@@ -25,7 +25,7 @@ What each tier needs:
 | **Python CLI** (`sts2-pycli`) | Python 3.13 | `uv python install` |
 | **C# runner + the mod** | .NET 9 SDK | winget |
 | **Web UIs** | Node.js LTS | winget |
-| **Workbench with real art** (`-SkipWorkbench` to omit) | `ilspycmd` 9.1, `wasm-bindgen-cli` (the `sts2-rs/Cargo.lock` version), libwebp (`cwebp`) | dotnet tool / cargo / winget |
+| **Workbench with real art and sound** (`-SkipWorkbench` to omit) | `ilspycmd` 9.1, `wasm-bindgen-cli` (the `sts2-rs/Cargo.lock` version), libwebp (`cwebp`), `ffmpeg` | dotnet tool / cargo / winget |
 
 Prerequisites the script verifies but does **not** install: `rustup`/`cargo`,
 `uv`, `git`, and **VS Build Tools 2022 with the "Desktop development with
@@ -53,14 +53,16 @@ Expected: full workspace builds, **6092 tests pass**.
 From the repo root, in PowerShell:
 
 ```powershell
-just import-game        # finds the game through Steam (any library); or $env:STS2_GAME_DIR
+just import-game        # art + sound; finds the game through Steam (any library); or $env:STS2_GAME_DIR
 just workbench-local    # builds the wasm + SPA + art, serves http://127.0.0.1:4173
 cd spire-mentor-mod
 dotnet build            # builds the mod and installs it into <game>\mods\SpireMentor\
 ```
 
 `import-game` needs no Developer Mode: it stages the game with a hard link and
-a directory junction where it cannot symlink. The mod also needs BaseLib and,
+a directory junction where it cannot symlink. It needs no FMOD download either:
+the sound effects are rendered with the `fmod.dll` the game installs. It ends
+with an art coverage report (`uv run --no-project scripts/check_art.py`). The mod also needs BaseLib and,
 for the in-game advisor, `cd sts2-pycli; uv sync` once (which builds the
 `sts2-py` crate below) — see
 [`spire-mentor-mod/README.md`](spire-mentor-mod/README.md).

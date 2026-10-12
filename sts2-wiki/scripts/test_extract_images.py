@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.extract_images import _ctex_path, extract_power_big_icons
+from scripts.extract_images import _ctex_path, extract_power_big_icons, write_ownerless_sprites
 from scripts.extract_rig import read_pck_index
 
 #: A VRAM-compressed import stub, verbatim in shape from
@@ -152,6 +152,24 @@ class CommittedBigIconGateTest(unittest.TestCase):
         # for the 14 powers that have a tray icon and no big one, so
         # `assets.power_big` needs it present to mirror that chain.
         self.assertIn("missing_power.png", {p.name for p in COMMITTED.iterdir()})
+
+
+class TestOwnerlessSprites(unittest.TestCase):
+    """`YummyCookie` has one sprite per character and none under its own id;
+    the workbench asks for the id, so the ownerless default is copied there."""
+
+    def test_copies_the_default_variant_to_the_model_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "yummy_cookie_ironclad.png").write_bytes(b"ironclad")
+            self.assertEqual(write_ownerless_sprites("relic_atlas", d), 1)
+            self.assertEqual((Path(d) / "yummy_cookie.png").read_bytes(), b"ironclad")
+            # Idempotent, and never overwrites.
+            self.assertEqual(write_ownerless_sprites("relic_atlas", d), 0)
+
+    def test_other_atlases_are_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(write_ownerless_sprites("power_atlas", d), 0)
+            self.assertEqual(os.listdir(d), [])
 
 
 if __name__ == "__main__":

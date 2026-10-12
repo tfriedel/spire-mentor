@@ -28,8 +28,10 @@ Tiers (each includes the ones before it):
                text / card db, the workbench's embedded data bundle
                -> the Python and browser workbenches render real game
                text and art; `just workbench-local` next
-    sound      + the sound effects (needs the FMOD Studio API, see below)
-    all        = sound
+    sound      + the sound effects: rendered through FMOD — on Windows the
+               game's own fmod.dll, elsewhere the FMOD Studio API
+               (FMOD_SDK_ROOT); skipped with a note when neither is there
+    all        = sound (the default)
 
 Every step is idempotent (re-running skips what exists) and logged to
 logs/import-game.log. Read docs/bring-your-own-game.md first.
@@ -67,6 +69,10 @@ GAME_DLLS = [
     "sts2.dll", "SmartFormat.dll", "SmartFormat.ZString.dll", "Sentry.dll", "Steamworks.NET.dll",
     "MonoMod.Backports.dll", "MonoMod.ILHelpers.dll", "0Harmony.dll", "System.IO.Hashing.dll",
 ]
+
+# The FMOD runtime the Windows game installs beside SlayTheSpire2.exe
+# (sts2-wiki/scripts/extract_sfx.py loads it through FMOD_LIB_DIR).
+FMOD_DLLS = ("fmod.dll", "fmodstudio.dll")
 
 # ilspycmd 10+ needs a newer runtime than the .NET 9 SDK the rest of the repo
 # pins; 9.1 is the last release that installs and runs on .NET 9.
@@ -278,6 +284,11 @@ def stage(data_dir: Path, pck: Path, release_info: Path, version: str, copy: boo
     how_pck = link_or_copy(pck, build / "SlayTheSpire2.pck", copy)
     how_data = link_or_copy(data_dir, build / "data", copy)
     log(f"staged {build.relative_to(ROOT)}/: SlayTheSpire2.pck ({how_pck}), data/ ({how_data}) -> {data_dir}")
+    # The Windows build ships its FMOD runtime next to the pck; staged beside
+    # the staged pck it is what the sound tier renders with (no SDK needed).
+    for dll in FMOD_DLLS:
+        if (pck.parent / dll).is_file():
+            link_or_copy(pck.parent / dll, build / dll, copy)
     if how_pck == "copy":
         log(f"note: the pck was COPIED ({pck.stat().st_size / 1e9:.1f} GB) — no symlink or hard link was possible "
             "(on Windows: enable Developer Mode, or keep the repo on the game's drive)")
@@ -287,6 +298,20 @@ def stage(data_dir: Path, pck: Path, release_info: Path, version: str, copy: boo
 # --------------------------------------------------------------------------
 # Steps
 # --------------------------------------------------------------------------
+
+
+def fmod_env(build: Path) -> dict[str, str]:
+    """The FMOD runtime for the sound step, or {} when there is none.
+
+    FMOD_SDK_ROOT (the FMOD Studio API, the Linux/WSL route) wins when set and
+    is passed through untouched. Otherwise, on Windows, the game's own
+    fmod.dll + fmodstudio.dll that `stage` put beside the pck.
+    """
+    if os.environ.get("FMOD_SDK_ROOT"):
+        return {"FMOD_SDK_ROOT": os.environ["FMOD_SDK_ROOT"]}
+    if os.name == "nt" and all((build / d).is_file() for d in FMOD_DLLS):
+        return {"FMOD_LIB_DIR": str(build)}
+    return {}
 
 
 def build_steps(build: Path, version: str) -> list[Step]:
@@ -300,7 +325,6 @@ def build_steps(build: Path, version: str) -> list[Step]:
     images = WIKI / "site/public/images"
     audio = WIKI / "site/public/audio"
     pck = str(build / "SlayTheSpire2.pck")
-    fmod = os.environ.get("FMOD_SDK_ROOT", "")
 
     def real_file(path: Path) -> bool:
         """Present and not an un-smudged LFS pointer (the private repo vendors lib/ that way)."""
@@ -388,10 +412,17 @@ def build_steps(build: Path, version: str) -> list[Step]:
         sh([sys.executable, "scripts/build_asset_manifest.py"], PYCLI)
         sh([sys.executable, "scripts/bundle_workbench_data.py"], PYCLI)
 
+    def portraits():
+        uv_python(["-m", "scripts.render_portraits", "site/public/images"], WIKI, wiki_env)
+
     def sfx():
         uv_python(["-m", "scripts.extract_sfx", pck, f"extracted/{version}", "--render"], WIKI,
-                  {**wiki_env, "FMOD_SDK_ROOT": fmod})
+                  {**wiki_env, **fmod_env(build)})
         uv_python(["-m", "scripts.encode_sfx", f"extracted/{version}/audio", "site/public/audio"], WIKI, wiki_env)
+        # The map's `audioRev` is a hash of the audio tree it is served with
+        # (the URLs' cache-buster). The committed map carries the maintainers'
+        # hash; re-derive it for the audio just encoded. Only that line moves.
+        sfx_map()
 
     return [
         Step("game DLLs -> sts2-pycli/lib/ (IL-patched) + C# oracle build", "oracle", has_lib, oracle_lib, ("dotnet",)),
@@ -409,10 +440,16 @@ def build_steps(build: Path, version: str) -> list[Step]:
              and any(images.glob("epoch_atlas/*")), atlas_art, ("uv",)),
         Step("rooms, scenes, map, HUD + card frames -> sts2-wiki/site/public/images/", "workbench",
              lambda: (images / "rooms").is_dir() and (images / "ui/top_panel").is_dir()
-             and (images / "boss_icons").is_dir() and (images / "card_template").is_dir(), scene_art, ("uv",)),
+             and (images / "boss_icons").is_dir() and (images / "card_template").is_dir()
+             and (images / "ancients/neow.png").is_file() and (images / "monsters/hourglass_placeholder.png").is_file(),
+             scene_art, ("uv",)),
         Step("creature + room rigs -> sts2-wiki/site/public/images/*_rigs/", "workbench",
              lambda: all(any((images / d).glob("*/*.skel")) for d in ("monster_rigs", "character_rigs", "room_rigs")),
              rigs, ("uv",)),
+        Step("creature portraits + character sprites (rendered from the rigs) -> sts2-wiki/site/public/images/",
+             "workbench",
+             lambda: (images / "character_sprites/ironclad.png").is_file() and (images / "monsters/amalgam.png").is_file(),
+             portraits, ("uv", "node", "npm")),
         Step("vfx_bindings.json + creature_scales.json -> the art tree", "workbench",
              lambda: (images / "vfx/vfx_bindings.json").is_file() and (images / "creature_scales.json").is_file(),
              art_tables),
@@ -423,7 +460,8 @@ def build_steps(build: Path, version: str) -> list[Step]:
              card_text_and_db),
         Step("workbench bundle -> sts2-rs/crates/sts2-workbench/data/game/", "workbench",
              lambda: (RS / "crates/sts2-workbench/data/game/wiki_cards.json").is_file(), workbench_data),
-        Step("sound effects -> sts2-wiki/site/public/audio/ (needs FMOD_SDK_ROOT)", "sound",
+        Step("sound effects -> sts2-wiki/site/public/audio/ (FMOD: the game's own DLLs on Windows, else FMOD_SDK_ROOT)",
+             "sound",
              lambda: any(audio.rglob("*.webm")), sfx, ("uv", "ffmpeg")),
     ]
 
@@ -458,7 +496,17 @@ def status(build: Path | None, version: str) -> int:
         for step in steps:
             if step.tier == tier:
                 print(f"  {'ok     ' if step.done() else 'MISSING'}  {step.name}")
+    print()
+    print("\n".join(art_coverage()))
     return 0
+
+
+def art_coverage() -> list[str]:
+    """scripts/check_art.py's summary: the art + sound against the committed manifest."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import check_art
+
+    return check_art.summary()
 
 
 # --------------------------------------------------------------------------
@@ -469,7 +517,7 @@ def status(build: Path | None, version: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[1], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     parser.add_argument("game_dir", nargs="?", help="Steam install folder / .app / data_sts2_* folder")
-    parser.add_argument("--tier", choices=TIERS + ["all"], default="workbench")
+    parser.add_argument("--tier", choices=TIERS + ["all"], default="all")
     parser.add_argument("--status", action="store_true", help="report which artifacts exist and exit")
     parser.add_argument("--copy", action="store_true", help="copy the pck and DLLs into sts2_binaries/ instead of symlinking")
     parser.add_argument("--allow-version-mismatch", action="store_true",
@@ -502,9 +550,10 @@ def main(argv: list[str] | None = None) -> int:
 
     wanted = TIERS[: TIERS.index(tier) + 1]
     steps = [s for s in build_steps(build, version) if s.tier in wanted]
-    if tier == "sound" and not os.environ.get("FMOD_SDK_ROOT"):
-        log("FMOD_SDK_ROOT is unset — skipping the sound tier (the FMOD Studio API is a free, registration-gated "
-            "download from fmod.com; unpack it and set FMOD_SDK_ROOT to its root). The workbench is silent without it.")
+    if tier == "sound" and not fmod_env(build):
+        log("no FMOD runtime — skipping the sound tier. On Windows the game's own fmod.dll is used (it was not "
+            "found next to the pck); elsewhere set FMOD_SDK_ROOT to the unpacked FMOD Studio API (a free, "
+            "registration-gated download from fmod.com). The workbench is silent without it.")
         steps = [s for s in steps if s.tier != "sound"]
     preflight([s for s in steps if not s.done()])
 
@@ -517,6 +566,9 @@ def main(argv: list[str] | None = None) -> int:
         if not step.done():
             raise SystemExit(f"step finished but its output is missing: {step.name} (see {LOG})")
     log("done")
+    if tier in ("workbench", "sound"):
+        for line in art_coverage():
+            log(line)
     if tier in ("workbench", "sound"):
         print("\nnext: the browser workbench -  just workbench-local   (http://127.0.0.1:4173)\n"
               "      the Python workbench  -  just workbench-server  (http://127.0.0.1:8077)\n"

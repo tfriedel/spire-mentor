@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import struct
 from pathlib import Path
 
@@ -214,6 +215,26 @@ def extract_fallback_sprites(
     return written
 
 
+# Sprites the game picks per owner at runtime, so no sprite carries the model's
+# own id; the workbench asks for the id. Each maps to the sprite the game shows
+# with no owner: `YummyCookie.IconBaseName` falls back to the Ironclad cookie.
+_OWNERLESS_SPRITES = {
+    "relic_atlas": {"yummy_cookie": "yummy_cookie_ironclad"},
+}
+
+
+def write_ownerless_sprites(atlas_name: str, atlas_output: str) -> int:
+    """Copy each per-owner sprite's ownerless default to the model id's name."""
+    written = 0
+    for name, source in _OWNERLESS_SPRITES.get(atlas_name, {}).items():
+        src = os.path.join(atlas_output, f"{source}.png")
+        dst = os.path.join(atlas_output, f"{name}.png")
+        if os.path.exists(src) and not os.path.exists(dst):
+            shutil.copyfile(src, dst)
+            written += 1
+    return written
+
+
 def extract_power_big_icons(
     pck_index: dict[str, tuple[int, int]],
     read_pck_file,
@@ -412,6 +433,7 @@ def main() -> None:
         if fallback_count:
             print(f"  Extracted {fallback_count} sprites from the fallback tree")
             atlas_total += fallback_count
+        atlas_total += write_ownerless_sprites(atlas_name, atlas_output)
 
         print(f"  Total for {atlas_name}: {atlas_total} sprites")
         total += atlas_total

@@ -164,14 +164,16 @@ just import-game /path/to/Slay\ the\ Spire\ 2 --tier oracle
 cd sts2-pycli && uv sync --dev && just build-cs && uv run pytest tests
 ```
 
-**Workbench with real art (and the decompiled source).** Add
+**Workbench with real art and sound (and the decompiled source).** Add
 `ilspycmd` 9.1 (`dotnet tool install -g ilspycmd --version 9.1.0.7988`),
 Node 20+, a `wasm-bindgen` CLI matching the crate
-(`cargo install wasm-bindgen-cli --version 0.2.120 --locked`) and `cwebp`
-(libwebp).
+(`cargo install wasm-bindgen-cli --version 0.2.120 --locked`), `cwebp`
+(libwebp) and `ffmpeg`. On Windows the sound needs nothing else; on Linux it
+also needs the FMOD SDK (`FMOD_SDK_ROOT`, see
+[docs/bring-your-own-game.md](docs/bring-your-own-game.md)).
 
 ```sh
-just import-game          # finds the game through Steam; tier = workbench
+just import-game          # finds the game through Steam; art, data and sound
 just workbench-local      # build + serve on http://127.0.0.1:4173
 ```
 
@@ -186,7 +188,9 @@ for your own use. The servers bind to `127.0.0.1` by default; `STS2_HOST`
 
 Without the game the workbench still builds and runs with the real card
 text; every image is a neutral placeholder tile and there is no sound until
-`just import-game` extracts the art (and, with the FMOD SDK, the audio).
+`just import-game` extracts the art and the audio (on Windows with the FMOD
+runtime the game ships; on Linux with the FMOD SDK — see
+[docs/bring-your-own-game.md](docs/bring-your-own-game.md)).
 
 **The mod.** Windows, the game at v0.107.1, the .NET 9 SDK and
 [BaseLib](https://github.com/Alchyr/BaseLib-StS2) v3.4.1 in

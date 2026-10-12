@@ -170,16 +170,18 @@ def output_for(source: str) -> str | None:
     # Static fallbacks the workbench resolves by name: the map's boss icons
     # (``boss_icons/<boss>_boss_icon.png``), the Defect orb sprites
     # (``orb_atlas/<orb>.png``; the animated orbs are Spine rigs) and the
-    # ancients' portraits (``ancients/<name>.png``).
+    # game's own static monster sprites (``monsters/<name>.png`` — e.g. the
+    # hourglass Aeonglass is drawn as, which has no rig). The ancients'
+    # portraits are the map-node icons; see ``aliases_for``.
     m = re.fullmatch(r"images/map/placeholder/(\w+_boss_icon)\.png", source)
     if m:
         return f"boss_icons/{m.group(1)}.png"
     m = re.fullmatch(r"images/orbs/(\w+)_orb\.png", source)
     if m:
         return f"orb_atlas/{m.group(1)}.png"
-    m = re.fullmatch(r"images/ancients/(\w+)_placeholder\.png", source)
+    m = re.fullmatch(r"images/monsters/(\w+)\.png", source)
     if m:
-        return f"ancients/{m.group(1)}.png"
+        return f"monsters/{m.group(1)}.png"
     # Screen-chrome families: the game's drawn HUD/panel/button art. Flat
     # textures; served under ui/<family>/ for the workbench's game-skin
     # components (top HUD band, energy orb layers, reward banner, rest-site
@@ -205,11 +207,17 @@ def aliases_for(rel_out: str) -> list[str]:
     """Further output paths that carry the same image as ``rel_out``.
 
     The top-panel character icons double as ``characters/character_icon_<c>.png``,
-    the path the run-setup and history views ask for.
+    the path the run-setup and history views ask for; the map's ancient-node
+    icons (278px) as ``ancients/<name>.png``. (``images/ancients/*_placeholder``
+    are 2560x1200 scene backdrops, not portraits, and only exist for six of
+    the eight ancients.)
     """
     m = re.fullmatch(r"ui/top_panel/(character_icon_\w+)\.png", rel_out)
     if m and not m.group(1).endswith("_outline"):
         return [f"characters/{m.group(1)}.png"]
+    m = re.fullmatch(r"ui/map/ancients/ancient_node_(\w+)\.png", rel_out)
+    if m and not m.group(1).endswith("_outline"):
+        return [f"ancients/{m.group(1)}.png"]
     return []
 
 

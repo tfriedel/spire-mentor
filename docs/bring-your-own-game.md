@@ -18,7 +18,7 @@ source the extractors and the mechanics work read plus real art
 | `engine` | nothing | — | the engine, the AI, the workbench (placeholder art, no sound); every oracle-dependent test skips |
 | `oracle` | the game, .NET 9 SDK, `uv`, `just` | `sts2-pycli/lib/` (IL-patched game DLLs); refreshes `localization_eng/` | the C# oracle (`just build-cs`), the parity harness, the full pytest suite |
 | `workbench` | + `ilspycmd` | `sts2-wiki/decompiled/`, `sts2-wiki/site/public/images/`; refreshes `sts2-wiki/data/<ver>/`, `sfx_map.json`, card text/db, the workbench bundle | real art in the workbench; the decompiled source for mechanics work |
-| `sound` | + the FMOD Studio API | `sts2-wiki/site/public/audio/` | sound effects in the workbench |
+| `sound` | + `ffmpeg`; FMOD — on Windows the game's own DLLs, elsewhere the FMOD Studio API | `sts2-wiki/site/public/audio/` | sound effects in the workbench |
 
 ## Prerequisites
 
@@ -39,10 +39,21 @@ source the extractors and the mechanics work read plus real art
   `sts2-rs/Cargo.lock`; the wasm target itself comes with the pinned
   toolchain), and `cwebp` from libwebp (`brew install webp`,
   `apt install webp`, `winget install Google.Libwebp`) — the build ships the
-  art as WebP.
-- **sound tier:** the FMOD Studio API (free, registration-gated download from
-  fmod.com, Linux tarball `fmodstudioapi*linux.tar.gz`). Unpack it anywhere
-  and export `FMOD_SDK_ROOT=<that dir>`. Also `ffmpeg` for the Opus encode.
+  art as WebP. The creature portraits are rendered with Node too
+  (`sts2-wiki/tools/spine-renderer`, installed on first use by `npm ci`).
+- **sound tier:** `ffmpeg` for the Opus encode (`winget install Gyan.FFmpeg`,
+  `brew install ffmpeg`, `apt install ffmpeg`), and an FMOD runtime to render
+  the game's sound banks:
+  - **Windows:** nothing to install. The game ships `fmod.dll` and
+    `fmodstudio.dll` (FMOD 2.03.06, the runtime its banks were built with)
+    next to `SlayTheSpire2.exe`; `import-game` stages them beside the pck and
+    renders with them.
+  - **Linux / WSL:** the FMOD Studio API (free, registration-gated download
+    from fmod.com — the "FMOD Engine" for Linux, `fmodstudioapi*linux.tar.gz`;
+    2.03.14 is what the maintainers use). Unpack it anywhere and export
+    `FMOD_SDK_ROOT=<that dir>`. The Windows DLLs cannot be used here, even
+    when Steam installed the game through Proton.
+  - `FMOD_SDK_ROOT`, when set, wins on every platform.
 - **Windows:** everything here runs natively from PowerShell —
   `.\install-windows-deps.ps1` installs the tools above
   ([BUILDING-WINDOWS.md](../BUILDING-WINDOWS.md)).
@@ -50,10 +61,10 @@ source the extractors and the mechanics work read plus real art
 ## Run it
 
 ```sh
-just import-game                       # finds the game through Steam; tier = workbench
+just import-game                       # finds the game through Steam; every tier
 just import-game --tier oracle         # just the C# oracle
-just import-game --tier all            # + sound, when FMOD_SDK_ROOT is set
-just import-game --status              # what exists, what is missing
+just import-game --tier workbench      # everything but sound
+just import-game --status              # what exists, what is missing, art coverage
 ```
 
 The game is found through Steam: every library folder Steam knows about
@@ -80,22 +91,38 @@ directly (no bash, so the same on every platform):
    `extract-vfx-bindings`, `extract-power-flash-sites` — committed, so only
    re-run when missing), then the art: `extract_images.py` (the sprite
    atlases), `extract_vfx`, `extract_rooms` (rooms, scenes, map, HUD, boss
-   icons, orbs), `extract_card_template` (card frames), `extract_rig --all`
-   (every creature and room rig), and `build_sfx_map`.
+   icons, orbs, ancients, the game's static creature sprites),
+   `extract_card_template` (card frames), `extract_rig --all` (every creature
+   and room rig), `render_portraits` (renders each creature rig's idle pose
+   to the still `monsters/*.png` and `character_sprites/*.png` the game does
+   not ship, through `tools/spine-renderer`), and `build_sfx_map`.
 4. `sts2-pycli`: `synergy.gen_card_text`, `workbench.build_card_db`,
    `scripts/build_asset_manifest.py`, `scripts/bundle_workbench_data.py`
    (= `just workbench-data`, the bundle the browser workbench embeds).
-5. `sound`: `extract_sfx` + `encode_sfx`.
+5. `sound`: `extract_sfx` (renders the ~570 sound-effect events of the
+   game's FMOD banks to WAV — music and ambience are not extracted) +
+   `encode_sfx` (trims and encodes them to Opus/WebM).
 
 Every step is idempotent — a re-run skips outputs that exist — and
 everything is logged to `logs/import-game.log`. To redo one step, delete its
 output and re-run.
 
-The art covers what the workbench draws, minus a few static fallbacks: the
-101 still `monsters/*.png` portraits and the 5 `character_sprites/*.png` are
-not in the game's files (the workbench draws the creatures' rigs instead), and
-a handful of art ids the committed asset manifest lists do not exist in
-v0.107.1. Those render as the neutral placeholder tile.
+At the end the driver compares the result with the committed asset
+manifest — the art and sound the maintainers' tree holds — and prints the
+coverage (`scripts/check_art.py`; `--list` names every missing file). A full
+import covers all of it except 17 images of content the game removed or
+renamed before v0.107.1 (Doormaker's boss icon, the Grapple / Follow Through /
+Prepare cards, 13 powers): their art is not in the v0.107.1 pck at all, and
+`check_art.py` lists them as "older builds only". If the workbench asks for
+one, it draws the neutral placeholder tile.
+
+Files present in both trees are mostly byte- or pixel-identical. Where they
+differ, the reference was extracted from an earlier build and the game has
+since redrawn the asset (some creature rigs, a few epoch portraits and card
+illustrations, the character icons), or the portrait is a fresh render of
+the current rig. Maintainers can compare a local tree with theirs:
+`uv run --with pillow --with numpy --no-project scripts/check_art.py
+--reference <their sts2-wiki/site/public>`.
 
 ## Then
 

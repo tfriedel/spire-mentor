@@ -13,7 +13,8 @@
       * C# runner + the mod       -> .NET 9 SDK             [-SkipDotnet to omit]
       * Web UIs                   -> Node.js LTS            [-SkipNode to omit]
       * Workbench with real art   -> ilspycmd 9.1, wasm-bindgen-cli (the version
-                                     sts2-rs/Cargo.lock pins), libwebp (cwebp)
+         and sound                   sts2-rs/Cargo.lock pins), libwebp (cwebp),
+                                     ffmpeg (the sound effects' Opus encode)
                                                             [-SkipWorkbench to omit]
 
     Prerequisites assumed already installed (the script verifies and warns):
@@ -34,7 +35,7 @@
 
 .PARAMETER SkipWorkbench
     Skip the tools `just import-game` and `just workbench-local` need on top
-    of the tiers above (ilspycmd, wasm-bindgen-cli, libwebp).
+    of the tiers above (ilspycmd, wasm-bindgen-cli, libwebp, ffmpeg).
 
 .EXAMPLE
     ./install-windows-deps.ps1              # full stack
@@ -176,7 +177,7 @@ if (-not $SkipNode) {
 
 # ---------------------------------------------------------------------------
 if (-not $SkipWorkbench) {
-    Step "Workbench with real art (just import-game, just workbench-local)"
+    Step "Workbench with real art and sound (just import-game, just workbench-local)"
 
     # ILSpy's CLI decompiles sts2.dll. 10.x+ needs a newer runtime than the
     # .NET 9 SDK; 9.1 is the last release that installs on .NET 9.
@@ -215,6 +216,11 @@ if (-not $SkipWorkbench) {
 
     # cwebp: the static build ships the extracted art as WebP.
     Install-Winget 'Google.Libwebp' 'cwebp' 'libwebp (cwebp)'
+
+    # ffmpeg: import-game's sound step encodes the rendered effects to Opus.
+    # (FMOD itself needs no install: the game ships fmod.dll, and import-game
+    # renders the sound banks with it.)
+    Install-Winget 'Gyan.FFmpeg' 'ffmpeg' 'ffmpeg'
 } else { $skipped += 'workbench tools' }
 
 # ---------------------------------------------------------------------------
@@ -226,7 +232,7 @@ if ($failed)    { Warn ("Needs attention: " + ($failed -join ', ')) }
 Write-Host @"
 
 Next steps (from the repo root, in a NEW terminal so the tools are on PATH):
-  * Workbench:     just import-game        # finds the game through Steam
+  * Workbench:     just import-game        # finds the game through Steam; art + sound
                    just workbench-local    # http://127.0.0.1:4173
   * The mod:       cd spire-mentor-mod; dotnet build   (needs BaseLib - spire-mentor-mod\README.md)
   * Rust engine:   just rs-test

@@ -70,6 +70,27 @@ def ext_src(ext):
     return {"spskel": "skel", "spatlas": "atlas", "ctex": "png"}[ext]
 
 
+def _page_sizes(lines):
+    """{page file: (w, h)} from the `size:` line under each atlas page header.
+
+    A page's properties are the `key:value` lines right after its file name;
+    the first line without a colon is a region name, whose own `size:` (older
+    atlas format) is not the page's.
+    """
+    sizes = {}
+    page = None
+    for ln in lines:
+        if ln.endswith(".png"):
+            page = ln
+        elif ":" not in ln:
+            page = None
+        elif page and ln.startswith("size:"):
+            w, h = (int(v) for v in ln[5:].replace(" ", "").split(","))
+            sizes[page] = (w, h)
+            page = None
+    return sizes
+
+
 def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None, index=None):
     """Reconstruct a Spine rig (``.skel`` + ``.atlas`` + page ``.png``\\ s).
 
@@ -114,9 +135,11 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None, index=None
         raise RigError(f"no .spatlas for '{atlas_name}'")
     atlas_text = json.loads(_read(pck_path, *index[atl[0]]))["atlas_data"]
     # Page headers are the only lines that end in ".png" (region names never do).
-    page_files = [ln.strip() for ln in atlas_text.splitlines() if ln.strip().endswith(".png")]
+    lines = [ln.strip() for ln in atlas_text.splitlines()]
+    page_files = [ln for ln in lines if ln.endswith(".png")]
     if not page_files:
         raise RigError(f"no atlas pages found for '{atlas_name}'")
+    page_sizes = _page_sizes(lines)
     # Output page filenames, by slug: <slug>.png, <slug>_2.png, … (the page-index
     # convention the libgdx atlas / spine-webgl loader expects).
     out_pngs = [f"{slug}.png" if i == 0 else f"{slug}_{i + 1}.png" for i in range(len(page_files))]
@@ -129,6 +152,11 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None, index=None
 
     # .png — decode each page's Godot compressed-texture (one .ctex per page; a
     # page may ship >1 compression variant — BPTC/S3TC — so try largest first).
+    # The imported names drop the source folder, so an unrelated texture can
+    # share the page's name: `battleworn_dummy.png` is both the rig page
+    # (396x502) and the event illustration (3440x1613), and largest-first
+    # picks the illustration. The atlas states each page's size; a candidate
+    # of that size wins.
     sizes = []
     for src_pf, out_pf in zip(page_files, out_pngs):
         page_name = src_pf[:-4]  # source ctex asset name, e.g. "decimillipede"
@@ -136,12 +164,23 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None, index=None
         if not ctex:
             raise RigError(f"no .ctex page for atlas page '{page_name}' (rig '{name}')")
         img = None
+        want = page_sizes.get(src_pf)
         for c in ctex:
-            img = decode_ctex(_read(pck_path, *index[c]))
-            if img is not None:
+            decoded = decode_ctex(_read(pck_path, *index[c]))
+            if decoded is None:
+                continue
+            if img is None:
+                img = decoded
+            if want is None or decoded.size == want:
+                img = decoded
                 break
         if img is None:
             raise RigError(f"failed to decode any .ctex variant for page '{page_name}'")
+        if want is not None and img.size != want:
+            print(
+                f"  warning: {name}: no {want[0]}x{want[1]} texture for page "
+                f"'{page_name}', using {img.size}"
+            )
         img.save(os.path.join(out_dir, out_pf))
         sizes.append(img.size)
     return out_dir, sizes[0], len(page_files)

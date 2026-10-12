@@ -52,6 +52,8 @@ just extract-pck      # localization + image atlases from the .pck -> extracted/
 just extract          # regex extractors: decompiled + localization -> data/{version}/*.json
 just llm-extract      # LLM extractors: refresh per-entity JSON in data/{version}/<type>/
 just extract-images   # card/monster/relic art -> site/public/images/
+just extract-rigs     # Spine creature/room rigs -> site/public/images/*_rigs/
+just render-portraits # still creature portraits rendered from the rigs
 just generate         # data/{version}/ -> site/src/content/ (markdown)
 just build-site       # Astro build -> site/dist/
 ```
@@ -90,9 +92,11 @@ carries additional hand-written event enrichments.
 - `tools/lookup/` — `sts2-lookup`, a CLI for quick enemy/card/encounter
   reference straight from `data/` (`uv run sts2-lookup enemy Nibbit`). Honors
   `STS2_WIKI_DATA` when the data tree lives elsewhere.
-- `tools/spine-renderer/` — headless Node renderer that turns the game's
-  Spine skeletons (`.skel` + `.atlas` + `.png` from `extracted/`) into monster
-  pose PNGs. Honors `STS2_WIKI_EXTRACTED`.
+- `tools/spine-renderer/` — headless Node renderer that turns the extracted
+  Spine rigs (`site/public/images/monster_rigs/<slug>/`, written by
+  `just extract-rigs`) into idle-pose PNGs: `just render-portraits` renders
+  `monsters/*.png` (512px) and `character_sprites/*.png` (640px). Direct use:
+  `node render.mjs [--rigs DIR] [--out DIR] [--size N] [--force] [rig ...]`.
 
 ## Role in the monorepo
 

@@ -86,7 +86,9 @@ extract-pck:
 # recipes (and extract-images / extract-vfx) still say `sfx_pck`. Same file.
 sfx_pck := sts2_pck
 
-# Path to the unpacked FMOD Studio API (not committed; required for --render)
+# Path to the unpacked FMOD Studio API (not committed). Required for --render
+# on Linux/macOS; on Windows, unset, the game's own fmod.dll next to the pck
+# is used (or FMOD_LIB_DIR).
 fmod_sdk_root := env("FMOD_SDK_ROOT", "")
 
 # Extract the SFX banks (NOT music) from the pck and render named event WAVs
@@ -137,6 +139,15 @@ extract-images:
 # wrote, so the manifest's `?v=` bust moves only when the art actually does.
 extract-vfx:
     uv run python -m scripts.extract_vfx "{{sfx_pck}}" site/public/images
+
+# Every creature and room Spine rig -> site/public/images/*_rigs/
+extract-rigs:
+    uv run python -m scripts.extract_rig "{{sfx_pck}}" --all site/public/images
+
+# Still portraits (monsters/*.png, character_sprites/*.png) rendered from the
+# rigs `extract-rigs` wrote, via tools/spine-renderer (npm ci on first use)
+render-portraits:
+    uv run python -m scripts.render_portraits site/public/images
 
 # Rebuild the committed card/move -> VFX effect binding table (design spec
 # §1.4). Re-run this after touching decompiled/{{version}}'s Cards or

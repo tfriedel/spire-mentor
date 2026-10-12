@@ -452,3 +452,45 @@ class TestExtractDebugAudio(unittest.TestCase):
         pck = self.write_pck(["images/atlases/cards.png"])
         with self.assertRaises(ValueError):
             extract_sfx.extract_debug_audio(pck, self.tmp / "audio")
+
+
+class TestFmodRuntime(unittest.TestCase):
+    """Which FMOD runtime `render_events` loads.
+
+    FMOD_SDK_ROOT (the Linux SDK route) must keep winning: the game's DLLs are
+    a Windows-only fallback, never a replacement.
+    """
+
+    def test_header_version_encodes_each_part_as_decimal_digits(self):
+        self.assertEqual(extract_sfx.fmod_header_version(2, 3, 14), 0x00020314)
+        self.assertEqual(extract_sfx.fmod_header_version(2, 3, 6), 0x00020306)
+
+    def test_sdk_root_wins_over_the_game_dlls(self):
+        env = {"FMOD_SDK_ROOT": "/opt/fmod", "FMOD_LIB_DIR": "C:/game"}
+        with (
+            mock.patch.dict("os.environ", env, clear=True),
+            mock.patch.object(extract_sfx.os, "name", "nt"),
+        ):
+            self.assertIsNone(extract_sfx._lib_dir())
+            self.assertTrue(extract_sfx.fmod_available())
+
+    def test_game_dlls_are_never_used_off_windows(self):
+        with (
+            mock.patch.dict("os.environ", {"FMOD_LIB_DIR": "/game"}, clear=True),
+            mock.patch.object(extract_sfx.os, "name", "posix"),
+        ):
+            self.assertIsNone(extract_sfx._lib_dir())
+            self.assertFalse(extract_sfx.fmod_available())
+
+    def test_windows_lib_dir_needs_both_dlls(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "fmod.dll").write_bytes(b"MZ")
+            env = {"FMOD_LIB_DIR": d}
+            with (
+                mock.patch.dict("os.environ", env, clear=True),
+                mock.patch.object(extract_sfx.os, "name", "nt"),
+            ):
+                self.assertEqual(extract_sfx._lib_dir(), Path(d))
+                self.assertFalse(extract_sfx.fmod_available())
+                (Path(d) / "fmodstudio.dll").write_bytes(b"MZ")
+                self.assertTrue(extract_sfx.fmod_available())

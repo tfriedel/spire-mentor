@@ -8,8 +8,10 @@ excluding it is an allowlist of the four SFX-side banks rather than a content
 judgement.
 
 Rendering (`render_events`) decodes each named event in the extracted banks
-to its own WAV via the real FMOD Studio engine — FMOD Studio API 2.03.14,
-Linux (`FMOD_SDK_ROOT`, not committed). `Master.bank`'s two `event:/music/`
+to its own WAV via the real FMOD Studio engine: on Linux the FMOD Studio API
+2.03.14 SDK (`FMOD_SDK_ROOT`, not committed); on Windows, without the SDK,
+the `fmod.dll`/`fmodstudio.dll` the game installs (`FMOD_LIB_DIR`, defaulting
+to the pck's directory). `Master.bank`'s two `event:/music/`
 entries are excluded by `is_music` as a second layer on top of the bank
 allowlist, since Master.bank itself is required (it carries the mixer); see
 `is_music` for the one further path it denylists by exact match.
@@ -187,16 +189,76 @@ def _sdk_root() -> Path:
     return Path(root)
 
 
+# The Windows game install ships the FMOD runtime it was built against
+# (`fmod.dll` + `fmodstudio.dll`, 2.03.06 in v0.107.1) next to
+# SlayTheSpire2.exe. On Windows that is the whole dependency: no SDK download.
+GAME_FMOD_DLLS = ("fmod.dll", "fmodstudio.dll")
+
+
+def _lib_dir() -> Path | None:
+    """`FMOD_LIB_DIR`: a directory holding the game's own FMOD DLLs (Windows).
+
+    Consulted only when `FMOD_SDK_ROOT` is unset, so the SDK path that Linux
+    and WSL use is unchanged. The DLLs are Windows binaries; they cannot be
+    loaded on Linux even when Steam installed the game there through Proton.
+    """
+    if os.environ.get("FMOD_SDK_ROOT") or os.name != "nt":
+        return None
+    d = os.environ.get("FMOD_LIB_DIR")
+    return Path(d) if d else None
+
+
+def fmod_available() -> bool:
+    """Whether `render_events` has an FMOD runtime to load."""
+    if os.environ.get("FMOD_SDK_ROOT"):
+        return True
+    d = _lib_dir()
+    return d is not None and all((d / n).is_file() for n in GAME_FMOD_DLLS)
+
+
 def _fmod_libs() -> tuple[ctypes.CDLL, ctypes.CDLL]:
-    """Load the core and studio shared objects from the unpacked SDK.
+    """Load the core and studio libraries: the SDK's, or the game's DLLs.
 
     Core first, deliberately: libfmodstudio.so links against libfmod.so, so the
     core library must already be resident when the studio one loads.
     """
+    d = _lib_dir()
+    if d is not None:
+        core_dll, studio_dll = (d / n for n in GAME_FMOD_DLLS)
+        return ctypes.CDLL(str(core_dll)), ctypes.CDLL(str(studio_dll))
     root = _sdk_root()
     core = ctypes.CDLL(str(root / "api/core/lib/x86_64/libfmod.so"))
     studio = ctypes.CDLL(str(root / "api/studio/lib/x86_64/libfmodstudio.so"))
     return core, studio
+
+
+def _dll_version(dll: Path) -> tuple[int, int, int]:
+    """(major, minor, patch) from a DLL's VS_FIXEDFILEINFO (Windows only).
+
+    FMOD stamps its release into the low three parts of the four-part file
+    version: `fmod.dll` 0.2.3.6 (shown as "2.3.6") is the 2.03.06 runtime.
+    """
+    ver = ctypes.WinDLL("version")  # type: ignore[attr-defined]
+    size = ver.GetFileVersionInfoSizeW(str(dll), None)
+    if not size:
+        raise SystemExit(f"{dll} carries no version resource")
+    buf = ctypes.create_string_buffer(size)
+    if not ver.GetFileVersionInfoW(str(dll), 0, size, buf):
+        raise SystemExit(f"could not read the version resource of {dll}")
+    info = ctypes.c_void_p()
+    length = ctypes.c_uint()
+    if not ver.VerQueryValueW(buf, "\\", ctypes.byref(info), ctypes.byref(length)):
+        raise SystemExit(f"could not read the fixed file info of {dll}")
+    # VS_FIXEDFILEINFO: signature, struct version, then FileVersionMS/LS.
+    fields = ctypes.cast(info, ctypes.POINTER(ctypes.c_uint32 * 4)).contents
+    ms, ls = fields[2], fields[3]
+    return ms & 0xFFFF, ls >> 16, ls & 0xFFFF
+
+
+def fmod_header_version(major: int, minor: int, patch: int) -> int:
+    """FMOD's `FMOD_VERSION` encoding: 2.03.06 -> 0x00020306 (the decimal
+    digits of each part, read as hex)."""
+    return int(f"{major}{minor:02d}{patch:02d}", 16)
 
 
 def _check(result: int) -> None:
@@ -209,7 +271,12 @@ def _header_version() -> int:
 
     Read it out of the SDK's own header rather than hard-coding a constant that
     silently rots when the SDK is updated. For 2.03.14 this reads 0x00020314.
+    The game's DLLs come without headers, so there it is the DLL's own file
+    version instead.
     """
+    d = _lib_dir()
+    if d is not None:
+        return fmod_header_version(*_dll_version(d / GAME_FMOD_DLLS[0]))
     header = _sdk_root() / "api/core/inc/fmod_common.h"
     m = re.search(r"#define FMOD_VERSION\s+(0x[0-9A-Fa-f]+)", header.read_text())
     if not m:
@@ -594,9 +661,22 @@ def main() -> None:
         "--render",
         action="store_true",
         help="also decode the extracted banks to named WAVs under out/audio/ "
-        "(requires FMOD_SDK_ROOT)",
+        "(requires FMOD_SDK_ROOT, or on Windows the game's FMOD DLLs: FMOD_LIB_DIR, "
+        "default the pck's directory)",
     )
     args = ap.parse_args()
+    if (
+        os.name == "nt"
+        and not os.environ.get("FMOD_SDK_ROOT")
+        and not os.environ.get("FMOD_LIB_DIR")
+    ):
+        os.environ["FMOD_LIB_DIR"] = str(args.pck.resolve().parent)
+    if args.render and not fmod_available():
+        raise SystemExit(
+            "--render needs an FMOD runtime: set FMOD_SDK_ROOT to the unpacked FMOD Studio "
+            "API (Linux), or on Windows FMOD_LIB_DIR to the game install (it ships fmod.dll "
+            "+ fmodstudio.dll)"
+        )
     try:
         written = extract_banks(args.pck, args.out)
     except ValueError as e:
