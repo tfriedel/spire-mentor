@@ -164,19 +164,20 @@ just import-game /path/to/Slay\ the\ Spire\ 2 --tier oracle
 cd sts2-pycli && uv sync --dev && just build-cs && uv run pytest tests
 ```
 
-**Workbench with real art (and the decompiled source).** Add `ilspycmd`,
-Node 20+, the wasm target and a `wasm-bindgen` CLI matching the crate
-(`rustup target add wasm32-unknown-unknown`,
-`cargo install wasm-bindgen-cli --version 0.2.120`).
+**Workbench with real art (and the decompiled source).** Add
+`ilspycmd` 9.1 (`dotnet tool install -g ilspycmd --version 9.1.0.7988`),
+Node 20+, a `wasm-bindgen` CLI matching the crate
+(`cargo install wasm-bindgen-cli --version 0.2.120 --locked`) and `cwebp`
+(libwebp).
 
 ```sh
-just import-game /path/to/Slay\ the\ Spire\ 2   # tier = workbench
-just workbench-local                              # build + serve on http://127.0.0.1:4173
+just import-game          # finds the game through Steam; tier = workbench
+just workbench-local      # build + serve on http://127.0.0.1:4173
 ```
 
 `workbench-local` builds `sts2-pycli/web/dist` (the engine runs in the
 browser as wasm — no backend) and serves it on this machine only.
-`cd sts2-pycli && just workbench` is the Python-backed alternative on :8077.
+`just workbench-server` is the Python-backed alternative on :8077.
 
 **Please run the workbench locally and don't host it publicly.** With real
 art the build contains the game's images and sound, extracted from your copy
@@ -188,20 +189,30 @@ text; every image is a neutral placeholder tile and there is no sound until
 `just import-game` extracts the art (and, with the FMOD SDK, the audio).
 
 **The mod.** Windows, the game at v0.107.1, the .NET 9 SDK and
-[BaseLib](https://github.com/Alchyr/BaseLib-StS2):
-`cd spire-mentor-mod && dotnet build` builds it and installs it into the game's
-`mods/` folder; details in [`spire-mentor-mod/README.md`](spire-mentor-mod/README.md).
+[BaseLib](https://github.com/Alchyr/BaseLib-StS2) v3.4.1 in
+`<game>/mods/BaseLib/`: `cd spire-mentor-mod && dotnet build` builds it and
+installs it into the game's `mods/` folder; the in-game advisor also needs
+`cd sts2-pycli && uv sync` once. Details in
+[`spire-mentor-mod/README.md`](spire-mentor-mod/README.md).
 
 ## Windows
 
-The engine tier works from PowerShell: the root `justfile` runs its recipes
-under PowerShell on Windows, so `just rs-check`, `just rs-test` and
-`just rs-doc-test` work as-is (needs VS Build Tools for the linker —
-[BUILDING-WINDOWS.md](BUILDING-WINDOWS.md)). The subproject justfiles,
-`import-game` and the workbench build are bash: use **WSL2** for those
-(point `import-game` at the game through `/mnt/c/...`; a server in WSL2 on
-`127.0.0.1` is normally reachable from the Windows browser at the same
-address).
+Everything above runs natively from **PowerShell** — the root `justfile` runs
+its recipes under PowerShell on Windows. From a fresh clone:
+
+```powershell
+.\install-windows-deps.ps1                  # the toolchain (winget / cargo / dotnet), idempotent
+# new terminal, so the tools are on PATH
+just import-game                            # finds the game through Steam
+just workbench-local                        # http://127.0.0.1:4173
+cd spire-mentor-mod; dotnet build           # the mod (BaseLib first: spire-mentor-mod\README.md)
+```
+
+The script installs everything except `rustup`, `uv`, git and VS Build Tools
+(the Rust linker), which it checks for —
+[BUILDING-WINDOWS.md](BUILDING-WINDOWS.md) has the details. The subproject
+justfiles (`sts2-rs/`, `sts2-pycli/`, `sts2-wiki/`) are bash: run those from
+Git Bash.
 
 ## Testing
 

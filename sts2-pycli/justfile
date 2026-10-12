@@ -12,12 +12,16 @@ import? "deploy/justfile"
 # Override with `DOTNET=/path/to/dotnet just <recipe>`.
 dotnet := env_var_or_default(
   "DOTNET",
-  if path_exists(env("HOME") + "/.dotnet-arm64/dotnet") == "true"
-    { env("HOME") + "/.dotnet-arm64/dotnet" }
-  else if path_exists(env("HOME") + "/.dotnet/dotnet") == "true"
-    { env("HOME") + "/.dotnet/dotnet" }
+  if path_exists(home_directory() / ".dotnet-arm64/dotnet") == "true"
+    { home_directory() / ".dotnet-arm64/dotnet" }
+  else if path_exists(home_directory() / ".dotnet/dotnet") == "true"
+    { home_directory() / ".dotnet/dotnet" }
   else { "dotnet" })
 cs_project := "src/Sts2Headless/Sts2Headless.csproj"
+
+# The project venv's interpreter, run directly (no `uv run` re-sync — see the
+# `workbench` recipe). Windows venvs keep it under Scripts/.
+venv_python := if os_family() == "windows" { ".venv/Scripts/python.exe" } else { ".venv/bin/python" }
 
 # Default recipe — show help
 default: help
@@ -226,7 +230,7 @@ workbench: _sim-engine-fresh
     # wheel (version pinned 0.0.1) and clobbers the fresh maturin build that
     # `_sim-engine-fresh` just produced — right before the server loads it.
     # The sim-* recipes already run the venv python directly for this reason.
-    PYTHONPATH=python .venv/bin/python -m workbench
+    PYTHONPATH=python {{venv_python}} -m workbench
 
 # Install web/ npm deps if missing (idempotent; fast no-op when already present)
 _web-deps:
@@ -256,24 +260,24 @@ SIM_HOST := env("STS2_HOST", "127.0.0.1")
 
 # Run a SimLab sweep, e.g.: just sim --name demo --encounter MAWLER_NORMAL --seeds 1000
 sim *ARGS: _sim-engine-fresh
-    PYTHONPATH=python .venv/bin/python -m simlab run {{ARGS}}
+    PYTHONPATH=python {{venv_python}} -m simlab run {{ARGS}}
 
 # SimLab perf bench vs the design budget
 sim-bench: _sim-engine-fresh
-    PYTHONPATH=python .venv/bin/python -m simlab bench
+    PYTHONPATH=python {{venv_python}} -m simlab bench
 
 # Start the SimLab web UI on :8078 — rebuilds engine if changed, frees port, builds SPA, serves.
 sim-ui: _sim-engine-fresh _web-deps
     -fuser -k {{SIM_PORT}}/tcp 2>/dev/null
     @sleep 1
     cd web && npm run build
-    PYTHONPATH=python .venv/bin/python -m uvicorn simlab.web.app:app --host {{SIM_HOST}} --port {{SIM_PORT}}
+    PYTHONPATH=python {{venv_python}} -m uvicorn simlab.web.app:app --host {{SIM_HOST}} --port {{SIM_PORT}}
 
 # SimLab backend only on :8078 (no SPA build) — fast engine-dev loop; pair with `just workbench-web`.
 sim-api: _sim-engine-fresh
     -fuser -k {{SIM_PORT}}/tcp 2>/dev/null
     @sleep 1
-    PYTHONPATH=python .venv/bin/python -m uvicorn simlab.web.app:app --host {{SIM_HOST}} --port {{SIM_PORT}}
+    PYTHONPATH=python {{venv_python}} -m uvicorn simlab.web.app:app --host {{SIM_HOST}} --port {{SIM_PORT}}
 
 # Force-rebuild the sts2_rs engine wheel into .venv (after editing ../sts2-rs).
 # Uses maturin via wheel-venv.sh (real recompile + post-build freshness gate),
@@ -290,10 +294,17 @@ sim-engine:
 # fast-path was dropped: it is fooled by a fresh-mtime/STALE-CONTENT .so (e.g.
 # a `uv sync` reinstalling its cached 0.0.1 wheel from an old commit), which it
 # would wave through as "up to date". (Hidden helper; `_` prefix.)
+[unix]
 _sim-engine-fresh:
     #!/usr/bin/env bash
     set -euo pipefail
     scripts/wheel-venv.sh build >/dev/null
+
+# Windows (Git Bash): no per-worktree venvs; `uv sync` rebuilds sts2_rs into
+# .venv whenever the Rust sources changed (the cache-keys in sts2-py's pyproject).
+[windows]
+_sim-engine-fresh:
+    uv sync --quiet
 
 ## Live advisor
 #
@@ -387,7 +398,7 @@ deps:
 # Regenerate the sts2-workbench data bundle
 workbench-data:
     @echo "📦 Bundling workbench data for sts2-workbench..."
-    python3 scripts/bundle_workbench_data.py
+    uv run --no-project python scripts/bundle_workbench_data.py
 
 # Gate: fail if the committed bundle drifts from its sources
 check-workbench-data:
@@ -396,7 +407,7 @@ check-workbench-data:
     echo "📦 Checking workbench data bundle..."
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
-    python3 scripts/bundle_workbench_data.py -o "$tmp" > /dev/null
+    uv run --no-project python scripts/bundle_workbench_data.py -o "$tmp" > /dev/null
     if ! diff -r -q "$tmp" ../sts2-rs/crates/sts2-workbench/data; then
         echo "ERROR: sts2-rs/crates/sts2-workbench/data is stale — run: just workbench-data" >&2
         exit 1
@@ -415,8 +426,8 @@ workbench-web-static: _web-deps
 # VITE_ASSETS_BASE is unset — a browser check of the exact bundle. Runs vite
 # directly rather than `npm run preview:static`: npm scripts run under cmd.exe
 # on Windows, where the `VAR=value cmd` prefix does not parse.
-workbench-static-preview: _web-deps
-    cd web && VITE_WORKBENCH_MODE=static npx vite preview
+workbench-static-preview:
+    uv run --no-project python scripts/workbench_static.py preview
 
 # Golden HTTP fixtures of the PYTHON workbench server (the oracle) for the Rust
 # port's replay test: scripted play over tests/workbench/golden/scenarios/*.json,
@@ -427,7 +438,7 @@ workbench-static-preview: _web-deps
 # Re-record the workbench golden fixtures (full scenario matrix, ~minutes)
 workbench-golden-dump *args:
     @echo "📼 Recording workbench golden fixtures..."
-    PYTHONPATH=python .venv/bin/python scripts/dump_workbench_golden.py {{args}}
+    PYTHONPATH=python {{venv_python}} scripts/dump_workbench_golden.py {{args}}
 
 # Record the SimLab sweep golden (GH #707): the Python runner's rows + the
 # results payload for two small sweeps, replayed by the Rust port's
@@ -435,7 +446,7 @@ workbench-golden-dump *args:
 # telemetry,intel,agents}.py or to `_kde`.
 simlab-sweep-golden-dump *args:
     @echo "📼 Recording the SimLab sweep golden..."
-    PYTHONPATH=python .venv/bin/python scripts/dump_simlab_sweep_golden.py {{args}}
+    PYTHONPATH=python {{venv_python}} scripts/dump_simlab_sweep_golden.py {{args}}
 
 # Record the state-import combat-lane golden (GH #708): the Python adapter
 # chain's engine wire dict for every real SpireMentor capture under
@@ -445,7 +456,7 @@ simlab-sweep-golden-dump *args:
 # workbench/state_import.py.
 state-import-golden-dump *args:
     @echo "📼 Recording the state-import combat-lane golden..."
-    PYTHONPATH=python .venv/bin/python scripts/dump_state_import_golden.py {{args}}
+    PYTHONPATH=python {{venv_python}} scripts/dump_state_import_golden.py {{args}}
 
 # Gate: re-dump into a temp dir and fail if the committed fixtures drifted
 workbench-golden-check:
@@ -454,7 +465,7 @@ workbench-golden-check:
     echo "📼 Checking workbench golden fixtures..."
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
-    PYTHONPATH=python .venv/bin/python scripts/dump_workbench_golden.py --out "$tmp" > "$tmp.log" \
+    PYTHONPATH=python {{venv_python}} scripts/dump_workbench_golden.py --out "$tmp" > "$tmp.log" \
         || { cat "$tmp.log"; echo "ERROR: golden dump failed" >&2; exit 1; }
     # simlab_sweep.json / state_import_combat.json come from their own dump scripts.
     if ! diff -r -q -x README.md -x simlab_sweep.json -x state_import_combat.json "$tmp" ../sts2-rs/crates/sts2-workbench/tests/golden; then
@@ -499,25 +510,7 @@ wasm-check:
 # Build the wasm bundle into web/src/wasm/pkg (needs `cargo install
 # wasm-bindgen-cli --version <lock version>`; wasm-opt is used if present).
 wasm-build:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd ../sts2-rs
-    RUSTC_WRAPPER= cargo build --profile wasm-release --target wasm32-unknown-unknown -p sts2-workbench-wasm
-    out="$(pwd)/../sts2-pycli/web/src/wasm/pkg"
-    mkdir -p "$out"
-    wasm-bindgen --target web --out-dir "$out" \
-        target/wasm32-unknown-unknown/wasm-release/sts2_workbench_wasm.wasm
-    # binaryen's wasm-opt: a system install if present, else the `binaryen`
-    # npm package in web/ (installed by `_web-deps`; shrinks the PPO-bearing
-    # engine ~30%). Skipped, with a note, only when neither exists.
-    opt="$(command -v wasm-opt || true)"
-    [ -n "$opt" ] || { [ -x ../sts2-pycli/web/node_modules/.bin/wasm-opt ] && opt=../sts2-pycli/web/node_modules/.bin/wasm-opt; } || true
-    if [ -n "$opt" ]; then
-        "$opt" -O3 -o "$out/sts2_workbench_wasm_bg.wasm" "$out/sts2_workbench_wasm_bg.wasm"
-    else
-        echo ">> note: wasm-opt not found (system or web/node_modules) — shipping the unoptimized wasm"
-    fi
-    ls -la "$out"/*.wasm
+    uv run --no-project python scripts/workbench_static.py wasm
 
 # Stamped into the static build as VITE_BUILD_ID: the cache-buster on the VFX
 # manifest fetched from the immutable art bucket (src/effects/manifest.ts,
@@ -537,19 +530,8 @@ wb_build_id := env_var_or_default("VITE_BUILD_ID", `git describe --always --dirt
 # origin instead (then dist carries no art). VITE_BUILD_ID (see the static
 # site deploy section) names the service worker's shell cache and busts the VFX manifest
 # cache.
-workbench-static: wasm-build _web-deps
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd web && VITE_WORKBENCH_MODE=static VITE_BUILD_ID="{{wb_build_id}}" \
-        VITE_ASSETS_BASE="${VITE_ASSETS_BASE:-}" npm run build
-    cd ..
-    # No art tree (a checkout that never ran `just import-game`): ship the SPA
-    # without /assets — every image then renders the placeholder tile
-    # (web/src/artPlaceholder.ts) and sound is silent.
-    if [ -z "${VITE_ASSETS_BASE:-}" ]; then
-        if [ -d ../sts2-wiki/site/public/images ]; then just _art-into-dist;
-        else echo ">> no art tree at ../sts2-wiki/site/public/images — building in placeholder-art mode (just import-game to extract it)"; fi
-    fi
+workbench-static:
+    VITE_BUILD_ID="{{wb_build_id}}" uv run --no-project python scripts/workbench_static.py build
 
 # Put the sibling wiki's art tree into web/dist/assets — images at /assets,
 # audio at /assets/audio (the layout the dev mount and the bucket use), every
@@ -558,10 +540,7 @@ workbench-static: wasm-build _web-deps
 # continue unless every file of the art manifest is there. Vite empties dist
 # on every build, so this runs after it. Needs `cwebp` (libwebp).
 _art-into-dist:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    python3 scripts/build_asset_manifest.py >/dev/null
-    python3 scripts/art_to_dist.py
+    uv run --no-project python scripts/workbench_static.py art
 
 # Browser-only end-to-end (Playwright against `vite preview` of the static
 # build; no Python backend). Build first: `just workbench-static`.

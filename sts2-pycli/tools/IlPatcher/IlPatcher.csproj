@@ -1,0 +1,15 @@
+<!--
+  IL-patches the game's sts2.dll for headless use (lib/sts2.dll, in place).
+  Run by scripts/setup_oracle.py (dotnet run with lib/sts2.dll as the argument).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Same family as src/Sts2Headless (net9.0); RollForward runs it on a newer SDK. -->
+    <TargetFramework>net9.0</TargetFramework>
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+  </ItemGroup>
+</Project>

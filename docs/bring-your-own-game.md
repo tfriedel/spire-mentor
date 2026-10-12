@@ -31,57 +31,80 @@ source the extractors and the mechanics work read plus real art
   first use) and `cargo-nextest`. `sccache` is optional
   (`export RUSTC_WRAPPER=sccache`).
 - **oracle tier:** the [.NET 9 SDK](https://dotnet.microsoft.com/download).
-- **workbench tier:** ILSpy's CLI — `dotnet tool install -g ilspycmd`
-  (lands in `~/.dotnet/tools`). Node 20+ for the web app, plus
-  `rustup target add wasm32-unknown-unknown` and
-  `cargo install wasm-bindgen-cli --version 0.2.120` (must match the
-  `wasm-bindgen` crate in `sts2-rs/Cargo.lock`) for the browser build.
+- **workbench tier:** ILSpy's CLI —
+  `dotnet tool install -g ilspycmd --version 9.1.0.7988` (lands in
+  `~/.dotnet/tools`; ilspycmd 10+ does not install on the .NET 9 SDK). For
+  the browser build: Node 20+, `cargo install wasm-bindgen-cli --version
+  0.2.120 --locked` (must match the `wasm-bindgen` crate in
+  `sts2-rs/Cargo.lock`; the wasm target itself comes with the pinned
+  toolchain), and `cwebp` from libwebp (`brew install webp`,
+  `apt install webp`, `winget install Google.Libwebp`) — the build ships the
+  art as WebP.
 - **sound tier:** the FMOD Studio API (free, registration-gated download from
   fmod.com, Linux tarball `fmodstudioapi*linux.tar.gz`). Unpack it anywhere
   and export `FMOD_SDK_ROOT=<that dir>`. Also `ffmpeg` for the Opus encode.
-- Windows: use WSL2 (the scripts are bash); point `import-game` at the
-  Windows install through `/mnt/c/...`. Native Windows builds of the Rust
-  engine are covered in `BUILDING-WINDOWS.md`.
+- **Windows:** everything here runs natively from PowerShell —
+  `.\install-windows-deps.ps1` installs the tools above
+  ([BUILDING-WINDOWS.md](../BUILDING-WINDOWS.md)).
 
 ## Run it
 
 ```sh
-just import-game                       # auto-detects the Steam install; tier = workbench
-just import-game /path/to/game --tier oracle
+just import-game                       # finds the game through Steam; tier = workbench
+just import-game --tier oracle         # just the C# oracle
 just import-game --tier all            # + sound, when FMOD_SDK_ROOT is set
 just import-game --status              # what exists, what is missing
 ```
 
-The first argument may be the install folder (the one holding
-`SlayTheSpire2.pck`), the macOS `.app`, or the `data_sts2_*` folder holding
-`sts2.dll`; `$STS2_GAME_DIR` works too. The driver stages the build under
-`sts2_binaries/<version>/` (symlinks by default, `--copy` to copy — the pck
-is ~1.9 GB) and then runs the per-subproject recipes in order:
+The game is found through Steam: every library folder Steam knows about
+(`steamapps/libraryfolders.vdf`, so other drives too; on Windows the Steam
+path comes from the registry). Anywhere else, set `STS2_GAME_DIR` to the
+install folder (the one holding `SlayTheSpire2.pck`), the macOS `.app`, or the
+`data_sts2_*` folder holding `sts2.dll` — or pass that folder as the first
+argument (on Unix shells; on Windows the path's spaces do not survive the
+recipe, so use `STS2_GAME_DIR`, e.g.
+`$env:STS2_GAME_DIR = "D:\SteamLibrary\steamapps\common\Slay the Spire 2"`).
 
-1. `sts2-pycli/setup.sh` — copies the DLLs to `lib/`, IL-patches `sts2.dll`
-   for headless use, builds the C# harness.
-2. `sts2-wiki: just extract-pck` and `sts2-pycli/scripts/vendor_localization.py`
-   — the English localization.
-3. `sts2-wiki: just decompile` (ilspycmd), `just extract`,
-   `extract-vfx-bindings`, `extract-power-flash-sites`, `extract-images`,
-   `extract-vfx`, `build-sfx-map`.
+The driver stages the build under `sts2_binaries/<version>/` — symlinks; on
+Windows without Developer Mode a hard link for the pck and a junction for the
+data folder; a copy only when neither works (the pck is ~1.9 GB, and the log
+says so) or with `--copy` — and then runs, in order, calling each tool
+directly (no bash, so the same on every platform):
+
+1. `sts2-pycli/scripts/setup_oracle.py` — copies the DLLs to `lib/`,
+   IL-patches `sts2.dll` for headless use (`tools/IlPatcher`), builds the
+   C# harness. (`setup.sh` runs the same script.)
+2. `sts2-wiki/scripts/extract_pck` and `sts2-pycli/scripts/vendor_localization.py`
+   — the English localization and the atlas metadata.
+3. ilspycmd (the decompile), the `sts2-wiki` extractors (`just extract`,
+   `extract-vfx-bindings`, `extract-power-flash-sites` — committed, so only
+   re-run when missing), then the art: `extract_images.py` (the sprite
+   atlases), `extract_vfx`, `extract_rooms` (rooms, scenes, map, HUD, boss
+   icons, orbs), `extract_card_template` (card frames), `extract_rig --all`
+   (every creature and room rig), and `build_sfx_map`.
 4. `sts2-pycli`: `synergy.gen_card_text`, `workbench.build_card_db`,
    `scripts/build_asset_manifest.py`, `scripts/bundle_workbench_data.py`
    (= `just workbench-data`, the bundle the browser workbench embeds).
-5. `sound`: `just extract-sfx` + `just encode-sfx`.
+5. `sound`: `extract_sfx` + `encode_sfx`.
 
 Every step is idempotent — a re-run skips outputs that exist — and
 everything is logged to `logs/import-game.log`. To redo one step, delete its
 output and re-run.
 
+The art covers what the workbench draws, minus a few static fallbacks: the
+101 still `monsters/*.png` portraits and the 5 `character_sprites/*.png` are
+not in the game's files (the workbench draws the creatures' rigs instead), and
+a handful of art ids the committed asset manifest lists do not exist in
+v0.107.1. Those render as the neutral placeholder tile.
+
 ## Then
 
 ```sh
+just workbench-local                   # browser workbench: build + serve on 127.0.0.1:4173
+just workbench-server                  # Python-backed workbench on 127.0.0.1:8077
 cd sts2-pycli && uv sync --dev
 just build-cs                          # C# oracle (oracle tier)
 uv run pytest tests                    # the whole suite, oracle tests included
-just workbench-static-preview          # after `just workbench-static`: serve on 127.0.0.1:4173
-just workbench                         # Python-backed workbench on 127.0.0.1:8077
 cd ../sts2-rs && cargo nextest run --workspace   # game-gated tests now run too
 ```
 

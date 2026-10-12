@@ -276,7 +276,17 @@ def main() -> None:
     parser.add_argument(
         "--atlases",
         nargs="*",
-        default=["power_atlas", "relic_atlas", "potion_atlas", "intent_atlas"],
+        # Every atlas the workbench serves art from. card_atlas is the per-card
+        # illustrations (import-game's art step checks for it); epoch_atlas the
+        # timeline portraits.
+        default=[
+            "power_atlas",
+            "relic_atlas",
+            "potion_atlas",
+            "intent_atlas",
+            "card_atlas",
+            "epoch_atlas",
+        ],
         help="Atlas names to extract",
     )
     args = parser.parse_args()

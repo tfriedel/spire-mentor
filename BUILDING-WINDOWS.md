@@ -1,9 +1,8 @@
 # Building on Windows
 
-How to compile and test **spire-mentor** on native Windows (no WSL). The Rust
-combat engine (`sts2-rs/`) builds and tests cleanly this way. The full Python
-+ C# + workbench stack (`sts2-pycli/`) is smoother under WSL2 — see
-[Caveats](#caveats).
+How to compile and test **spire-mentor** on native Windows (no WSL): the Rust
+engine, `just import-game`, the browser workbench and the Spire Mentor mod all
+build and run from PowerShell.
 
 ## 1. Install the toolchain
 
@@ -24,13 +23,16 @@ What each tier needs:
 |------|-------|---------------|
 | **Rust engine** (`sts2-rs`) | `just`, `cargo-nextest`, rust-analyzer | winget / cargo / rustup |
 | **Python CLI** (`sts2-pycli`) | Python 3.13 | `uv python install` |
-| **C# runner** (`sts2-pycli/src`) | .NET 9 SDK | winget |
+| **C# runner + the mod** | .NET 9 SDK | winget |
 | **Web UIs** | Node.js LTS | winget |
+| **Workbench with real art** (`-SkipWorkbench` to omit) | `ilspycmd` 9.1, `wasm-bindgen-cli` (the `sts2-rs/Cargo.lock` version), libwebp (`cwebp`) | dotnet tool / cargo / winget |
 
 Prerequisites the script verifies but does **not** install: `rustup`/`cargo`,
-`uv`, `git`, `git-lfs`, and **VS Build Tools 2022 with the "Desktop
-development with C++" workload** (provides `link.exe` — Rust cannot link
-without it).
+`uv`, `git`, and **VS Build Tools 2022 with the "Desktop development with
+C++" workload** (provides `link.exe` — Rust cannot link without it).
+
+The repo runs Python through `uv run` everywhere, so the Microsoft Store
+`python.exe` alias on PATH does no harm.
 
 ## 2. Build & test the Rust engine
 
@@ -46,7 +48,24 @@ Expected: full workspace builds, **6092 tests pass**.
 > isolating the process-global effect/relic registry. Plain `cargo test` shares
 > one process and produces order-dependent false failures.
 
-## 3. The one Windows gotcha: the `sts2-py` PyO3 crate needs a real Python
+## 3. The workbench and the mod
+
+From the repo root, in PowerShell:
+
+```powershell
+just import-game        # finds the game through Steam (any library); or $env:STS2_GAME_DIR
+just workbench-local    # builds the wasm + SPA + art, serves http://127.0.0.1:4173
+cd spire-mentor-mod
+dotnet build            # builds the mod and installs it into <game>\mods\SpireMentor\
+```
+
+`import-game` needs no Developer Mode: it stages the game with a hard link and
+a directory junction where it cannot symlink. The mod also needs BaseLib and,
+for the in-game advisor, `cd sts2-pycli; uv sync` once (which builds the
+`sts2-py` crate below) — see
+[`spire-mentor-mod/README.md`](spire-mentor-mod/README.md).
+
+## 4. The `sts2-py` PyO3 crate needs a real Python
 
 The `sts2-py` crate embeds a Python interpreter and needs a **real** one at
 **both build and run time**. Two traps on Windows:
@@ -96,13 +115,11 @@ show CRLF locally, re-checkout them or strip `\r`.
 ## Caveats
 
 - The root `justfile` runs under PowerShell on Windows (`rs-check`,
-  `rs-test`, `rs-doc-test`, `py-test`, `web-test`). The subproject justfiles
-  and `setup.sh` / `scripts/wheel-venv.sh` are written for Unix shells (bash
-  shebangs, `.venv/bin/activate`, `fuser`, macOS/Linux Steam paths); they need
-  an `sh` on PATH (Git Bash) and recipes like `workbench`, `sim-ui`,
-  `build-rust`, and `setup` will still break on those Unix-isms.
+  `rs-test`, `rs-doc-test`, `py-test`, `web-test`, `import-game`,
+  `workbench-local`, `workbench-server`). The subproject justfiles are
+  written for bash: run them from Git Bash. Most of their recipes work there;
+  the worktree tooling (`scripts/wheel-venv.sh`, `fuser`-based recipes such
+  as `sim-ui`) is Unix-only.
 - `sccache` is not required; set `$env:RUSTC_WRAPPER="sccache"` to use it.
 - The C# headless runner also needs the game DLLs — `just import-game`
   (docs/bring-your-own-game.md) stages them from your install.
-- For the full Python + C# + workbench stack, **WSL2 (Ubuntu) is the path of
-  least resistance.** The Rust engine alone is happy on native Windows.

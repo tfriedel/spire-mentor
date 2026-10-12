@@ -19,7 +19,9 @@ e.g.
 import argparse
 import json
 import os
+import re
 import struct
+import sys
 
 from scripts.extract_images import decode_ctex
 
@@ -47,6 +49,10 @@ def read_pck_index(pck_path):
     return index
 
 
+class RigError(Exception):
+    """A rig whose skeleton, atlas or texture pages are not in the PCK."""
+
+
 def _read(pck_path, offset, size):
     with open(pck_path, "rb") as f:
         f.seek(offset)
@@ -64,7 +70,7 @@ def ext_src(ext):
     return {"spskel": "skel", "spatlas": "atlas", "ctex": "png"}[ext]
 
 
-def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None):
+def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None, index=None):
     """Reconstruct a Spine rig (``.skel`` + ``.atlas`` + page ``.png``\\ s).
 
     Most rigs name the skeleton, atlas and texture page identically (``name``).
@@ -80,17 +86,22 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None):
         slug: Output dir/file slug (default: ``name``).
         atlas_name: Source atlas asset name, when it differs from ``name``
             (default: ``name``).
+        index: A ``read_pck_index`` result to reuse (batch callers); read
+            from ``pck_path`` when omitted.
+
+    Raises:
+        RigError: the skeleton, atlas or a texture page is missing.
     """
     slug = slug or name
     atlas_name = atlas_name or name
-    index = read_pck_index(pck_path)
+    index = index if index is not None else read_pck_index(pck_path)
     out_dir = os.path.join(out_root, slug)
     os.makedirs(out_dir, exist_ok=True)
 
     # .skel — the .spskel is the raw Spine binary, verbatim
     skel = _find(index, name, "spskel")
     if not skel:
-        raise SystemExit(f"no .spskel for '{name}' — it likely has no Spine rig (static sprite)")
+        raise RigError(f"no .spskel for '{name}' — it likely has no Spine rig (static sprite)")
     with open(os.path.join(out_dir, f"{slug}.skel"), "wb") as o:
         o.write(_read(pck_path, *index[skel[0]]))
 
@@ -100,12 +111,12 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None):
     # names so every page gets extracted, not just the first.
     atl = _find(index, atlas_name, "spatlas")
     if not atl:
-        raise SystemExit(f"no .spatlas for '{atlas_name}'")
+        raise RigError(f"no .spatlas for '{atlas_name}'")
     atlas_text = json.loads(_read(pck_path, *index[atl[0]]))["atlas_data"]
     # Page headers are the only lines that end in ".png" (region names never do).
     page_files = [ln.strip() for ln in atlas_text.splitlines() if ln.strip().endswith(".png")]
     if not page_files:
-        raise SystemExit(f"no atlas pages found for '{atlas_name}'")
+        raise RigError(f"no atlas pages found for '{atlas_name}'")
     # Output page filenames, by slug: <slug>.png, <slug>_2.png, … (the page-index
     # convention the libgdx atlas / spine-webgl loader expects).
     out_pngs = [f"{slug}.png" if i == 0 else f"{slug}_{i + 1}.png" for i in range(len(page_files))]
@@ -113,7 +124,7 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None):
     for src_pf, out_pf in zip(page_files, out_pngs):
         if src_pf != out_pf:
             atlas_text = atlas_text.replace(src_pf, out_pf, 1)
-    with open(os.path.join(out_dir, f"{slug}.atlas"), "w") as o:
+    with open(os.path.join(out_dir, f"{slug}.atlas"), "w", encoding="utf-8") as o:
         o.write(atlas_text)
 
     # .png — decode each page's Godot compressed-texture (one .ctex per page; a
@@ -123,28 +134,144 @@ def extract_rig(pck_path, name, out_root, slug=None, atlas_name=None):
         page_name = src_pf[:-4]  # source ctex asset name, e.g. "decimillipede"
         ctex = _find(index, page_name, "ctex")
         if not ctex:
-            raise SystemExit(f"no .ctex page for atlas page '{page_name}' (rig '{name}')")
+            raise RigError(f"no .ctex page for atlas page '{page_name}' (rig '{name}')")
         img = None
         for c in ctex:
             img = decode_ctex(_read(pck_path, *index[c]))
             if img is not None:
                 break
         if img is None:
-            raise SystemExit(f"failed to decode any .ctex variant for page '{page_name}'")
+            raise RigError(f"failed to decode any .ctex variant for page '{page_name}'")
         img.save(os.path.join(out_dir, out_pf))
         sizes.append(img.size)
     return out_dir, sizes[0], len(page_files)
 
 
+#: Room rigs the workbench draws under a slug no scene or folder carries:
+#: the treasure-room chests (``room_rigs/treasure_act_<n>``) and the merchant.
+ROOM_RIGS = {
+    "treasure_act_1": "chest_room_act_1",
+    "treasure_act_2": "chest_room_act_2",
+    "treasure_act_3": "chest_room_act_3",
+    "shop_merchant_top": "shop_merchant_top",
+}
+
+
+def _rig_of_resource(index, pck_path, res_path):
+    """(skel, atlas, skel res-path) named by a Spine skeleton-data ``.tres``, else None."""
+    if res_path not in index:
+        return None
+    text = _read(pck_path, *index[res_path]).decode("utf-8", "replace")
+    refs = [r.removeprefix("res://") for r in re.findall(r'path="(res://[^"]+)"', text)]
+    skel = next((r for r in refs if r.endswith(".skel")), None)
+    atlas = next((r for r in refs if r.endswith(".atlas")), None)
+    if not (skel and atlas):
+        return None
+    return os.path.basename(skel)[: -len(".skel")], os.path.basename(atlas)[: -len(".atlas")], skel
+
+
+def find_rigs(index, pck_path):
+    """Every creature and room rig, as ``{(category, slug): (skel, atlas)}``.
+
+    Creatures resolve through the game's own scenes first:
+    ``scenes/creature_visuals/<slug>.tscn`` references a skeleton-data ``.tres``
+    that names the ``.skel`` and ``.atlas``. That is the only reliable pairing —
+    the Decimillipede segments cross their file names (``segment_front`` draws
+    ``decimillipede3.skel`` with ``decimillipede_back.atlas``). A rig several
+    scenes share is published under its folder or skeleton name instead
+    (``animations/monsters/bowlbug/`` → ``bowlbug``), so those are added too,
+    when the atlas of the same name exists. A skeleton under
+    ``animations/characters/`` is a character rig; every other creature is a
+    monster rig. Rooms come from ``ROOM_RIGS``.
+    """
+    rigs = {}
+    for path in sorted(index):
+        m = re.fullmatch(r"scenes/creature_visuals/(\w+)\.tscn", path)
+        if not m:
+            continue
+        scene = _read(pck_path, *index[path]).decode("utf-8", "replace")
+        for res in re.findall(r'path="res://([^"]+\.tres)"', scene):
+            rig = _rig_of_resource(index, pck_path, res)
+            if rig:
+                skel, atlas, skel_path = rig
+                category = (
+                    "character_rigs"
+                    if skel_path.startswith("animations/characters/")
+                    else "monster_rigs"
+                )
+                rigs[(category, m.group(1))] = (skel, atlas)
+                break
+
+    folders = {}
+    for path in index:
+        m = re.fullmatch(
+            r"animations/(monsters|characters)/(?:.+/)?(\w+)/(\w+)\.skel\.import", path
+        )
+        if m:
+            folders.setdefault((m.group(1), m.group(2)), []).append(m.group(3))
+    for (kind, folder), names in sorted(folders.items()):
+        category = "character_rigs" if kind == "characters" else "monster_rigs"
+        for name in names:
+            if not _find(index, name, "spatlas"):
+                continue
+            slugs = [name] + ([folder] if len(names) == 1 and folder != name else [])
+            for slug in slugs:
+                rigs.setdefault((category, slug), (name, name))
+
+    for slug, name in ROOM_RIGS.items():
+        rigs[("room_rigs", slug)] = (name, name)
+    return rigs
+
+
+def extract_all(pck_path, images_root, force=False):
+    """Write every rig ``find_rigs`` names under ``images_root``; returns the failures.
+
+    Idempotent: a rig whose ``<slug>.skel`` exists is skipped unless ``force``.
+    """
+    index = read_pck_index(pck_path)
+    rigs = find_rigs(index, pck_path)
+    written = skipped = 0
+    failures = []
+    for (category, slug), (skel, atlas) in sorted(rigs.items()):
+        out_root = os.path.join(images_root, category)
+        if not force and os.path.isfile(os.path.join(out_root, slug, f"{slug}.skel")):
+            skipped += 1
+            continue
+        try:
+            extract_rig(pck_path, skel, out_root, slug=slug, atlas_name=atlas, index=index)
+            written += 1
+        except RigError as exc:
+            failures.append(f"{category}/{slug}: {exc}")
+    print(f"rigs: {written} written, {skipped} present, {len(failures)} failed (of {len(rigs)})")
+    for failure in failures:
+        print(f"  FAILED {failure}")
+    return failures
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pck")
-    ap.add_argument("name", help="source skeleton asset name in the PCK, e.g. skulking_colony")
-    ap.add_argument("out_root", help="e.g. site/public/images/monster_rigs")
+    ap.add_argument(
+        "name", nargs="?", help="source skeleton asset name in the PCK, e.g. skulking_colony"
+    )
+    ap.add_argument("out_root", nargs="?", help="e.g. site/public/images/monster_rigs")
     ap.add_argument("--slug", help="output dir/file slug (default: name)")
     ap.add_argument("--atlas", help="source atlas asset name when it differs from <name>")
+    ap.add_argument(
+        "--all", metavar="IMAGES_ROOT", help="extract every creature and room rig under IMAGES_ROOT"
+    )
+    ap.add_argument(
+        "--force", action="store_true", help="with --all: rewrite rigs that already exist"
+    )
     a = ap.parse_args()
-    out_dir, size, npages = extract_rig(a.pck, a.name, a.out_root, a.slug, a.atlas)
+    if a.all:
+        sys.exit(1 if extract_all(a.pck, a.all, a.force) else 0)
+    if not (a.name and a.out_root):
+        ap.error("name and out_root are required without --all")
+    try:
+        out_dir, size, npages = extract_rig(a.pck, a.name, a.out_root, a.slug, a.atlas)
+    except RigError as exc:
+        sys.exit(str(exc))
     # ASCII only: this is the LAST line of a successful run, and on a cp1252
     # console a non-ASCII glyph here raises UnicodeEncodeError *after* every
     # file is already written - so a clean extraction exits 1 with a traceback.

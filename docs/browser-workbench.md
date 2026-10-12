@@ -68,11 +68,11 @@ public/sw.js: shell cache-first + art runtime cache (offline)
 `wasm-build` shells out to the **`wasm-bindgen` CLI**, which cargo does not
 install for you, and its version must equal the `wasm-bindgen` crate version in
 `sts2-rs/Cargo.lock` — wasm-bindgen refuses an artifact produced by a different
-version. Without it the crate compiles and then the recipe dies with
-`wasm-bindgen: command not found`, several minutes in.
+version. The build (`sts2-pycli/scripts/workbench_static.py`) checks both
+before it compiles and prints the install command. The wasm target itself
+comes with the toolchain `sts2-rs/rust-toolchain.toml` pins.
 
 ```
-rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --locked \
     --version "$(grep -A1 'name = "wasm-bindgen"' sts2-rs/Cargo.lock | grep version | head -1 | cut -d'"' -f2)"
 ```

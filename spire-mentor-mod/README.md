@@ -47,10 +47,17 @@ mod leaves the game 100% vanilla.
 - Windows, with your own Steam install of Slay the Spire 2 at **v0.107.1**
   (the mod patches game internals and clicks concrete UI scene paths — a game
   update can break it silently).
-- .NET 9 SDK.
+- .NET 9 SDK (`winget install Microsoft.DotNet.SDK.9`, or the repo root's
+  `install-windows-deps.ps1`).
 - [Alchyr's BaseLib](https://github.com/Alchyr/BaseLib-StS2) (MIT, v3.4.1
-  verified) installed at `<game>/mods/BaseLib/` — it provides the mod
-  settings page, and the build **fails with a clear error** if it is missing.
+  verified) — it provides the mod settings page, and the build **fails with a
+  clear error** if it is missing. Install it once: from the
+  [v3.4.1 release](https://github.com/Alchyr/BaseLib-StS2/releases) download
+  `BaseLib.dll`, `BaseLib.pck` and `BaseLib.json` into
+  `<game>/mods/BaseLib/` (create the folder; `<game>` is the folder holding
+  `SlayTheSpire2.exe`, e.g.
+  `C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2`).
+- For the in-game advisor: the repo's Python side, set up once (below).
 
 ## Build and install
 
@@ -58,6 +65,10 @@ mod leaves the game 100% vanilla.
 cd spire-mentor-mod
 dotnet build
 ```
+
+Coming from an older build? Delete `<game>/mods/SimBridge/` or
+`<game>/mods/SpireCoach/` first — the game would load both, and only one can
+listen on port 9002.
 
 `SpireMentor.csproj` locates the game through the Steam registry key, falling
 back to `C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2`. If
@@ -161,6 +172,20 @@ packaged torch-free `SimAdvisor` exe bundled by `package.ps1`. Any process
 that speaks [`PROTOCOL.md`](PROTOCOL.md) can serve instead — connect it to
 `127.0.0.1:<port>` and answer the decision messages.
 
+**Set it up once before the first game launch.** The dev launcher runs
+`uv run` in `sts2-pycli/`; on a fresh clone that first syncs the whole
+environment — downloads torch and friends and compiles the `sts2_rs` Rust
+extension — which takes 10+ minutes, while the game waits for its advisor.
+Do it ahead:
+
+```powershell
+cd sts2-pycli
+uv sync                 # BUILDING-WINDOWS.md §4 if the sts2-py build cannot find Python
+```
+
+After a `git pull` that touches Rust code, the next launch rebuilds `sts2_rs`
+again (a few minutes); `uv sync` beforehand avoids the wait there too.
+
 ## Repository tour
 
 | File | Purpose |
@@ -182,16 +207,26 @@ that speaks [`PROTOCOL.md`](PROTOCOL.md) can serve instead — connect it to
 
 How the mod fits the rest of the stack: [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
-## Browser workbench (GH #709)
+## The workbench link
 
-The browser-only workbench (`https://your-workbench.example.com`) can show the
-live game's tree, run a live search and rewind the game, but it has no server
-to proxy for it and calls the advisor's control plane (`127.0.0.1:8079`)
-straight from the page. That is off unless you allow it: set **Browser
-workbench origin** in the mod's settings to the page's origin
-(`https://your-workbench.example.com`), which the mod passes to the advisor as
-`--control-allow-origin`; the control plane then answers that origin with the
-CORS / Private Network Access headers and nothing else changes. In the page,
-Tools → **Live game…** takes the control plane's URL. Chrome asks once for
-local-network access; Firefox does not. Details and the browser measurements:
-`docs/browser-workbench.md`, "Live-game bridge".
+The toolbar's **Workbench ▾ → open** opens the *Workbench URL* setting —
+by default `http://127.0.0.1:8077/?follow=1`, the Python-backed workbench,
+which the advisor starts on its own when nothing answers there. It serves
+whatever is built in `sts2-pycli/web/dist`, and which build that is decides
+what the button shows:
+
+- **Server build** — `cd sts2-pycli/web; npm run build`. `?follow=1` opens
+  the advisor's live run log in the replay view and follows it.
+- **Browser-only build** — what the repo root's `just workbench-local`
+  builds (and serves on `http://127.0.0.1:4173`). It has no server to proxy
+  for it, so it talks to the advisor's control plane (`127.0.0.1:8079`)
+  straight from the page: it can show the live game's tree, run a live search
+  and rewind the game. That is off unless you allow the page's origin: set
+  **Browser workbench origin** in the mod's settings to it (e.g.
+  `http://127.0.0.1:4173`, and set **Workbench URL** to the same page), which
+  the mod passes to the advisor as `--control-allow-origin`; the control
+  plane then answers that origin with the CORS / Private Network Access
+  headers and nothing else changes. In the page, Tools → **Live game…** takes
+  the control plane's URL. Chrome asks once for local-network access; Firefox
+  does not. Details and the browser measurements: `docs/browser-workbench.md`,
+  "Live-game bridge".

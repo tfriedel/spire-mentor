@@ -37,8 +37,9 @@ epochs, characters, ascensions) with Astro.
 - [`just`](https://github.com/casey/just), [`uv`](https://docs.astral.sh/uv/)
   (Python 3.12+), Node.js/npm (for the Astro site), and the .NET tool
   [`ilspycmd`](https://github.com/icsharpcode/ILSpy) for decompilation
-  (`dotnet tool install -g ilspycmd`; see `CLAUDE.md` for the `DOTNET_ROOT`
-  gotcha on macOS).
+  (`dotnet tool install -g ilspycmd --version 9.1.0.7988` — 10+ does not
+  install on the .NET 9 SDK; see `CLAUDE.md` for the `DOTNET_ROOT` gotcha on
+  macOS).
 - The LLM-based extractors (`just llm-extract-*`) additionally use the Claude
   Agent SDK, i.e. a working Claude Code setup.
 

@@ -167,6 +167,19 @@ def output_for(source: str) -> str | None:
         return "scene_bgs/rest_site/" + source[len("animations/rest_site/") :]
     if source.startswith("images/ui/transitions/"):
         return "scene_bgs/transitions/" + source[len("images/ui/transitions/") :]
+    # Static fallbacks the workbench resolves by name: the map's boss icons
+    # (``boss_icons/<boss>_boss_icon.png``), the Defect orb sprites
+    # (``orb_atlas/<orb>.png``; the animated orbs are Spine rigs) and the
+    # ancients' portraits (``ancients/<name>.png``).
+    m = re.fullmatch(r"images/map/placeholder/(\w+_boss_icon)\.png", source)
+    if m:
+        return f"boss_icons/{m.group(1)}.png"
+    m = re.fullmatch(r"images/orbs/(\w+)_orb\.png", source)
+    if m:
+        return f"orb_atlas/{m.group(1)}.png"
+    m = re.fullmatch(r"images/ancients/(\w+)_placeholder\.png", source)
+    if m:
+        return f"ancients/{m.group(1)}.png"
     # Screen-chrome families: the game's drawn HUD/panel/button art. Flat
     # textures; served under ui/<family>/ for the workbench's game-skin
     # components (top HUD band, energy orb layers, reward banner, rest-site
@@ -186,6 +199,18 @@ def output_for(source: str) -> str | None:
         if source.startswith(prefix):
             return f"ui/{family}/" + source[len(prefix) :]
     return None
+
+
+def aliases_for(rel_out: str) -> list[str]:
+    """Further output paths that carry the same image as ``rel_out``.
+
+    The top-panel character icons double as ``characters/character_icon_<c>.png``,
+    the path the run-setup and history views ask for.
+    """
+    m = re.fullmatch(r"ui/top_panel/(character_icon_\w+)\.png", rel_out)
+    if m and not m.group(1).endswith("_outline"):
+        return [f"characters/{m.group(1)}.png"]
+    return []
 
 
 def main() -> None:
@@ -213,7 +238,8 @@ def main() -> None:
             continue
         out_path = out_root / rel_out
         category = rel_out.split("/")[0]
-        if out_path.exists() and not args.force:
+        alias_paths = [out_root / a for a in aliases_for(rel_out)]
+        if out_path.exists() and all(p.exists() for p in alias_paths) and not args.force:
             skipped += 1
             continue
         import_text = (read(path) or b"").decode("utf-8", "replace")
@@ -229,8 +255,9 @@ def main() -> None:
             failed += 1
             continue
         img = downscale(img, CATEGORY_MAX_EDGE.get(category, MAX_EDGE))
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(out_path, "PNG")
+        for p in (out_path, *alias_paths):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            img.save(p, "PNG")
         extracted += 1
         by_category[category] = by_category.get(category, 0) + 1
 

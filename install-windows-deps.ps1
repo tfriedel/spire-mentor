@@ -10,15 +10,18 @@
     Tiers (install what you need):
       * Rust engine (sts2-rs)     -> just, cargo-nextest   [always]
       * Python CLI  (sts2-pycli)  -> Python 3.13 via uv     [-SkipPython to omit]
-      * C# runner   (sts2-pycli)  -> .NET 9 SDK             [-SkipDotnet to omit]
+      * C# runner + the mod       -> .NET 9 SDK             [-SkipDotnet to omit]
       * Web UIs                   -> Node.js LTS            [-SkipNode to omit]
+      * Workbench with real art   -> ilspycmd 9.1, wasm-bindgen-cli (the version
+                                     sts2-rs/Cargo.lock pins), libwebp (cwebp)
+                                                            [-SkipWorkbench to omit]
 
     Prerequisites assumed already installed (the script verifies and warns):
-      rustup/cargo, uv, git, git-lfs, and VS Build Tools 2022 (VC++ / linker).
+      rustup/cargo, uv, git, and VS Build Tools 2022 (VC++ / linker).
 
 .PARAMETER RustOnly
     Only install what the Rust engine needs (just + cargo-nextest +
-    rust-analyzer). Implies -SkipPython -SkipDotnet -SkipNode.
+    rust-analyzer). Implies -SkipPython -SkipDotnet -SkipNode -SkipWorkbench.
 
 .PARAMETER SkipPython
     Skip installing the pinned Python 3.13 via uv.
@@ -28,6 +31,10 @@
 
 .PARAMETER SkipNode
     Skip installing Node.js LTS (needed only for the web frontends).
+
+.PARAMETER SkipWorkbench
+    Skip the tools `just import-game` and `just workbench-local` need on top
+    of the tiers above (ilspycmd, wasm-bindgen-cli, libwebp).
 
 .EXAMPLE
     ./install-windows-deps.ps1              # full stack
@@ -39,12 +46,13 @@ param(
     [switch]$RustOnly,
     [switch]$SkipPython,
     [switch]$SkipDotnet,
-    [switch]$SkipNode
+    [switch]$SkipNode,
+    [switch]$SkipWorkbench
 )
 
 $ErrorActionPreference = 'Stop'
 
-if ($RustOnly) { $SkipPython = $true; $SkipDotnet = $true; $SkipNode = $true }
+if ($RustOnly) { $SkipPython = $true; $SkipDotnet = $true; $SkipNode = $true; $SkipWorkbench = $true }
 
 # --- pretty output helpers -------------------------------------------------
 function Info($m) { Write-Host "  $m" -ForegroundColor Gray }
@@ -57,7 +65,7 @@ function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 function Update-SessionPath {
     $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:Path = ($machine, $user, "$env:USERPROFILE\.cargo\bin" -join ';')
+    $env:Path = ($machine, $user, "$env:USERPROFILE\.cargo\bin", "$env:USERPROFILE\.dotnet\tools" -join ';')
 }
 
 $installed = @()
@@ -85,8 +93,7 @@ Ok "winget $(winget --version)"
 foreach ($p in @(
     @{ cmd = 'cargo';   name = 'Rust (rustup/cargo)'; hint = 'https://rustup.rs' },
     @{ cmd = 'uv';      name = 'uv';                  hint = 'winget install astral-sh.uv' },
-    @{ cmd = 'git';     name = 'git';                 hint = 'winget install Git.Git' },
-    @{ cmd = 'git-lfs'; name = 'git-lfs';             hint = 'winget install GitHub.GitLFS' }
+    @{ cmd = 'git';     name = 'git';                 hint = 'winget install Git.Git' }
 )) {
     if (Have $p.cmd) { Ok "$($p.name) present" }
     else { Warn "$($p.name) MISSING - install it first ($($p.hint))" }
@@ -158,7 +165,7 @@ if (-not $SkipDotnet) {
     }
     if ($hasSdk) { Ok ".NET 9 SDK already installed"; $skipped += '.NET 9 SDK' }
     else { Install-Winget 'Microsoft.DotNet.SDK.9' 'dotnet' '.NET 9 SDK' }
-    Info "The C# runner also needs the game DLLs: run 'git lfs pull' inside sts2-pycli/."
+    Info "The C# runner also needs the game DLLs: 'just import-game' stages them from your install."
 } else { $skipped += '.NET 9 SDK' }
 
 # ---------------------------------------------------------------------------
@@ -168,6 +175,49 @@ if (-not $SkipNode) {
 } else { $skipped += 'Node.js LTS' }
 
 # ---------------------------------------------------------------------------
+if (-not $SkipWorkbench) {
+    Step "Workbench with real art (just import-game, just workbench-local)"
+
+    # ILSpy's CLI decompiles sts2.dll. 10.x+ needs a newer runtime than the
+    # .NET 9 SDK; 9.1 is the last release that installs on .NET 9.
+    if (Have 'ilspycmd') {
+        Ok "ilspycmd already installed"; $skipped += 'ilspycmd'
+    } elseif (Have 'dotnet') {
+        Info "Installing ilspycmd 9.1 (dotnet global tool) ..."
+        dotnet tool install -g ilspycmd --version 9.1.0.7988
+        Update-SessionPath
+        if (Have 'ilspycmd') { Ok "ilspycmd installed"; $installed += 'ilspycmd' }
+        else { Warn "ilspycmd install failed"; $failed += 'ilspycmd' }
+    } else {
+        Warn "dotnet missing - cannot install ilspycmd"; $failed += 'ilspycmd'
+    }
+
+    # wasm-bindgen-cli must match the wasm-bindgen crate in sts2-rs/Cargo.lock.
+    $lock = Join-Path $PSScriptRoot 'sts2-rs\Cargo.lock'
+    $wbVer = $null
+    if (Test-Path $lock) {
+        $m = [regex]::Match((Get-Content $lock -Raw), 'name = "wasm-bindgen"\r?\nversion = "([^"]+)"')
+        if ($m.Success) { $wbVer = $m.Groups[1].Value }
+    }
+    $haveWb = $false
+    if (Have 'wasm-bindgen') { $haveWb = ((wasm-bindgen --version) -match [regex]::Escape("$wbVer")) }
+    if ($haveWb) {
+        Ok "wasm-bindgen $wbVer already installed"; $skipped += 'wasm-bindgen-cli'
+    } elseif ($wbVer -and (Have 'cargo')) {
+        Info "Installing wasm-bindgen-cli $wbVer via cargo (compiles; a few minutes) ..."
+        cargo install wasm-bindgen-cli --version $wbVer --locked
+        Update-SessionPath
+        if (Have 'wasm-bindgen') { Ok "wasm-bindgen-cli $wbVer installed"; $installed += 'wasm-bindgen-cli' }
+        else { Warn "wasm-bindgen-cli install failed"; $failed += 'wasm-bindgen-cli' }
+    } else {
+        Warn "cannot install wasm-bindgen-cli (cargo or sts2-rs/Cargo.lock missing)"; $failed += 'wasm-bindgen-cli'
+    }
+
+    # cwebp: the static build ships the extracted art as WebP.
+    Install-Winget 'Google.Libwebp' 'cwebp' 'libwebp (cwebp)'
+} else { $skipped += 'workbench tools' }
+
+# ---------------------------------------------------------------------------
 Step "Summary"
 if ($installed) { Ok  ("Installed: " + ($installed -join ', ')) }
 if ($skipped)   { Info ("Already present / skipped: " + ($skipped -join ', ')) }
@@ -175,11 +225,11 @@ if ($failed)    { Warn ("Needs attention: " + ($failed -join ', ')) }
 
 Write-Host @"
 
-Next steps:
-  * Reopen your terminal so freshly-installed tools land on PATH.
-  * Rust engine:   cd sts2-rs   ; cargo build --workspace ; cargo nextest run --workspace
-  * Python CLI:    cd sts2-pycli; uv sync
-  * Heads up: the 'just' recipes and setup.sh / wheel-venv.sh are written for
-    Unix shells (bash, .venv/bin/activate, fuser, Steam paths). The Rust engine
-    builds natively; the full Python + C# + workbench stack is smoother under WSL2.
+Next steps (from the repo root, in a NEW terminal so the tools are on PATH):
+  * Workbench:     just import-game        # finds the game through Steam
+                   just workbench-local    # http://127.0.0.1:4173
+  * The mod:       cd spire-mentor-mod; dotnet build   (needs BaseLib - spire-mentor-mod\README.md)
+  * Rust engine:   just rs-test
+  The root justfile runs under PowerShell. The subproject justfiles are bash:
+  run those from Git Bash.
 "@ -ForegroundColor Cyan

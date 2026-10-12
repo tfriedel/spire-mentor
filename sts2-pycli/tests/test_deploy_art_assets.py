@@ -61,7 +61,11 @@ def test_static_art_step_runs_the_generator() -> None:
     text = _justfile()
     assert re.search(r"^_art-into-dist:", text, re.M), "_art-into-dist recipe is missing"
     body = text.split("_art-into-dist:", 1)[1].split("\n\n", 1)[0]
-    assert _GENERATOR in body, f"_art-into-dist must run {_GENERATOR}"
+    # The recipe delegates to the cross-platform build driver's `art` stage.
+    assert "scripts/workbench_static.py art" in body, "_art-into-dist must run the `art` stage"
+    driver = (_PYCLI_ROOT / "scripts" / "workbench_static.py").read_text(encoding="utf-8")
+    art_stage = driver.split("\ndef art(", 1)[1].split("\ndef ", 1)[0]
+    assert _GENERATOR in art_stage, f"the `art` stage must run {_GENERATOR}"
 
 
 def test_no_recipe_still_syncs_art_to_the_retired_bucket() -> None:
