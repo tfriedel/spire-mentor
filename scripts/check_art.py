@@ -25,7 +25,9 @@ which classifies every file present in both as byte-identical, pixel-identical,
 near-identical (same size, mean pixel difference <= NEAR_IDENTICAL: texture
 compression noise) or different (for an image, usually the game having
 redrawn it since the reference was extracted, or a fresh portrait render).
-Encoded audio is never byte-identical across runs; it shows as different.
+Audio renders are seeded, so two imports on the same FMOD build give
+byte-identical files; against a tree rendered before the seed (or on another
+FMOD build) they differ, because FMOD picks a different take of each layer.
 """
 
 from __future__ import annotations

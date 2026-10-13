@@ -245,6 +245,12 @@ def ffmpeg_args(src: Path, dest: Path, start: float, length: float, gain_db: flo
         "libopus",
         "-b:a",
         "64k",
+        # Without these the WebM muxer writes random track/segment UIDs and the
+        # encoder tag, so the same WAV encoded twice gave different files.
+        "-fflags",
+        "+bitexact",
+        "-flags:a",
+        "+bitexact",
         str(dest),
     ]
 

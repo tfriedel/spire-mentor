@@ -494,3 +494,24 @@ class TestFmodRuntime(unittest.TestCase):
                 self.assertFalse(extract_sfx.fmod_available())
                 (Path(d) / "fmodstudio.dll").write_bytes(b"MZ")
                 self.assertTrue(extract_sfx.fmod_available())
+
+
+class TestDeterministicRender(unittest.TestCase):
+    """The seed only takes if `FMOD_ADVANCEDSETTINGS` is laid out as FMOD's.
+
+    FMOD validates `cbSize` against its known struct versions, so a wrong size
+    fails loudly; a wrong field ORDER would not, and would set some other field
+    instead of the seed. These are the offsets fmod_common.h gives on 64-bit.
+    """
+
+    @unittest.skipUnless(ctypes.sizeof(ctypes.c_void_p) == 8, "64-bit layout")
+    def test_advanced_settings_layout_matches_fmod_common_h(self):
+        s = extract_sfx.FmodAdvancedSettings
+        self.assertEqual(ctypes.sizeof(s), 96)
+        self.assertEqual(s.ASIOChannelList.offset, 40)
+        self.assertEqual(s.defaultDecodeBufferSize.offset, 60)
+        self.assertEqual(s.randomSeed.offset, 88)
+
+    def test_seed_is_nonzero(self):
+        # 0 is FMOD's "seed from the clock".
+        self.assertNotEqual(extract_sfx.RANDOM_SEED, 0)

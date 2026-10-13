@@ -23,12 +23,21 @@ import ctypes
 import os
 import re
 import struct
+import time
 from pathlib import Path
 from typing import NamedTuple
 
 FMOD_OK = 0
 FMOD_STUDIO_LOAD_BANK_NORMAL = 0
 FMOD_STUDIO_INIT_NORMAL = 0
+# Studio normally processes commands and loads sample data on threads of its
+# own, so how far into an NRT render an event's audio arrives depends on
+# wall-clock scheduling: renders of one event came out with different leading
+# delays, lengths, and once silence. Driving both from `Update()` (plus the
+# explicit sample preload in `_render_one`) makes a render a pure function of
+# the banks, the FMOD build and `RANDOM_SEED`.
+FMOD_STUDIO_INIT_SYNCHRONOUS_UPDATE = 0x00000004
+FMOD_STUDIO_INIT_LOAD_FROM_UPDATE = 0x00000010
 FMOD_INIT_NORMAL = 0
 # `FMOD_INIT_STREAM_FROM_UPDATE` (fmod_common.h, 0x1): "No stream thread is
 # created internally. Streams are driven from System::update."
@@ -266,6 +275,55 @@ def _check(result: int) -> None:
         raise RuntimeError(f"FMOD error {result}")
 
 
+# Seed for FMOD's random number generators. Nearly every event randomises
+# (which round-robin take of each layer, pitch, volume): unseeded, two renders
+# of the same event are different audio, so every import shipped a different
+# sound set. Seeded, each event renders the same take every time on a given
+# FMOD build. Any nonzero value; 0 is FMOD's "seed from the clock" default.
+RANDOM_SEED = 0x53545332  # "STS2"
+
+
+class FmodAdvancedSettings(ctypes.Structure):
+    """`FMOD_ADVANCEDSETTINGS` (fmod_common.h) up to `maxConvolutionThreads`.
+
+    FMOD versions the struct by `cbSize` and accepts every earlier size, so a
+    prefix ending at a field both 2.03.06 (the game's DLLs) and 2.03.14 (the
+    SDK) know is valid on both. 96 bytes on 64-bit, `randomSeed` at offset 88.
+    """
+
+    _fields_ = [
+        ("cbSize", ctypes.c_int),
+        ("maxMPEGCodecs", ctypes.c_int),
+        ("maxADPCMCodecs", ctypes.c_int),
+        ("maxXMACodecs", ctypes.c_int),
+        ("maxVorbisCodecs", ctypes.c_int),
+        ("maxAT9Codecs", ctypes.c_int),
+        ("maxFADPCMCodecs", ctypes.c_int),
+        ("maxOpusCodecs", ctypes.c_int),
+        ("ASIONumChannels", ctypes.c_int),
+        ("ASIOChannelList", ctypes.c_void_p),
+        ("ASIOSpeakerList", ctypes.c_void_p),
+        ("vol0virtualvol", ctypes.c_float),
+        ("defaultDecodeBufferSize", ctypes.c_uint),
+        ("profilePort", ctypes.c_ushort),
+        ("geometryMaxFadeTime", ctypes.c_uint),
+        ("distanceFilterCenterFreq", ctypes.c_float),
+        ("reverb3Dinstance", ctypes.c_int),
+        ("DSPBufferPoolSize", ctypes.c_int),
+        ("resamplerMethod", ctypes.c_int),
+        ("randomSeed", ctypes.c_uint),
+        ("maxConvolutionThreads", ctypes.c_int),
+    ]
+
+
+def _seed(core: ctypes.CDLL, core_system: ctypes.c_void_p) -> None:
+    """Fix *core_system*'s random seed. Must run before Initialize."""
+    settings = FmodAdvancedSettings(cbSize=ctypes.sizeof(FmodAdvancedSettings))
+    _check(core.FMOD_System_GetAdvancedSettings(core_system, ctypes.byref(settings)))
+    settings.randomSeed = RANDOM_SEED
+    _check(core.FMOD_System_SetAdvancedSettings(core_system, ctypes.byref(settings)))
+
+
 def _header_version() -> int:
     """FMOD refuses to init if the header version mismatches the .so.
 
@@ -423,6 +481,22 @@ def _list_event_paths(core: ctypes.CDLL, studio: ctypes.CDLL, bank_dir: Path) ->
 # went wrong.
 CAP_SECONDS = 10.0
 
+# Wall-clock time a streaming event gets, started but paused, to open its
+# streams before the render runs. FMOD opens streams on a thread of its own
+# whatever the init flags, and the NRT mixer otherwise races ahead of it: the
+# streamed audio then lands a different distance into the render each time,
+# and in an event that mixes streamed and preloaded layers the layers drift
+# apart. FMOD reports no "streams ready" state to wait on (the instance says
+# PLAYING at once), so this is a generous fixed wait; opening takes a few ms.
+# Only `IsStream` events pay it (~135 of 566).
+STREAM_PREROLL_SECONDS = 0.2
+# The same race recurs mid-event when a streamed instrument starts later in
+# the timeline (`map_draw` once rendered as pure silence, `neow_welcome` and
+# Cubex's charge attack came out different): a streaming event is therefore
+# rendered at most this many times faster than real time, so its stream
+# reads keep up. ~1 s for a 10 s capped event.
+STREAM_PACE = 10
+
 
 def _apply_render_params(studio: ctypes.CDLL, inst: ctypes.c_void_p, event_path: str) -> None:
     """Set every `RENDER_PARAMS` entry on *inst*, skipping ones it doesn't have.
@@ -467,11 +541,12 @@ def _render_one(
         core_system = ctypes.c_void_p()
         _check(studio.FMOD_Studio_System_GetCoreSystem(system, ctypes.byref(core_system)))
         _check(core.FMOD_System_SetOutput(core_system, FMOD_OUTPUTTYPE_WAVWRITER_NRT))
+        _seed(core, core_system)
         _check(
             studio.FMOD_Studio_System_Initialize(
                 system,
                 64,
-                FMOD_STUDIO_INIT_NORMAL,
+                FMOD_STUDIO_INIT_SYNCHRONOUS_UPDATE | FMOD_STUDIO_INIT_LOAD_FROM_UPDATE,
                 FMOD_INIT_STREAM_FROM_UPDATE,
                 ctypes.c_char_p(str(dest).encode()),
             )
@@ -515,16 +590,34 @@ def _render_one(
 
         desc = ctypes.c_void_p()
         _check(studio.FMOD_Studio_System_GetEvent(system, event_path.encode(), ctypes.byref(desc)))
+        # Every take the event could pick is resident before it starts, so the
+        # render never waits on a load mid-playback.
+        _check(studio.FMOD_Studio_EventDescription_LoadSampleData(desc))
+        _check(studio.FMOD_Studio_System_FlushSampleLoading(system))
         inst = ctypes.c_void_p()
         _check(studio.FMOD_Studio_EventDescription_CreateInstance(desc, ctypes.byref(inst)))
         try:
             _apply_render_params(studio, inst, event_path)
-            _check(studio.FMOD_Studio_EventInstance_Start(inst))
+            is_stream = ctypes.c_int()
+            _check(studio.FMOD_Studio_EventDescription_IsStream(desc, ctypes.byref(is_stream)))
+            if is_stream.value:
+                # The paused updates write silence, which encode_sfx trims.
+                _check(studio.FMOD_Studio_EventInstance_SetPaused(inst, 1))
+                _check(studio.FMOD_Studio_EventInstance_Start(inst))
+                for _ in range(10):
+                    _check(studio.FMOD_Studio_System_Update(system))
+                    time.sleep(STREAM_PREROLL_SECONDS / 10)
+                _check(studio.FMOD_Studio_EventInstance_SetPaused(inst, 0))
+            else:
+                _check(studio.FMOD_Studio_EventInstance_Start(inst))
 
             state = ctypes.c_int(-1)
             capped = True
+            pace = seconds_per_update / STREAM_PACE if is_stream.value else 0.0
             for _ in range(cap_updates):
                 _check(studio.FMOD_Studio_System_Update(system))
+                if pace:
+                    time.sleep(pace)
                 _check(studio.FMOD_Studio_EventInstance_GetPlaybackState(inst, ctypes.byref(state)))
                 if state.value == FMOD_STUDIO_PLAYBACK_STOPPED:
                     capped = False

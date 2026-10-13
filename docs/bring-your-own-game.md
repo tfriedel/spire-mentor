@@ -120,7 +120,17 @@ Files present in both trees are mostly byte- or pixel-identical. Where they
 differ, the reference was extracted from an earlier build and the game has
 since redrawn the asset (some creature rigs, a few epoch portraits and card
 illustrations, the character icons), or the portrait is a fresh render of
-the current rig. Maintainers can compare a local tree with theirs:
+the current rig.
+
+Most sound events pick a random take of each layer each time they play. The
+render seeds FMOD and loads synchronously, so two imports with the same FMOD
+build give byte-identical audio. Against the maintainers' audio they differ:
+the same sounds with the same lengths and loudness, but different takes,
+because those files were rendered before the seed existed. The Windows DLLs
+(2.03.06) and the Linux SDK (2.03.14) are different FMOD builds and may pick
+different takes.
+
+Maintainers can compare a local tree with theirs:
 `uv run --with pillow --with numpy --no-project scripts/check_art.py
 --reference <their sts2-wiki/site/public>`.
 

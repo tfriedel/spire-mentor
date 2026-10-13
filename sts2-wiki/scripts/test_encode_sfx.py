@@ -210,6 +210,12 @@ class TestFfmpegArgs(unittest.TestCase):
     def test_overwrites_without_prompting(self):
         self.assertIn("-y", ffmpeg_args(Path("a.wav"), Path("a.webm"), 0.0, 1.0, -3.0))
 
+    def test_output_is_reproducible(self):
+        # Container and codec both bitexact: no random UIDs or version tags.
+        joined = " ".join(ffmpeg_args(Path("a.wav"), Path("a.webm"), 0.0, 1.0, -3.0))
+        self.assertIn("-fflags +bitexact", joined)
+        self.assertIn("-flags:a +bitexact", joined)
+
 
 class TestCorpusGainDb(unittest.TestCase):
     def test_puts_the_loudest_window_at_the_target(self):
