@@ -54,6 +54,9 @@ source the extractors and the mechanics work read plus real art
     `FMOD_SDK_ROOT=<that dir>`. The Windows DLLs cannot be used here, even
     when Steam installed the game through Proton.
   - `FMOD_SDK_ROOT`, when set, wins on every platform.
+  - Without ffmpeg or an FMOD runtime, a plain `just import-game` skips the
+    sound and says so at the end; art and data still import. An explicit
+    `--tier sound` (or `all`) fails on a missing ffmpeg instead.
 - **Windows:** everything here runs natively from PowerShell —
   `.\install-windows-deps.ps1` installs the tools above
   ([BUILDING-WINDOWS.md](../BUILDING-WINDOWS.md)).
@@ -61,7 +64,7 @@ source the extractors and the mechanics work read plus real art
 ## Run it
 
 ```sh
-just import-game                       # finds the game through Steam; every tier
+just import-game                       # finds the game through Steam; every tier it can
 just import-game --tier oracle         # just the C# oracle
 just import-game --tier workbench      # everything but sound
 just import-game --status              # what exists, what is missing, art coverage

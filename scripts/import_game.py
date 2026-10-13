@@ -31,7 +31,11 @@ Tiers (each includes the ones before it):
     sound      + the sound effects: rendered through FMOD — on Windows the
                game's own fmod.dll, elsewhere the FMOD Studio API
                (FMOD_SDK_ROOT); skipped with a note when neither is there
-    all        = sound (the default)
+    all        = sound
+
+Without --tier the import runs everything it can: the sound tier is skipped
+with a note when ffmpeg is not installed. Asking for --tier sound or --tier
+all explicitly makes a missing ffmpeg an error instead.
 
 Every step is idempotent (re-running skips what exists) and logged to
 logs/import-game.log. Read docs/bring-your-own-game.md first.
@@ -466,13 +470,22 @@ def build_steps(build: Path, version: str) -> list[Step]:
     ]
 
 
+def ffmpeg_hint() -> str:
+    """How to install ffmpeg on this machine."""
+    if os.name == "nt":
+        return "winget install Gyan.FFmpeg (or .\\install-windows-deps.ps1), then open a new terminal"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "your package manager, e.g. sudo apt install ffmpeg / sudo dnf install ffmpeg"
+
+
 def preflight(steps: list[Step]) -> None:
     missing: dict[str, str] = {}
     hints = {
         "dotnet": ".NET 9 SDK - https://dotnet.microsoft.com/download (Windows: winget install Microsoft.DotNet.SDK.9)",
         "uv": "https://docs.astral.sh/uv/ (Windows: winget install astral-sh.uv)",
         "ilspycmd": f"{ILSPYCMD_INSTALL} (ILSpy's CLI; the decompile step)",
-        "ffmpeg": "https://ffmpeg.org (Windows: winget install Gyan.FFmpeg)",
+        "ffmpeg": ffmpeg_hint(),
     }
     for step in steps:
         for tool in step.needs:
@@ -480,8 +493,8 @@ def preflight(steps: list[Step]) -> None:
                 missing[tool] = hints.get(tool, "")
     if missing:
         lines = [f"  {tool}: {hint}" for tool, hint in missing.items()]
-        raise SystemExit("missing tools for the requested tier:\n" + "\n".join(lines)
-                         + "\n(Windows: .\\install-windows-deps.ps1 installs all of them)")
+        footer = "\n(Windows: .\\install-windows-deps.ps1 installs all of them)" if os.name == "nt" else ""
+        raise SystemExit("missing tools for the requested tier:\n" + "\n".join(lines) + footer)
 
 
 def status(build: Path | None, version: str) -> int:
@@ -517,13 +530,14 @@ def art_coverage() -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[1], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     parser.add_argument("game_dir", nargs="?", help="Steam install folder / .app / data_sts2_* folder")
-    parser.add_argument("--tier", choices=TIERS + ["all"], default="all")
+    parser.add_argument("--tier", choices=TIERS + ["all"],
+                        help="default: everything, skipping sound if ffmpeg is missing")
     parser.add_argument("--status", action="store_true", help="report which artifacts exist and exit")
     parser.add_argument("--copy", action="store_true", help="copy the pck and DLLs into sts2_binaries/ instead of symlinking")
     parser.add_argument("--allow-version-mismatch", action="store_true",
                         help=f"proceed even if the install is not {PINNED_VERSION} (the engine is pinned; expect drift)")
     args = parser.parse_args(argv)
-    tier = "sound" if args.tier == "all" else args.tier
+    tier = "sound" if args.tier in (None, "all") else args.tier
     for stream in (sys.stdout, sys.stderr):
         # Arrows and dashes in the log lines; a cp1252 console would print mojibake.
         stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
@@ -550,10 +564,20 @@ def main(argv: list[str] | None = None) -> int:
 
     wanted = TIERS[: TIERS.index(tier) + 1]
     steps = [s for s in build_steps(build, version) if s.tier in wanted]
+    sound_skipped = ""
     if tier == "sound" and not fmod_env(build):
+        sound_skipped = "no FMOD runtime"
         log("no FMOD runtime — skipping the sound tier. On Windows the game's own fmod.dll is used (it was not "
             "found next to the pck); elsewhere set FMOD_SDK_ROOT to the unpacked FMOD Studio API (a free, "
             "registration-gated download from fmod.com). The workbench is silent without it.")
+    elif (tier == "sound" and args.tier is None and not which("ffmpeg")
+          and any(s.tier == "sound" and not s.done() for s in steps)):
+        # The default run takes everything it can; only an explicit
+        # --tier sound / all makes ffmpeg a hard requirement (preflight).
+        sound_skipped = "ffmpeg not installed"
+        log(f"ffmpeg not found — skipping the sound tier (art and data are unaffected). Install it ({ffmpeg_hint()}) "
+            "and re-run `just import-game`; the workbench is silent until then.")
+    if sound_skipped:
         steps = [s for s in steps if s.tier != "sound"]
     preflight([s for s in steps if not s.done()])
 
@@ -569,6 +593,8 @@ def main(argv: list[str] | None = None) -> int:
     if tier in ("workbench", "sound"):
         for line in art_coverage():
             log(line)
+    if sound_skipped:
+        log(f"sound skipped: {sound_skipped} (the audio counts above are missing for that reason)")
     if tier in ("workbench", "sound"):
         print("\nnext: the browser workbench -  just workbench-local   (http://127.0.0.1:4173)\n"
               "      the Python workbench  -  just workbench-server  (http://127.0.0.1:8077)\n"
