@@ -61,11 +61,11 @@ NO_ART: frozenset[str] = frozenset(
 NO_RIG: frozenset[str] = NO_ART | frozenset(
     {
         "Aeonglass",  # v0.107.1 boss: no Spine rig; renders the static hourglass placeholder
-        # Decimillipede has per-segment rigs, but they are addressed by
-        # MonsterKind (front/middle/back), not by this shared display name — so
-        # the name-based lookup here legitimately finds none. The kind-based
-        # rigs are guarded by test_kind_addressed_rigs_resolve below.
-        "Decimillipede",
+        # Decimillipede is NOT listed: besides its per-segment rigs (addressed
+        # by MonsterKind, guarded by test_kind_addressed_rigs_resolve below),
+        # the game ships scenes/creature_visuals/decimillipede.tscn, which
+        # extract_rig.find_rigs publishes as the name-addressed
+        # monster_rigs/decimillipede.
     }
 )
 

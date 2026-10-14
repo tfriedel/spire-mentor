@@ -80,7 +80,9 @@ describe("noiseDirection", () => {
     }
     expect(firstBad, `non-finite direction at ${JSON.stringify(firstBad)}`).toBeNull();
     expect(sampled).toBe(51005);
-  });
+    // ~2.7 s alone, but 9.8 s measured with the full suite running beside a
+    // Rust build: the 5 s default still made this a load test.
+  }, 30_000);
 });
 
 describe("turbulenceDisplacement", () => {
