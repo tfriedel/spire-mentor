@@ -451,6 +451,36 @@ class TestStreamFromUpdate(unittest.TestCase):
         self.assertNotIn("FMOD_INIT_NORMAL", render_one)
 
 
+class TestStuckStreamReadFlag(unittest.TestCase):
+    """A stream-read flag that never clears must not fail the render.
+
+    The game's FMOD 2.03.06 keeps `diskbusy` set between updates, so waiting
+    for it before each `Update()` timed out on every streaming event and the
+    import shipped ~0.1 s of silence for each of them.
+    """
+
+    def setUp(self):
+        patcher = mock.patch.object(extract_sfx, "_stream_wait_disabled", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_flag_that_never_clears_stops_the_waiting_instead_of_raising(self):
+        with (
+            mock.patch.object(extract_sfx, "STREAM_READ_TIMEOUT_SECONDS", 0.01),
+            mock.patch.object(extract_sfx, "_stream_reading", return_value=True) as reading,
+        ):
+            extract_sfx._wait_for_stream_reads(None, None, None)
+            self.assertTrue(extract_sfx._stream_wait_disabled)
+            calls = reading.call_count
+            extract_sfx._wait_for_stream_reads(None, None, None)
+            self.assertEqual(reading.call_count, calls, "a disabled wait must not poll again")
+
+    def test_a_flag_that_clears_keeps_the_wait(self):
+        with mock.patch.object(extract_sfx, "_stream_reading", side_effect=[True, False]):
+            extract_sfx._wait_for_stream_reads(None, None, None)
+        self.assertFalse(extract_sfx._stream_wait_disabled)
+
+
 class TestExtractDebugAudio(unittest.TestCase):
     """`res://debug_audio/` is the game's second sound layer, not an extra.
 

@@ -586,12 +586,34 @@ def _stream_reading(core: ctypes.CDLL, studio: ctypes.CDLL, inst: ctypes.c_void_
     return False
 
 
+# Set once a stream read's flag outlasts STREAM_READ_TIMEOUT_SECONDS. The game's
+# own FMOD 2.03.06 (`fmod.dll`, used on Windows when FMOD_SDK_ROOT is unset)
+# keeps `diskbusy` set between updates for the whole life of a stream: with
+# FMOD_INIT_STREAM_FROM_UPDATE the read only happens INSIDE `Update()`, so
+# waiting for it before the update never ends. Measured: every streaming event
+# timed out and shipped as ~0.1 s of silence (`nibbit_die`, `game_over`, ...),
+# while the same events rendered without the wait came out at full length and
+# byte-identical across `_render_stable`'s renders. A flag that never clears
+# carries no signal, so measure 3 is dropped for the rest of the process.
+_stream_wait_disabled = False
+
+
 def _wait_for_stream_reads(core: ctypes.CDLL, studio: ctypes.CDLL, inst: ctypes.c_void_p) -> None:
     """Block until no stream read of *inst* is in flight (measure 3 above)."""
+    global _stream_wait_disabled
+    if _stream_wait_disabled:
+        return
     deadline = time.monotonic() + STREAM_READ_TIMEOUT_SECONDS
     while _stream_reading(core, studio, inst):
         if time.monotonic() > deadline:
-            raise RuntimeError(f"a stream read took over {STREAM_READ_TIMEOUT_SECONDS:.0f} s")
+            _stream_wait_disabled = True
+            print(
+                f"  stream-read flag still set after {STREAM_READ_TIMEOUT_SECONDS:.0f} s: "
+                "this FMOD build only reads streams inside Update(); "
+                "no longer waiting on stream reads",
+                flush=True,
+            )
+            return
         time.sleep(0.001)
 
 
