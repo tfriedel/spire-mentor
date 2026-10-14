@@ -360,7 +360,16 @@ def build_app(work: Path):
     shutil.copy(scales, images / "creature_scales.json")
     link = work / "data"
     if not link.exists():
-        link.symlink_to(_WIKI_DATA)
+        try:
+            link.symlink_to(_WIKI_DATA, target_is_directory=True)
+        except OSError:
+            # Windows refuses symlinks without Developer Mode or admin rights
+            # (WinError 1314); a directory junction needs neither.
+            if os.name != "nt":
+                raise
+            import _winapi
+
+            _winapi.CreateJunction(str(_WIKI_DATA), str(link))
     logs = work / "logs"
     logs.mkdir(exist_ok=True)
     return create_app(images_root=images, logs_dir=logs, assets_manifest=manifest)
