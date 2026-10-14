@@ -273,7 +273,8 @@ def build_table(decompiled_root: Path) -> dict:
     """The full binding table for `decompiled_root` (a `decompiled/<version>`
     directory), in the exact shape written to `vfx_bindings.json`.
 
-    Deterministic: `Path.glob` results are sorted before scanning, and
+    Deterministic: `Path.glob` results are sorted by file name (a str sort:
+    `WindowsPath` ordering is case-insensitive, Linux is not) before scanning, and
     `vfx_bindings.py`'s regex scanning is itself order-preserving, so two
     calls against the same decomp text always produce byte-identical
     `bindings`. This determinism is what makes the re-extraction gate
@@ -285,9 +286,9 @@ def build_table(decompiled_root: Path) -> dict:
 
     bindings: list[Binding] = []
     death_fade: dict[str, dict[str, object]] = {}
-    for cs_file in sorted(cards_dir.glob("*.cs")):
+    for cs_file in sorted(cards_dir.glob("*.cs"), key=lambda p: p.name):
         bindings.extend(parse_card_file(cs_file.stem, cs_file.read_text()))
-    for cs_file in sorted(monsters_dir.glob("*.cs")):
+    for cs_file in sorted(monsters_dir.glob("*.cs"), key=lambda p: p.name):
         text = cs_file.read_text()
         bindings.extend(parse_monster_file(cs_file.stem, text))
         row = parse_death_fade(cs_file.stem, text)

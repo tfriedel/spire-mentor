@@ -79,7 +79,7 @@ def collect(decomp_root: Path) -> list[dict[str, Any]]:
         raise FileNotFoundError(f"no {POWERS_DIR} under {decomp_root}")
 
     sites: list[dict[str, Any]] = []
-    for cs in sorted(powers_dir.glob("*Power.cs")):
+    for cs in sorted(powers_dir.glob("*Power.cs"), key=lambda p: p.name):
         text = cs.read_text(encoding="utf-8", errors="replace")
         for m in _FLASH.finditer(text):
             sites.append(
