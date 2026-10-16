@@ -358,6 +358,10 @@ internal sealed class SimHud
     private readonly List<Control> _routePoints = new();
     private Line2D? _routeLine;
     private bool _combatEndedSubscribed;
+    // The "… N more" toggle on the ranked list: sticky across advice updates,
+    // and re-renders from the advice the panel last showed.
+    private bool _rankedExpanded;
+    private SimAdvice? _panelAdvice;
 
 
     // ------------------------------------------------------------------
@@ -477,6 +481,7 @@ internal sealed class SimHud
     private void RenderAdvicePanel(SimAdvice advice)
     {
         ClearAdvicePanel();
+        _panelAdvice = advice;
 
         bool hasRanked = advice.Options.Exists(o => o.PWin != null || o.Q != null || o.VisitShare != null);
         bool hasEval = advice.BestQ != null || advice.PWin != null;
@@ -516,13 +521,14 @@ internal sealed class SimHud
             });
             const int maxRows = 6;
             double? bestQ = advice.BestQ;
-            for (int i = 0; i < ranked.Count && i < maxRows; i++)
+            int shown = _rankedExpanded ? ranked.Count : Math.Min(ranked.Count, maxRows);
+            for (int i = 0; i < shown; i++)
             {
                 _adviceRows.AddChildSafely(BuildOptionRow(ranked[i], bestQ));
             }
             if (ranked.Count > maxRows)
             {
-                _adviceRows.AddChildSafely(SmallLabel($"… {ranked.Count - maxRows} more", new Color(0.7f, 0.7f, 0.7f)));
+                _adviceRows.AddChildSafely(BuildRankedToggle(ranked.Count - maxRows));
             }
 
             // Say when the ranking is not really a ranking. In a fight the
@@ -682,6 +688,26 @@ internal sealed class SimHud
         }
 
         return row;
+    }
+
+    /// <summary>
+    /// "… N more" / "show fewer": the one clickable control in the otherwise
+    /// click-through panel (a Stop-filter button, SimUiKit's input-safety
+    /// contract). Re-renders the panel from the advice it last showed.
+    /// </summary>
+    private Control BuildRankedToggle(int hidden)
+    {
+        string text = _rankedExpanded ? "▴ show fewer" : $"… {hidden} more ▾";
+        Button toggle = SimUiKit.MakeButton(text, "", () =>
+        {
+            _rankedExpanded = !_rankedExpanded;
+            if (_panelAdvice != null)
+            {
+                RenderAdvicePanel(_panelAdvice);
+            }
+        });
+        toggle.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+        return toggle;
     }
 
     private void ClearAdvicePanel()
