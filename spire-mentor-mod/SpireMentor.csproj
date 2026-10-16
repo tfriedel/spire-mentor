@@ -45,6 +45,7 @@
     <STS2_GAME_DIR Condition="'$(STS2_GAME_DIR)' == ''">$(SteamLibraryPath)/common/Slay the Spire 2</STS2_GAME_DIR>
     <Sts2DataDir>$(STS2_GAME_DIR)/data_sts2_windows_x86_64</Sts2DataDir>
     <ModsPath>$(STS2_GAME_DIR)/mods/</ModsPath>
+    <SimPycliDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../sts2-pycli'))</SimPycliDir>
   </PropertyGroup>
 
   <Target Name="CheckDependencyPaths" BeforeTargets="Build;Restore">
@@ -96,14 +97,26 @@
     <Copy SourceFiles="@(DeployFiles)" DestinationFolder="$(ModsPath)SpireMentor/" />
     <!-- Default advisor launcher (phase 8): SimAdvisorProcess falls back to
          this script when the settings page leaves the command blank. The
-         sts2-pycli path is baked in at deploy time from this repo layout. -->
-    <PropertyGroup>
-      <SimPycliDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../sts2-pycli'))</SimPycliDir>
-    </PropertyGroup>
+         sts2-pycli path (SimPycliDir) is baked in at deploy time from this
+         repo layout. -->
     <WriteLinesToFile
         File="$(ModsPath)SpireMentor/SimAdvisor.cmd"
         Overwrite="true"
         Lines="@echo off;cd /d &quot;$(SimPycliDir)&quot;;uv run python python/realgame_advisor.py %25*" />
     <Message Text="SpireMentor deployed to $(ModsPath)SpireMentor/" Importance="high" />
+  </Target>
+
+  <!--
+    Prepares what SimAdvisor.cmd's `uv run` needs, so the game never waits on
+    it: the sts2-pycli venv and the sts2_rs extension (a release maturin build,
+    minutes the first time; see sts2-pycli/pyproject.toml). Same sync `uv run`
+    does, so the launcher's run is then a no-op; an instant cache hit when the
+    engine is unchanged. A failure only warns: the mod itself is deployed and
+    the advisor would retry the build at launch.
+    Pass -p:SpireMentorSkipAdvisorSync=true to skip it.
+  -->
+  <Target Name="SyncSpireMentorAdvisor" AfterTargets="DeploySpireMentor" Condition="Exists('$(STS2_GAME_DIR)') and '$(SpireMentorSkipDeploy)' != 'true' and '$(SpireMentorSkipAdvisorSync)' != 'true'">
+    <Message Text="Preparing the advisor: uv sync in $(SimPycliDir) (builds the Rust engine when it changed; minutes the first time) ..." Importance="high" />
+    <Exec Command="uv sync" WorkingDirectory="$(SimPycliDir)" ContinueOnError="WarnAndContinue" StandardOutputImportance="high" StandardErrorImportance="high" />
   </Target>
 </Project>
