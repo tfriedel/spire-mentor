@@ -85,6 +85,17 @@ internal static class SimAdvisorProcess
                     "game is holding the slot -- kill it.");
                 return;
             }
+            if (!OperatingSystem.IsWindows())
+            {
+                // Every launcher below goes through cmd.exe or a win64 exe. The
+                // Workshop delivers the mod to Mac/Linux too, where a failed
+                // launch would otherwise just read "advisor: crashed".
+                Logger.Log(
+                    "[SimAdvisorProcess] The bundled advisor is Windows-only; not launching it. " +
+                    "Start an advisor yourself and point it at the configured port.");
+                SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Crashed);
+                return;
+            }
 
             string? modDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             // --port in EVERY branch: the advisor otherwise defaults to 9002

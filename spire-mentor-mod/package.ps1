@@ -29,7 +29,10 @@
 param(
     # Rebuild the advisor exe before packaging instead of reusing the
     # prebuilt sts2-pycli/dist/SimAdvisor.
-    [switch]$BuildAdvisor
+    [switch]$BuildAdvisor,
+    # Stop after staging (staging/mods/...): workshop.ps1 builds its Workshop
+    # content from that and needs neither the zip nor BaseLib's license text.
+    [switch]$NoZip
 )
 $ErrorActionPreference = "Stop"
 $bridge = $PSScriptRoot
@@ -50,7 +53,7 @@ if (-not (Test-Path (Join-Path $baseLibDir "BaseLib.dll"))) {
 # until LICENSE-BaseLib.txt is sourced from upstream.
 $baseLibLicense = Join-Path $repo "refs/BaseLib-StS2/LICENSE.txt"
 $haveBaseLibLicense = Test-Path $baseLibLicense
-if (-not $haveBaseLibLicense) {
+if (-not $haveBaseLibLicense -and -not $NoZip) {
     Write-Warning ("BaseLib license text not found at $baseLibLicense -- the zip will NOT " +
         "contain LICENSE-BaseLib.txt. Before distributing, clone " +
         "https://github.com/Alchyr/BaseLib-StS2 into refs/ and re-run (the MIT notice must ship).")
@@ -92,6 +95,10 @@ if ($haveBaseLibLicense) {
 Copy-Item (Join-Path $bridge "packaging/README-dist.txt") (Join-Path $staging "README.txt")
 
 # --- zip ---------------------------------------------------------------------
+if ($NoZip) {
+    Write-Host "OK: staged $staging (no zip)"
+    return
+}
 $zip = Join-Path $bridge "SpireMentor-v$version-win64.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zip

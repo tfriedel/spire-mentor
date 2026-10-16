@@ -4,3 +4,5 @@ obj/
 # package.ps1 outputs (GH #380)
 staging/
 *.zip
+# workshop.ps1 output (packaging/workshop/ is the committed source)
+workshop-workspace/

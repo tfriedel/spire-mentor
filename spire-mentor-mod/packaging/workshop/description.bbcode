@@ -1,0 +1,38 @@
+[h1]Spire Mentor: an AI coach for Slay the Spire 2[/h1]
+
+Spire Mentor rates your options while you play: a score on every card in hand, a ranked list of the moves the AI considered, a win-chance bar, and the map route it likes. Combat advice comes from a Monte Carlo tree search over a full simulation of the fight; map, card-reward, shop, event and rest-site advice comes from a trained run policy. It can also take a single decision for you, or play on by itself until you stop it.
+
+[b]It does nothing until you turn it on.[/b] Installed but switched off, the game stays vanilla: no HUD, no AI, no changed behaviour. Press [b]F8[/b] in game to switch the coach on, [b]F1[/b] for every key.
+
+[h2]Requirements[/h2]
+[list]
+[*][b]Windows only.[/b] The AI runs as a bundled Windows program (SimAdvisor.exe). On Mac or Linux the mod loads but the coach cannot start.
+[*][b]Tested on game build v0.107.1.[/b] The mod hooks into game internals, so a game update can break it until a new version is out. If the game has updated and things misbehave, disable the mod and wait for an update.
+[*][b]BaseLib[/b] (by Alchyr), which Steam installs alongside this mod as a required item.
+[/list]
+
+[h2]Keys[/h2]
+[list]
+[*][b]F1[/b] help: mode, keys, file locations
+[*][b]F8[/b] AI coach on / off
+[*][b]F6[/b] let the AI take just this one decision
+[*][b]F7[/b] let the AI keep playing until you press F7 again
+[*][b]F4[/b] show / hide the HUD
+[*][b]F3[/b] action log: what was played, and what was advised at the time
+[*][b]F9 / F10[/b] game speed down / up
+[/list]
+Settings: Main menu → Options → Mod Configuration → SpireMentor.
+
+[h2]What it does on your machine[/h2]
+[list]
+[*]When you switch the coach on, the mod starts the bundled [b]SimAdvisor.exe[/b] in the background and talks to it over a local connection ([i]127.0.0.1:9002[/i]). Nothing leaves your computer. The exe is not code-signed, so Windows SmartScreen may ask about it the first time.
+[*]The first start takes a few seconds while the advisor loads its networks.
+[*][b]Autopilot mode[/b] (off by default) lets an AI play whole runs on its own. It turns tutorials off and makes every character selectable on your [b]modded[/b] profile. The game keeps modded progress separate from your normal save, so your unmodded profile is never touched. Advisor mode and F6/F7 never change your save.
+[/list]
+
+[h2]Files[/h2]
+Config: [i]%LOCALAPPDATA%\SpireMentor\SpireMentor.conf[/i]
+Logs: [i]%LOCALAPPDATA%\SpireMentor\[/i]
+
+[h2]Source and license[/h2]
+Open source under the MIT license: [url=https://github.com/tfriedel/spire-mentor]github.com/tfriedel/spire-mentor[/url]. Bug reports go there; please attach [i]%APPDATA%\SlayTheSpire2\logs\godot.log[/i].
