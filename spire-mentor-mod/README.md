@@ -109,7 +109,9 @@ BaseLib, which the item lists as a required Workshop item) into
 [uploader](https://github.com/megacrit/sts2-mod-uploader); `-Upload` runs
 it. The item's title, tags and dependencies are in
 `packaging/workshop/workshop.json`, its page text in
-`packaging/workshop/description.bbcode`, and its id in
+`packaging/workshop/description.bbcode`, its preview image in
+`packaging/workshop/image.png` (rendered from `image.html` by
+`render-image.ps1`; original art only, no game assets), and its id in
 `packaging/workshop/mod_id.txt` once the first upload has created it. To
 test the subscribed copy, remove `<game>/mods/SpireMentor/` first: the
 game disables a Workshop mod whose id is also in the local mods folder
