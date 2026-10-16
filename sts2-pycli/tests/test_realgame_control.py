@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from realgame_control import ControlPlane
+from realgame_control import ControlPlane, StaticSite
 from realgame_livetree import LiveRunTree
 
 ENV: dict[str, Any] = {
@@ -378,3 +378,106 @@ class TestBrowserAccess:
         code, headers = _request(control, "GET", "/status", {})
         assert code == 200
         assert "access-control-allow-origin" not in headers
+
+
+@pytest.fixture()
+def site_plane(tmp_path: Path):
+    """A control plane hosting a fake static workbench build."""
+    root = tmp_path / "workbench"
+    (root / "wb-assets").mkdir(parents=True)
+    (root / "assets" / "cards").mkdir(parents=True)
+    (root / "ppo").mkdir()
+    (root / "index.html").write_text("<!doctype html><title>wb</title>")
+    (root / "wb-precache.json").write_text('{"build": "t", "files": []}')
+    (root / "wb-assets" / "engine.wasm").write_bytes(b"\0asm")
+    (root / "assets" / "cards" / "strike.png").write_bytes(b"RIFF....WEBP")
+    (root / "ppo" / "index.json").write_text('{"files": ["champ.onnx"]}')
+    ppo = tmp_path / "advisor-ppo"
+    ppo.mkdir()
+    (ppo / "champ.onnx").write_bytes(b"onnx")
+    (tmp_path / "secret.txt").write_text("outside the build")
+    control = ControlPlane(LiveRunTree())
+    control.start(0, site=StaticSite(root, ppo_dir=ppo))
+    assert control.port
+    yield control
+    control.stop()
+
+
+def _fetch(control: ControlPlane, path: str) -> tuple[int, dict[str, str], bytes]:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{control.port}{path}", timeout=5) as r:
+            return r.status or 0, {k.lower(): v for k, v in r.headers.items()}, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read()
+
+
+class TestBundledWorkbench:
+    def test_no_site_means_no_files_and_no_health(self, plane) -> None:
+        control, _, _ = plane
+        assert _fetch(control, "/")[0] == 404
+        assert _fetch(control, "/api/health")[0] == 404  # the mod falls back to :8077
+
+    def test_health_and_index(self, site_plane) -> None:
+        assert json.loads(_fetch(site_plane, "/api/health")[2]) == {
+            "ok": True,
+            "workbench": "static",
+        }
+        code, headers, body = _fetch(site_plane, "/")
+        assert code == 200 and body.startswith(b"<!doctype html>")
+        assert headers["content-type"].startswith("text/html")
+        assert headers["cache-control"] == "no-cache"
+        # The endpoints win over the site.
+        assert json.loads(_fetch(site_plane, "/status")[2]) == {"connected": False}
+
+    def test_headers_follow_the_pages_rules(self, site_plane) -> None:
+        _, headers, _ = _fetch(site_plane, "/wb-assets/engine.wasm")
+        assert headers["content-type"] == "application/wasm"
+        assert "immutable" in headers["cache-control"]
+        _, headers, _ = _fetch(site_plane, "/assets/cards/strike.png")
+        assert headers["content-type"] == "image/webp"  # WebP under the .png name
+
+    def test_ppo_nets_come_from_the_advisor_bundle(self, site_plane) -> None:
+        assert json.loads(_fetch(site_plane, "/ppo/index.json")[2]) == {"files": ["champ.onnx"]}
+        code, headers, body = _fetch(site_plane, "/ppo/champ.onnx")
+        assert (code, body) == (200, b"onnx")
+        assert headers["content-type"] == "application/octet-stream"
+
+    def test_spa_fallback_and_misses(self, site_plane) -> None:
+        assert _fetch(site_plane, "/some/route")[2].startswith(b"<!doctype html>")
+        assert _fetch(site_plane, "/missing.js")[0] == 404
+        assert _fetch(site_plane, "/api/bugreport")[0] == 404  # keeps the report button hidden
+        assert _fetch(site_plane, "/..%2fsecret.txt")[0] == 404
+        assert _fetch(site_plane, "/ppo/..%2f..%2fsecret.txt")[0] == 404
+
+    def test_is_static_build(self, tmp_path: Path) -> None:
+        (tmp_path / "index.html").write_text("x")
+        assert not StaticSite.is_static_build(tmp_path)  # a server build of the SPA
+        (tmp_path / "wb-precache.json").write_text("{}")
+        assert StaticSite.is_static_build(tmp_path)
+
+
+class TestLiveLog:
+    def test_404_until_a_log_is_open(self, plane) -> None:
+        control, _, _ = plane
+        assert _fetch(control, "/log")[0] == 404
+
+    def test_serves_complete_lines_and_a_stat(self, plane, tmp_path: Path) -> None:
+        control, _, _ = plane
+        log = tmp_path / "20261016-120000_IRONCLAD_ABC.jsonl"
+        log.write_bytes(b'{"step": 0}\n{"step": 1}\n{"ste')  # the advisor mid-write
+        control.set_log_path(str(log))
+        code, _, body = _fetch(control, "/log")
+        reply = json.loads(body)
+        assert code == 200
+        assert reply["name"] == log.name
+        assert reply["text"] == '{"step": 0}\n{"step": 1}\n'  # the torn record waits
+        assert reply["size"] == log.stat().st_size
+        stat = json.loads(_fetch(control, "/log?stat=1")[2])
+        assert "text" not in stat and stat["size"] == reply["size"]
+
+    def test_name_is_a_bare_safe_filename(self, plane, tmp_path: Path) -> None:
+        control, _, _ = plane
+        log = tmp_path / "run with space.jsonl"
+        log.write_text("{}\n")
+        control.set_log_path(str(log))
+        assert json.loads(_fetch(control, "/log?stat=1")[2])["name"] == "run_with_space.jsonl"

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_BRIDGE_URL, normalizeBridgeUrl } from "../bridge";
+import { DEFAULT_BRIDGE_URL, normalizeBridgeUrl, servedByControlPlane } from "../bridge";
 
 /**
  * "Live game…" (browser build, GH #709): connect this page to the advisor's
@@ -62,6 +62,13 @@ export default function BridgeConnectDialog({
           game to a save point), <b>Live search</b> over the live board, and <b>rewind to the viewed floor</b>.
           Three things have to be true, none of them by default:
         </p>
+        {servedByControlPlane() ? (
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>
+            This page is served by the advisor itself (the workbench bundled with the Spire Mentor mod), so it is
+            connected to <code className="mono">{origin}</code> already — nothing to allow, no browser prompt.
+            If it stops answering, the advisor has stopped (the game closed, or the AI coach was turned off).
+          </p>
+        ) : (
         <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.45 }}>
           <li>
             The advisor allows this page. In the mod&apos;s settings set <b>Browser workbench origin</b> to
@@ -71,6 +78,7 @@ export default function BridgeConnectDialog({
           <li>The control plane&apos;s address below points at that machine (the default is right when the game runs on this one).</li>
           <li>Chrome asks once whether this site may reach your local network — allow it. Firefox does not ask.</li>
         </ol>
+        )}
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
           control plane URL
           <input className="mono" value={text} onChange={(e) => setText(e.target.value)}

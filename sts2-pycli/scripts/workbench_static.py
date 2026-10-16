@@ -19,8 +19,11 @@ Stages of ``build``:
      an art tree every image renders the placeholder tile and sound is silent.
 
 Environment: ``VITE_BUILD_ID`` (default: ``git describe``), ``VITE_ASSETS_BASE``
-(build against a hosted art origin; then dist carries no art), ``STS2_WEB_HOST``
-(the preview's bind address, default 127.0.0.1).
+(build against a hosted art origin; then dist carries no art),
+``STS2_WORKBENCH_NO_ART`` (placeholder art even when the tree exists),
+``VITE_BRIDGE_SAME_ORIGIN=1`` (the build the mod bundles, see
+``web/src/bridge.ts``), ``STS2_WEB_HOST`` (the preview's bind address,
+default 127.0.0.1).
 """
 
 from __future__ import annotations
@@ -162,7 +165,11 @@ def art() -> None:
 
 
 def build() -> None:
-    with_art = IMAGES.is_dir() and not os.environ.get("VITE_ASSETS_BASE")
+    with_art = (
+        IMAGES.is_dir()
+        and not os.environ.get("VITE_ASSETS_BASE")
+        and not os.environ.get("STS2_WORKBENCH_NO_ART")
+    )
     if with_art:
         need_cwebp()  # before the minutes of compiling, not after
     wasm()
@@ -173,7 +180,8 @@ def build() -> None:
         art()
     else:
         print(
-            f">> no art tree at {IMAGES} — building in placeholder-art mode (`just import-game` extracts it)"
+            f">> no art tree at {IMAGES} (or STS2_WORKBENCH_NO_ART set) — building in "
+            "placeholder-art mode (`just import-game` extracts it)"
         )
 
 

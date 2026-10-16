@@ -228,11 +228,23 @@ How the mod fits the rest of the stack: [`../ARCHITECTURE.md`](../ARCHITECTURE.m
 
 ## The workbench link
 
-The toolbar's **Workbench ▾ → open** opens the *Workbench URL* setting —
-by default `http://127.0.0.1:8077/?follow=1`, the Python-backed workbench,
-which the advisor starts on its own when nothing answers there. It serves
-whatever is built in `sts2-pycli/web/dist`, and which build that is decides
-what the button shows:
+The toolbar's **Workbench ▾ → open** opens the *Workbench URL* setting.
+Blank (the default) tries two pages in order (`SimWorkbenchLink.cs`):
+
+1. **The bundled workbench**, `http://127.0.0.1:8079/?follow=1`. The release zip
+   ships the browser-only build in `mods/SpireMentor/workbench/`
+   (`package.ps1` builds it with `VITE_BRIDGE_SAME_ORIGIN=1`, with the art
+   and sound of the local `just import-game` tree unless `-NoArt`), and the
+   advisor's control plane hosts it next to its JSON endpoints
+   (`--workbench-dir`; in a dev checkout, `sts2-pycli/web/dist` whenever
+   that is a static build). Page and control plane share an origin, so the
+   live game's tree, live search and rewind work with no opt-in, and
+   `?follow=1` follows the advisor's run log as on the dev workbench (the
+   page mirrors it from the control plane's `GET /log`, `web/src/liveLog.ts`).
+   It answers `GET /api/health` only while it has a build to serve.
+2. **The dev workbench**, `http://127.0.0.1:8077/?follow=1`: the
+   Python-backed one, which the advisor starts on its own in dev installs.
+   It serves whatever is built in `sts2-pycli/web/dist`:
 
 - **Server build** — `cd sts2-pycli/web; npm run build`. `?follow=1` opens
   the advisor's live run log in the replay view and follows it.

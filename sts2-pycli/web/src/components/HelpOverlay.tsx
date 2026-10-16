@@ -35,6 +35,10 @@ export default function HelpOverlay({ open, onClose }: { open: boolean; onClose:
             ))}
           </div>
         ))}
+        <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 8 }}>
+          Unofficial fan project, not affiliated with or endorsed by Mega Crit. Slay the Spire 2 and its art and
+          sound are © Mega Crit.
+        </div>
         <button onClick={onClose} style={{ marginTop: 4 }}>close</button>
       </div>
     </div>

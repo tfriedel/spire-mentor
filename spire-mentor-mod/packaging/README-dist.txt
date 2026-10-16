@@ -69,6 +69,15 @@ The HUD draws a score on each card in hand, a ranked list of the moves the
 AI considered, a win-chance bar, and markers on the map for the route it
 likes. Each can be switched off on the settings page.
 
+THE WORKBENCH
+-------------
+Toolbar -> Workbench -> Open workbench opens a browser page that follows
+your run as you play: every decision with what the AI advised, a run tree
+(click a save point to rewind the real game), live search over the board,
+replays, a sandbox and more. It is served by the advisor on
+http://127.0.0.1:8079, so the AI coach must be on (F8). It runs entirely on
+your machine and works offline.
+
 THE SETTINGS PAGE
 -----------------
 Main menu -> Options -> Mod Configuration -> SpireMentor: mode switch, game
@@ -112,3 +121,9 @@ LICENSING / DO NOT REDISTRIBUTE
 - SpireMentor is MIT-licensed (spire-mentor-mod/LICENSE in the source
   repository, github.com/tfriedel/spire-mentor). It started as a port of
   zhiyue's "STS2BridgeMod" (github.com/zhiyue/sts2-rl-agent).
+- Spire Mentor is an unofficial fan project, not affiliated with or
+  endorsed by Mega Crit. Slay the Spire 2 and the art and sound in
+  mods\SpireMentor\workbench are (c) Mega Crit, included for use with your
+  own copy of the game under Mega Crit's content policy
+  (https://www.megacrit.com/content-policy/). Spire Mentor is free and
+  must never be sold or paywalled.

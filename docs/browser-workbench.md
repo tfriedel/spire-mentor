@@ -566,6 +566,19 @@ two opt-ins, both off by default.
 3. **In Chrome**, allow the "access devices on your local network" prompt
    the first request raises. Firefox does not ask.
 
+**The bundled workbench needs none of this.** The Spire Mentor release zip
+ships this build in `mods/SpireMentor/workbench/` (`spire-mentor-mod/package.ps1`),
+and the control plane serves it itself (`realgame_control.StaticSite`): the
+page lives on `http://127.0.0.1:8079`, the control plane's own origin, so no
+CORS, no local-network prompt, and `VITE_BRIDGE_SAME_ORIGIN=1` makes
+`src/bridge.ts` connect to that origin on load. The champion nets are not
+duplicated into it: `/ppo/<file>` falls back to the advisor's bundled
+`data/ppo`. Follow (`?follow=1`, the replay view tailing the advisor's run
+log) works there too: the page cannot read the advisor's file, so
+`src/liveLog.ts` polls the control plane's `GET /log?stat=1` and, when the
+log changed, copies `GET /log` into the worker's run store
+(`POST /api/runs/put`), after which App.tsx's follow loop runs unchanged.
+
 The proxy's routes mapped 1:1 onto the control plane's; the one transform it
 did — rendering each tree node's `combat_log_raw` with the localization —
 is the wasm's `POST /api/bridge/render-tree` (`enrich::log_names` +

@@ -16,6 +16,12 @@ Endpoints (all JSON):
                          message the mod's Copy state yields, so the
                          workbench's state import takes it as is (404 until
                          the first one, and again after game over)
+    GET  /log          — the run log the advisor is writing (``log_path``):
+                         ``{name, size, mtime, text}``, the text cut at the
+                         last complete line; ``?stat=1`` leaves the text out.
+                         The bundled workbench's Follow mode mirrors it into
+                         the page (it cannot read the file); 404 until the
+                         first message opens a log
     POST /restore      — {snapshot_id} or {node_id}; rewinds the live game
     POST /search_tree  — companion MCTS tree over the current combat board
 
@@ -29,6 +35,15 @@ answered here, OPT-IN: ``start(port, allow_origins=[...])`` names the page
 origins allowed to call in (``--control-allow-origin`` on the advisor). With
 no origin listed the server sends no CORS headers at all, so no page anywhere
 can read a reply, exactly as before. Same-origin proxies are unaffected.
+
+The bundled workbench. The packaged mod ships the browser-only workbench
+(``web/dist`` of ``just workbench-static``) next to the advisor, and this
+server hosts it: every GET that is not one of the endpoints above is a file
+of that build (``start(..., site=StaticSite(...))``). The page and the
+control plane then share one origin, so the live-game views need neither the
+CORS opt-in nor Chrome's local-network prompt. ``GET /api/health`` answers
+200 only while a site is mounted: the mod's workbench button probes it to
+choose between this page and the dev workbench on :8077.
 """
 
 from __future__ import annotations
@@ -36,13 +51,112 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import re
+import shutil
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from realgame_livetree import LiveRunTree
 
 logger = logging.getLogger(__name__)
+
+#: Content types by extension. Explicit, not ``mimetypes``: Python on
+#: Windows reads the registry and has no ``.wasm`` entry, and the wasm must go
+#: out as ``application/wasm`` or ``WebAssembly.instantiateStreaming`` refuses it.
+_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".webmanifest": "application/manifest+json",
+    ".wasm": "application/wasm",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".mp3": "audio/mpeg",
+    ".webm": "video/webm",
+    ".ogg": "audio/ogg",
+    ".txt": "text/plain; charset=utf-8",
+    ".atlas": "text/plain; charset=utf-8",
+}
+
+
+class StaticSite:
+    """A static workbench build served from disk (see the module docstring).
+
+    Headers follow ``web/public/_headers``, the Cloudflare Pages rules the
+    same build is deployed with: the art is WebP under ``.png`` names
+    (``scripts/art_to_dist.py``), content-hashed ``wb-assets/`` are immutable,
+    the shell is ``no-cache``.
+
+    Args:
+        root: The build (holds ``index.html`` and ``wb-precache.json``).
+        ppo_dir: Where ``/ppo/<file>`` is looked up when the build does not
+            carry it: the packaged mod strips the champion nets from the
+            build and serves the copies the advisor bundles anyway.
+    """
+
+    def __init__(self, root: Path, ppo_dir: Path | None = None) -> None:
+        self.root = root.resolve()
+        self.ppo_dir = ppo_dir.resolve() if ppo_dir else None
+
+    @staticmethod
+    def is_static_build(root: Path) -> bool:
+        """True for a browser-only build. ``wb-precache.json`` is written only
+        by the static build (vite.config.ts ``swPrecache``); a server build of
+        the same SPA would call ``/api/*`` here and fail on every request."""
+        return (root / "index.html").is_file() and (root / "wb-precache.json").is_file()
+
+    def resolve(self, url_path: str) -> Path | None:
+        """The file for a request path, or None. Never leaves the roots."""
+        rel = url_path.lstrip("/") or "index.html"
+        found = self._under(self.root, rel)
+        if found is None and self.ppo_dir is not None and rel.startswith("ppo/"):
+            found = self._under(self.ppo_dir, rel[len("ppo/") :])
+        if found is None and "." not in rel.rsplit("/", 1)[-1]:
+            found = self._under(self.root, "index.html")  # SPA fallback
+        return found
+
+    @staticmethod
+    def _under(root: Path, rel: str) -> Path | None:
+        try:
+            path = (root / rel).resolve()
+        except (OSError, ValueError):
+            return None
+        if path != root and root not in path.parents:
+            return None
+        return path if path.is_file() else None
+
+    @staticmethod
+    def headers(url_path: str, file: Path) -> dict[str, str]:
+        ext = file.suffix.lower()
+        ctype = _MIME.get(ext, "application/octet-stream")
+        if url_path.startswith("/assets/") and ext == ".png":
+            ctype = "image/webp"
+        if url_path.startswith("/ppo/") and ext != ".json":
+            ctype = "application/octet-stream"
+        if url_path.startswith(("/wb-assets/", "/ppo/")) and url_path != "/ppo/index.json":
+            cache = "public, max-age=31536000, immutable"
+        elif url_path.startswith(("/assets/", "/fonts/", "/icons/")):
+            cache = "public, max-age=604800"
+        else:
+            cache = "no-cache"
+        return {
+            "content-type": ctype,
+            "cache-control": cache,
+            "x-content-type-options": "nosniff",
+        }
+
 
 #: Message types the advisor's receive loop must route to the control plane.
 BRIDGE_MESSAGE_TYPES = (
@@ -77,6 +191,8 @@ class ControlPlane:
         self._waiters: dict[str, _Waiter] = {}
         self._last_state: dict[str, Any] | None = None
         self._server: ThreadingHTTPServer | None = None
+        #: The bundled workbench build, if any (``start`` sets it).
+        self.site: StaticSite | None = None
         self.search_tree_fn: Any = None  # set by the advisor: (sims|None) -> dict
 
     # -- called from the advisor loop ----------------------------------
@@ -192,9 +308,31 @@ class ControlPlane:
         with self._lock:
             return dict(self._status)
 
+    def live_log(self, *, stat_only: bool) -> tuple[int, dict[str, Any]]:
+        """``GET /log``: the current run log, as (HTTP status, payload)."""
+        with self._lock:
+            path = self._status.get("log_path")
+        if not path:
+            return 404, {"error": "no_log", "detail": "the advisor has not opened a run log yet"}
+        file = Path(path)
+        try:
+            st = file.stat()
+            raw = b"" if stat_only else file.read_bytes()
+        except OSError as exc:
+            return 404, {"error": "no_log", "detail": str(exc)}
+        # The bundled page stores it under this key (its run store takes a
+        # bare filename, engineRoutes.ts RUN_FILENAME).
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", file.name)
+        payload: dict[str, Any] = {"name": name, "size": st.st_size, "mtime": st.st_mtime}
+        if not stat_only:
+            # The advisor appends while we read: a torn last record would
+            # fail the page's parse, so it waits for the next poll.
+            payload["text"] = raw[: raw.rfind(b"\n") + 1].decode("utf-8", errors="replace")
+        return 200, payload
+
     # -- HTTP server ---------------------------------------------------
 
-    def start(self, port: int, allow_origins: Any = ()) -> None:
+    def start(self, port: int, allow_origins: Any = (), site: StaticSite | None = None) -> None:
         """Serve on ``127.0.0.1:port``.
 
         Args:
@@ -203,11 +341,14 @@ class ControlPlane:
                 allowed to call this server from a browser. Each gets the CORS
                 headers and the Private Network Access opt-in on every reply
                 and on the preflight; anything else gets none. Default: none.
+            site: The bundled workbench build to host at ``/`` (see the
+                module docstring). Default: none, every other path is a 404.
         """
         plane = self
         self.allow_origins = tuple(
             o.strip().rstrip("/") for o in (allow_origins or ()) if str(o).strip()
         )
+        self.site = site
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format: str, *args: Any) -> None:
@@ -289,8 +430,45 @@ class ControlPlane:
                         self._send(503, {"error": "bridge not connected"})
                     else:
                         self._send(200, reply)
-                else:
+                elif path == "/log":
+                    code, payload = plane.live_log(stat_only="stat=1" in self.path)
+                    self._send(code, payload)
+                elif path == "/api/health" and plane.site is not None:
+                    self._send(200, {"ok": True, "workbench": "static"})
+                elif not self._send_file(path, head=False):
                     self._send(404, {"error": f"unknown path {path}"})
+
+            def do_HEAD(self) -> None:
+                if not self._send_file(self.path.split("?", 1)[0], head=True):
+                    self.send_response(404)
+                    self.send_header("content-length", "0")
+                    self.end_headers()
+
+            def _send_file(self, path: str, *, head: bool) -> bool:
+                """Serve a file of the bundled workbench; False if there is none."""
+                site = plane.site
+                if site is None or path.startswith("/api/"):
+                    return False
+                file = site.resolve(unquote(path))
+                if file is None:
+                    return False
+                try:
+                    size = file.stat().st_size
+                    fh = file.open("rb")
+                except OSError:
+                    return False
+                with fh:
+                    self.send_response(200)
+                    for name, value in site.headers(path, file).items():
+                        self.send_header(name, value)
+                    self.send_header("content-length", str(size))
+                    self.end_headers()
+                    if not head:
+                        try:
+                            shutil.copyfileobj(fh, self.wfile, 256 * 1024)
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass  # the browser cancelled (navigation, SW abort)
+                return True
 
             def do_POST(self) -> None:
                 path = self.path.split("?", 1)[0]

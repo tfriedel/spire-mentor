@@ -21,9 +21,21 @@
  * the "local network" permission (its Local Network Access check) the first
  * time — the fetch waits on that prompt. `targetAddressSpace` is Chrome's
  * hint that a loopback target is intended.
+ *
+ * The workbench the Spire Mentor mod ships is different: the advisor's
+ * control plane serves the page itself, so the bridge is this page's own
+ * origin — connected from the first load, no opt-in, no prompt. That build
+ * sets `VITE_BRIDGE_SAME_ORIGIN=1` (spire-mentor-mod/package.ps1).
  */
 
 const KEY = "sts2.bridgeUrl";
+/** Stored when the user disconnects a same-origin build (see setBridgeBase). */
+const OFF = "off";
+
+/** True for the build the mod bundles: the control plane serves this page. */
+export function servedByControlPlane(): boolean {
+  return import.meta.env.VITE_BRIDGE_SAME_ORIGIN === "1";
+}
 
 /** What the dialog pre-fills: the advisor's default control-plane port. */
 export const DEFAULT_BRIDGE_URL = "http://127.0.0.1:8079";
@@ -42,20 +54,25 @@ export function normalizeBridgeUrl(raw: string): string | null {
   return url.origin;
 }
 
-/** The configured control-plane origin, or null (the default). */
+/** The configured control-plane origin, or null. The default is null, or
+ *  this page's own origin when the control plane serves it. */
 export function bridgeBase(): string | null {
   try {
     const v = localStorage.getItem(KEY);
-    return v ? normalizeBridgeUrl(v) : null;
+    if (v === OFF) return null;
+    if (v) return normalizeBridgeUrl(v);
   } catch {
-    return null;
+    /* no storage: fall through to the default */
   }
+  return servedByControlPlane() ? window.location.origin : null;
 }
 
 /** Remember (or forget, with null) the control-plane origin. */
 export function setBridgeBase(url: string | null): void {
   try {
     if (url) localStorage.setItem(KEY, url);
+    // A same-origin build would otherwise reconnect itself on the next read.
+    else if (servedByControlPlane()) localStorage.setItem(KEY, OFF);
     else localStorage.removeItem(KEY);
   } catch {
     /* private mode: the setting lives for this page load only */
@@ -66,8 +83,9 @@ export function setBridgeBase(url: string | null): void {
 export function bridgeFetch(path: string, init?: RequestInit): Promise<Response> {
   const base = bridgeBase();
   if (!base) return Promise.reject(new Error("no live-game bridge configured"));
-  // `targetAddressSpace` is Chrome's Local Network Access hint; unknown
-  // RequestInit keys are ignored elsewhere.
+  // `targetAddressSpace` is Chrome's Local Network Access hint, for a
+  // cross-origin target only; unknown RequestInit keys are ignored elsewhere.
+  if (base === window.location.origin) return fetch(`${base}${path}`, init);
   const extra = { targetAddressSpace: "loopback" } as unknown as RequestInit;
   return fetch(`${base}${path}`, { ...init, ...extra });
 }

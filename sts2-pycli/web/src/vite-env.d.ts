@@ -15,6 +15,10 @@ interface ImportMetaEnv {
    *  cache name (public/sw.js, stamped by vite.config.ts). Unset in plain
    *  `npm run build` / dev: the VFX fetch then falls back to Date.now(). */
   readonly VITE_BUILD_ID?: string;
+  /** `"1"` = the build the Spire Mentor mod bundles: the advisor's control
+   *  plane serves the page, so the live-game bridge is the page's own origin
+   *  (src/bridge.ts). Set by spire-mentor-mod/package.ps1. */
+  readonly VITE_BRIDGE_SAME_ORIGIN?: string;
 }
 
 interface ImportMeta {

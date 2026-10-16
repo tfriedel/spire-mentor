@@ -57,7 +57,7 @@ import runtime_paths
 from realgame_adapter import character_display_name, to_headless_combat_play
 from realgame_advisor_mirror import AdvisorMirror
 from realgame_bridge import DEFAULT_HOST, DEFAULT_PORT, RealGameBridgeClient
-from realgame_control import BRIDGE_MESSAGE_TYPES, ControlPlane
+from realgame_control import BRIDGE_MESSAGE_TYPES, ControlPlane, StaticSite
 from realgame_livetree import LiveRunTree
 from realgame_workbench_log import WorkbenchRunLogger
 from sts2_hint.recommender import (
@@ -1159,7 +1159,13 @@ def serve(args: argparse.Namespace) -> None:
         return tree_payload
 
     control.search_tree_fn = _control_search_tree
-    control.start(args.control_port, allow_origins=args.control_allow_origin or ())
+    site = None
+    if args.workbench_dir and StaticSite.is_static_build(Path(args.workbench_dir)):
+        site = StaticSite(
+            Path(args.workbench_dir), ppo_dir=runtime_paths.data_root() / "data" / "ppo"
+        )
+        logger.info("hosting the browser workbench from %s", args.workbench_dir)
+    control.start(args.control_port, allow_origins=args.control_allow_origin or (), site=site)
 
     # Screen decisions (card reward / card select) are answered by the same
     # run-policy champion the PPO driver uses; loaded lazily per character on
@@ -1580,6 +1586,13 @@ def main(argv: list[str] | None = None) -> int:
         "(repeatable), e.g. https://your-workbench.example.com — the browser-only "
         "workbench's live-game views (GH #709). Off by default: without it no "
         "web page can read the control plane, only the same-machine proxy.",
+    )
+    parser.add_argument(
+        "--workbench-dir",
+        default=str(runtime_paths.workbench_dir()),
+        help="Browser-only workbench build the control plane hosts at / "
+        "(the mod's bundled workbench; dev: web/dist when it is the static "
+        "build). Empty string disables.",
     )
     parser.add_argument(
         "--model",

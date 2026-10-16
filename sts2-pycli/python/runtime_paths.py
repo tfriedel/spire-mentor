@@ -42,6 +42,18 @@ def data_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def workbench_dir() -> Path:
+    """The browser-only workbench build the control plane hosts.
+
+    Dev: ``web/dist`` (whatever was built last; hosted only when it is the
+    static build). Frozen: the mod zip's ``mods/SpireMentor/workbench/``, the
+    sibling of the ``SimAdvisor/`` dir this exe lives in.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent.parent / "workbench"
+    return Path(__file__).resolve().parent.parent / "web" / "dist"
+
+
 def app_data_dir() -> Path:
     """Writable per-user dir for the packaged advisor's logs/config.
 

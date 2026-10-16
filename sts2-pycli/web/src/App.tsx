@@ -30,7 +30,18 @@ import { isCombatChoiceStep } from "./choiceKinds";
 import SaveLoadDialog from "./components/SaveLoadDialog";
 import ImportStateDialog from "./components/ImportStateDialog";
 import BridgeConnectDialog from "./components/BridgeConnectDialog";
-import { bridgeBase, setBridgeBase } from "./bridge";
+import { bridgeBase, servedByControlPlane, setBridgeBase } from "./bridge";
+import { mirrorLiveLog } from "./liveLog";
+
+/** The run log the live advisor is writing, as a path `/api/load` opens, or
+ *  null. The bundled workbench cannot read the advisor's file, so it mirrors
+ *  it into its own run store first (src/liveLog.ts). */
+function liveLogPath(): Promise<string | null> {
+  if (servedByControlPlane()) return mirrorLiveLog().catch(() => null);
+  return api.bridge.status()
+    .then((s) => s.log_path ?? null)
+    .catch(() => null);
+}
 import BugReportButton from "./components/BugReportButton";
 import BugReportToast, { type BugReportResult } from "./components/BugReportToast";
 import BugReportView from "./components/BugReportView";
@@ -523,9 +534,7 @@ function AppBody() {
       // The live advisor knows exactly which file it is writing — prefer that
       // over the /api/runs head, which is only ever a guess at which file the
       // game is in.
-      const live = await api.bridge.status()
-        .then((s) => s.log_path ?? null)
-        .catch(() => null);
+      const live = await liveLogPath();
       if (!path) path = live;
       if (!path) {
         const r = await api.runs();
@@ -578,9 +587,7 @@ function AppBody() {
         // An advisor restart (coach toggled off/on, next game session)
         // writes a NEW log file — adopt it, or this poll would stat the
         // dead previous file forever ("workbench lost track", 2026-08-21).
-        const live = await api.bridge.status()
-          .then((s) => s.log_path ?? null)
-          .catch(() => null);
+        const live = await liveLogPath();
         if (cancelled) return;
         if (live && live !== loadedPath) {
           const n = await loadRun(live);

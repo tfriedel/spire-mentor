@@ -105,7 +105,8 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     public static bool ToolbarExpanded { get; set; } = true;
 
     /// <summary>Workbench page the toolbar's button opens. Blank = the
-    /// default local URL (see SimWorkbenchLink).</summary>
+    /// bundled workbench the advisor hosts, else the dev one on :8077 (see
+    /// SimWorkbenchLink).</summary>
     public static string WorkbenchUrl { get; set; } = "";
 
     /// <summary>Command line used to launch the Python advisor process.

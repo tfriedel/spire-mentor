@@ -5,6 +5,8 @@
 #
 #   mods/SpireMentor/   SpireMentor.dll, SpireMentor.json, SpireMentor.conf.template,
 #                     SimAdvisor/            (the packaged torch-free advisor)
+#                     workbench/             (the browser-only workbench, which
+#                                             the advisor hosts on :8079)
 #   mods/BaseLib/     BaseLib.dll, BaseLib.pck, BaseLib.json,
 #                     LICENSE-BaseLib.txt    (MIT notice; only staged when the
 #                                             upstream license text is present
@@ -24,15 +26,26 @@
 # The SimAdvisor exe is taken prebuilt from sts2-pycli/dist/SimAdvisor by
 # default; pass -BuildAdvisor to rebuild it first (slow-ish).
 #
+# The workbench is built here (`just workbench-static` with
+# VITE_BRIDGE_SAME_ORIGIN=1, so the page talks to the control plane that
+# serves it). It carries the game's art and sound when the local tree has
+# them (`just import-game` at the workbench / sound tier), placeholders
+# otherwise; -NoArt forces placeholders. The PPO nets are left out of it: the
+# control plane serves the copies the advisor bundles.
+#
 # NOTE (licensing): SpireMentor is MIT (spire-mentor-mod/LICENSE); the zip also
-# bundles BaseLib (MIT, its notice below) and the advisor exe.
+# bundles BaseLib (MIT, its notice below), the advisor exe and, unless -NoArt,
+# art and sound extracted from the game (© Mega Crit; shipped under Mega Crit's
+# content policy for free, unaffiliated mods -- https://www.megacrit.com/content-policy/).
 param(
     # Rebuild the advisor exe before packaging instead of reusing the
     # prebuilt sts2-pycli/dist/SimAdvisor.
     [switch]$BuildAdvisor,
     # Stop after staging (staging/mods/...): workshop.ps1 builds its Workshop
     # content from that and needs neither the zip nor BaseLib's license text.
-    [switch]$NoZip
+    [switch]$NoZip,
+    # Ship the workbench with placeholder art and no sound.
+    [switch]$NoArt
 )
 $ErrorActionPreference = "Stop"
 $bridge = $PSScriptRoot
@@ -75,6 +88,23 @@ if (-not (Test-Path (Join-Path $advisorDist "SimAdvisor.exe"))) {
           "-BuildAdvisor (runs sts2-pycli/scripts/build_advisor_exe.ps1)"
 }
 
+# The workbench: always rebuilt (a web/dist left by `npm run build` is the
+# server build, and a deploy build lacks VITE_BRIDGE_SAME_ORIGIN).
+$env:VITE_BRIDGE_SAME_ORIGIN = "1"
+$env:STS2_WORKBENCH_NO_ART = $(if ($NoArt) { "1" } else { "" })
+try {
+    Push-Location $pycli
+    uv run --no-project python scripts/workbench_static.py build
+    if ($LASTEXITCODE -ne 0) { throw "workbench build failed" }
+} finally {
+    Pop-Location
+    Remove-Item Env:VITE_BRIDGE_SAME_ORIGIN, Env:STS2_WORKBENCH_NO_ART -ErrorAction SilentlyContinue
+}
+$workbenchDist = Join-Path $pycli "web/dist"
+if (-not (Test-Path (Join-Path $workbenchDist "wb-precache.json"))) {
+    throw "missing $workbenchDist\wb-precache.json -- not a static workbench build"
+}
+
 # --- stage -------------------------------------------------------------------
 $version = (Get-Content (Join-Path $bridge "SpireMentor.json") | ConvertFrom-Json).version
 $staging = Join-Path $bridge "staging"
@@ -86,6 +116,10 @@ Copy-Item $dll $simDir
 Copy-Item (Join-Path $bridge "SpireMentor.json") $simDir
 Copy-Item (Join-Path $bridge "SpireMentor.conf.template") $simDir
 Copy-Item -Recurse $advisorDist (Join-Path $simDir "SimAdvisor")
+# The nets stay out (8.5 MB each); /ppo/index.json stays, and the control
+# plane serves the files from the advisor's own data/ppo.
+Copy-Item -Recurse $workbenchDist (Join-Path $simDir "workbench")
+Get-ChildItem (Join-Path $simDir "workbench/ppo") -Filter *.onnx | Remove-Item
 Copy-Item (Join-Path $baseLibDir "BaseLib.dll") $libDir
 Copy-Item (Join-Path $baseLibDir "BaseLib.pck") $libDir
 Copy-Item (Join-Path $baseLibDir "BaseLib.json") $libDir
