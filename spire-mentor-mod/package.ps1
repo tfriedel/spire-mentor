@@ -13,9 +13,9 @@
 #                                             locally -- see below)
 #   README.txt
 #
-# BaseLib is staged from the LOCAL GAME INSTALL: that is the exact v3.4.1
-# binary this SpireMentor.dll was compiled against (the csproj references the
-# deployed copy). BaseLib is MIT-licensed, so redistribution needs its
+# BaseLib is staged from the LOCAL GAME INSTALL (<game>/mods/BaseLib, else the
+# Workshop item's folder -- the csproj's BaseLibDir): that is the exact v3.4.1
+# binary this SpireMentor.dll was compiled against. BaseLib is MIT-licensed, so redistribution needs its
 # license text in the zip. That text is NOT vendored in this repo (the
 # authoritative copyright line lives upstream); it is picked up from an
 # optional local clone of github.com/Alchyr/BaseLib-StS2 at refs/BaseLib-StS2
@@ -54,9 +54,10 @@ $pycli = Join-Path $repo "sts2-pycli"
 
 # --- locate the game (asks SpireMentor.csproj: STS2_GAME_DIR, else every Steam library)
 $gameDir = (dotnet msbuild (Join-Path $bridge "SpireMentor.csproj") -getProperty:STS2_GAME_DIR).Trim()
-$baseLibDir = Join-Path $gameDir "mods/BaseLib"
+# <game>/mods/BaseLib, else the Workshop item (the csproj's BaseLibDir).
+$baseLibDir = (dotnet msbuild (Join-Path $bridge "SpireMentor.csproj") -getProperty:BaseLibDir).Trim()
 if (-not (Test-Path (Join-Path $baseLibDir "BaseLib.dll"))) {
-    throw "BaseLib not found at $baseLibDir -- install BaseLib into the game first " +
+    throw "BaseLib not found at $baseLibDir -- subscribe to it on the Workshop or install it into the game " +
           "(https://github.com/Alchyr/BaseLib-StS2/releases, v3.4.1 for game v0.107.1), " +
           "or set STS2_GAME_DIR."
 }

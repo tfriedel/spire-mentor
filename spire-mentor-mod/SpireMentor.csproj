@@ -45,6 +45,11 @@
     <STS2_GAME_DIR Condition="'$(STS2_GAME_DIR)' == ''">$(SteamLibraryPath)/common/Slay the Spire 2</STS2_GAME_DIR>
     <Sts2DataDir>$(STS2_GAME_DIR)/data_sts2_windows_x86_64</Sts2DataDir>
     <ModsPath>$(STS2_GAME_DIR)/mods/</ModsPath>
+    <!-- BaseLib: a manual install in <game>/mods/BaseLib, else the Steam
+         Workshop item (3737335127) the game loads it from when subscribed.
+         package.ps1 asks for this property too. -->
+    <BaseLibDir Condition="'$(BaseLibDir)' == '' and Exists('$(ModsPath)BaseLib/BaseLib.dll')">$(ModsPath)BaseLib</BaseLibDir>
+    <BaseLibDir Condition="'$(BaseLibDir)' == ''">$(SteamLibraryPath)/workshop/content/2868840/3737335127/BaseLib</BaseLibDir>
     <SimPycliDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../sts2-pycli'))</SimPycliDir>
   </PropertyGroup>
 
@@ -53,8 +58,8 @@
         Text="Slay the Spire 2 game data not found at '$(Sts2DataDir)'. Pass -p:STS2_GAME_DIR=&quot;C:/path/to/Slay the Spire 2&quot; if it's installed somewhere else."
         Condition="'$(Sts2DataDir)' == '' or !Exists('$(Sts2DataDir)')" />
     <Error
-        Text="BaseLib not found at '$(ModsPath)BaseLib/BaseLib.dll'. SpireMentor depends on Alchyr's BaseLib (settings-UI framework); install its release (dll + pck + json) into &lt;game&gt;/mods/BaseLib/. See https://github.com/Alchyr/BaseLib-StS2/releases (v3.4.1 verified against game v0.107.1)."
-        Condition="!Exists('$(ModsPath)BaseLib/BaseLib.dll')" />
+        Text="BaseLib not found in '$(ModsPath)BaseLib/' or the Steam Workshop folder. SpireMentor depends on Alchyr's BaseLib (settings-UI framework); subscribe to it on the Workshop, or install its release (dll + pck + json) into &lt;game&gt;/mods/BaseLib/. See https://github.com/Alchyr/BaseLib-StS2/releases (v3.4.1 verified against game v0.107.1)."
+        Condition="!Exists('$(BaseLibDir)/BaseLib.dll')" />
   </Target>
 
   <ItemGroup Condition="Exists('$(Sts2DataDir)')">
@@ -73,8 +78,8 @@
     <!-- Installed mod, not game data: the game loads mods/BaseLib/BaseLib.dll
          into the shared ALC, so referencing the deployed copy guarantees we
          compile against exactly the assembly we run against. -->
-    <Reference Include="BaseLib" Condition="Exists('$(ModsPath)BaseLib/BaseLib.dll')">
-      <HintPath>$(ModsPath)BaseLib/BaseLib.dll</HintPath>
+    <Reference Include="BaseLib" Condition="Exists('$(BaseLibDir)/BaseLib.dll')">
+      <HintPath>$(BaseLibDir)/BaseLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

@@ -3,7 +3,7 @@
   "name": "Spire Mentor",
   "author": "spire-mentor",
   "description": "AI coach: rates your options while you play (card scores, ranked moves, win chance, map route), and can play whole runs by itself. Never plays for you unless you ask — press F1 in game for the keys.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "has_pck": false,
   "has_dll": true,
   "dependencies": ["BaseLib"],

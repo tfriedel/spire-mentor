@@ -23,6 +23,9 @@ Spire Mentor rates your options while you play: a score on every card in hand, a
 [/list]
 Settings: Main menu → Options → Mod Configuration → SpireMentor.
 
+[h2]The workbench[/h2]
+The toolbar's [b]Workbench → Open workbench[/b] opens a page in your browser that follows your run as you play: every decision with what the AI advised at the time, regret reviews and search trees for any past step, the run tree (click a save point to rewind the real game), live search over the board, replays and a combat sandbox. It is served by the coach on [i]127.0.0.1:8079[/i] and runs entirely on your machine.
+
 [h2]What it does on your machine[/h2]
 [list]
 [*]When the coach is on, the mod starts the bundled [b]SimAdvisor.exe[/b] in the background and talks to it over a local connection ([i]127.0.0.1:9002[/i]). Nothing leaves your computer. The exe is not code-signed, so Windows SmartScreen may ask about it the first time.
@@ -36,3 +39,5 @@ Logs: [i]%LOCALAPPDATA%\SpireMentor\[/i]
 
 [h2]Source and license[/h2]
 Open source under the MIT license: [url=https://github.com/tfriedel/spire-mentor]github.com/tfriedel/spire-mentor[/url]. Bug reports go there; please attach [i]%APPDATA%\SlayTheSpire2\logs\godot.log[/i].
+
+Spire Mentor is an unofficial fan project, not affiliated with or endorsed by Mega Crit. Slay the Spire 2 and the art and sound shown in the workbench are © Mega Crit.
