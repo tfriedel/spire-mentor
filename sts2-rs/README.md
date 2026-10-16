@@ -22,6 +22,13 @@ cargo nextest run --workspace     # canonical test runner (see note)
 cargo test --workspace --doc      # doctests — nextest cannot run these
 ```
 
+The `sts2-py` crate (PyO3) needs **Python ≥ 3.11** at build and test time. If
+the `python` on your PATH is older or missing (a `pyo3-build-config` build
+script failure), set `PYO3_PYTHON` to a 3.11+ interpreter (e.g. the output of
+`uv python find --system 3.13`), or skip the crate with `--exclude sts2-py`. Windows
+has an extra DLL trap: see
+[`../BUILDING-WINDOWS.md`](../BUILDING-WINDOWS.md#4-the-sts2-py-pyo3-crate-needs-a-real-python).
+
 The toolchain is pinned by [`rust-toolchain.toml`](rust-toolchain.toml) to
 **Rust 1.96.0**; the MSRV is **1.96** (`rust-version` in
 [`Cargo.toml`](Cargo.toml)). All workspace crates share version **0.0.1**

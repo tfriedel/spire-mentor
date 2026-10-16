@@ -9,7 +9,8 @@
 
     Tiers (install what you need):
       * Rust engine (sts2-rs)     -> just, cargo-nextest   [always]
-      * Python CLI  (sts2-pycli)  -> Python 3.13 via uv     [-SkipPython to omit]
+      * Python 3.13 via uv, wired up for the sts2-py PyO3 crate (PYO3_PYTHON
+        + PATH) and for sts2-pycli                          [-SkipPython to omit]
       * C# runner + the mod       -> .NET 9 SDK             [-SkipDotnet to omit]
       * Web UIs                   -> Node.js LTS            [-SkipNode to omit]
       * Workbench with real art   -> ilspycmd 9.1, wasm-bindgen-cli (the version
@@ -22,10 +23,12 @@
 
 .PARAMETER RustOnly
     Only install what the Rust engine needs (just + cargo-nextest +
-    rust-analyzer). Implies -SkipPython -SkipDotnet -SkipNode -SkipWorkbench.
+    rust-analyzer + Python 3.13 for the sts2-py crate). Implies -SkipDotnet
+    -SkipNode -SkipWorkbench.
 
 .PARAMETER SkipPython
-    Skip installing the pinned Python 3.13 via uv.
+    Skip installing the pinned Python 3.13 via uv and setting PYO3_PYTHON.
+    Without it, build the Rust engine with `--exclude sts2-py`.
 
 .PARAMETER SkipDotnet
     Skip installing the .NET 9 SDK (needed only for the C# headless runner).
@@ -53,7 +56,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($RustOnly) { $SkipPython = $true; $SkipDotnet = $true; $SkipNode = $true; $SkipWorkbench = $true }
+if ($RustOnly) { $SkipDotnet = $true; $SkipNode = $true; $SkipWorkbench = $true }
 
 # --- pretty output helpers -------------------------------------------------
 function Info($m) { Write-Host "  $m" -ForegroundColor Gray }
@@ -144,11 +147,40 @@ if (Have 'rustup') {
 
 # ---------------------------------------------------------------------------
 if (-not $SkipPython) {
-    Step "Python CLI deps (sts2-pycli)"
+    Step "Python 3.13 (sts2-py PyO3 crate, sts2-pycli)"
     if (Have 'uv') {
         Info "Installing pinned Python 3.13 via uv ..."
         try { uv python install 3.13; Ok "Python 3.13 available to uv"; $installed += 'Python 3.13 (uv)' }
         catch { Warn "uv python install failed: $_"; $failed += 'Python 3.13' }
+
+        # PyO3 otherwise builds against the first `python` on PATH: the Store
+        # stub or an older install (abi3-py311 rejects < 3.11). The test
+        # binaries also need python313.dll on PATH at load time (0xc0000135).
+        # See BUILDING-WINDOWS.md section 4.
+        $pyExe = $null
+        # --system: never a project .venv, which may be deleted or rebuilt.
+        try { $pyExe = (uv python find --system 3.13 2>$null | Select-Object -First 1) } catch {}
+        if ($pyExe -and (Test-Path $pyExe)) {
+            $pyDir = Split-Path $pyExe
+            $current = [Environment]::GetEnvironmentVariable('PYO3_PYTHON', 'User')
+            if ($current -and (Test-Path $current)) {
+                Ok "PYO3_PYTHON already set ($current)"
+            } else {
+                [Environment]::SetEnvironmentVariable('PYO3_PYTHON', $pyExe, 'User')
+                Ok "PYO3_PYTHON set to $pyExe (user environment)"
+            }
+            $env:PYO3_PYTHON = [Environment]::GetEnvironmentVariable('PYO3_PYTHON', 'User')
+            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+            if (($userPath -split ';') -notcontains $pyDir) {
+                [Environment]::SetEnvironmentVariable('Path', "$pyDir;$userPath", 'User')
+                Ok "Added $pyDir to the user PATH (python313.dll for the sts2-py tests)"
+            }
+            Update-SessionPath
+            Info "Terminals (and IDEs such as VS Code) opened before now do not see these; restart them."
+        } else {
+            Warn "could not locate uv's Python 3.13 - set PYO3_PYTHON by hand (BUILDING-WINDOWS.md section 4)"
+            $failed += 'PYO3_PYTHON'
+        }
         Info "Note: run 'uv sync' inside sts2-pycli/ to build the venv + sts2_rs wheel."
     } else {
         Warn "uv missing - skipping Python. Install uv first (winget install astral-sh.uv)."

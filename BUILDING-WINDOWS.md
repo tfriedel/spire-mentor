@@ -32,7 +32,12 @@ Prerequisites the script verifies but does **not** install: `rustup`/`cargo`,
 C++" workload** (provides `link.exe` — Rust cannot link without it).
 
 The repo runs Python through `uv run` everywhere, so the Microsoft Store
-`python.exe` alias on PATH does no harm.
+`python.exe` alias on PATH does no harm — except to the `sts2-py` PyO3 crate,
+which finds Python by itself; the script points it at uv's 3.13
+(`PYO3_PYTHON`, see [section 4](#4-the-sts2-py-pyo3-crate-needs-a-real-python)).
+**Open a new terminal after running the script** — and restart VS Code or any
+other IDE whose terminal you use: windows opened before do not see the new
+environment.
 
 ## 2. Build & test the Rust engine
 
@@ -69,17 +74,25 @@ for the in-game advisor, `cd sts2-pycli; uv sync` once (which builds the
 
 ## 4. The `sts2-py` PyO3 crate needs a real Python
 
-The `sts2-py` crate embeds a Python interpreter and needs a **real** one at
-**both build and run time**. Two traps on Windows:
+The `sts2-py` crate embeds a Python interpreter and needs a **real** one, at
+least **3.11** (the `abi3-py311` feature), at **both build and run time**.
+Without `PYO3_PYTHON`, PyO3 uses the first `python` on PATH. The traps, by
+the error you see:
 
-1. The Microsoft Store `python.exe` alias in `%LOCALAPPDATA%\Microsoft\WindowsApps`
-   is a dead stub that hijacks auto-detection — PyO3 finds it and fails with
-   *"no Python 3.x interpreter found"*.
-2. The compiled test binary must find `pythonNNN.dll` at load time, or it aborts
-   with `0xc0000135` (STATUS_DLL_NOT_FOUND).
+| Error | Cause |
+|-------|-------|
+| `failed to run custom build command for pyo3-build-config` … *"no Python 3.x interpreter found"* | The Microsoft Store `python.exe` alias in `%LOCALAPPDATA%\Microsoft\WindowsApps` is a dead stub that hijacks auto-detection. |
+| `failed to run custom build command for pyo3-build-config` … *"cannot set a minimum Python version 3.11 higher than the interpreter version 3.10"* | An older real Python (e.g. `C:\Python310`) is first on PATH. |
+| `cargo nextest` … `creating test list failed` … `sts2_rs-….exe --list` aborted with code `0xc0000135` (*"The specified module could not be found"*, os error 126) | The build worked, but the test binary cannot find `python313.dll` at load time: the interpreter's folder is not on this terminal's PATH. |
 
-**Fix once (machine-local, per-user — never commit this):** point PyO3 straight
-at a real interpreter and put its folder on PATH. Using a uv-managed Python:
+The third one is what you also get when you did the fix below but are still in
+a terminal opened before it — open a new one (restart the IDE if it is an IDE
+terminal).
+
+`install-windows-deps.ps1` applies this fix (unless `-SkipPython`).
+**To fix by hand once (machine-local, per-user — never commit this):** point
+PyO3 straight at a real interpreter and put its folder on PATH. Using a
+uv-managed Python:
 
 ```powershell
 uv python install 3.13
@@ -93,11 +106,17 @@ if ($userPath -notlike "*$py*") {
 }
 ```
 
-Open a **new terminal** afterward. Then `cargo nextest run --workspace` works
-with no per-session setup.
+Open a **new terminal** afterward (restart VS Code or another IDE, not just its
+terminal tab). Then `cargo nextest run --workspace` works with no per-session
+setup. To fix only the current terminal instead:
 
-- `PYO3_PYTHON` (not PATH order) is what defeats the Store stub — it's
-  unambiguous.
+```powershell
+$py = "$env:APPDATA\uv\python\cpython-3.13-windows-x86_64-none"
+$env:PYO3_PYTHON = "$py\python.exe"; $env:Path = "$py;$env:Path"
+```
+
+- `PYO3_PYTHON` (not PATH order) is what defeats the Store stub and an older
+  Python — it's unambiguous. The PATH entry is only for loading the DLL.
 - These are user-env settings, **not** `sts2-rs/.cargo/config.toml`: that file
   is committed and shared, and Cargo config cannot scope an env var by OS, so a
   Windows path there would break every Linux/macOS dev.
