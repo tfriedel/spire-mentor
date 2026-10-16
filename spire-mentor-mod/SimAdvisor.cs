@@ -911,6 +911,20 @@ internal sealed class SimAdvisor
             {
                 return;
             }
+            // Not the play phase yet: no snapshot. `StartTurn` drops
+            // PlayerActionsDisabled at the very START of turn setup, before
+            // the energy reset and the hand draw (CombatManager.cs:465 vs
+            // SetupPlayerTurn), so the decision edge above fires on a board
+            // with an empty hand. The search can only answer "End turn" to
+            // that, and autoplay executed it: whole turns ended card-less
+            // with a full hand about to be drawn (2026-10-16, Fuzzy Wurm
+            // rounds 3-5). TurnStarted fires on the switch to Play and
+            // re-requests, so nothing is lost by waiting for it. Same gate
+            // as the autopilot lane (SimCombatHandler.IsPlayerInPlayPhase).
+            if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+            {
+                return;
+            }
 
             Dictionary<string, object>? state = SimCombatHandler.BuildCombatState(player);
             if (state == null)
@@ -1238,6 +1252,15 @@ internal sealed class SimAdvisor
             Player? player = LocalContext.GetMe(runState);
             if (player == null)
             {
+                return;
+            }
+            // Backstop for the request-side gate in RequestCombatAdviceNow:
+            // advice computed for one turn must not fire into the next
+            // turn's setup, where an `end_turn` is accepted (and deferred)
+            // before the hand is even drawn.
+            if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+            {
+                Logger.Log($"[SimAdvisor] Takeover: not in the play phase ({player.PlayerCombatState?.Phase}); holding.");
                 return;
             }
 
