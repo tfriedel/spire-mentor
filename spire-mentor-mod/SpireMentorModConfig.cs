@@ -93,6 +93,14 @@ public sealed class SpireMentorModConfig : SimpleModConfig
 
     public static bool AdvisorAutoLaunch { get; set; } = true;
 
+    /// <summary>Switch the coach on by itself at launch (see
+    /// MainFile.CoachOnWhenReadyAsync), so enabling the mod in the game's mod
+    /// list is the only step. Only from Off and only on Windows: Autopilot
+    /// (auto_start, the sweep lane) and the advisor_autoplay harness keep
+    /// their own startup paths, and the bundled advisor cannot start
+    /// elsewhere.</summary>
+    public static bool CoachOnAtLaunch { get; set; } = true;
+
     /// <summary>Toolbar strip expanded/collapsed (SimToolbar pill).</summary>
     public static bool ToolbarExpanded { get; set; } = true;
 
@@ -148,9 +156,11 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         // what turning it on gets you before offering the switch.
         AddNote(optionContainer,
             "The AI coach rates your options while you play: a score on each card, a ranked\n" +
-            "list of moves, a win-chance bar, and the route it likes on the map. It is off\n" +
-            "until you switch it on, and it never plays for you unless you ask it to (F7).");
+            "list of moves, a win-chance bar, and the route it likes on the map. It switches\n" +
+            "on when the game starts (untick that below if you would rather press F8), and it\n" +
+            "never plays for you unless you ask it to (F7).");
         AddRow(optionContainer, "Advisor mode (AI coach)", nameof(AdvisorMode), CreateRawTickboxControl);
+        AddRow(optionContainer, "Turn the coach on when the game starts", nameof(CoachOnAtLaunch), CreateRawTickboxControl);
         AddRow(optionContainer, "Game speed", nameof(GameSpeed), CreateRawSliderControl);
 
         optionContainer.AddChild(CreateSectionHeader("HUD"));
@@ -185,13 +195,15 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Build the mid-run panel's rows into <paramref name="container"/>,
-    /// using the same NConfig* controls as the main-menu page (they bind the
-    /// static properties and self-refresh on ConfigReloaded, so every
-    /// surface stays in sync). Returns false if the control factory failed
-    /// -- the caller renders a pointer to the main-menu page instead.
+    /// Build the mid-run panel's rows into <paramref name="container"/>
+    /// (everyday settings) and <paramref name="advanced"/> (advisor and
+    /// workbench plumbing most players never touch), using the same NConfig*
+    /// controls as the main-menu page (they bind the static properties and
+    /// self-refresh on ConfigReloaded, so every surface stays in sync).
+    /// Returns false if the control factory failed -- the caller renders a
+    /// pointer to the main-menu page instead.
     /// </summary>
-    internal static bool BuildLiveRowsInto(Control container)
+    internal static bool BuildLiveRowsInto(Control container, Control advanced)
     {
         SpireMentorModConfig? cfg = _instance;
         if (cfg == null)
@@ -201,6 +213,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         try
         {
             cfg.AddLiveRow(container, "AI coach (advisor mode)", nameof(AdvisorMode), cfg.CreateRawTickboxControl);
+            cfg.AddLiveRow(container, "Coach on when the game starts", nameof(CoachOnAtLaunch), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Game speed", nameof(GameSpeed), cfg.CreateRawSliderControl);
             cfg.AddLiveRow(container, "Show HUD", nameof(ShowHud), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show ranked moves", nameof(ShowRankedList), cfg.CreateRawTickboxControl);
@@ -208,10 +221,10 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             cfg.AddLiveRow(container, "Show map markers + route", nameof(ShowMapMarkers), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show win chance bar", nameof(ShowWinBar), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Reduce combat effects", nameof(ReduceEffects), cfg.CreateRawTickboxControl);
-            cfg.AddLiveRow(container, "Auto-launch Python advisor", nameof(AdvisorAutoLaunch), cfg.CreateRawTickboxControl);
-            cfg.AddLiveRow(container, "Advisor command (blank = default)", nameof(AdvisorCommand), cfg.CreateRawLineEditControl);
-            cfg.AddLiveRow(container, "Workbench URL (blank = default)", nameof(WorkbenchUrl), cfg.CreateRawLineEditControl);
-            cfg.AddLiveRow(container, "Browser workbench origin (blank = off)", nameof(BrowserWorkbenchOrigin), cfg.CreateRawLineEditControl);
+            cfg.AddLiveRow(advanced, "Auto-launch Python advisor", nameof(AdvisorAutoLaunch), cfg.CreateRawTickboxControl);
+            cfg.AddLiveRow(advanced, "Advisor command (blank = default)", nameof(AdvisorCommand), cfg.CreateRawLineEditControl);
+            cfg.AddLiveRow(advanced, "Workbench URL (blank = default)", nameof(WorkbenchUrl), cfg.CreateRawLineEditControl);
+            cfg.AddLiveRow(advanced, "Browser workbench origin (blank = off)", nameof(BrowserWorkbenchOrigin), cfg.CreateRawLineEditControl);
             return true;
         }
         catch (Exception ex)

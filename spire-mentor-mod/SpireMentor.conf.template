@@ -1,5 +1,5 @@
 {
-  "_readme": "Defaults for a PLAYER install: the mod loads but does nothing until you switch Advisor mode on (F8, or the mod settings page). Set auto_start to true only if you want the AI to play whole runs by itself.",
+  "_readme": "Defaults for a PLAYER install: the AI coach (Advisor mode) switches on when the game starts and never plays for you unless you ask (F8 turns it off; untick 'Turn the coach on when the game starts' in the mod settings to keep it off). Set auto_start to true only if you want the AI to play whole runs by itself.",
   "port": 9002,
   "auto_start": false,
   "advisor_autoplay": false,

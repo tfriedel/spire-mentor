@@ -2,7 +2,7 @@
 
 Spire Mentor rates your options while you play: a score on every card in hand, a ranked list of the moves the AI considered, a win-chance bar, and the map route it likes. Combat advice comes from a Monte Carlo tree search over a full simulation of the fight; map, card-reward, shop, event and rest-site advice comes from a trained run policy. It can also take a single decision for you, or play on by itself until you stop it.
 
-[b]It does nothing until you turn it on.[/b] Installed but switched off, the game stays vanilla: no HUD, no AI, no changed behaviour. Press [b]F8[/b] in game to switch the coach on, [b]F1[/b] for every key.
+[b]The coach switches on when the game starts and never plays for you unless you ask.[/b] Press [b]F8[/b] to switch it off (the game is then vanilla: no HUD, no AI, no changed behaviour), [b]F1[/b] for every key. To keep it off at launch, untick [i]Turn the coach on when the game starts[/i] in the mod settings.
 
 [h2]Requirements[/h2]
 [list]
@@ -25,7 +25,7 @@ Settings: Main menu → Options → Mod Configuration → SpireMentor.
 
 [h2]What it does on your machine[/h2]
 [list]
-[*]When you switch the coach on, the mod starts the bundled [b]SimAdvisor.exe[/b] in the background and talks to it over a local connection ([i]127.0.0.1:9002[/i]). Nothing leaves your computer. The exe is not code-signed, so Windows SmartScreen may ask about it the first time.
+[*]When the coach is on, the mod starts the bundled [b]SimAdvisor.exe[/b] in the background and talks to it over a local connection ([i]127.0.0.1:9002[/i]). Nothing leaves your computer. The exe is not code-signed, so Windows SmartScreen may ask about it the first time.
 [*]The first start takes a few seconds while the advisor loads its networks.
 [*][b]Autopilot mode[/b] (off by default) lets an AI play whole runs on its own. It turns tutorials off and makes every character selectable on your [b]modded[/b] profile. The game keeps modded progress separate from your normal save, so your unmodded profile is never touched. Advisor mode and F6/F7 never change your save.
 [/list]

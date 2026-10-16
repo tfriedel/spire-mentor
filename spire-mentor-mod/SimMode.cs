@@ -25,8 +25,10 @@
 // SimAutoSlayer rather than being refused.
 //
 // Startup mapping preserves every existing invocation: auto_start=true (the
-// sweep lane) => Autopilot, auto_start=false => Off. Advisor is only ever
-// entered by explicit user action (settings page / hotkey / console).
+// sweep lane) => Autopilot, auto_start=false => Off. A human launch then
+// flips Off -> Advisor once the game is up if the persisted CoachOnAtLaunch
+// setting allows it (MainFile.CoachOnWhenReadyAsync) -- never from
+// Autopilot, never under advisor_autoplay.
 
 using System;
 using System.Threading;

@@ -8,9 +8,10 @@ that recommends plays: an MCTS search for combat and a trained run policy
 for map routes, card rewards, shops, events and rest sites. It can advise
 you while you play, or play whole runs itself.
 
-IT DOES NOTHING UNTIL YOU TURN IT ON. Installing the mod does not change
-your game: no HUD, no AI, no modified behaviour. Press F8 in game (or tick
-"Advisor mode" on the settings page) when you want the coach.
+THE COACH SWITCHES ON WHEN THE GAME STARTS, and never plays for you unless
+you ask. Press F8 in game to switch it off (the game is then vanilla: no
+HUD, no AI, no modified behaviour). To keep it off at launch, untick "Turn
+the coach on when the game starts" on the mod settings page.
 
 IMPORTANT — VERSION PIN
 -----------------------

@@ -121,6 +121,17 @@ public static class MainFile
         {
             SimAdvisorAutoplay.ArmWhenRunStarts();
         }
+        else if (SimRuntime.Mode == SimMode.Off && SpireMentorModConfig.CoachOnAtLaunch &&
+                 OperatingSystem.IsWindows())
+        {
+            // Enabling the mod in the game's mod list should be the only step;
+            // a second "now switch the coach on" confused players. Autopilot
+            // (auto_start, every sweep) and the advisor_autoplay harness never
+            // reach this branch. Windows only: elsewhere the bundled advisor
+            // cannot start (SimAdvisorProcess) and the toolbar would just read
+            // "crashed".
+            TaskHelper.RunSafely(CoachOnWhenReadyAsync());
+        }
 
         // Backstop only: GameQuitPatch is the graceful shutdown path.
         AppDomain.CurrentDomain.ProcessExit += (_, _) => SimShutdown.Run("ProcessExit");
@@ -254,6 +265,29 @@ public static class MainFile
         {
             Logger.Log($"  patch skipped: {patchType.Name} ({ex.Message})");
         }
+    }
+
+    /// <summary>
+    /// Switch the coach on once the game node exists -- through the same
+    /// Mode setter as F8, so the advisor subscribes, its process starts and
+    /// every surface refreshes. Runs before the main menu shows, so the boot
+    /// hint (SimHelp) already sees the coach on. Skips if anything changed
+    /// the mode in the meantime.
+    /// </summary>
+    private static async Task CoachOnWhenReadyAsync()
+    {
+        using var cts = new CancellationTokenSource(GameStartupWait);
+        await WaitHelper.Until(() => NGame.Instance != null, cts.Token, GameStartupWait,
+            "NGame.Instance did not appear");
+        Callable.From(() =>
+        {
+            if (SimRuntime.Mode != SimMode.Off)
+            {
+                return;
+            }
+            Logger.Log("Coach on at launch (settings: \"Turn the coach on when the game starts\").");
+            SimRuntime.Mode = SimMode.Advisor;
+        }).CallDeferred();
     }
 
     /// <summary>

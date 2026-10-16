@@ -10,7 +10,8 @@ Two ways to use it:
 
 - **Advisor mode** — you play; the mod streams each decision to an AI backend
   and renders its advice in-game (card scores, ranked moves, win chance, map
-  route). Off until you turn it on.
+  route). Switches itself on when the game starts (Windows); untick
+  "Turn the coach on when the game starts" in the mod settings to stop that.
 - **Autopilot mode** — an external agent plays whole runs by itself
   (used for unattended sweeps and evaluation against the headless
   [`sts2-rs`](../sts2-rs) simulator).
@@ -119,13 +120,14 @@ game disables a Workshop mod whose id is also in the local mods folder
 ## Configuration (`SpireMentor.conf`)
 
 On first run the mod copies `SpireMentor.conf.template` to `SpireMentor.conf`
-next to the DLL. Player-install defaults do nothing until you enable the mod
-in game. Fields (authoritative docs: `SimConfig.cs`):
+next to the DLL. Player-install defaults never let the AI play by itself; the
+coach (Advisor mode) switches on at launch unless you untick that in the mod
+settings. Fields (authoritative docs: `SimConfig.cs`):
 
 | Field | Default | Meaning |
 |---|---|---|
 | `port` | `9002` | TCP listen port (loopback only) |
-| `auto_start` | `false` | Launch Autopilot at boot (the unattended sweep lane). `false` = Advisor is only ever entered by explicit user action |
+| `auto_start` | `false` | Launch Autopilot at boot (the unattended sweep lane). `false` = Off, or Advisor if the "Turn the coach on when the game starts" setting is ticked (default; Windows only) |
 | `advisor_autoplay` | `false` | Testing: once a run is live, switch to Advisor mode and toggle AI autoplay (the F8+F7 path) unattended |
 | `character` / `ascension` / `seed` | `"Ironclad"` / `0` / `null` | Run setup for Autopilot; `seed: null` = fresh random seed |
 | `num_runs` | `1` | Runs to play in sequence before going idle |

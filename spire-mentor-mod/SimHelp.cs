@@ -117,8 +117,11 @@ internal static class SimHelp
                 ? "[color=#ff9d5c][b]Spire Mentor: AUTOPILOT IS ARMED[/b] — the AI will play by itself as soon as " +
                   "the advisor connects. Press [b]F8[/b] to take the controls back, or set " +
                   "[i]auto_start[/i] to false in SpireMentor.conf. [b]F1[/b] for help.[/color]"
-                : $"[color=#9aa3b8]Spire Mentor {MainFile.ModVersion} loaded — click the [b]Spire Mentor[/b] " +
-                  "strip in the top-left to turn the AI coach on, or press [b]F1[/b] for help.[/color]";
+                : SimRuntime.Mode == SimMode.Advisor
+                    ? $"[color=#9aa3b8]Spire Mentor {MainFile.ModVersion} loaded — the AI coach is on. " +
+                      "[b]F8[/b] turns it off, [b]F1[/b] for help.[/color]"
+                    : $"[color=#9aa3b8]Spire Mentor {MainFile.ModVersion} loaded — click the [b]Spire Mentor[/b] " +
+                      "strip in the top-left to turn the AI coach on, or press [b]F1[/b] for help.[/color]";
             Reposition();
             _hint.Visible = true;
             Logger.Log($"[SimHelp] Boot hint shown (armed={armed}) at {_hint.Position} " +
