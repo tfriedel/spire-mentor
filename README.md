@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/tfriedel/spire-mentor/actions/workflows/ci.yml/badge.svg)](https://github.com/tfriedel/spire-mentor/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-tfriedel.github.io%2Fspire--mentor-blue)](https://tfriedel.github.io/spire-mentor/)
+[![Steam Workshop](https://img.shields.io/badge/Steam_Workshop-Spire_Mentor-1b2838?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3821016481)
 
 **A bit-exact re-implementation of Slay the Spire 2, an AI that plays it, and
 the tools to watch, question and argue with that AI — in a browser tab or
@@ -167,6 +168,10 @@ placeholder art. With it, add `ilspycmd`, `cwebp` and `ffmpeg` — details in
 A C# mod for Slay the Spire 2 ([`spire-mentor-mod/`](spire-mentor-mod/)) that connects
 the running game to the AI stack over a local socket. An idle mod leaves the
 game vanilla.
+
+**Play with it: subscribe on the [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3821016481)** (Windows; Steam
+installs BaseLib with it). The workbench comes bundled and follows your run
+in the browser.
 
 - **Advisor mode** — you play; the mod shows ranked moves with MCTS
   statistics, card-reward and shop scores, the recommended map route and

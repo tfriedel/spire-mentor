@@ -64,6 +64,9 @@ mod leaves the game 100% vanilla.
 
 ## Build and install
 
+Players don't need any of this: the mod is on the
+[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3821016481).
+
 ```powershell
 cd spire-mentor-mod
 dotnet build
