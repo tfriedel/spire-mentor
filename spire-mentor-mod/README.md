@@ -220,7 +220,7 @@ again (a few minutes); `uv sync` beforehand avoids the wait there too.
 | `SimAdvisor.cs`, `SimScreenAdvice.cs`, `SimAdvisorAutoplay.cs`, `SimAdvisorProcess.cs` | Advisor mode: observe-and-advise loop, screen describers, F7 autoplay, backend auto-launch |
 | `SimHud.cs`, `SimActionLog.cs`, `SimHelp.cs`, `SimHotkeys.cs`, `SimConsoleCommands.cs`, `SpireMentorModConfig.cs` | In-game UI and controls |
 | `SimMode.cs`, `SimSpeed.cs`, `SimShutdown.cs`, `SimJobObject.cs` | Runtime mode/speed state, clean shutdown, child-process containment |
-| `SpireMentor.json` | Mod manifest (`dependencies: ["BaseLib"]`, `affects_gameplay: true`, `min_game_version: "0.107.1"`) |
+| `SpireMentor.json` | Mod manifest (`dependencies: [{ id: "BaseLib", min_version: "3.4.7" }]`, `affects_gameplay: true`, `min_game_version: "0.107.1"`) |
 | `PROTOCOL.md` | Full wire-protocol reference |
 | `tools/` | Unattended drivers and log graders: `ascension_climb.py` (drive the advisor lane up the ascension ladder), `check_f7_log.py` (assert known stall signatures in a game log) |
 

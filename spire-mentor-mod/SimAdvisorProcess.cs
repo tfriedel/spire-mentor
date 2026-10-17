@@ -194,7 +194,13 @@ internal static class SimAdvisorProcess
                 RotateOversizedLog(logPath);
                 var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 var stopFlag = new StopFlag();
-                var logWriter = TextWriter.Synchronized(new StreamWriter(logPath, append: true));
+                // Shared, and closed when the process exits: Kill() returns
+                // before the old process's Exited handler runs, so an F8
+                // off -> on found the previous launch's writer still holding
+                // the file and the relaunch failed with "being used by
+                // another process" (seen 2026-10-17, v0.5.0).
+                var logWriter = TextWriter.Synchronized(new StreamWriter(new FileStream(
+                    logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)));
                 logWriter.WriteLine($"--- advisor launched {DateTime.Now:yyyy-MM-dd HH:mm:ss} ---");
                 process.OutputDataReceived += (_, e) =>
                 {
@@ -212,7 +218,12 @@ internal static class SimAdvisorProcess
                 {
                     int code = -1;
                     try { code = process.ExitCode; } catch { }
+                    // The parameterless wait returns once the redirected
+                    // output is drained, so the last lines land before the
+                    // banner and the writer is closed.
+                    try { process.WaitForExit(); } catch { }
                     try { logWriter.WriteLine($"--- advisor exited ({code}) ---"); logWriter.Flush(); } catch { }
+                    try { logWriter.Dispose(); } catch { }
                     bool deliberate;
                     lock (_lock)
                     {
