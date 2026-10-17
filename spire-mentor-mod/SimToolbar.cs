@@ -490,6 +490,13 @@ internal sealed class SimToolbar
         {
             status += $" · advisor: {_advisorStatus.ToString().ToLowerInvariant()}";
         }
+        // The HUD toggle persists across launches; a hidden HUD with a
+        // connected advisor otherwise reads as "the coach does nothing"
+        // (2026-10-17, a v0.5.0 player with ShowHud saved off).
+        if (SimRuntime.Mode != SimMode.Off && !SpireMentorModConfig.ShowHud)
+        {
+            status += " · HUD hidden (F4 shows it)";
+        }
         if (_advisorStatus == SimAdvisorStatus.Building)
         {
             // Say how long and why, or the wait reads as a hang and gets killed.
