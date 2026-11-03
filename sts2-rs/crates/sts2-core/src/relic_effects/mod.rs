@@ -21,6 +21,7 @@ pub mod bound_phylactery;
 pub mod brimstone;
 pub mod bronze_scales;
 pub mod burning_blood;
+pub mod burning_sticks;
 pub mod candelabra;
 pub mod captains_wheel;
 pub mod centennial_puzzle;
@@ -129,6 +130,7 @@ pub fn install_default_registry() {
         ring_of_the_snake::install();
         divine_right::install();
         burning_blood::install();
+        burning_sticks::install();
         meat_on_the_bone::install();
         black_blood::install();
         ring_of_the_drake::install();
