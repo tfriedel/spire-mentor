@@ -703,6 +703,11 @@ pub struct RunManager {
     /// the boss gold roll reads the boss room type. Bead `sts2-rs-jenwp`
     /// (M4 live reward stream — Boss follow-up).
     pending_boss_act_advance: bool,
+    /// v0.111.0: the next act's Ancient-event entry heal was already applied when
+    /// the boss-relic (= Ancient) screen opened, so [`Self::advance_boss_act`]
+    /// must not heal a second time (the A2+ WearyTraveler heal is 80% of the HP
+    /// still missing, which is not idempotent). Always `false` on v0.107.1.
+    ancient_heal_done: bool,
     /// Set when an intermediate page of a multi-page event offered rewards
     /// (C# `RewardsCmd.OfferCustom` awaited inside the option, e.g. Dream
     /// Catcher's card from DenseVegetation's mimicked rest heal). Once the
@@ -1000,6 +1005,7 @@ impl RunManager {
             card_reward_bundles: None,
             boss_relic_options: Vec::new(),
             pending_boss_act_advance: false,
+            ancient_heal_done: false,
             resume_event_after_rewards: false,
             resume_shop_after_rewards: false,
             resume_rest_site_after_rewards: false,
@@ -3457,6 +3463,18 @@ impl RunManager {
             // This must fire AFTER the boss reward's gold/potion/card reads
             // (already drained above) and BEFORE the relic pick, so the shared
             // `Rewards` cursor stays read-for-read aligned with C#.
+            //
+            // v0.111.0: the Ancient event heals when it STARTS
+            // (`AncientEventModel.BeforeEventStarted`, `AncientEventModel.cs:143-164`,
+            // before `GenerateInitialOptions`), so the player stands at full
+            // health (80% of the missing HP from A2) on the Ancient screen, not
+            // only after the pick. `advance_boss_act` skips its own heal then.
+            if self.run_state.game_version >= crate::GameVersion::V0_111_0
+                && !self.ancient_heal_done
+            {
+                let _ = self.run_state.apply_ancient_event_heal();
+                self.ancient_heal_done = true;
+            }
             if let Some(setup) = self.callbacks.setup_boss_relic_ancient {
                 setup(&mut self.run_state, &self.boss_relic_options);
             }
@@ -3559,6 +3577,9 @@ impl RunManager {
     /// `_on_boss_relic_picked` → `_advance_to_next_act` at
     /// `sts2-rl-agent@01c094d:sts2_env/run/run_manager.py:1331-1345`.
     fn advance_boss_act(&mut self) {
+        // Consumed on every call, so a heal already applied on the Ancient screen
+        // never leaks into a later act advance.
+        let ancient_heal_done = std::mem::take(&mut self.ancient_heal_done);
         if self.run_state.act_index < 3
             && self.run_state.current_room.map(|r| r.room_type)
                 == Some(crate::runstate::RoomType::Boss)
@@ -3571,7 +3592,9 @@ impl RunManager {
             // ascension, 80% of missing HP at A2 WearyTraveler. Mirror of the
             // same step in `advance_act_on_boss_kill`; this is the production
             // phase-machine act-advance path driven by `do_boss_relic_pick`.
-            let _ = self.run_state.apply_ancient_event_heal();
+            if !ancient_heal_done {
+                let _ = self.run_state.apply_ancient_event_heal();
+            }
             // Each act opens with its Ancient event room (the "boss relic"
             // Ancient for acts 2/3). C# `MarkRoomVisited`s that RoomType.Event
             // room on entry (`RunManager.cs:901-903` — CurrentRoomCount==1 →
@@ -7213,6 +7236,74 @@ mod tests {
         assert_eq!(res, ActionResult::Advanced);
         assert_eq!(rm.phase(), Phase::RunOver);
         assert!(rm.run_state.is_over && !rm.run_state.player_won);
+    }
+
+    /// `AncientEventModel.BeforeEventStarted` heals when the Ancient event STARTS
+    /// (`AncientEventModel.cs:143-164`: `amount = MaxHp - CurrentHp`, x0.8 at WearyTraveler / A2), i.e. the
+    /// player is already healed on the Ancient (boss-relic) screen. v0.111.0 heals when that screen opens and
+    /// not a second time on the pick; v0.107.1 keeps healing on the pick.
+    #[test]
+    fn ancient_entry_heal_is_on_the_ancient_screen_on_v0111_only() {
+        fn pool_stub(_rs: &mut RunState) -> Vec<crate::RelicId> {
+            vec![crate::RelicId::Anchor, crate::RelicId::CallingBell]
+        }
+        for (version, ascension) in [
+            (crate::GameVersion::V0_107_1, 0u8),
+            (crate::GameVersion::V0_111_0, 0),
+            (
+                crate::GameVersion::V0_107_1,
+                crate::runstate::WEARY_TRAVELER_ASCENSION_LEVEL,
+            ),
+            (
+                crate::GameVersion::V0_111_0,
+                crate::runstate::WEARY_TRAVELER_ASCENSION_LEVEL,
+            ),
+        ] {
+            let cb = ContentCallbacks {
+                generate_boss_relic_pool: Some(pool_stub),
+                ..ContentCallbacks::default()
+            };
+            let mut rm = RunManager::new(0, CharacterId::Ironclad).with_content_callbacks(cb);
+            rm.run_state.game_version = version;
+            rm.run_state.ascension_level = ascension;
+            rm.run_state.act_index = 1;
+            rm.run_state.max_hp = 100;
+            rm.run_state.current_hp = 60;
+            rm.run_state.current_room =
+                Some(crate::runstate::Room::new(crate::runstate::RoomType::Boss));
+            rm.combat = Some(crate::CombatState {
+                is_over: true,
+                player_won: true,
+                ..crate::CombatState::default()
+            });
+            rm.set_phase(Phase::Combat);
+            assert_eq!(rm.exit_combat_and_transition(), ActionResult::Advanced);
+            assert_eq!(rm.phase(), Phase::BossRelic);
+            // 40 HP missing: full heal, or floor(40 * 0.8) = 32 from A2 (WearyTraveler).
+            let healed = if ascension >= crate::runstate::WEARY_TRAVELER_ASCENSION_LEVEL {
+                92
+            } else {
+                100
+            };
+            let on_screen = if version >= crate::GameVersion::V0_111_0 {
+                healed
+            } else {
+                60
+            };
+            assert_eq!(
+                rm.run_state.current_hp, on_screen,
+                "{version:?} A{ascension} at the Ancient screen"
+            );
+            assert_eq!(
+                rm.take_action(RunAction::PickBossRelic { idx: 0 }),
+                ActionResult::Advanced
+            );
+            assert_eq!(
+                rm.run_state.current_hp, healed,
+                "{version:?} A{ascension} after the pick: healed once"
+            );
+            assert_eq!(rm.run_state.act_index, 2);
+        }
     }
 
     #[test]
