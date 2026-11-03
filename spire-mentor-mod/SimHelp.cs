@@ -6,7 +6,7 @@
 // unmodded and has no way to find out otherwise (reported 2026-08-08 by the
 // first outside tester). Two surfaces fix that:
 //
-//   * ShowBootHint() -- one dim line at the bottom of the main menu for a few
+//   * ShowBootHint() -- a first-launch tip at the bottom of the main menu for a few
 //     seconds, saying the mod is loaded and that F1 explains it. It also
 //     carries the LOUD case: if autopilot is armed, the player is told that
 //     the AI is about to play and which key takes it back.
@@ -92,23 +92,22 @@ internal static class SimHelp
     }
 
     /// <summary>
-    /// One-shot "the mod is here" line. Dismisses itself; F1 is the durable
-    /// surface.
+    /// First-launch greeting, persisted across sessions. The armed-autopilot
+    /// warning still appears each launch; F1 remains available for help.
     /// </summary>
     public static void ShowBootHint()
     {
-        if (_bootHintShown)
+        bool armed = SimRuntime.Mode == SimMode.Autopilot;
+        if (_bootHintShown || (!armed && SpireMentorModConfig.StartupTipShown))
         {
             return;
         }
-        _bootHintShown = true;
         Guarded(() =>
         {
             if (!EnsureBuilt())
             {
                 return;
             }
-            bool armed = SimRuntime.Mode == SimMode.Autopilot;
             var label = _hint!.GetNode<RichTextLabel>("HintText");
             label.Text = armed
                 // Never let the AI take a run without saying so. This is the
@@ -138,6 +137,12 @@ internal static class SimHelp
             var timer = _hint.GetNode<Godot.Timer>("HintTimer");
             timer.WaitTime = armed ? 40.0 : 20.0;
             timer.Start();
+            _bootHintShown = true;
+            if (!armed)
+            {
+                SpireMentorModConfig.StartupTipShown = true;
+                SpireMentorModConfig.SaveSoon();
+            }
         });
     }
 

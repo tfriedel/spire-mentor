@@ -81,6 +81,8 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     // Persisted preferences.
     // ------------------------------------------------------------------
 
+    public static bool StartupTipShown { get; set; } = false;
+
     public static bool ShowHud { get; set; } = true;
     public static bool ShowRankedList { get; set; } = true;
     public static bool ShowCardLabels { get; set; } = true;
