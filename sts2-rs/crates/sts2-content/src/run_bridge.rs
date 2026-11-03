@@ -1744,6 +1744,59 @@ mod tests {
         );
     }
 
+    /// Pael's Tears' latch survives a turn only into the enemy side (`PaelsTears.cs:38-55`). End a
+    /// turn with energy left, let Poison kill the enemy on its turn, and leave the combat: the latch
+    /// is cleared at combat end (`PaelsTears.cs:57-61`), so the next combat opens with its normal
+    /// energy. v0.107.1 keeps the engine's old behaviour (the +2 carries over).
+    #[test]
+    fn paels_tears_latch_does_not_carry_into_the_next_combat_v0111_only() {
+        crate::relics::dispatch::ensure_installed();
+        // `enter_combat` runs `start_combat` and the opening `start_player_turn`.
+        let opening_energy = |rs: &RunState| {
+            enter_combat(rs, select_first(act1_normal_pool()))
+                .player
+                .energy
+        };
+        for (version, carried) in [
+            (sts2_core::GameVersion::V0_111_0, false),
+            (sts2_core::GameVersion::V0_107_1, true),
+        ] {
+            let mut rs = fresh_run();
+            rs.game_version = version;
+            rs.relics.push(sts2_core::RelicId::PaelsTears);
+            let normal = opening_energy(&rs);
+
+            let mut state = enter_combat(&rs, select_first(act1_normal_pool()));
+            assert!(state.player.energy > 0);
+            let enemies: Vec<CreatureUid> = state.enemy_uids.to_vec();
+            for &enemy in &enemies {
+                if let Some(c) = state.creatures.iter_mut().find(|c| c.id == enemy.0) {
+                    c.current_hp = 1;
+                }
+                sts2_core::card_effects::apply_power_to_creature(
+                    &mut state,
+                    enemy,
+                    sts2_core::PowerKind::Poison,
+                    5,
+                );
+            }
+            let _ = sts2_core::combat_loop::end_turn_dispatch(&mut state);
+            assert!(
+                state.is_over && state.player_won,
+                "{version:?}: Poison wins"
+            );
+            let latch = state
+                .relics
+                .iter()
+                .find(|r| r.kind == sts2_core::RelicKind::PaelsTears)
+                .map(|r| r.counter);
+            assert_eq!(latch, Some(i32::from(carried)), "{version:?}");
+            exit_combat(&mut rs, &state);
+            let extra = if carried { 2 } else { 0 };
+            assert_eq!(opening_energy(&rs), normal + extra, "{version:?}");
+        }
+    }
+
     #[test]
     fn enter_combat_seeds_potion_belt_from_run_state() {
         // Bead `sts2-rs-01o`: potions held at the run level are seeded

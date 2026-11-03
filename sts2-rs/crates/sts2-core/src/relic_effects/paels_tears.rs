@@ -51,7 +51,29 @@ pub(crate) fn on_after_side_turn_start_paels_tears(
     EffectResult::Resolved
 }
 
+/// `PaelsTears.AfterCombatEnd` (`PaelsTears.cs:57-61`) clears `HadLeftoverEnergy`. The latch is
+/// sampled at the player's turn end and cleared at the next player turn start, so it is still set
+/// only when the combat ends during the enemy side (an enemy killed by Poison or Thorns after a
+/// turn ended with energy left). Without this reset `run_bridge::exit_combat` carried it into the
+/// next combat, whose opening turn then gained the +2 energy. v0.111.0 only, so the v0.107.1
+/// engine stays byte-identical.
+pub(crate) fn on_after_combat_end_paels_tears(state: &mut CombatState) -> EffectResult {
+    if state.game_version < crate::GameVersion::V0_111_0 {
+        return EffectResult::NotImplemented;
+    }
+    let Some(r) = paels_tears_relic_mut(state) else {
+        return EffectResult::NotImplemented;
+    };
+    r.counter = 0;
+    EffectResult::Resolved
+}
+
 pub(crate) fn install() {
+    register_owned_after_combat_end(
+        RelicId::PaelsTears,
+        crate::RelicKind::PaelsTears,
+        on_after_combat_end_paels_tears as AfterCombatEndFn,
+    );
     register_before_turn_end(
         RelicId::PaelsTears,
         on_before_turn_end_paels_tears as BeforeTurnEndFn,
