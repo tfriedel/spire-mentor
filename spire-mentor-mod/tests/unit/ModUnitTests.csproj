@@ -31,5 +31,6 @@
     <Compile Include="../../RefusalWatch.cs" Link="RefusalWatch.cs" />
     <Compile Include="../../TravelGuard.cs" Link="TravelGuard.cs" />
     <Compile Include="../../BugReportDump.cs" Link="BugReportDump.cs" />
+    <Compile Include="../../WindowsChildProcess.cs" Link="WindowsChildProcess.cs" />
   </ItemGroup>
 </Project>

@@ -38,6 +38,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace SpireMentor;
 
@@ -47,7 +48,7 @@ internal static class SimAdvisorProcess
     private static Process? _process;
     /// <summary>
     /// Per-launch "we killed it on purpose" flag. It must NOT be one shared
-    /// bool: Process.Exited fires asynchronously, so toggling advisor mode
+    /// bool: output/exit monitoring completes asynchronously, so toggling advisor mode
     /// off and straight back on let the OLD process's exit handler read the
     /// NEW launch's reset flag and report a phantom "advisor: crashed"
     /// (seen 2026-08-05 on an F8 toggle).
@@ -211,67 +212,25 @@ internal static class SimAdvisorProcess
                     return;
                 }
             }
-            psi.UseShellExecute = false;
-            psi.CreateNoWindow = true;
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
-
+            TextWriter? logWriter = null;
+            WindowsChildProcess? child = null;
             try
             {
                 string logPath = StdoutLogPath(BridgeServer.Instance.Port);
                 RotateOversizedLog(logPath);
-                var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 var stopFlag = new StopFlag();
                 // Shared, and closed when the process exits: Kill() returns
-                // before the old process's Exited handler runs, so an F8
+                // before the old process's output monitor finishes, so an F8
                 // off -> on found the previous launch's writer still holding
                 // the file and the relaunch failed with "being used by
                 // another process" (seen 2026-10-17, v0.5.0).
-                var logWriter = TextWriter.Synchronized(new StreamWriter(new FileStream(
+                logWriter = TextWriter.Synchronized(new StreamWriter(new FileStream(
                     logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)));
                 logWriter.WriteLine($"--- advisor launched {DateTime.Now:yyyy-MM-dd HH:mm:ss} ---");
-                process.OutputDataReceived += (_, e) =>
-                {
-                    if (e.Data == null) return;
-                    TryWrite(logWriter, e.Data);
-                    NoteBuildProgress(e.Data);
-                };
-                process.ErrorDataReceived += (_, e) =>
-                {
-                    if (e.Data == null) return;
-                    TryWrite(logWriter, e.Data);
-                    NoteBuildProgress(e.Data);
-                };
-                process.Exited += (_, _) =>
-                {
-                    int code = -1;
-                    try { code = process.ExitCode; } catch { }
-                    // The parameterless wait returns once the redirected
-                    // output is drained, so the last lines land before the
-                    // banner and the writer is closed.
-                    try { process.WaitForExit(); } catch { }
-                    try { logWriter.WriteLine($"--- advisor exited ({code}) ---"); logWriter.Flush(); } catch { }
-                    try { logWriter.Dispose(); } catch { }
-                    bool deliberate;
-                    lock (_lock)
-                    {
-                        deliberate = stopFlag.Value;
-                        _process = null;
-                    }
-                    if (!deliberate)
-                    {
-                        Logger.Log($"[SimAdvisorProcess] Advisor process exited unexpectedly (code {code}).");
-                        SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Crashed);
-                    }
-                };
-
+                child = WindowsChildProcess.Start(psi.FileName, psi.Arguments, psi.WorkingDirectory,
+                    process => SimJobObject.Adopt(process));
+                Process process = child.Process;
                 _stopFlag = stopFlag;
-                process.Start();
-                // Immediately after Start and before anything can throw: from
-                // here on the OS itself guarantees the advisor cannot outlive
-                // the game (see SimJobObject -- an orphan holds port 9002 AND
-                // keeps Steam showing the game as running).
-                SimJobObject.Adopt(process);
                 // The advisor's MCTS competes with the game's render loop
                 // for this machine; the search is the one on the critical
                 // path (the game is idle while it thinks — SimThinkFps.cs).
@@ -287,18 +246,93 @@ internal static class SimAdvisorProcess
                 {
                     Logger.Log($"[SimAdvisorProcess] Could not raise advisor priority: {prioEx.Message}");
                 }
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
                 _process = process;
                 Logger.Log($"[SimAdvisorProcess] Launched advisor (pid {process.Id}); output -> {logPath}");
                 SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Launching);
+                _ = MonitorAsync(child, logWriter, stopFlag);
             }
             catch (Exception ex)
             {
+                if (child != null)
+                {
+                    try
+                    {
+                        if (!child.Process.HasExited)
+                        {
+                            child.Process.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        Logger.Log($"[SimAdvisorProcess] Failed to stop partially launched advisor: {cleanupEx}");
+                    }
+                    child.Dispose();
+                }
+                CloseOutput(child: null, logWriter);
                 Logger.Log($"[SimAdvisorProcess] Launch failed: {ex.Message}");
                 SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Crashed);
                 _process = null;
             }
+        }
+    }
+
+    private static async Task MonitorAsync(WindowsChildProcess child, TextWriter logWriter, StopFlag stopFlag)
+    {
+        int code = -1;
+        try
+        {
+            await Task.WhenAll(
+                ReadOutputAsync(child.StandardOutput, logWriter),
+                ReadOutputAsync(child.StandardError, logWriter),
+                child.Process.WaitForExitAsync()).ConfigureAwait(false);
+            code = child.Process.ExitCode;
+            TryWrite(logWriter, $"--- advisor exited ({code}) ---");
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[SimAdvisorProcess] Advisor output/exit monitoring failed: {ex}");
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                // A stopped advisor may finish draining after its replacement starts.
+                if (ReferenceEquals(_process, child.Process))
+                {
+                    _process = null;
+                    if (!stopFlag.Value)
+                    {
+                        Logger.Log($"[SimAdvisorProcess] Advisor process exited unexpectedly (code {code}).");
+                        SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Crashed);
+                    }
+                }
+            }
+            CloseOutput(child, logWriter);
+        }
+    }
+
+    private static void CloseOutput(WindowsChildProcess? child, TextWriter? logWriter)
+    {
+        try
+        {
+            logWriter?.Dispose();
+        }
+        catch (IOException ex)
+        {
+            Logger.Log($"[SimAdvisorProcess] Could not close advisor log: {ex}");
+        }
+        finally
+        {
+            child?.Dispose();
+        }
+    }
+
+    private static async Task ReadOutputAsync(StreamReader reader, TextWriter logWriter)
+    {
+        while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
+        {
+            TryWrite(logWriter, line);
+            NoteBuildProgress(line);
         }
     }
 

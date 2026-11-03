@@ -2,6 +2,11 @@
 
 using SpireMentor;
 
+if (args.Length is 2 or 3 && args[0] == "--advisor-child")
+{
+    return WindowsChildProcessTests.RunChild(args[1], args.Length == 3 ? int.Parse(args[2]) : null);
+}
+
 int failures = 0;
 int checks = 0;
 
@@ -567,6 +572,15 @@ using (new FileStream(tailFile, FileMode.Open, FileAccess.ReadWrite, FileShare.R
 File.Delete(tailFile);
 Check("file tail: missing file", BugReportDump.ReadFileTail(tailFile, 10), null);
 Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, object?> { ["type"] = "run_snapshot" }), "run");
+
+if (OperatingSystem.IsWindows())
+{
+    WindowsChildProcessTests.Run(Check);
+}
+else
+{
+    Console.WriteLine("SKIP Windows advisor handle-inheritance tests (requires Windows).");
+}
 
 Console.WriteLine(failures == 0
     ? $"ModUnitTests: OK ({checks} checks)"
