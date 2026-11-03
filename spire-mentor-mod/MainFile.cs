@@ -58,6 +58,7 @@ public static class MainFile
             ShieldBaseLibDamagePreview();
             ApplyPatch(typeof(HitStopTimeScalePatch));
             ApplyPatch(typeof(GameQuitPatch));
+            ApplyPatch(typeof(HotkeyResetPatch));
             // Coach capture (PROTOCOL.md v5 human_action): the human's end
             // turn and their event / campfire picks.
             ApplyPatch(typeof(HumanEndTurnPatch));

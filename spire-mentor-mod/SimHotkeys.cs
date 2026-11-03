@@ -39,6 +39,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Godot;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -109,20 +110,7 @@ public static class SimHotkeys
             RegisterAction(ActionCopyState, Key.C, ctrl: true, shift: true);
             RegisterAction(ActionReportBug, Key.B, ctrl: true, shift: true);
 
-            manager.PushHotkeyPressedBinding(ActionHelp, SimActions.ToggleHelp);
-            manager.PushHotkeyPressedBinding(ActionToggleHud, SimActions.ToggleHud);
-            manager.PushHotkeyPressedBinding(ActionToggleLog, SimActions.ToggleLog);
-            manager.PushHotkeyPressedBinding(ActionHideAll, SimActions.ToggleHideAll);
-            manager.PushHotkeyPressedBinding(ActionPeek, SimActions.Peek);
-            manager.PushHotkeyPressedBinding(ActionAiOnce, () => SimActions.AiOnce("F6 (AI takes this decision)"));
-            manager.PushHotkeyPressedBinding(ActionAiAuto, () => SimActions.ToggleAutoplay("F7 (AI plays until you stop)"));
-            manager.PushHotkeyPressedBinding(ActionToggleAdvisor, SimActions.ToggleAdvisor);
-            manager.PushHotkeyPressedBinding(ActionSpeedDown, () => SimActions.NudgeSpeed(-0.1));
-            manager.PushHotkeyPressedBinding(ActionSpeedUp, () => SimActions.NudgeSpeed(0.1));
-            manager.PushHotkeyPressedBinding(ActionUndoTurn, SimActions.UndoTurn);
-            manager.PushHotkeyPressedBinding(ActionRestartRoom, SimActions.RestartRoom);
-            manager.PushHotkeyPressedBinding(ActionCopyState, SimActions.CopyState);
-            manager.PushHotkeyPressedBinding(ActionReportBug, SimActions.ReportBug);
+            BindActions(manager);
 
             _installed = true;
             GD.Print("[SpireMentor] Hotkeys installed: F1=help, F4=HUD, Ctrl+L=log, Ctrl+H=hide all, F5=peek (Coach), F6=AI once, F7=AI auto, F8=AI on/off, F9/F10=speed -/+, Ctrl+Z=undo turn, Ctrl+Shift+Z=restart room, Ctrl+Shift+C=copy state, Ctrl+Shift+B=report a bug");
@@ -131,6 +119,42 @@ public static class SimHotkeys
         {
             GD.PrintErr($"[SpireMentor] Hotkey install failed: {ex.Message}");
         }
+    }
+
+    internal static void RestoreAfterClear(NHotkeyManager manager)
+    {
+        // ClearHotkeys can run before our initial InputMap registration.
+        if (!_installed)
+        {
+            return;
+        }
+        try
+        {
+            BindActions(manager);
+            GD.Print("[SpireMentor] Hotkeys restored after ClearHotkeys.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[SpireMentor] Hotkey restore failed: {ex}");
+        }
+    }
+
+    private static void BindActions(NHotkeyManager manager)
+    {
+        manager.PushHotkeyPressedBinding(ActionHelp, SimActions.ToggleHelp);
+        manager.PushHotkeyPressedBinding(ActionToggleHud, SimActions.ToggleHud);
+        manager.PushHotkeyPressedBinding(ActionToggleLog, SimActions.ToggleLog);
+        manager.PushHotkeyPressedBinding(ActionHideAll, SimActions.ToggleHideAll);
+        manager.PushHotkeyPressedBinding(ActionPeek, SimActions.Peek);
+        manager.PushHotkeyPressedBinding(ActionAiOnce, () => SimActions.AiOnce("F6 (AI takes this decision)"));
+        manager.PushHotkeyPressedBinding(ActionAiAuto, () => SimActions.ToggleAutoplay("F7 (AI plays until you stop)"));
+        manager.PushHotkeyPressedBinding(ActionToggleAdvisor, SimActions.ToggleAdvisor);
+        manager.PushHotkeyPressedBinding(ActionSpeedDown, () => SimActions.NudgeSpeed(-0.1));
+        manager.PushHotkeyPressedBinding(ActionSpeedUp, () => SimActions.NudgeSpeed(0.1));
+        manager.PushHotkeyPressedBinding(ActionUndoTurn, SimActions.UndoTurn);
+        manager.PushHotkeyPressedBinding(ActionRestartRoom, SimActions.RestartRoom);
+        manager.PushHotkeyPressedBinding(ActionCopyState, SimActions.CopyState);
+        manager.PushHotkeyPressedBinding(ActionReportBug, SimActions.ReportBug);
     }
 
     private static void RegisterAction(string name, Key key, bool ctrl = false, bool shift = false)
@@ -145,4 +169,11 @@ public static class SimHotkeys
         InputMap.ActionAddEvent(actionName, ev);
     }
 
+}
+
+[HarmonyPatch(typeof(NHotkeyManager), nameof(NHotkeyManager.ClearHotkeys))]
+internal static class HotkeyResetPatch
+{
+    private static void Postfix(NHotkeyManager __instance) =>
+        SimHotkeys.RestoreAfterClear(__instance);
 }
