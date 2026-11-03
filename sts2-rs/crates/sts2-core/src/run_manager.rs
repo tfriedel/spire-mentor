@@ -1517,6 +1517,22 @@ impl RunManager {
                     return vec![RunAction::LeaveShop];
                 };
                 let gold = self.run_state.gold;
+                // `MerchantEntry.Cost` is the rolled price folded through
+                // `Hook.ModifyMerchantPrice` (TheCourier -20%, MembershipCard
+                // -50%) and `EnoughGold => Cost <= Gold`
+                // (`MerchantEntry.cs:15-27`); `buy_*` already charge that
+                // price, so affordability must use it too (an entry was
+                // withheld while the gold covered its discounted price but not
+                // its base price). v0.111.0 only.
+                let relics_now = self.run_state.active_relics();
+                let discounted = self.run_state.game_version >= crate::GameVersion::V0_111_0;
+                let cost_of = |price: i32| {
+                    if discounted {
+                        crate::shop::merchant_price_with_modifiers(&relics_now, price)
+                    } else {
+                        price
+                    }
+                };
                 let mut actions: Vec<RunAction> = Vec::new();
                 let card_total = inv.cards.len() + inv.colorless_cards.len();
                 for idx in 0..card_total {
@@ -1526,7 +1542,7 @@ impl RunManager {
                         &inv.colorless_cards[idx - inv.cards.len()]
                     };
                     if crate::shop::is_shop_entry_available(entry.price)
-                        && entry.price <= gold
+                        && cost_of(entry.price) <= gold
                         && entry.card.is_some()
                     {
                         actions.push(RunAction::ShopBuyCard { idx });
@@ -1534,7 +1550,7 @@ impl RunManager {
                 }
                 for (idx, entry) in inv.relics.iter().enumerate() {
                     if crate::shop::is_shop_entry_available(entry.price)
-                        && entry.price <= gold
+                        && cost_of(entry.price) <= gold
                         && entry.relic_id.is_some()
                     {
                         actions.push(RunAction::ShopBuyRelic { idx });
@@ -1558,14 +1574,14 @@ impl RunManager {
                 if !potion_row_locked {
                     for (idx, entry) in inv.potions.iter().enumerate() {
                         if crate::shop::is_shop_entry_available(entry.price)
-                            && entry.price <= gold
+                            && cost_of(entry.price) <= gold
                             && entry.potion_kind.is_some()
                         {
                             actions.push(RunAction::ShopBuyPotion { idx });
                         }
                     }
                 }
-                if !inv.removal_used && gold >= inv.removal_cost {
+                if !inv.removal_used && gold >= cost_of(inv.removal_cost) {
                     // v0.107.1 shop removal is `CardSelectCmd.FromDeckForRemoval`
                     // with NO extra filter (`OneOffSynchronizer.DoMerchantCard
                     // Removal` → `CardModel.IsRemovable`: `Type != Quest &&
@@ -9054,6 +9070,100 @@ mod tests {
             rm.run_state.potions,
             vec![crate::potions::PotionKind::BlockPotion],
         );
+    }
+
+    /// `MerchantEntry.EnoughGold => Cost <= Gold` with `Cost` folded
+    /// through `Hook.ModifyMerchantPrice` (`MerchantEntry.cs:15-27`; MembershipCard
+    /// x0.5, `MembershipCard.cs:18-29`; TheCourier x0.8). `buy_*` always charged the
+    /// discounted price; the action list compared the BASE price with the gold, so
+    /// the removal (75 -> 37 with a Membership Card) was withheld at 37..74 gold.
+    /// Paired: v0.107.1 keeps the old gate, v0.111.0 offers the removal at 40 gold.
+    #[test]
+    fn shop_actions_use_the_discounted_price_on_v0111_only() {
+        for version in [crate::GameVersion::V0_107_1, crate::GameVersion::V0_111_0] {
+            let mut rm = make_rm_in_shop_phase_with_inventory(make_test_shop_inventory());
+            rm.run_state.game_version = version;
+            rm.run_state.relics.push(crate::RelicId::MembershipCard);
+            let base = rm.shop_inventory().expect("inv").removal_cost;
+            assert_eq!(base, 75);
+            // C#: (int)(75 * 0.5m) = 37; rust floor(75 / 2) = 37.
+            assert_eq!(
+                crate::shop::merchant_price_with_modifiers(&rm.run_state.active_relics(), base),
+                37
+            );
+            rm.run_state.gold = 40;
+            let offered = rm
+                .get_available_actions()
+                .iter()
+                .any(|a| matches!(a, RunAction::ShopRemoveCard { .. }));
+            assert_eq!(
+                offered,
+                version >= crate::GameVersion::V0_111_0,
+                "{version:?}"
+            );
+            if offered {
+                let res = rm.take_action(RunAction::ShopRemoveCard { deck_idx: 0 });
+                assert_eq!(res, ActionResult::Advanced);
+                assert_eq!(rm.run_state.gold, 40 - 37, "charged the discounted price");
+            }
+        }
+    }
+
+    /// Every entry kind is offered exactly from its discounted cost: absent at `cost - 1` gold,
+    /// present at `cost`, for TheCourier, MembershipCard and both together (v0.111.0).
+    #[test]
+    fn shop_actions_offer_each_entry_from_its_discounted_cost_on_v0111() {
+        let mut inv = make_test_shop_inventory();
+        inv.cards[0].price = 100;
+        let mut colorless = inv.cards.remove(1);
+        colorless.is_colorless = true;
+        colorless.price = 80;
+        inv.colorless_cards = vec![colorless];
+        inv.relics[0].price = 150;
+        inv.potions[0].price = 60;
+        let entries = [
+            (100, RunAction::ShopBuyCard { idx: 0 }),
+            (80, RunAction::ShopBuyCard { idx: 1 }),
+            (150, RunAction::ShopBuyRelic { idx: 0 }),
+            (60, RunAction::ShopBuyPotion { idx: 0 }),
+        ];
+        for relics in [
+            vec![crate::RelicId::TheCourier],
+            vec![crate::RelicId::MembershipCard],
+            vec![crate::RelicId::TheCourier, crate::RelicId::MembershipCard],
+        ] {
+            let mut rm = make_rm_in_shop_phase_with_inventory(inv.clone());
+            rm.run_state.game_version = crate::GameVersion::V0_111_0;
+            rm.run_state.relics.extend(relics.iter().copied());
+            let cost_of = |rm: &RunManager, base: i32| {
+                crate::shop::merchant_price_with_modifiers(&rm.run_state.active_relics(), base)
+            };
+            let removal = cost_of(&rm, 75);
+            for (base, action) in &entries {
+                let cost = cost_of(&rm, *base);
+                assert!(cost < *base, "{relics:?} discounts {action:?}");
+                for (gold, offered) in [(cost - 1, false), (cost, true)] {
+                    rm.run_state.gold = gold;
+                    let actions = rm.get_available_actions();
+                    assert_eq!(
+                        actions.contains(action),
+                        offered,
+                        "{relics:?} {action:?} at {gold} gold (cost {cost})"
+                    );
+                }
+            }
+            for (gold, offered) in [(removal - 1, false), (removal, true)] {
+                rm.run_state.gold = gold;
+                let actions = rm.get_available_actions();
+                assert_eq!(
+                    actions
+                        .iter()
+                        .any(|a| matches!(a, RunAction::ShopRemoveCard { .. })),
+                    offered,
+                    "{relics:?} removal at {gold} gold (cost {removal})"
+                );
+            }
+        }
     }
 
     #[test]
