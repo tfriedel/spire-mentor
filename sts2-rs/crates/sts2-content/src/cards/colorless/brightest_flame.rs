@@ -24,7 +24,7 @@ pub(crate) fn play_brightest_flame(
         } else {
             1
         };
-        let _ = state.creature_lose_max_hp(player_uid, max_hp_loss);
+        let _ = state.creature_lose_max_hp_from(player_uid, max_hp_loss, true);
     }
     EffectResult::Resolved
 }

@@ -4312,6 +4312,18 @@ impl Default for CombatState {
     }
 }
 
+/// The `ValueProp`s of the damage C# `CreatureCmd.LoseMaxHp` deals when the new max HP is
+/// below the current HP (`CreatureCmd.cs:657`): `Unblockable | Unpowered`, plus `Move` when
+/// the loss comes from a card.
+fn lose_max_hp_damage_props(from_card: bool) -> crate::hooks::ValueProps {
+    let props = crate::hooks::ValueProps::UNBLOCKABLE.union(crate::hooks::ValueProps::UNPOWERED);
+    if from_card {
+        props.union(crate::hooks::ValueProps::MOVE)
+    } else {
+        props
+    }
+}
+
 impl CombatState {
     /// Grow the targeted creature's `max_hp` by `amount` and broadcast
     /// the [`AfterMaxHpChangedFn`](crate::relic_effects::AfterMaxHpChangedFn)
@@ -4384,16 +4396,61 @@ impl CombatState {
     /// Returns the delta actually applied (always `<= 0`; negative /
     /// zero `amount` is a no-op and no event is broadcast). Bead
     /// `sts2-rs-tcf` (P7-surf).
+    ///
+    /// On v0.111.0 a loss below the player's current HP first deals the
+    /// difference as damage; see [`Self::creature_lose_max_hp_from`]. This
+    /// entry point is the non-card one (`isFromCard = false`, e.g. Paper Cuts).
     pub fn creature_lose_max_hp(&mut self, owner: CreatureUid, amount: i32) -> i32 {
+        self.creature_lose_max_hp_from(owner, amount, false)
+    }
+
+    /// [`Self::creature_lose_max_hp`] with C#'s `isFromCard` flag.
+    ///
+    /// v0.111.0: C# `CreatureCmd.LoseMaxHp` (`CreatureCmd.cs:643-660`) does not just shrink the
+    /// cap. When `newMaxHp < CurrentHp` it first deals `CurrentHp - newMaxHp` of
+    /// `Unblockable | Unpowered` damage (plus `Move` when `isFromCard`, which Brightest Flame passes
+    /// and Paper Cuts does not), with no dealer or card source (`CreatureCmd.cs:657` -> `:89-92`).
+    /// That damage dispatches the damage hooks, so eligible effects react to it, e.g. Centennial
+    /// Puzzle (on the first HP loss of the combat) and Rupture. Only the player's combat path is
+    /// changed. The current HP must be above 0, since C# damage skips a dead target.
+    pub fn creature_lose_max_hp_from(
+        &mut self,
+        owner: CreatureUid,
+        amount: i32,
+        from_card: bool,
+    ) -> i32 {
         if amount <= 0 {
             return 0;
         }
-        let Some(idx) = self.creatures.iter().position(|c| c.id == owner.0) else {
+        let Some(mut idx) = self.creatures.iter().position(|c| c.id == owner.0) else {
             panic!(
                 "creature_lose_max_hp: creature uid {} not found",
                 owner.get()
             )
         };
+        if self.game_version >= crate::GameVersion::V0_111_0
+            && self.player.creature_uid == Some(owner)
+        {
+            let (cur, max) = (self.creatures[idx].current_hp, self.creatures[idx].max_hp);
+            let new_max = max - amount;
+            if new_max < cur && cur > 0 {
+                // C# passes no dealer and no card source (`CreatureCmd.cs:657`), so
+                // Rupture grants its Strength at once rather than deferring it to
+                // the end of the card being played.
+                let _ = crate::combat_loop::apply_damage_to_player(
+                    self,
+                    crate::hooks::CreatureRef::Nobody,
+                    cur - new_max,
+                    lose_max_hp_damage_props(from_card),
+                    None,
+                );
+                idx = self
+                    .creatures
+                    .iter()
+                    .position(|c| c.id == owner.0)
+                    .expect("player creature");
+            }
+        }
         // Capture the pre-shrink current HP so a max-hp clamp that pulls
         // current HP down can be detected (C# `AfterCurrentHpChanged` fires
         // only on a CURRENT-hp move, so a non-clamping max loss must NOT
@@ -21613,5 +21670,14 @@ mod tests {
         state.reduce_melancholy_cost_on_death();
         assert_eq!(cost(&state, 2), 2, "the piled Melancholy must drop 3→2");
         assert_eq!(cost(&state, 1), 3, "the deck-only decoy must be untouched");
+    }
+
+    /// `CreatureCmd.LoseMaxHp` damage props (`CreatureCmd.cs:657`): `Move` only for a card.
+    #[test]
+    fn lose_max_hp_damage_props_add_move_only_for_a_card() {
+        use crate::hooks::ValueProps;
+        let base = ValueProps::UNBLOCKABLE.union(ValueProps::UNPOWERED);
+        assert_eq!(lose_max_hp_damage_props(false), base);
+        assert_eq!(lose_max_hp_damage_props(true), base.union(ValueProps::MOVE));
     }
 }
