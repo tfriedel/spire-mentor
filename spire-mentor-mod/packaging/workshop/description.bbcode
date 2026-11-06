@@ -23,6 +23,7 @@ It has two styles, switched with the toolbar's [b]Hints / Coach[/b] button:
 [*][b]F8[/b] AI coach on / off (from Autopilot: take the controls back)
 [*][b]F5[/b] Coach style: peek at the AI's pick for just the next decision
 [*][b]F6[/b] let the AI take just this one decision
+[*][b]Shift+F6[/b] co-op: an AI partner that is waiting for you plays its turn now
 [*][b]F7[/b] let the AI keep playing until you press F7 again. It pauses and hands a decision back to you when it has no real policy for it (F7 resumes).
 [*][b]Shift+F7[/b] autobattle: the AI plays the fights, you make every run-level decision (card rewards, map, shops, rest sites, events), with a note at each one on what changed since the last. Press again to stop.
 [*][b]F4[/b] show / hide the HUD
@@ -45,8 +46,10 @@ The coach also works in co-op runs, as host or as a client, and your teammates d
 [list]
 [*]Multiplayer → Host shows a [b]With AI partners[/b] entry: a co-op run on your PC alone.
 [*]A lobby you host gets [b]Add AI partner[/b] / [b]Remove AI partner[/b] tiles (up to three partners). Friends join as usual and play next to the AI. They do not need the mod; their game shows the partner without a name.
+[*][b]Click an AI partner in the lobby[/b] to change its character (right-click goes back). Each partner seat remembers its last pick.
 [*]Save and continue work: loading the run brings the partners back.
-[*]The mod settings ([i]Co-op AI partners[/i]) say whether a partner waits for your first play, or until you end your turn, before it moves.
+[*]When a partner's best move needs your setup (your Vulnerable on its target, your block on it), it waits up to 10 seconds for it; the settings ([i]Co-op AI partners[/i]) change that (0-60 s) and can make it wait for your first play, or until you end your turn, before it moves.
+[*]Done setting up? The toolbar's [b]Partner go[/b] (or [b]Shift+F6[/b]) makes a waiting partner play now.
 [/list]
 Each partner runs one more advisor process while the run lasts, so expect more CPU use. It is new: if a partner gets stuck or acts strangely, please send a bug report (Ctrl+Shift+B).
 

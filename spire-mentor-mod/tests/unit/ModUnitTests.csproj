@@ -37,6 +37,7 @@
     <Compile Include="../../CrystalSpherePick.cs" Link="CrystalSpherePick.cs" />
     <Compile Include="../../AdviceColumn.cs" Link="AdviceColumn.cs" />
     <Compile Include="../../RewardSwapLayout.cs" Link="RewardSwapLayout.cs" />
+    <Compile Include="../../PartnerCharacters.cs" Link="PartnerCharacters.cs" />
     <Compile Include="../../WindowsChildProcess.cs" Link="WindowsChildProcess.cs" />
   </ItemGroup>
 </Project>

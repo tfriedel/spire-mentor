@@ -190,7 +190,8 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
   position is kept across launches, and right-clicking its header puts it back
   under the column — `LogPanelPlacement.cs`), `Ctrl+H` hides every
   panel down to the toolbar pill (again, or click the pill, to show them), `F4` HUD
-  on/off, `F6` AI takes this one decision, `F7` AI plays until you stop,
+  on/off, `F6` AI takes this one decision, `Shift+F6` co-op: every AI
+  partner waiting for you plays its turn now (below), `F7` AI plays until you stop,
   `Shift+F7` autobattle (below),
   `F8` turns the AI on / off in the current style (from Autopilot: stops the
   AI and hands you the controls; the toolbar's Hints / Coach button switches
@@ -199,6 +200,17 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
   settings slider still sets tenths), `Ctrl+Z` undo to the start of the
   combat turn, `Ctrl+Shift+Z` restart the room, `Ctrl+Shift+C` copy state,
   `Ctrl+Shift+B` report a bug. `F2` and `F11` belong to the game.
+- **AI partners in the lobby and in combat** (`SimAiPartnerLobby.cs`,
+  `SimAiPartnerBrain.cs`, `PartnerCharacters.cs`) — click an AI partner's
+  slot in a lobby you host to give it the next character (right-click: the
+  previous one); each seat keeps its last pick for the next lobby
+  (`AiPartnerCharacters` in the BaseLib config). In combat, a partner whose
+  best move needs your setup play (Vulnerable on its target, block on it)
+  holds it up to **AI partner holds for your setup play** (default 10 s,
+  0–60), briefly (2.5 s) when only other AI partners are still to act. The
+  toolbar's **Partner go** (shown in a combat with AI partners; `▶` and a
+  countdown while one waits) or `Shift+F6` ends every wait for this turn:
+  the setup hold and the "waits for your first play / end turn" settings.
 - **Autobattle** (`Autobattle.cs`, `Shift+F7` or the toolbar's
   **Autobattle**) — the workbench's autobattle mode in the real game: the AI
   plays the fights (card picks inside a fight included) and every run-level

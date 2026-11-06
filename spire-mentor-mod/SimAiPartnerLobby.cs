@@ -37,8 +37,10 @@ internal static class SimAiPartnerLobby
     private const string RemoveName = "SpireMentorRemoveAiPartner";
     private const string AddText = "Add AI partner";
     private const string RemoveText = "Remove AI partner";
+    private const string PickerName = "SpireMentorAiPartnerPicker";
 
     private static readonly FieldInfo? LobbyField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_lobby");
+    private static readonly FieldInfo? NodesField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_nodes");
     private static readonly FieldInfo? ListField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_container");
     private static readonly FieldInfo? InviteField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_inviteButton");
 
@@ -159,6 +161,10 @@ internal static class SimAiPartnerLobby
                           && !lobby!.IsAboutToBeginGame();
         removeTile.Visible = host != null && partners > 0 && !lobby!.IsAboutToBeginGame();
         Reorder(container, addTile, removeTile);
+        if (host != null && session != null)
+        {
+            WirePartnerSlots(container, session);
+        }
 
         if (host != null && SimMp.AiPartnerJoinOverride > 0 && AutoJoined.Add(host))
         {
@@ -227,6 +233,118 @@ internal static class SimAiPartnerLobby
             }
         }).CallDeferred();
         return tile;
+    }
+
+    /// <summary>
+    /// The character picker: an AI partner's own slot in the player list
+    /// (the game's NRemoteLobbyPlayer) gets a transparent click target on
+    /// top. Left-click: its next character, right-click: the previous one
+    /// (SimAiPartner.CycleCharacter); the slot's character label and icon
+    /// follow through the game's own OnPlayerChanged. The nameplate says so,
+    /// since the game has no tooltips to put it in. A load lobby's slots are
+    /// a different container (NRemoteLoadLobbyPlayerContainer): a saved
+    /// run's characters are fixed.
+    /// </summary>
+    private static void WirePartnerSlots(NRemoteLobbyPlayerContainer container, SimAiPartnerSession session)
+    {
+        if (NodesField?.GetValue(container) is not List<NRemoteLobbyPlayer> nodes)
+        {
+            return;
+        }
+        foreach (NRemoteLobbyPlayer slot in nodes)
+        {
+            SimAiPartner? partner = session.Partners.FirstOrDefault(p => p.NetId == slot.PlayerId);
+            if (partner == null || !GodotObject.IsInstanceValid(slot) || slot.GetNodeOrNull(PickerName) != null)
+            {
+                continue;
+            }
+            var picker = new Control
+            {
+                Name = PickerName,
+                MouseFilter = Control.MouseFilterEnum.Stop,
+                MouseDefaultCursorShape = Control.CursorShape.PointingHand,
+            };
+            picker.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            ulong netId = partner.NetId;
+            picker.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(ev => OnPickerInput(container, picker, netId, ev)));
+            slot.AddChild(picker);
+            string label = partner.Label;
+            Callable.From(() =>
+            {
+                // After the slot's _Ready, which names it from the platform.
+                if (GodotObject.IsInstanceValid(slot) && slot.GetNodeOrNull<MegaLabel>("%NameplateLabel") is { } name)
+                {
+                    name.SetTextAutoSize($"{label} (click: character)");
+                }
+            }).CallDeferred();
+            Logger.Log($"[SimAiPartnerLobby] {label}'s slot picks its character on click.");
+        }
+    }
+
+    private static void OnPickerInput(NRemoteLobbyPlayerContainer container, Control picker, ulong netId, InputEvent ev)
+    {
+        if (ev is not InputEventMouseButton { Pressed: true } mb
+            || (mb.ButtonIndex != MouseButton.Left && mb.ButtonIndex != MouseButton.Right))
+        {
+            return;
+        }
+        picker.AcceptEvent();
+        try
+        {
+            if (HostedLobby(container, out StartRunLobby? lobby) == null || lobby == null || lobby.IsAboutToBeginGame())
+            {
+                return;
+            }
+            SimAiPartner? partner = SimAiPartner.All.FirstOrDefault(p => p.NetId == netId);
+            partner?.CycleCharacter(mb.ButtonIndex == MouseButton.Left ? 1 : -1);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[SimAiPartnerLobby] character pick: {ex}");
+        }
+    }
+
+    /// <summary>The lane's picker check (<c>--spire-mentor-ai-partner-pick
+    /// N</c>): N left clicks at the centre of the partner's slot, pushed into
+    /// the viewport as a player's mouse would be, so the GUI's own routing
+    /// decides who gets them.</summary>
+    internal static async System.Threading.Tasks.Task ClickSlotAsync(SceneTree tree, ulong netId, int clicks)
+    {
+        Control? picker = null;
+        for (int i = 0; i < 120 && picker == null; i++)
+        {
+            picker = tree.Root.FindChildren(PickerName, "", recursive: true, owned: false)
+                .OfType<Control>()
+                .FirstOrDefault(c => c.GetParent() is NRemoteLobbyPlayer slot && slot.PlayerId == netId && c.IsVisibleInTree());
+            if (picker == null)
+            {
+                await tree.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+            }
+        }
+        if (picker == null)
+        {
+            Logger.Log($"[SimAiPartnerLobby] pick lane: no picker on {netId}'s slot.");
+            return;
+        }
+        Vector2 at = picker.GetGlobalRect().GetCenter();
+        Logger.Log($"[SimAiPartnerLobby] pick lane: {clicks} click(s) at {at} on {netId}'s slot ({picker.GetGlobalRect()}).");
+        for (int i = 0; i < clicks; i++)
+        {
+            foreach (bool pressed in new[] { true, false })
+            {
+                var ev = new InputEventMouseButton
+                {
+                    ButtonIndex = MouseButton.Left,
+                    Pressed = pressed,
+                    Position = at,
+                    GlobalPosition = at,
+                    ButtonMask = pressed ? MouseButtonMask.Left : 0,
+                };
+                tree.Root.PushInput(ev, inLocalCoords: true);
+                await tree.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+            }
+            await System.Threading.Tasks.Task.Delay(300);
+        }
     }
 
     /// <summary>The game keeps its Invite tile last; ours go just before it.</summary>

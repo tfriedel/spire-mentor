@@ -755,6 +755,33 @@ Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, obje
     Check("log: junk follows the column", LogPanelPlacement.TryParse("12;x", out _, out _).ToString(), "False");
 }
 
+// AI partner seats: the lobby's click cycles characters, kept per seat;
+// setup holds wait long for a human, briefly for another AI partner.
+{
+    Check("partner: next wraps", PartnerCharacters.Cycle(4, 5, 1).ToString(), "0");
+    Check("partner: back wraps", PartnerCharacters.Cycle(0, 5, -1).ToString(), "4");
+    Check("partner: next", PartnerCharacters.Cycle(1, 5, 1).ToString(), "2");
+    Check("partner: unknown current, next starts at the first", PartnerCharacters.Cycle(-1, 5, 1).ToString(), "0");
+    Check("partner: unknown current, back starts at the last", PartnerCharacters.Cycle(-1, 5, -1).ToString(), "4");
+    Check("partner: no characters", PartnerCharacters.Cycle(0, 0, 1).ToString(), "-1");
+    Check("partner: seat 1 defaults to the second character", PartnerCharacters.DefaultIndex(0, 5).ToString(), "1");
+    Check("partner: seat 3 defaults to the fourth", PartnerCharacters.DefaultIndex(2, 5).ToString(), "3");
+    Check("partner: saved seat", PartnerCharacters.ForSeat("SILENT,,DEFECT", 2), "DEFECT");
+    Check("partner: unset seat", PartnerCharacters.ForSeat("SILENT,,DEFECT", 1) ?? "none", "none");
+    Check("partner: seat past the list", PartnerCharacters.ForSeat("SILENT", 2) ?? "none", "none");
+    Check("partner: blank prefs", PartnerCharacters.ForSeat("", 0) ?? "none", "none");
+    Check("partner: set a later seat", PartnerCharacters.WithSeat("", 2, "DEFECT"), ",,DEFECT");
+    Check("partner: replace a seat", PartnerCharacters.WithSeat("SILENT,REGENT", 1, "IRONCLAD"), "SILENT,IRONCLAD");
+    Check("partner: clearing the last seat trims", PartnerCharacters.WithSeat("SILENT,REGENT", 1, ""), "SILENT");
+    Check("partner: a comma cannot split a seat", PartnerCharacters.WithSeat("", 0, "A,B"), "AB");
+    Check("partner: human hold is the setting", PartnerCharacters.HoldSeconds(10, true).ToString(), "10");
+    Check("partner: human hold capped at 60 s", PartnerCharacters.HoldSeconds(600, true).ToString(), "60");
+    Check("partner: AI-only hold is short", PartnerCharacters.HoldSeconds(10, false).ToString(System.Globalization.CultureInfo.InvariantCulture), "2.5");
+    Check("partner: AI-only hold never above the setting", PartnerCharacters.HoldSeconds(1, false).ToString(), "1");
+    Check("partner: 0 never holds, even for an AI", PartnerCharacters.HoldSeconds(0, false).ToString(), "0");
+    Check("partner: negative setting never holds", PartnerCharacters.HoldSeconds(-3, true).ToString(), "0");
+}
+
 if (OperatingSystem.IsWindows())
 {
     WindowsChildProcessTests.Run(Check);

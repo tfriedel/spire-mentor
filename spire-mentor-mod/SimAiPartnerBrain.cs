@@ -94,6 +94,7 @@ internal sealed class SimAiPartnerBrain
             Step("combat", () => TickCombat(me));
             return;
         }
+        Waiting = PartnerWait.None;
         // One screen at a time, as a player has: no room decision while one
         // of our prompts or reward sets is still open. Two of our prompts open
         // at once (a card reward's pick, then a smith's upgrade) once had the
@@ -521,10 +522,12 @@ internal sealed class SimAiPartnerBrain
     {
         if (me.Creature == null || !me.Creature.IsAlive || me.PlayerCombatState is not { } pcs)
         {
+            Waiting = PartnerWait.None;
             return;
         }
         if (pcs.Phase != PlayerTurnPhase.Play || CombatManager.Instance.IsPlayerReadyToEndTurn(me))
         {
+            Waiting = PartnerWait.None;
             return;
         }
         int turn = pcs.TurnNumber;
@@ -558,6 +561,11 @@ internal sealed class SimAiPartnerBrain
         if (!HumansHaveGoneFirst(me, turn))
         {
             return;
+        }
+        if (Waiting is PartnerWait.FirstPlay or PartnerWait.EndTurn)
+        {
+            // The humans went first; a setup hold below sets its own.
+            Waiting = PartnerWait.None;
         }
         if (_playsThisTurn >= MaxPlaysPerTurn)
         {
@@ -623,14 +631,42 @@ internal sealed class SimAiPartnerBrain
     /// advisor connects also pays for its warm-up).</summary>
     private static readonly TimeSpan AdviceTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>The longest the partner holds a move for a teammate's
-    /// setup play (the advice's <c>wait_for_ally</c>): the settings page's
-    /// "holds for your setup play" (default 2.5 s, as the human's autoplay
-    /// caps it; 0 = never).</summary>
-    private static TimeSpan MaxAllyWait =>
-        TimeSpan.FromSeconds(Math.Clamp(SpireMentorModConfig.AiPartnerAllyWaitSeconds, 0.0, 10.0));
+    /// <summary>The longest the partner holds a move for a teammate's setup
+    /// play (the advice's <c>wait_for_ally</c>): for a human, the settings
+    /// page's "holds for your setup play" (default 10 s, up to 60; 0 =
+    /// never), since a person reads the board and thinks, and "Partner go"
+    /// ends it early; for another AI partner, briefly (PartnerCharacters).</summary>
+    private static TimeSpan SetupHold(bool humanStillToAct) =>
+        TimeSpan.FromSeconds(PartnerCharacters.HoldSeconds(SpireMentorModConfig.AiPartnerSetupHoldSeconds, humanStillToAct));
 
     private int _paceLoggedFor = -1;
+
+    /// <summary>The turn "Partner: go" released (<see cref="Go"/>): no more
+    /// waiting for the humans or holding for their setup until it ends.</summary>
+    private int _goTurn = -1;
+
+    /// <summary>What the partner is waiting for in its combat turn, for the
+    /// toolbar's "Partner go" (main thread, like the tick that sets it).</summary>
+    public PartnerWait Waiting { get; private set; }
+
+    /// <summary>Whole seconds left of a setup hold for a human
+    /// (<see cref="PartnerWait.SetupHold"/>), else 0.</summary>
+    public int HoldSecondsLeft =>
+        Waiting == PartnerWait.SetupHold ? (int)Math.Ceiling(Math.Max(0, (_heldUntil - DateTime.UtcNow).TotalSeconds)) : 0;
+
+    /// <summary>"Partner go" (toolbar, Shift+F6): play the rest of this turn
+    /// now. False when the partner was not waiting (nothing to release).</summary>
+    public bool Go()
+    {
+        if (Waiting == PartnerWait.None)
+        {
+            return false;
+        }
+        Logger.Log($"[SimAiPartner] {_partner.Label}: go (was waiting: {Waiting}; turn {_turnSeen}).");
+        _goTurn = _turnSeen;
+        Waiting = PartnerWait.None;
+        return true;
+    }
 
     /// <summary>
     /// The settings' "let me go first" (read live): with "waits until you end
@@ -644,7 +680,7 @@ internal sealed class SimAiPartnerBrain
         string? pace = SimMp.AiPartnerPaceOverride;
         bool forEnd = pace != null ? pace == "end-turn" : SpireMentorModConfig.AiPartnerWaitForEndTurn;
         bool forPlay = pace != null ? pace == "first-play" : SpireMentorModConfig.AiPartnerWaitForFirstPlay;
-        if ((!forEnd && !forPlay) || CombatManager.Instance.DebugOnlyGetState() is not { } combat)
+        if ((!forEnd && !forPlay) || _goTurn == turn || CombatManager.Instance.DebugOnlyGetState() is not { } combat)
         {
             return true;
         }
@@ -668,6 +704,7 @@ internal sealed class SimAiPartnerBrain
                 Logger.Log($"[SimAiPartner] {_partner.Label} waits for the human player's " +
                            (forEnd ? "end turn" : "first play") + $" (turn {turn}).");
             }
+            Waiting = forEnd ? PartnerWait.EndTurn : PartnerWait.FirstPlay;
             return false;
         }
         return true;
@@ -681,6 +718,7 @@ internal sealed class SimAiPartnerBrain
     private DateTime _inflightAt;
     private string? _gaveUpSignature;
     private string? _heldSignature;
+    private DateTime _heldSince;
     private DateTime _heldUntil;
     private long _boardStateId = -1;
 
@@ -709,7 +747,9 @@ internal sealed class SimAiPartnerBrain
         }
         if (reply != null && reply.Signature == sig)
         {
-            if (reply.Advice.WaitForAllyMs > 0 && MaxAllyWait > TimeSpan.Zero && AllyStillToAct(me))
+            bool humanToAct = AllyStillToAct(me, humansOnly: true);
+            TimeSpan hold = SetupHold(humanToAct);
+            if (reply.Advice.WaitForAllyMs > 0 && hold > TimeSpan.Zero && _goTurn != turn && AllyStillToAct(me))
             {
                 // A teammate can make this move better (their Vulnerable on
                 // our target, their block on us): hold it for the configured
@@ -719,14 +759,23 @@ internal sealed class SimAiPartnerBrain
                 if (_heldSignature != sig)
                 {
                     _heldSignature = sig;
-                    _heldUntil = DateTime.UtcNow + MaxAllyWait;
-                    Logger.Log($"[SimAiPartner] {_partner.Label} holds its move up to {MaxAllyWait.TotalSeconds:0.0} s for a teammate's setup play.");
+                    _heldSince = DateTime.UtcNow;
+                    Logger.Log($"[SimAiPartner] {_partner.Label} holds its move up to {hold.TotalSeconds:0.0} s for a " +
+                               (humanToAct ? "human" : "partner") + " teammate's setup play.");
                 }
-                if (DateTime.UtcNow < _heldUntil)
+                // From the hold's start, by who is still to act now: a human
+                // ending their turn mid-hold leaves only the short AI hold.
+                _heldUntil = _heldSince + hold;
+                TimeSpan left = _heldUntil - DateTime.UtcNow;
+                if (left > TimeSpan.Zero)
                 {
+                    // Go only releases a hold for a human: an AI teammate's
+                    // short hold ends by itself.
+                    Waiting = humanToAct ? PartnerWait.SetupHold : PartnerWait.None;
                     return true;
                 }
             }
+            Waiting = PartnerWait.None;
             lock (_replyLock)
             {
                 _reply = null;
@@ -914,14 +963,16 @@ internal sealed class SimAiPartnerBrain
         return sb.ToString();
     }
 
-    /// <summary>Some living teammate has not ended its turn yet.</summary>
-    private static bool AllyStillToAct(Player me)
+    /// <summary>Some living teammate has not ended its turn yet; with
+    /// <paramref name="humansOnly"/>, a human one (not an AI partner).</summary>
+    private static bool AllyStillToAct(Player me, bool humansOnly = false)
     {
         if (CombatManager.Instance.DebugOnlyGetState() is not { } combat)
         {
             return false;
         }
         return combat.Players.Any(p => !ReferenceEquals(p, me) && p.Creature is { IsAlive: true } &&
+                                       (!humansOnly || !SimAiPartner.IsPartner(p.NetId)) &&
                                        !CombatManager.Instance.IsPlayerReadyToEndTurn(p));
     }
 
@@ -1275,4 +1326,18 @@ internal static class SimAiPartnerPatches
             }
         }
     }
+}
+
+/// <summary>Why an AI partner is not playing its combat turn yet
+/// (SimAiPartnerBrain.Waiting); "Partner go" releases any of them.</summary>
+internal enum PartnerWait
+{
+    None,
+    /// <summary>"waits for your first play": a human has not played a card.</summary>
+    FirstPlay,
+    /// <summary>"waits until you end your turn".</summary>
+    EndTurn,
+    /// <summary>Its best move gets better after a human's setup play
+    /// (wait_for_ally); held up to "holds for your setup play".</summary>
+    SetupHold,
 }

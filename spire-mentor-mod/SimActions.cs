@@ -6,6 +6,7 @@
 // surfaces. Bodies moved verbatim from SimHotkeys (2026-08-21).
 
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace SpireMentor;
@@ -81,6 +82,32 @@ internal static class SimActions
     /// fights, you make every run-level decision (Autobattle.cs).</summary>
     public static void ToggleAutobattle(string surface) =>
         RequireAdvisor(surface, () => SimAdvisor.Instance.ToggleAutobattle());
+
+    /// <summary>"Partner: go" (Shift+F6 / toolbar), co-op with AI partners:
+    /// every partner that is waiting for you this turn (your first play, your
+    /// end turn, your setup play) plays the rest of it now. Needs no coach:
+    /// each partner runs on its own advisor.</summary>
+    public static void PartnersGo(string surface)
+    {
+        var released = new List<string>();
+        foreach (SimAiPartner partner in SimAiPartner.All)
+        {
+            if (partner.Brain.Go())
+            {
+                released.Add(partner.Label);
+            }
+        }
+        if (released.Count > 0)
+        {
+            SimActionLog.Note($"{surface}: {string.Join(", ", released)} plays now.");
+        }
+        else
+        {
+            SimActionLog.Note(SimAiPartner.All.Count == 0
+                ? $"{surface}: no AI partner in this run."
+                : $"{surface}: no AI partner is waiting for you.");
+        }
+    }
 
     /// <summary>
     /// F8 / the on-off button: AI off &lt;-&gt; on in the current style

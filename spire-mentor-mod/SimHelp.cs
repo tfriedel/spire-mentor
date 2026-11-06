@@ -168,6 +168,7 @@ internal static class SimHelp
         Row(sb, "F8", "turn the AI on / off (from Autopilot: take the controls back); the toolbar's Hints / Coach button switches style");
         Row(sb, "F5", "Coach: peek at the AI's pick for just the next decision (also the toolbar's Peek button)");
         Row(sb, "F6", "let the AI take just this one decision");
+        Row(sb, "Shift+F6", "co-op: a waiting AI partner plays its turn now");
         Row(sb, "F7", "let the AI keep playing until you stop it (press again to stop)");
         Row(sb, "Shift+F7", "autobattle: the AI plays the fights, you make every run-level decision, with a note on what changed since your last one; 1x becomes 2x (again to stop)");
         Row(sb, "F4", "show / hide the HUD");

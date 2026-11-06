@@ -11,6 +11,9 @@
 #   ... -BotHost                    the host plays hands-free too (advisor
 #                                   autoplay; embarks once everyone is in)
 #   ... -Speed 1                    game speed (default 3x)
+#   ... -Pick 2                     click partner 1's lobby slot twice (the
+#                                   character picker); no -BotHost
+#   ... -Pace end-turn -GoTest -BotHost   "Partner go" each turn it waits
 #
 # Human players next to the AI (phase 4): -Humans N hosts the game's own
 # lobby instead (`--fastmp host_standard`, ENet on 127.0.0.1:33771, as
@@ -36,6 +39,13 @@ param(
     [double]$Speed = 3.0,
     # The partners' pacing, overriding the settings: first-play, end-turn, now.
     [string]$Pace = "",
+    # Click AI partner 1's lobby slot N times (the character picker), then
+    # screenshot the lobby again (host_menu_lobby_picked.png). Leave out
+    # -BotHost: a hands-free host embarks before the clicks land.
+    [ValidateRange(0, 10)]
+    [int]$Pick = 0,
+    # Press "Partner go" once per turn when a partner has waited 1.5 s.
+    [switch]$GoTest,
     [string]$LogDir = "",
     [ValidateRange(0, 2)]
     [int]$Humans = 0,
@@ -87,6 +97,8 @@ if ($Continue) {
 }
 if ($Character) { $hostArgs += @("--spire-mentor-ai-partner-character", $Character) }
 if ($Pace) { $hostArgs += @("--spire-mentor-ai-partner-pace", $Pace) }
+if ($Pick -gt 0) { $hostArgs += @("--spire-mentor-ai-partner-pick", "$Pick") }
+if ($GoTest) { $hostArgs += "--spire-mentor-ai-partner-go-test" }
 if ($BotHost) { $hostArgs += "--spire-mentor-autoplay" }
 $proc = Start-Process -FilePath $exe -WorkingDirectory $GameDir -ArgumentList $hostArgs -PassThru
 $launch = @("host pid {0} args {1}" -f $proc.Id, ($hostArgs -join " "))

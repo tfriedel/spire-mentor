@@ -29,10 +29,12 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
 
@@ -58,6 +60,7 @@ internal sealed class SimToolbar
     private Button? _aiOnce;
     private Button? _aiAuto;
     private Button? _autobattle;
+    private Button? _partnerGo;
     private Label? _speedLabel;
     private Label? _statusLabel;
     private Label? _hintLabel;
@@ -288,6 +291,14 @@ internal sealed class SimToolbar
                 "shops, rest sites, events -- with a note on what changed since your last one (Shift+F7)",
                 () => SimActions.ToggleAutobattle("The Autobattle button"), SetHint);
             buttons.AddChild(_autobattle);
+
+            // Co-op with AI partners, in combat only (RefreshLiveLabels).
+            _partnerGo = SimUiKit.MakeButton("Partner go",
+                "Your AI partner waits for you (your first play, your end turn, or a setup play " +
+                "of yours it wants first): let it play the rest of its turn now (Shift+F6)",
+                () => SimActions.PartnersGo("The Partner go button"), SetHint);
+            _partnerGo.Visible = false;
+            buttons.AddChild(_partnerGo);
 
             buttons.AddChild(SimUiKit.MakeButton("-", "Game speed down: 4x, 3x, 2x, 1x (F9)",
                 () => SimActions.StepSpeed(-1), SetHint));
@@ -619,6 +630,37 @@ internal sealed class SimToolbar
             {
                 _autobattle.Text = label;
             }
+        }
+        if (_partnerGo != null && GodotObject.IsInstanceValid(_partnerGo))
+        {
+            RefreshPartnerGo(_partnerGo);
+        }
+    }
+
+    /// <summary>"Partner go": shown in a combat with AI partners, live while
+    /// one waits for you ("▶ Partner go", with the setup hold's seconds).</summary>
+    private static void RefreshPartnerGo(Button button)
+    {
+        IReadOnlyList<SimAiPartner> partners = SimAiPartner.All;
+        bool show = partners.Count > 0 && CombatManager.Instance.IsInProgress;
+        if (button.Visible != show)
+        {
+            button.Visible = show;
+        }
+        if (!show)
+        {
+            return;
+        }
+        SimAiPartner? waiting = partners.FirstOrDefault(p => p.Brain.Waiting != PartnerWait.None);
+        int seconds = waiting?.Brain.HoldSecondsLeft ?? 0;
+        string text = waiting == null ? "Partner go" : seconds > 0 ? $"▶ Partner go {seconds}s" : "▶ Partner go";
+        if (button.Text != text)
+        {
+            button.Text = text;
+        }
+        if (button.Disabled != (waiting == null))
+        {
+            button.Disabled = waiting == null;
         }
     }
 

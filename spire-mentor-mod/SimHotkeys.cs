@@ -16,6 +16,10 @@
 //       popular mod binds F3)
 //   F5  Coach style: peek at the AI's pick for the next decision only
 //   F6  AI takes this decision (advisor mode, combat)
+//   Shift+F6 co-op: every AI partner that is waiting (for your first play,
+//       your end turn or your setup play) plays the rest of its turn now.
+//       Not F3 (another popular mod binds it, see Ctrl+L) and not a Ctrl
+//       chord (game streaming such as Apollo drops those).
 //   F7  AI plays until I stop (toggle)
 //   Shift+F7 autobattle (toggle): the AI plays the fights, I make every
 //       run-level decision (Autobattle.cs)
@@ -66,6 +70,7 @@ public static class SimHotkeys
     private const string ActionRestartRoom = "spirementor_restart_room";
     private const string ActionCopyState = "spirementor_copy_state";
     private const string ActionReportBug = "spirementor_report_bug";
+    private const string ActionPartnerGo = "spirementor_partner_go";
 
     private static bool _installed;
 
@@ -93,13 +98,13 @@ public static class SimHotkeys
             {
                 return;
             }
-
             RegisterAction(ActionHelp, Key.F1);
             RegisterAction(ActionToggleHud, Key.F4);
             RegisterAction(ActionToggleLog, Key.L, ctrl: true);
             RegisterAction(ActionHideAll, Key.H, ctrl: true);
             RegisterAction(ActionPeek, Key.F5);
             RegisterAction(ActionAiOnce, Key.F6);
+            RegisterAction(ActionPartnerGo, Key.F6, shift: true);
             RegisterAction(ActionAiAuto, Key.F7);
             RegisterAction(ActionAutobattle, Key.F7, shift: true);
             RegisterAction(ActionToggleAdvisor, Key.F8);
@@ -118,7 +123,7 @@ public static class SimHotkeys
             BindActions(manager);
 
             _installed = true;
-            GD.Print("[SpireMentor] Hotkeys installed: F1=help, F4=HUD, Ctrl+L=log, Ctrl+H=hide all, F5=peek (Coach), F6=AI once, F7=AI auto, Shift+F7=autobattle, F8=AI on/off, F9/F10=speed -/+, Ctrl+Z=undo turn, Ctrl+Shift+Z=restart room, Ctrl+Shift+C=copy state, Ctrl+Shift+B=report a bug");
+            GD.Print("[SpireMentor] Hotkeys installed: F1=help, F4=HUD, Ctrl+L=log, Ctrl+H=hide all, F5=peek (Coach), F6=AI once, Shift+F6=AI partner go, F7=AI auto, Shift+F7=autobattle, F8=AI on/off, F9/F10=speed -/+, Ctrl+Z=undo turn, Ctrl+Shift+Z=restart room, Ctrl+Shift+C=copy state, Ctrl+Shift+B=report a bug");
         }
         catch (Exception ex)
         {
@@ -151,9 +156,17 @@ public static class SimHotkeys
         manager.PushHotkeyPressedBinding(ActionToggleLog, SimActions.ToggleLog);
         manager.PushHotkeyPressedBinding(ActionHideAll, SimActions.ToggleHideAll);
         manager.PushHotkeyPressedBinding(ActionPeek, SimActions.Peek);
-        manager.PushHotkeyPressedBinding(ActionAiOnce, () => SimActions.AiOnce("F6 (AI takes this decision)"));
-        // Godot matches an action's modifiers non-exactly, so Shift+F7 also
-        // presses the plain-F7 action; leave that one to autobattle.
+        // Godot matches an action's modifiers non-exactly, so Shift+F6 also
+        // presses the plain-F6 action (and Shift+F7 the plain-F7 one); leave
+        // those to partner go and autobattle.
+        manager.PushHotkeyPressedBinding(ActionAiOnce, () =>
+        {
+            if (!Input.IsKeyPressed(Key.Shift))
+            {
+                SimActions.AiOnce("F6 (AI takes this decision)");
+            }
+        });
+        manager.PushHotkeyPressedBinding(ActionPartnerGo, () => SimActions.PartnersGo("Shift+F6"));
         manager.PushHotkeyPressedBinding(ActionAiAuto, () =>
         {
             if (!Input.IsKeyPressed(Key.Shift))

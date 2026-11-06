@@ -136,10 +136,18 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     public static bool AiPartnerWaitForEndTurn { get; set; } = false;
 
     /// <summary>How long the AI partner holds a move its advisor says a
-    /// teammate's setup play would improve (Vulnerable on its target, block
-    /// on it): <c>wait_for_ally</c>. 0 = never hold.</summary>
-    [ConfigSlider(0.0, 10.0, 0.5, Format = "{0:0.0} s")]
-    public static double AiPartnerAllyWaitSeconds { get; set; } = 2.5;
+    /// human teammate's setup play would improve (Vulnerable on its target,
+    /// block on it): <c>wait_for_ally</c>. 0 = never hold; "Partner go"
+    /// (toolbar, Shift+F6) ends a hold early. Was AiPartnerAllyWaitSeconds (0-10 s,
+    /// default 2.5): renamed so a saved 2.5 does not outlive the new default.</summary>
+    [ConfigSlider(0.0, 60.0, 1.0, Format = "{0:0} s")]
+    public static double AiPartnerSetupHoldSeconds { get; set; } = 10.0;
+
+    /// <summary>The character each AI partner seat last played, by id
+    /// ("SILENT,,DEFECT"; blank = the seat's default): set by clicking a
+    /// partner's slot in the lobby (PartnerCharacters). Not on the settings
+    /// page.</summary>
+    public static string AiPartnerCharacters { get; set; } = "";
 
     /// <summary>Toolbar strip expanded/collapsed (SimToolbar pill).</summary>
     public static bool ToolbarExpanded { get; set; } = true;
@@ -239,10 +247,13 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             optionContainer.AddChild(CreateSectionHeader("Co-op AI partners (experimental)"));
             AddNote(optionContainer,
                 "An AI teammate plays its own seat during the same turn as you. By default it\n" +
-                "starts as soon as its board is ready; these make it let you go first.");
+                "starts as soon as its board is ready; these make it let you go first. When its\n" +
+                "best move needs your setup (Vulnerable, block), it holds it for you up to the\n" +
+                "time below. Shift+F6 or the toolbar's Partner go makes it play now.\n" +
+                "Click an AI partner in the lobby to change its character.");
             AddRow(optionContainer, "AI partner waits for your first play", nameof(AiPartnerWaitForFirstPlay), CreateRawTickboxControl);
             AddRow(optionContainer, "AI partner waits until you end your turn", nameof(AiPartnerWaitForEndTurn), CreateRawTickboxControl);
-            AddRow(optionContainer, "AI partner holds for your setup play", nameof(AiPartnerAllyWaitSeconds), CreateRawSliderControl);
+            AddRow(optionContainer, "AI partner holds for your setup play", nameof(AiPartnerSetupHoldSeconds), CreateRawSliderControl);
         }
 
         optionContainer.AddChild(CreateSectionHeader("Advisor backend"));
@@ -257,6 +268,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             "F8   AI on / off (from autopilot: take the controls back)\n" +
             "F5   Coach style: peek at the AI's next pick\n" +
             "F6   let the AI take just this one decision\n" +
+            "Shift+F6   co-op: a waiting AI partner plays its turn now\n" +
             "F7   let the AI keep playing until you stop it\n" +
             "Shift+F7   autobattle: the AI fights, you make the run's decisions\n" +
             "F4   show / hide the HUD          Ctrl+L action log\n" +
@@ -305,7 +317,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             {
                 cfg.AddLiveRow(container, "AI partner waits for your first play", nameof(AiPartnerWaitForFirstPlay), cfg.CreateRawTickboxControl);
                 cfg.AddLiveRow(container, "AI partner waits until you end your turn", nameof(AiPartnerWaitForEndTurn), cfg.CreateRawTickboxControl);
-                cfg.AddLiveRow(container, "AI partner holds for your setup play", nameof(AiPartnerAllyWaitSeconds), cfg.CreateRawSliderControl);
+                cfg.AddLiveRow(container, "AI partner holds for your setup play", nameof(AiPartnerSetupHoldSeconds), cfg.CreateRawSliderControl);
             }
             cfg.AddLiveRow(advanced, "Auto-launch Python advisor", nameof(AdvisorAutoLaunch), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(advanced, "Advisor command (blank = default)", nameof(AdvisorCommand), cfg.CreateRawLineEditControl);

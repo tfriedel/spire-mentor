@@ -209,6 +209,19 @@ public static class SimMp
     /// saved); null = the settings.</summary>
     public static string? AiPartnerPaceOverride => CmdlineValue("spire-mentor-ai-partner-pace");
 
+    /// <summary><c>--spire-mentor-ai-partner-pick N</c>: once the partners
+    /// are in the lobby, click AI partner 1's slot N times (synthetic mouse
+    /// clicks through the GUI, as a player's), then screenshot the lobby
+    /// (with <c>--spire-mentor-ai-partner-shot</c>): the character picker's
+    /// lane check.</summary>
+    public static int AiPartnerPickClicks =>
+        int.TryParse(CmdlineValue("spire-mentor-ai-partner-pick"), out int n) ? Math.Clamp(n, 0, 10) : 0;
+
+    /// <summary><c>--spire-mentor-ai-partner-go-test</c>: press "Partner go"
+    /// once per turn when a partner has waited 1.5 s (the go lane check,
+    /// with <c>-Pace end-turn</c> and a hands-free host).</summary>
+    public static bool AiPartnerGoTest => HasCmdlineArg("spire-mentor-ai-partner-go-test");
+
     /// <summary><c>--spire-mentor-ai-partner-no-advisor</c>: the partners play
     /// the first-legal fallback (the phase-1 behaviour; a quick lane).</summary>
     public static bool AiPartnerNoAdvisor => HasCmdlineArg("spire-mentor-ai-partner-no-advisor");
