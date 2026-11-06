@@ -41,6 +41,15 @@ Settings: [b]Panels → Settings[/b] on the toolbar (works mid-run), or Main men
 [h2]Co-op[/h2]
 The coach also works in co-op runs, as host or as a client, and your teammates do not need the mod. It advises you only, but its combat search sees the whole party: your teammates' cards, block, powers and orbs, and what their cards do to you. Undo and rewind are off in co-op, since they would roll back everyone's game.
 
+[b]AI partners (new, experimental):[/b] play co-op with AI teammates instead of, or next to, your friends. Each partner takes a seat of its own, with its own character, deck and decisions, and plays it with its own copy of the coach.
+[list]
+[*]Multiplayer → Host shows a [b]With AI partners[/b] entry: a co-op run on your PC alone.
+[*]A lobby you host gets [b]Add AI partner[/b] / [b]Remove AI partner[/b] tiles (up to three partners). Friends join as usual and play next to the AI. They do not need the mod; their game shows the partner without a name.
+[*]Save and continue work: loading the run brings the partners back.
+[*]The mod settings ([i]Co-op AI partners[/i]) say whether a partner waits for your first play, or until you end your turn, before it moves.
+[/list]
+Each partner runs one more advisor process while the run lasts, so expect more CPU use. It is new: if a partner gets stuck or acts strangely, please send a bug report (Ctrl+Shift+B).
+
 [h2]The workbench[/h2]
 The toolbar's [b]Workbench → Open workbench[/b] opens a page in your browser that follows your run as you play: every decision with what the AI advised at the time, regret reviews and search trees for any past step, the run tree (click a save point to rewind the real game), live search over the board, replays and a combat sandbox. [b]Workbench → Copy state[/b] (or Ctrl+Shift+C) puts the current position on the clipboard; paste it into the workbench's [b]Import state[/b] to try other lines. It is served by the coach on [i]127.0.0.1:8079[/i] and runs entirely on your machine.
 

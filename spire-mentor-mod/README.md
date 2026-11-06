@@ -165,7 +165,7 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
 | `client_run_config` | `false` | Let the TCP client pick character/ascension/seed via the `run_config`/`start_run` handshake (PROTOCOL.md) |
 | `debug_player_hp` | `0` | Testing cheat: `>0` sets player HP at run start; never use for measurements |
 | `overlay` | `true` | Render autopilot `annotations` (status chip + per-card score labels) in the HUD |
-| `ai_partners_menu` | `false` | Experimental: a "With AI partners" entry in the multiplayer host menu, a co-op run with an AI teammate in this one game process, and "Add AI partner" / "Remove AI partner" tiles in the lobby you host (also a Steam lobby: friends join as usual and play next to the AI; they need no mod, and their game shows the partner without a name). The teammate runs its own advisor (one more advisor process while the run lasts); see `docs/plans/2026-11-05-ai-coop-partners.md` for what it does not handle yet |
+| `ai_partners_menu` | `true` | Experimental (`false` hides it): a "With AI partners" entry in the multiplayer host menu, a co-op run with an AI teammate in this one game process, and "Add AI partner" / "Remove AI partner" tiles in the lobby you host (also a Steam lobby: friends join as usual and play next to the AI; they need no mod, and their game shows the partner without a name). The teammate runs its own advisor (one more advisor process while the run lasts); see `docs/plans/2026-11-05-ai-coop-partners.md` for what it does not handle yet |
 | `stall_timeout_seconds` | `300` | Mod-side stall limit replacing the game's 30 s AutoSlay watchdog |
 | `run_timeout_minutes` | `360` | Absolute per-run wall-clock cap |
 

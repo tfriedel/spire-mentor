@@ -188,11 +188,12 @@ public sealed class SimConfig
 
     /// <summary>
     /// Show "With AI partners" in the multiplayer host menu (SimAiPartnerMenu;
-    /// docs/plans/2026-11-05-ai-coop-partners.md). Off by default while the
-    /// feature is experimental (no save / continue, no human teammate next
-    /// to the AI yet); `--spire-mentor-ai-partners N` shows it too.
+    /// docs/plans/2026-11-05-ai-coop-partners.md), the lobby's "Add AI
+    /// partner" tiles and the settings' AI-partner section. On by default:
+    /// a player finds the feature without editing this file; `false` hides
+    /// all three. `--spire-mentor-ai-partners N` shows them regardless.
     /// </summary>
-    public bool AiPartnersMenu { get; init; } = false;
+    public bool AiPartnersMenu { get; init; } = true;
 
     /// <summary>
     /// Mod-side stall limit, in seconds, replacing the game's hard-coded

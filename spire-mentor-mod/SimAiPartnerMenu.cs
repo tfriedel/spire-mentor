@@ -51,9 +51,9 @@ internal static class SimAiPartnerMenu
         }
     }
 
-    /// <summary>Opt-in while the feature is experimental:
-    /// <c>ai_partners_menu</c> in SpireMentor.conf, or the test lane's
-    /// <c>--spire-mentor-ai-partners N</c>.</summary>
+    /// <summary>On unless <c>"ai_partners_menu": false</c> in
+    /// SpireMentor.conf; the test lane's <c>--spire-mentor-ai-partners N</c>
+    /// forces it on.</summary>
     internal static bool Enabled => SimConfig.Instance.AiPartnersMenu || SimMp.AiPartnersOverride > 0 || SimMp.AiPartnerJoinOverride > 0;
 
     private static void AddButton(NMultiplayerHostSubmenu submenu)

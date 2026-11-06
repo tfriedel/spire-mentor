@@ -27,7 +27,7 @@ public static class MainFile
 {
     public const string ModId = "SpireMentor";
     // Keep in sync with SpireMentor.json "version" (package.ps1 reads that one).
-    public const string ModVersion = "0.9.0";
+    public const string ModVersion = "0.9.1";
 
     private static Harmony? _patcher;
     private static SimAutoSlayer? _autoSlayer;
