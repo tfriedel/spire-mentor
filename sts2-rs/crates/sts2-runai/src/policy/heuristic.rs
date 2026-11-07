@@ -218,6 +218,12 @@ impl HeuristicPolicy {
     }
 
     fn choose_card_reward(&mut self, view: &VisibleRunView, actions: &[RunAction]) -> usize {
+        // An egg queued beside the open card reward is offered first, with
+        // the card options still on screen (GH #1094): take it, since it only
+        // upgrades the options.
+        if actions.contains(&RunAction::PickRelicReward) {
+            return Self::position_of(actions, &RunAction::PickRelicReward);
+        }
         if !view.offers.card_rewards.is_empty() {
             let (pick, scores) = picks::best_card_reward(view, &self.v, &view.offers.card_rewards);
             self.set_scores(scores);

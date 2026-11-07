@@ -129,3 +129,37 @@ def test_path_class_strips_indices_and_len():
     assert path_class("piles.hand[3]") == "piles.hand"
     assert path_class("monsters[0].powers[1].amount") == "monsters.powers.amount"
     assert path_class("piles.draw.len") == "piles.draw"
+
+
+def _with_afflictions(cs_affs: list, cs_amounts: list) -> dict:
+    cs = copy.deepcopy(_csharp())
+    cs["hand_afflictions"] = cs_affs
+    cs["hand_affliction_amounts"] = cs_amounts
+    return cs
+
+
+def test_bound_affliction_split_is_reported():
+    """GH #1150: a Bound split shows on the step it happens."""
+    cs = _with_afflictions(["BOUND", None], [2, 0])
+    assert diff_full(project_csharp(cs), project_rust_dict(_rust())) == [
+        {"path": "hand_afflictions[0]", "csharp": {"id": "BOUND", "amount": 2}, "rust": None}
+    ]
+    rs = _rust()
+    rs["deck"]["hand"][0]["affliction"] = "Bound"
+    rs["deck"]["hand"][0]["affliction_stacks"] = 2
+    assert diff_full(project_csharp(cs), project_rust_dict(rs)) == []
+
+
+def test_affliction_amount_split_is_reported():
+    cs = _with_afflictions(["BOUND", None], [2, 0])
+    rs = _rust()
+    rs["deck"]["hand"][0]["affliction"] = "Bound"
+    rs["deck"]["hand"][0]["affliction_stacks"] = 1
+    paths = [d["path"] for d in diff_full(project_csharp(cs), project_rust_dict(rs))]
+    assert paths == ["hand_afflictions[0].amount"]
+
+
+def test_oracle_without_afflictions_skips_the_check():
+    rs = _rust()
+    rs["deck"]["hand"][0]["affliction"] = "Bound"
+    assert diff_full(project_csharp(_csharp()), project_rust_dict(rs)) == []

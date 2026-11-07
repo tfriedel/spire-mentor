@@ -293,14 +293,9 @@ pub fn build_scenario_state_with_run_rng(
     potion_slots: Option<u8>,
     run_rng_init: Option<RunRngInit<'_>>,
 ) -> Result<CoreCombatState, String> {
-    if let Some(potion_slots) = potion_slots {
-        if usize::from(potion_slots) > sts2_core::MAX_POTIONS {
-            return Err(format!(
-                "build_scenario_state: {potion_slots} potion slots exceed MAX_POTIONS ({})",
-                sts2_core::MAX_POTIONS
-            ));
-        }
-    }
+    // No upper bound on `potion_slots`: C# `Player.MaxPotionCount` stacks past
+    // five (Potion Belt + Phial Holster, or Alchemical Coffer), and so does the
+    // engine's belt (`PlayerCombatState::effective_potion_slots`; GH #1094).
     // Map the scenario's capitalized class string to a `CharacterId`. The
     // deck loader (`resolve_card_name` below) already searches every
     // character's spec slice, so any ported character can build a scenario;
@@ -487,7 +482,7 @@ pub fn build_scenario_state_with_run_rng(
         creature_uid: None,
         pet_uid: None,
         shivs_played_this_turn: 0,
-        cards_played_this_turn: [0; 5],
+        cards_played_this_turn: [0; 6],
         powered_hits_this_turn: 0,
         powered_hits_by_target_this_turn: smallvec::SmallVec::new(),
         powered_hits_at_card_play_start: 0,
@@ -946,21 +941,35 @@ mod tests {
             3,
             "the toad's rock fills the free third slot"
         );
-        assert!(super::build_scenario_state_with_slots(
+        // A belt bigger than the old five-slot cap (Alchemical Coffer: 3 + 4)
+        // builds, and the toad's rock lands in its seventh slot (GH #1094).
+        let six: Vec<String> = ["FIRE_POTION", "BLOCK_POTION", "ENERGY_POTION"]
+            .iter()
+            .cycle()
+            .take(6)
+            .map(|s| (*s).to_string())
+            .collect();
+        let seven = super::build_scenario_state_with_slots(
             1,
             "Ironclad",
             &deck,
             70,
             80,
-            &[],
-            &[],
+            &relics,
+            &six,
             "SHRINKER_BEETLE_WEAK",
-            10,
+            1,
             None,
             None,
-            u8::try_from(sts2_core::MAX_POTIONS + 1).unwrap(),
+            7,
         )
-        .is_err());
+        .expect("a 7-slot belt builds");
+        assert_eq!(seven.player.potion_slots, 7);
+        assert_eq!(
+            seven.player.potions.len(),
+            7,
+            "the toad's rock fills the 7th slot"
+        );
     }
 
     /// GH #893: A4 Tight Belt leaves the scenario player 2 potion slots.

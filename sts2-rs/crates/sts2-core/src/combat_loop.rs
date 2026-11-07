@@ -610,13 +610,13 @@ fn reset_seat_for_turn(state: &mut CombatState) {
     // (`card_play_effects.py:411-413`).
     state.player.shivs_played_this_turn = 0;
     // Bead `sts2-rs-r6l9`: reset the per-turn cards-played bucket
-    // counter (Attack / Skill / Power / Curse / Status). Mirrors
+    // counter (Attack / Skill / Power / Curse / Status / Quest). Mirrors
     // Python's `_played_cards_this_turn = []` at the top of
     // `_start_player_turn` (`sts2-rl-agent@01c094d:sts2_env/core/
     // combat.py:678`). Read by
     // `CombatState::count_player_cards_played_this_turn` (the analogue
     // of Python's `count_cards_played_this_turn(owner, card_type=...)`).
-    state.player.cards_played_this_turn = [0; 5];
+    state.player.cards_played_this_turn = [0; 6];
     state.player.card_plays_started_this_turn = 0;
     // GH #363 A2: C# `VoidFormPower.BeforeSideTurnStart` (VoidFormPower.cs:75-83)
     // zeroes its own `Data.cardsPlayedThisTurn` when the owner is among the
@@ -7879,7 +7879,7 @@ pub fn consume_free_card_power(
         CardType::Attack => PowerKind::FreeAttack,
         CardType::Skill => PowerKind::FreeSkill,
         CardType::Power => PowerKind::FreePower,
-        CardType::Curse | CardType::Status => return None,
+        CardType::Curse | CardType::Status | CardType::Quest => return None,
     };
     // J07: this runs on every card play and almost never finds a Free*
     // power. `present_kinds` is a superset of every live kind, so with no
@@ -9198,9 +9198,14 @@ fn clear_when_played_costs(state: &mut CombatState, card_idx: usize) {
     state.cards[card_idx]
         .combat_vars
         .zero(crate::cards::VarKey::CostReductionUntilPlayed);
-    state.cards[card_idx]
-        .combat_vars
-        .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
+    // A Transfigure `+1` dies with the zero it followed: free-this-turn /
+    // until-played clear on play, Flatten's `SetThisTurn(0)` does not
+    // (GH #1150).
+    if !crate::hooks::flatten_zeroed(state, &state.cards[card_idx]) {
+        state.cards[card_idx]
+            .combat_vars
+            .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
+    }
     // Bead `sts2-rs-mnjxg`: SneckoOil sets the randomized
     // cost via C# `EnergyCost.SetThisTurnOrUntilPlayed` — the SAME
     // `EndOfTurn | WhenPlayed` modifier as `SetToFreeThisTurn` above. So a
@@ -9711,11 +9716,11 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
         let before_hooks_live = replay_before_card_played_live(state);
         if before_hooks_live {
             dispatch_relic_before_card_played_replay(state, &played_ctx, resolved_cost);
-            crate::hooks::dispatch_before_card_played_powers_for_card(
+            crate::hooks::dispatch_before_card_played_powers_on_replay(
                 state,
                 replay_resolved_cost(state, card_uid, resolved_cost),
                 card_is_ethereal,
-                Some(card_uid),
+                card_uid,
             );
             // v0.111.0: Juggling's `BeforeCardPlayed` runs per play iteration
             // (decomp JugglingPower.cs:36). No-op before v0.111.0.
@@ -9821,11 +9826,11 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
             let before_hooks_live = replay_before_card_played_live(state);
             if before_hooks_live {
                 dispatch_relic_before_card_played_replay(state, &played_ctx, resolved_cost);
-                crate::hooks::dispatch_before_card_played_powers_for_card(
+                crate::hooks::dispatch_before_card_played_powers_on_replay(
                     state,
                     replay_resolved_cost(state, card_uid, resolved_cost),
                     card_is_ethereal,
-                    Some(card_uid),
+                    card_uid,
                 );
                 // v0.111.0: Juggling's `BeforeCardPlayed` runs per play iteration
                 // (decomp JugglingPower.cs:36). No-op before v0.111.0.
@@ -11217,7 +11222,8 @@ pub fn resolve_inline_auto_play_choices(state: &mut CombatState) {
 /// Record one FINISHED auto-play in the per-turn play bookkeeping that C#'s
 /// `History.CardPlaysFinished` feeds: the per-turn `cards_played_this_turn`
 /// bucket (read by Conflagration / Juggling / Finisher / LunarBlast / FTL),
-/// the combat-long ethereal tally, and the Stomp/Pinpoint per-card cost shaves.
+/// the combat-long ethereal tally, and the Pinpoint per-card cost shave (Stomp's
+/// is a `BeforeCardPlayed` hook, applied pre-body by the auto-play's dispatch).
 /// Mirrors the identical hand-play sequence (combat_loop.rs:4735-4764). Called
 /// once for the initial auto-play AND once per OneTwoPunch/base_replay replay,
 /// so a replayed scaling Attack observes its own earlier plays — matching C#'s
@@ -12485,11 +12491,11 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
             let before_played_listeners = state.cards.len();
             if before_hooks_live {
                 dispatch_relic_before_card_played_replay(state, &played_ctx, auto_energy_value);
-                crate::hooks::dispatch_before_card_played_powers_for_card(
+                crate::hooks::dispatch_before_card_played_powers_on_replay(
                     state,
                     replay_resolved_cost(state, top_uid, auto_resolved_cost),
                     auto_card_is_ethereal,
-                    Some(top_uid),
+                    top_uid,
                 );
                 // v0.111.0: Juggling's `BeforeCardPlayed` runs per play iteration
                 // (decomp JugglingPower.cs:36). No-op before v0.111.0.

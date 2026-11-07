@@ -75,7 +75,7 @@ fn ripple_basin_blocks_only_after_a_turn_without_attacks() {
 fn a_teammates_play_buckets_round_trip() {
     install();
     let st = state_from_json(&board(0, 2)).expect("builds");
-    assert_eq!(st.allies[0].cards_played_this_turn, [2, 0, 0, 0, 0]);
+    assert_eq!(st.allies[0].cards_played_this_turn, [2, 0, 0, 0, 0, 0]);
     let out = sts2_wire::emit::combat_state_to_value(&st).expect("emits");
     assert_eq!(
         out["allies"][0]["cards_played_this_turn"],

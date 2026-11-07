@@ -131,9 +131,11 @@ fn foreign_applier(
 /// Copy one snapshotted debuff onto `enemy` — C#'s `ModifyAmount` / `Apply`
 /// branch with the original applier.
 ///
-/// A copy of a monster's own debuff (`applier` = that monster) is invisible
-/// to Unsettling Lamp, so it neither captures nor doubles it, and it is not a
-/// player-applied debuff for Sleight of Flesh. Rust treated every copy as
+/// A copy of a monster's own debuff (`applier` = that monster) cannot capture
+/// Unsettling Lamp's trigger, and it is not a player-applied debuff for
+/// Sleight of Flesh. It IS doubled once an earlier player-applied copy of the
+/// same play captured the Lamp: the doubling arm checks only the card source
+/// (GH #1150, `relic_effects::helpers::unsettling_lamp_doubles`). Rust treated every copy as
 /// player-applied: Misery copying BowlbugRock's Imbalanced 1 onto its Nectar
 /// sibling under the Lamp landed Imbalanced 2 and burnt the Lamp's trigger
 /// (loadout Necrobinder 1096 v0.107.1 act2; C# Imbalanced 1).

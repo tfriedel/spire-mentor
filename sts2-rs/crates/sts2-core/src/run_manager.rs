@@ -1521,6 +1521,11 @@ impl RunManager {
                 // (c) both empty → unreachable (handler would have phase-
                 //     advanced to MapChoice; emit empty so a stuck loop is
                 //     visible to the caller rather than papered over).
+                // An egg queued beside an open card reward is offered FIRST
+                // (GH #1094); see [`Self::egg_relic_reward_first`].
+                if self.egg_relic_reward_first() {
+                    return vec![RunAction::PickRelicReward, RunAction::SkipRelic];
+                }
                 if let Some(bundles) = &self.card_reward_bundles {
                     // Scroll Boxes: pick exactly one pack, no skip, no
                     // Pael's Wing sacrifice (C# `FromChooseABundleScreen`
@@ -2722,6 +2727,37 @@ impl RunManager {
         ActionResult::Advanced
     }
 
+    /// Whether the relic-reward queue is offered BEFORE the open card reward:
+    /// an egg (Frozen / Molten / Toxic) is queued and a standard card reward
+    /// is open (not a Scroll Boxes bundle, not a custom choose-a-card
+    /// screen, neither of which is a C# `CardReward` listening for
+    /// `RelicObtained`).
+    ///
+    /// C# shows the relic and the card reward on one screen, in either order.
+    /// Taking the egg first upgrades the matching options
+    /// (`CardReward.OnRelicObtained`, CardReward.cs:169-182, both builds), so
+    /// that order is never worse; the engine offers the queue first instead of
+    /// adding a relic pick to the card screen, which keeps every decision's
+    /// action set unchanged for trained policies (the e2e contract gives a
+    /// card-reward decision only pick / skip / sacrifice). The queue is taken
+    /// last-first as usual, so a non-egg relic queued after the egg is
+    /// offered before it. With no egg queued nothing changes: the card reward
+    /// comes first. GH #1094.
+    fn egg_relic_reward_first(&self) -> bool {
+        self.phase == Phase::CardReward
+            && !self.card_reward_options.is_empty()
+            && self.card_reward_bundles.is_none()
+            && !self.card_offer_choose_screen
+            && self.run_state.relic_rewards.iter().any(|r| {
+                matches!(
+                    r.relic_id,
+                    crate::RelicId::FrozenEgg
+                        | crate::RelicId::MoltenEgg
+                        | crate::RelicId::ToxicEgg
+                )
+            })
+    }
+
     /// A populated `CardReward` listens for `RelicObtained` and runs the new
     /// relic's `TryModifyCardRewardOptionsLate` over its shown options
     /// (CardReward.cs:119,169-182, both builds). The Elite / BlackStar /
@@ -3294,9 +3330,14 @@ impl RunManager {
         // follow-up-reward listener (WarPaint et al.) queues a
         // player-pickable reward that `advance_after_card_reward` then
         // surfaces. Bead `sts2-rs-wt4w1`.
+        let relics_before = self.run_state.relics.len();
         if let Some(idx) = self.run_state.relic_rewards.len().checked_sub(1) {
             let _ = self.run_state.accept_relic_reward(idx);
         }
+        // An egg taken while its card reward is still open upgrades the
+        // shown options (`CardReward.OnRelicObtained`), as when the egg came
+        // with the combat rewards. A no-op when no card reward is open.
+        self.apply_obtained_eggs_to_open_card_reward(relics_before);
         // Bead `sts2-rs-l0wbw` (GH #70): same C# `TestMode.IsOn`
         // auto-resolution as `do_event_choice` — if accepting this relic
         // fired an after-obtained listener that queued more rewards
@@ -10214,6 +10255,80 @@ mod tests {
         rm.run_state.relics.push(crate::RelicId::MoltenEgg);
         rm.apply_obtained_eggs_to_open_card_reward(before);
         assert_eq!(rm.card_reward_upgraded, vec![true; 3]);
+    }
+
+    /// A card reward open with `relic` queued beside it.
+    fn card_reward_with_queued_relic(relic: crate::RelicId) -> RunManager {
+        crate::run_effects::register_modify_card_reward_options_late(
+            crate::RelicId::MoltenEgg,
+            upgrade_all_if_molten_egg as crate::run_effects::ModifyCardRewardOptionsLateRunFn,
+        );
+        let mut rm = RunManager::new(0, CharacterId::Ironclad);
+        rm.set_phase(Phase::CardReward);
+        rm.card_reward_options = vec![crate::cards::CardId::Anger; 3];
+        rm.card_reward_upgraded = vec![false; 3];
+        rm.run_state.offer_relic_rewards(relic, 1);
+        rm
+    }
+
+    /// GH #1094: an egg queued beside an open card reward is offered first,
+    /// as its own relic decision (no new action on the card screen), and
+    /// taking it upgrades the shown options before the card pick.
+    #[test]
+    fn a_queued_egg_is_offered_before_the_card_reward_and_upgrades_it() {
+        let mut rm = card_reward_with_queued_relic(crate::RelicId::MoltenEgg);
+        assert_eq!(
+            rm.get_available_actions(),
+            vec![RunAction::PickRelicReward, RunAction::SkipRelic]
+        );
+        assert_eq!(
+            rm.take_action(RunAction::PickRelicReward),
+            ActionResult::Advanced
+        );
+        assert!(rm.run_state.relics.contains(&crate::RelicId::MoltenEgg));
+        assert_eq!(rm.phase, Phase::CardReward, "the card reward is still open");
+        assert_eq!(rm.card_reward_upgraded, vec![true; 3]);
+        let actions = rm.get_available_actions();
+        assert!(actions.contains(&RunAction::PickCardReward { idx: Some(0) }));
+        assert!(!actions.contains(&RunAction::PickRelicReward));
+    }
+
+    /// Skipping the egg leaves the card reward as it was.
+    #[test]
+    fn skipping_the_queued_egg_leaves_the_card_reward_unupgraded() {
+        let mut rm = card_reward_with_queued_relic(crate::RelicId::MoltenEgg);
+        assert_eq!(rm.take_action(RunAction::SkipRelic), ActionResult::Advanced);
+        assert!(!rm.run_state.relics.contains(&crate::RelicId::MoltenEgg));
+        assert_eq!(rm.card_reward_upgraded, vec![false; 3]);
+        assert!(rm
+            .get_available_actions()
+            .contains(&RunAction::PickCardReward { idx: Some(0) }));
+    }
+
+    /// Any other relic keeps the old order: card reward first, then the
+    /// relic decision.
+    #[test]
+    fn a_queued_non_egg_relic_still_comes_after_the_card_reward() {
+        let mut rm = card_reward_with_queued_relic(crate::RelicId::Anchor);
+        let actions = rm.get_available_actions();
+        assert!(actions.contains(&RunAction::PickCardReward { idx: Some(0) }));
+        assert!(!actions.contains(&RunAction::PickRelicReward));
+        let _ = rm.take_action(RunAction::PickCardReward { idx: Some(0) });
+        assert_eq!(
+            rm.get_available_actions(),
+            vec![RunAction::PickRelicReward, RunAction::SkipRelic]
+        );
+    }
+
+    /// A custom choose-a-card screen (HeftyTablet, Brain Leech) is not a C#
+    /// `CardReward` and does not listen for `RelicObtained`: no reordering.
+    #[test]
+    fn a_choose_screen_does_not_put_the_egg_first() {
+        let mut rm = card_reward_with_queued_relic(crate::RelicId::MoltenEgg);
+        rm.card_offer_choose_screen = true;
+        assert!(rm
+            .get_available_actions()
+            .contains(&RunAction::PickCardReward { idx: Some(0) }));
     }
 
     fn lords_parasol_shop_inventory() -> crate::shop::ShopInventory {

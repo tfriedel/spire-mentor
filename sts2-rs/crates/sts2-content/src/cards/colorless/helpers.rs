@@ -138,13 +138,9 @@ pub(crate) fn move_card_from_draw_to_hand_by_type(
         .draw
         .iter()
         .copied()
-        .filter(|uid| {
-            // C# filters `c.Type == kind`; the Quest cards are
-            // `CardType.Quest` (`Dowsing.cs:45`), which Rust models as
-            // Skills, so Secret Technique must not fetch them.
-            let card = &state.cards[uid.0.get() as usize - 1];
-            card.card_type == kind && !card.is_quest()
-        })
+        // C# filters `c.Type == kind`; the Quest cards are `CardType.Quest`
+        // (`Dowsing.cs:45`), so Secret Technique never fetches them.
+        .filter(|uid| state.cards[uid.0.get() as usize - 1].card_type == kind)
         .collect();
     // Mirror C# `FromCombatPile`'s `OrderBy(Rarity).ThenBy(Id)` Draw-pile
     // sort (stable, no `upgraded` key). Harmless for the 0/1-candidate arms.
@@ -171,6 +167,9 @@ pub(crate) fn move_card_from_draw_to_hand_by_type(
             // which an auto-play from the draw pile (Mayhem) can reach.
             if let Some(pos) = state.player.draw.iter().position(|u| u == uid) {
                 let card = state.player.draw.remove(pos);
+                // A pinned draw card leaves no stale pin behind, as the
+                // multi-candidate select resolution does (#1105).
+                sts2_core::cards::unpin(&mut state.player, card);
                 let _ = sts2_core::cards::try_add_to_hand(&mut state.player, card);
             }
         }
@@ -871,11 +870,9 @@ pub fn transform_card_to_random_for_hook(
     // Quest / Event / Ancient / **Token** originals are FORCED onto the
     // ColorlessCardPool by C#
     // (`(Type != Quest && Rarity not in {Event,Ancient,Token}) ? Pool :
-    // ColorlessCardPool`, CardFactory.cs:173). `CardType.Quest` has no Rust
-    // variant (Quest cards are modelled as Unplayable Skills), but every
-    // Quest-TYPE card (ByrdonisEgg, LanternKey, SpoilsMap, Dowsing) is also
-    // `CardRarity.Quest` and no other card is, so the rarity stands in for the
-    // type: Entropy on SPOILS_MAP rolls the colorless pool (random-loadout
+    // ColorlessCardPool`, CardFactory.cs:173). Every Quest-TYPE card
+    // (ByrdonisEgg, LanternKey, SpoilsMap, Dowsing) is also `CardRarity.Quest`
+    // and no other card is, so the rarity stands in for the type: Entropy on SPOILS_MAP rolls the colorless pool (random-loadout
     // v0.107.1 seed 1198: C# FINESSE, not the character pool's DARK_EMBRACE).
     // The Token arm is the
     // fix for bead `sts2-rs-p52dg`: the per-combat token cards (GiantRock,

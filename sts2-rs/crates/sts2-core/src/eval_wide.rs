@@ -411,7 +411,10 @@ fn count_pile_card_types(
         if let Some(c) = state.cards.iter().find(|c| c.uid == *uid) {
             match c.card_type {
                 CardType::Attack => counts.attack += 1,
-                CardType::Skill => counts.skill += 1,
+                // Quest cards were modelled as Skills before GH #1111; keep
+                // them in the skill bucket so the wide feature layout (and
+                // nets trained on it) is unchanged.
+                CardType::Skill | CardType::Quest => counts.skill += 1,
                 CardType::Power => counts.power += 1,
                 CardType::Curse => counts.curse += 1,
                 CardType::Status => counts.status += 1,
@@ -432,7 +435,10 @@ fn count_hand_card_types(state: &CombatState) -> PileTypeCounts {
         if let Some(c) = state.cards.iter().find(|c| c.uid == *uid) {
             match c.card_type {
                 CardType::Attack => counts.attack += 1,
-                CardType::Skill => counts.skill += 1,
+                // Quest cards were modelled as Skills before GH #1111; keep
+                // them in the skill bucket so the wide feature layout (and
+                // nets trained on it) is unchanged.
+                CardType::Skill | CardType::Quest => counts.skill += 1,
                 CardType::Power => counts.power += 1,
                 CardType::Curse => counts.curse += 1,
                 CardType::Status => counts.status += 1,

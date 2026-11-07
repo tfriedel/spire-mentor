@@ -517,7 +517,15 @@ fn hash_enemies_cards_items_pending_skipping<E: HashEncoding, H: Hasher>(
         // card (this block runs once per card, every node expansion).
         c.card_id.hash(h);
         c.cost.hash(h);
-        c.card_type.hash(h);
+        // GH #1111 split Quest out of Skill. A Quest card's type is a pure
+        // function of its `card_id` (hashed above), so hashing it as the
+        // Skill it used to be loses nothing and keeps every digest — and the
+        // search streams seeded from it — identical to before the split.
+        if c.card_type == crate::cards::CardType::Quest {
+            crate::cards::CardType::Skill.hash(h);
+        } else {
+            c.card_type.hash(h);
+        }
         c.target_type.hash(h);
         c.upgraded.hash(h);
         c.base_damage.hash(h);

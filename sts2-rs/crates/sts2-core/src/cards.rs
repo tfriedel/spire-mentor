@@ -192,6 +192,10 @@ pub enum VarKey {
     /// chokepoints (`spawn_card_into_pile`,
     /// `spawn_card_into_draw_pile_random_position`,
     /// `create_character_cards_into_arena`). Bead `sts2-rs-a4096`.
+    ///
+    /// The value says how: [`GENERATED_FRESH`] for a new card,
+    /// [`GENERATED_AS_CLONE`] for a [`Card::create_clone`] copy (C#
+    /// `IsClone`). Readers that only need "not from the deck" test `!= 0`.
     GeneratedInCombat,
     /// Marker (non-zero = flag set): this card's `cost` currently holds an
     /// ABSOLUTE local cost modifier (C# `LocalCostModifier.Absolute`) —
@@ -807,10 +811,13 @@ impl CardTags {
 // Card POD + supporting enums
 // ---------------------------------------------------------------------------
 
-/// Card type. Mirrors `sts2_env/core/enums.py::CardType`.
+/// Card type. Mirrors C# `CardType` (`Entities.Cards/CardType.cs`) minus
+/// its `None` placeholder.
 ///
-/// `Quest` is intentionally omitted for Phase 1 — token deck only contains
-/// the standard five buckets. Phase 6 may add it.
+/// `Quest` is the type of the four Quest cards (ByrdonisEgg, LanternKey,
+/// SpoilsMap and v0.111.0's Dowsing — each `base(.., CardType.Quest, ..)`).
+/// It used to be folded into `Skill`, which made every `== Skill` check
+/// match them where C#'s `Type == CardType.Skill` does not (GH #1111).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CardType {
     Attack,
@@ -818,6 +825,7 @@ pub enum CardType {
     Power,
     Curse,
     Status,
+    Quest,
 }
 
 impl CardType {
@@ -825,7 +833,7 @@ impl CardType {
     /// per-turn cards-played counter in
     /// [`crate::PlayerCombatState::cards_played_this_turn`] (bead
     /// `sts2-rs-r6l9`). Matches enum declaration order:
-    /// `Attack=0`, `Skill=1`, `Power=2`, `Curse=3`, `Status=4`.
+    /// `Attack=0`, `Skill=1`, `Power=2`, `Curse=3`, `Status=4`, `Quest=5`.
     #[must_use]
     pub const fn index(self) -> usize {
         match self {
@@ -834,6 +842,7 @@ impl CardType {
             CardType::Power => 2,
             CardType::Curse => 3,
             CardType::Status => 4,
+            CardType::Quest => 5,
         }
     }
 }
@@ -980,6 +989,14 @@ impl crate::inline_kv::InlineKvKey for EnchantmentId {
 /// Overflow still panics loudly (see [`crate::inline_kv`]); the guard test
 /// is `combat_vars_capacity_holds_worst_case_distinct_key_set`.
 pub type CombatVars = crate::inline_kv::InlineKv<VarKey, 16>;
+
+/// [`VarKey::GeneratedInCombat`] value of a card generated fresh mid-combat.
+pub const GENERATED_FRESH: i32 = 1;
+/// [`VarKey::GeneratedInCombat`] value of a [`Card::create_clone`] copy (C#
+/// `CardModel.IsClone`). A clone is generated mid-combat too, so it reuses
+/// that flag's slot rather than adding a key: the inline var store's
+/// worst-case key count stays at its capacity of 16.
+pub const GENERATED_AS_CLONE: i32 = 2;
 
 /// `Card::enchantments` storage: fixed-capacity `Copy` map (was
 /// `SmallVec<[(EnchantmentId, i32); 2]>` with rare heap spill). Capacity 6:
@@ -1200,11 +1217,44 @@ impl Card {
     /// (Bolas.cs:41-46, ThrummingHatchet.cs:35-40), so the copy loses the
     /// `ReturnIfPlayedRound` stamp. Callers spawn the result (which assigns the
     /// new uid).
+    ///
+    /// The copy is marked as a clone ([`Self::is_clone`], C#
+    /// `CardModel.IsClone`: `CreateClone` sets `_cloneOf`, CardModel.cs).
+    /// Every clone a C# `IsClone` reader can see goes through here: Stomp /
+    /// Pinpoint copies (Juggling, Nightmare, Dual Wield, Music Box, Burning
+    /// Sticks) and Heirloom Hammer's Sovereign Blade (SwordSage). The cards
+    /// that copy THEMSELVES (Anger, Undeath, Adaptive Strike) still copy the
+    /// raw POD: no `IsClone` reader looks at them in either build, and the
+    /// extra var slots would only move the search hashes (GH #1094).
     #[must_use]
     pub fn create_clone(&self) -> Self {
         let mut clone = *self;
         clone.set_combat_var(VarKey::ReturnIfPlayedRound, 0);
+        clone.set_combat_var(VarKey::GeneratedInCombat, GENERATED_AS_CLONE);
         clone
+    }
+
+    /// Append a local `Absolute(0)` — C# `SetToFreeThisTurn`
+    /// (`SetThisTurnOrUntilPlayed(0)`, [`VarKey::FreeThisTurn`]) or
+    /// `SetUntilPlayed(0)` ([`VarKey::FreeUntilPlayed`]). Local modifiers fold
+    /// in order (`CardEnergyCost.cs:110-115`), so the new zero also overrides
+    /// a Transfigure `+1` appended after an earlier zero
+    /// ([`VarKey::CostAddedAfterLocalZero`], GH #1150).
+    pub fn set_locally_free(&mut self, key: VarKey) {
+        debug_assert!(matches!(
+            key,
+            VarKey::FreeThisTurn | VarKey::FreeUntilPlayed
+        ));
+        self.set_combat_var(key, 1);
+        self.combat_vars.zero(VarKey::CostAddedAfterLocalZero);
+    }
+
+    /// C# `CardModel.IsClone` (`CloneOf != null`): this card was made by
+    /// [`Self::create_clone`] (or is a copy of such a card). Stomp, Pinpoint
+    /// and Banshee's Cry skip their entered-combat cost catch-up for a clone.
+    #[must_use]
+    pub fn is_clone(&self) -> bool {
+        self.combat_var(VarKey::GeneratedInCombat) == GENERATED_AS_CLONE
     }
 
     /// C# `EnergyCost.AddUntilPlayed(-amount)`: bank `amount` more energy off
@@ -1353,27 +1403,31 @@ impl Card {
         if self.is_x_cost() {
             return;
         }
+        // The cap is the LAST local modifier, so C# reads `min(x, cap)` for
+        // whatever `x` the earlier modifiers give at each moment:
+        // * now: the shown cost, `cost - reduction`;
+        // * once a live roll expires (end of turn): the pre-roll base less
+        //   the `AddUntilPlayed(-n)` reduction, which outlives it;
+        // * once the card is played (roll and reduction both gone): the base.
+        // Re-bank the roll and the reduction so the collapsed model yields
+        // all three. A reduction added after a live roll was ignored in the
+        // roll branch (GH #1150).
         let live = self.combat_var(VarKey::SneckoRollLive);
         let banked = self.combat_var(VarKey::SneckoCostDeltaThisTurn);
+        let reduction = self.combat_var(VarKey::CostReductionUntilPlayed);
+        let cap = i32::from(cost);
+        let base = i32::from(self.cost) - banked;
+        let capped_base = base.min(cap);
+        let new_reduction = capped_base - (base - reduction).min(cap);
+        let new_cost = (i32::from(self.cost) - reduction).min(cap) + new_reduction;
+        self.cost = i8::try_from(new_cost).unwrap_or(i8::MAX);
+        if reduction != 0 || new_reduction != 0 {
+            self.set_combat_var(VarKey::CostReductionUntilPlayed, new_reduction);
+        }
         if live == 0 && banked == 0 {
-            // An earlier `AddUntilPlayed(-n)` reduction folds before the cap
-            // (see `set_this_turn_or_until_played_reduce_only`): C# shows
-            // `min(cost - n, cap)` until the card is played, then `min(cost,
-            // cap)`. Keep the cap in `cost` and shrink the bank to the part of
-            // the reduction still visible under it.
-            let reduction = self.combat_var(VarKey::CostReductionUntilPlayed);
-            let capped = self.cost.min(cost);
-            if reduction != 0 {
-                let shown = (i32::from(self.cost) - reduction).min(i32::from(cost));
-                self.set_combat_var(VarKey::CostReductionUntilPlayed, i32::from(capped) - shown);
-            }
-            self.cost = capped;
             return;
         }
-        let displayed = i32::from(self.cost.min(cost));
-        let revealed = (i32::from(self.cost) - banked).min(i32::from(cost));
-        self.cost = displayed as i8;
-        self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, displayed - revealed);
+        self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, new_cost - capped_base);
         self.set_combat_var(VarKey::SneckoRollLive, SNECKO_ROLL_FLAG_PREOWNED);
         self.set_combat_var(VarKey::CostAbsolutelySet, 1);
     }
@@ -1486,23 +1540,21 @@ impl Card {
     pub fn is_upgradable(&self) -> bool {
         // C# `IsUpgradable => !IsUpgraded && CurrentUpgradeLevel <
         // MaxUpgradeLevel`. Curses/statuses override `MaxUpgradeLevel => 0`,
-        // but so do the three `CardType.Quest` cards (`ByrdonisEgg`,
-        // `LanternKey`, `SpoilsMap` — `MaxUpgradeLevel => 0`), which the Rust
-        // model mistypes as `CardType::Skill` (the enum has no `Quest`
-        // variant). Without this guard those Quest cards slip into
-        // `WarPaint`/`upgrade_random_cards_of_type`'s Skill candidate set,
-        // shifting the `Rng.Niche` Fisher-Yates and upgrading the wrong
-        // cards (A9P1: SpoilsMap counted as a 7th WarPaint candidate).
+        // but so do the Quest cards (`ByrdonisEgg`, `LanternKey`,
+        // `SpoilsMap`, `Dowsing` — `MaxUpgradeLevel => 0`). Before GH #1111
+        // they were typed `Skill` and slipped into `WarPaint`'s Skill
+        // candidate set (A9P1: SpoilsMap counted as a 7th candidate); the
+        // guard stays because an upgrade path need not filter by type.
         !self.upgraded
             && !matches!(self.card_type, CardType::Curse | CardType::Status)
             && !self.is_quest()
     }
 
-    /// C# `CardType.Quest`, which the Rust `CardType` enum has no variant
-    /// for: the four Quest cards (`ByrdonisEgg`, `LanternKey`, `SpoilsMap`,
-    /// and v0.111.0's `Dowsing` — each `base(.., CardType.Quest, ..)`) are
-    /// modelled as Skills, so callers that mirror a C# `Type != Quest` gate
-    /// test this instead.
+    /// C# `Type == CardType.Quest`: the four Quest cards (`ByrdonisEgg`,
+    /// `LanternKey`, `SpoilsMap`, and v0.111.0's `Dowsing` — each
+    /// `base(.., CardType.Quest, ..)`). Their specs carry
+    /// [`CardType::Quest`] (GH #1111); this keys on the id so it also holds
+    /// for a hand-built `Card` whose `card_type` was left at a default.
     #[must_use]
     pub fn is_quest(&self) -> bool {
         matches!(
@@ -4697,7 +4749,7 @@ mod tests {
         for (card_id, card_type) in [
             (CardId::AscendersBane, CardType::Curse),
             (CardId::Wound, CardType::Status),
-            (CardId::SpoilsMap, CardType::Skill),
+            (CardId::SpoilsMap, CardType::Quest),
         ] {
             let mut c = Card {
                 card_id,
@@ -6778,5 +6830,41 @@ mod tests {
         card.set_combat_var(VarKey::BansheesCryEtherealCounted, 4);
         assert!(card.downgrade_with(factory));
         assert_eq!(card.cost, 1, "max(0, 9 - 8)");
+    }
+
+    /// GH #1150: Enlightenment+'s reduce-only cap over a live Snecko roll AND
+    /// a later `AddUntilPlayed(-1)`. C# folds `[roll 2, -1, cap 2]`: shown
+    /// `min(1, 2) = 1`; after the roll expires `[-1, cap 2]` on the 3-base,
+    /// `min(2, 2) = 2`; after the play `[cap 2]`, `min(3, 2) = 2`.
+    #[test]
+    fn enlightenment_cap_over_a_snecko_roll_keeps_the_until_played_reduction() {
+        let mut card = Card {
+            cost: 3,
+            ..Card::pod_defaults()
+        };
+        // Snecko roll 3 -> 2 (what `snecko_randomize_hand_costs` banks).
+        card.cost = 2;
+        card.set_combat_var(VarKey::SneckoCostDeltaThisTurn, -1);
+        card.set_combat_var(VarKey::SneckoRollLive, SNECKO_ROLL_RAISED_FLAG);
+        card.set_combat_var(VarKey::CostAbsolutelySet, 1);
+        card.add_cost_reduction_until_played(1);
+        let shown = |c: &Card| i32::from(c.cost) - c.combat_var(VarKey::CostReductionUntilPlayed);
+        assert_eq!(shown(&card), 1);
+
+        card.set_this_combat_reduce_only(2);
+        assert_eq!(shown(&card), 1, "min(1, 2)");
+
+        let mut end_of_turn = card;
+        end_of_turn.expire_snecko_roll();
+        assert_eq!(
+            shown(&end_of_turn),
+            2,
+            "min(3 - 1, 2) once the roll expires"
+        );
+
+        let mut played = card;
+        played.expire_snecko_roll();
+        played.combat_vars.zero(VarKey::CostReductionUntilPlayed);
+        assert_eq!(shown(&played), 2, "min(3, 2) once played");
     }
 }

@@ -1229,7 +1229,7 @@ pub const fn byrdonis_egg() -> CardSpec {
         id: CardId::ByrdonisEgg,
         name: "BYRDONIS_EGG",
         cost: -1,
-        card_type: CardType::Skill,
+        card_type: CardType::Quest,
         target_type: TargetType::None,
         rarity: CardRarity::Quest,
         base_damage: 0,
@@ -1245,7 +1245,7 @@ pub const fn lantern_key() -> CardSpec {
         id: CardId::LanternKey,
         name: "LANTERN_KEY",
         cost: -1,
-        card_type: CardType::Skill,
+        card_type: CardType::Quest,
         target_type: TargetType::Self_,
         rarity: CardRarity::Quest,
         base_damage: 0,
@@ -1260,17 +1260,16 @@ pub const fn lantern_key() -> CardSpec {
 ///
 /// [decompiled C# omitted — see the cited path]
 ///
-/// `CardType.Quest` has no Rust variant; like the other Quest cards
-/// (ByrdonisEgg / LanternKey / SpoilsMap) it is modelled as an Unplayable
-/// Skill. Its `BeforeRoomEntered` quest (5 `?` rooms -> transform into
-/// Abundance) is card content owned by S8a (#793) and not ported here.
+/// Like the other Quest cards (ByrdonisEgg / LanternKey / SpoilsMap) it is
+/// an Unplayable `CardType::Quest` card. Its `BeforeRoomEntered` quest (5 `?`
+/// rooms -> transform into Abundance) is card content owned by S8a (#793) and not ported here.
 #[must_use]
 pub const fn dowsing() -> CardSpec {
     CardSpec {
         id: CardId::Dowsing,
         name: "DOWSING",
         cost: -1,
-        card_type: CardType::Skill,
+        card_type: CardType::Quest,
         target_type: TargetType::None,
         rarity: CardRarity::Quest,
         base_damage: 0,
@@ -1286,7 +1285,7 @@ pub const fn spoils_map() -> CardSpec {
         id: CardId::SpoilsMap,
         name: "SPOILS_MAP",
         cost: -1,
-        card_type: CardType::Skill,
+        card_type: CardType::Quest,
         target_type: TargetType::Self_,
         rarity: CardRarity::Quest,
         base_damage: 0,

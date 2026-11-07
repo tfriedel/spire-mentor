@@ -52,3 +52,18 @@ export function turnChips(rows: CombatLogRow[], details: string[]): string[] {
   if (kills) out.push(`☠ ${kills}`);
   return out;
 }
+
+/** Player-side row kinds the `net` view keeps: each names a card the step
+ * label does not (GH #1015, #1155). The engine log hides the card moves
+ * unless verbose, so in the workbench these arrive only from the mod. */
+const NET_CARD_KINDS = new Set([
+  "card_exhausted",
+  "card_discarded",
+  "card_generated",
+  "card_auto_played",
+  "card_replayed",
+]);
+
+export function keptInNet(r: CombatLogRow): boolean {
+  return r.side === "enemy" || r.auto_played === true || NET_CARD_KINDS.has(r.kind);
+}

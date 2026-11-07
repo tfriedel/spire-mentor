@@ -10,16 +10,15 @@ use super::prelude::*;
 /// `CalculatedHits`: one hit per Skill in your Hand. Shared with the card face
 /// — see `crate::cards::preview`.
 ///
-/// C# `Flechettes.cs:23` counts `c.Type == CardType.Skill`; the Quest cards
-/// (`SpoilsMap`, `LanternKey`, `ByrdonisEgg`, `Dowsing` — `CardType.Quest` in
-/// C#) are modelled as Skills in Rust, so they are excluded via `is_quest`.
+/// C# `Flechettes.cs:23` counts `c.Type == CardType.Skill`, which excludes the
+/// Quest cards (`SpoilsMap`, `LanternKey`, `ByrdonisEgg`, `Dowsing` —
+/// `CardType::Quest`).
 pub(crate) fn preview_flechettes(
     state: &CombatState,
     _card: &Card,
     _target: Option<CreatureUid>,
 ) -> i32 {
-    i32::try_from(search_hand(state, |c| c.card_type == CardType::Skill && !c.is_quest()).len())
-        .unwrap_or(i32::MAX)
+    i32::try_from(search_hand(state, |c| c.card_type == CardType::Skill).len()).unwrap_or(i32::MAX)
 }
 
 pub(crate) fn play_flechettes(

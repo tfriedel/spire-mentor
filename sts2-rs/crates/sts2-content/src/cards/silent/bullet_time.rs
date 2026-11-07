@@ -21,7 +21,6 @@ use super::prelude::*;
 /// cards (`cost == -1`) are skipped, matching C#'s `!CostsX` guard.
 /// Bead `sts2-rs-bxwz` / `sts2-rs-q6bix`.
 pub(crate) fn play_bullet_time(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    use sts2_core::card_effects::set_card_var;
     use sts2_core::cards::VarKey;
 
     let hand_uids: smallvec::SmallVec<[sts2_core::CardUid; 16]> =
@@ -30,7 +29,9 @@ pub(crate) fn play_bullet_time(state: &mut CombatState, _t: Option<CreatureUid>)
         let idx = uid.0.get() as usize - 1;
         let costs_x = state.cards.get(idx).is_some_and(|c| c.cost < 0);
         if !costs_x {
-            set_card_var(state, uid, VarKey::FreeThisTurn, 1);
+            if let Some(card) = state.cards.get_mut(idx) {
+                card.set_locally_free(VarKey::FreeThisTurn);
+            }
         }
     }
     apply_power_to_player(state, PowerKind::NoDraw, 1);

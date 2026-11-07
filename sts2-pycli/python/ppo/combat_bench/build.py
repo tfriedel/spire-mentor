@@ -150,9 +150,6 @@ DEV_SOURCES = ("boss800.jsonl", "wg_fights.jsonl", "elite800.jsonl", "hall800.js
 BASE_POTION_SLOTS = 3  # Player.initialMaxPotionSlotCount
 TIGHT_BELT_ASCENSION = 4  # AscensionLevel.TightBelt: SubtractFromMaxPotionCount(1)
 SLOT_RELICS = {"POTION_BELT": 2, "PHIAL_HOLSTER": 1, "ALCHEMICAL_COFFER": 4}  # AfterObtained
-# The engine's belt holds at most `sts2_core::MAX_POTIONS` (5); a bigger human
-# belt (Alchemical Coffer) is capped there and the fight flagged `belt_capped`.
-ENGINE_MAX_POTIONS = 5
 AUTO_POTIONS = frozenset({"FAIRY_IN_A_BOTTLE"})  # the only PotionUsage.Automatic potion
 # PotionUsage.AnyTime: drinkable outside combat too. One the human picked on
 # the fight's floor (not on the entry belt) and drank was most likely a
@@ -745,7 +742,8 @@ def bench_fights(
         pt = pts[floor - 1]
         room = next(r for r in pt.get("rooms") or [] if r.get("room_type") == f["room_type"])
         belt = None if belts is None else belts[floor]
-        n_slots = min(slots[floor], ENGINE_MAX_POTIONS)
+        # The engine belt takes any size, as C# `MaxPotionCount` does (GH #1094).
+        n_slots = slots[floor]
         potions, pinfo = pilot_potions(f["potions"], belt, f["relics"], n_slots, f["deck"])
         hp_after = f["human_hp_after"]
         dmg = f["human_damage_taken"] or 0
@@ -778,7 +776,9 @@ def bench_fights(
             # HP lost, so L_h is unaffected).
             "death_hp_unlogged": died and not lost_all,
             "abandoned_after_win": after_win,
-            "belt_capped": slots[floor] > ENGINE_MAX_POTIONS,
+            # Always False since GH #1094 lifted the 5-slot engine cap; kept so
+            # the flag columns of earlier builds still line up.
+            "belt_capped": False,
         }
         mids = room.get("monster_ids")
         records.append(

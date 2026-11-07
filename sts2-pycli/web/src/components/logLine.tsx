@@ -67,6 +67,16 @@ export function LogLine({ row }: { row: CombatLogRow }) {
           {row.source ? <>{" via "}<span style={{ color: "var(--gold)" }}>{row.source}</span></> : null}.
         </>
       );
+    // A card a play moved: Brand's exhaust pick, Survivor's discard, an added
+    // Shiv (GH #1015). The step label names only the card played.
+    case "card_exhausted":
+    case "card_discarded":
+    case "card_generated":
+      return row.actor && row.verb && row.noun ? (
+        <>{actor} {row.verb} {noun}.</>
+      ) : (
+        <>{row.text}</>
+      );
     // Every other kind (including anything a newer engine adds) renders the
     // server's own sentence rather than being dropped.
     default:

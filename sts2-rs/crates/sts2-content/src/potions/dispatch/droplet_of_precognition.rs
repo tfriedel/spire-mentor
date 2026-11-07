@@ -51,6 +51,9 @@ pub(crate) fn drink_droplet_of_precognition(
         for uid in &ordered {
             if let Some(pos) = state.player.draw.iter().position(|u| u == uid) {
                 let card = state.player.draw.remove(pos);
+                // A pinned draw card leaves no stale pin behind, as the
+                // multi-candidate select resolution does (#1105).
+                sts2_core::cards::unpin(&mut state.player, card);
                 let _ = sts2_core::cards::try_add_to_hand(&mut state.player, card);
             }
         }

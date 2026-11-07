@@ -465,18 +465,17 @@ fn annotations_are_not_counted_as_piles() {
     check_combat_invariants(&s, "t").expect("annotations are not piles");
 }
 
+/// A pin can outlive its card's stay in the draw pile (an auto-played
+/// Headbutt-pinned card); every reader sweeps stale pins first, so the state
+/// is legal (#1105).
 #[test]
-fn pinned_top_must_be_in_the_draw_pile() {
+fn stale_pinned_top_passes() {
     let mut s = valid_state();
     s.cards
         .push(make_card(1, CardId::StrikeIronclad, 1, CardType::Attack));
     s.player.hand.push(uid(1));
     s.player.pinned_top.push(uid(1));
-    let err = check_combat_invariants(&s, "t").unwrap_err();
-    assert!(
-        err.contains("in pinned_top but not in the pile it annotates"),
-        "{err}"
-    );
+    check_combat_invariants(&s, "t").expect("a stale pin is legal");
 }
 
 #[test]
@@ -490,18 +489,16 @@ fn pinned_bottom_must_resolve_in_the_arena() {
     );
 }
 
+/// The end-of-turn retain keeps only cards still in hand, so a stale
+/// `retain_this_turn` entry is legal (#1105).
 #[test]
-fn retain_this_turn_must_be_in_hand() {
+fn stale_retain_this_turn_passes() {
     let mut s = valid_state();
     s.cards
         .push(make_card(1, CardId::StrikeIronclad, 1, CardType::Attack));
     s.player.draw.push(uid(1));
     s.player.retain_this_turn.push(uid(1));
-    let err = check_combat_invariants(&s, "t").unwrap_err();
-    assert!(
-        err.contains("in retain_this_turn but not in the pile it annotates"),
-        "{err}"
-    );
+    check_combat_invariants(&s, "t").expect("a stale retain entry is legal");
 }
 
 // ── check_combat_invariants: hand cap / enemy mirror ───────────────────

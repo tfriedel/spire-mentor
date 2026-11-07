@@ -55,6 +55,45 @@ pub const BLOCK_RETENTION_RELICS: &[RelicKind] = &[
     RelicKind::SturdyClamp,
 ];
 
+/// Powers whose C# `InstanceType` is `Instanced` or `InstancedPerApplier`
+/// (`PowerInstanceType.cs`; `PowerCmd.FindExistingInstanceForStacking`), so
+/// one owner can legally hold more than one instance: every apply of an
+/// `Instanced` kind adds a new one, and an `InstancedPerApplier` kind adds
+/// one per applier. This is the full v0.111.0 decomp set (23 kinds; v0.107.1
+/// lacks only Cacophony and ImitationLearning). It is wider than
+/// [`crate::card_effects::power_kind_is_instanced`], which lists only the
+/// kinds the engine's apply path already instances: a state rebuilt from a C#
+/// snapshot can carry duplicates of the rest, and they are legal (#1105).
+#[must_use]
+pub const fn power_kind_may_repeat(kind: PowerKind) -> bool {
+    matches!(
+        kind,
+        PowerKind::Automation
+            | PowerKind::Cacophony
+            | PowerKind::Covered
+            | PowerKind::Flanking
+            | PowerKind::Guarded
+            | PowerKind::Heist
+            | PowerKind::ImitationLearning
+            | PowerKind::Knockdown
+            | PowerKind::MagicBomb
+            | PowerKind::Monologue
+            | PowerKind::Nightmare
+            | PowerKind::Oblivion
+            | PowerKind::Orbit
+            | PowerKind::Panache
+            | PowerKind::RollingBoulder
+            | PowerKind::Sandpit
+            | PowerKind::Strangle
+            | PowerKind::Swipe
+            | PowerKind::TagTeam
+            | PowerKind::TheBomb
+            | PowerKind::Thievery
+            | PowerKind::ToricToughness
+            | PowerKind::WitheringPresence
+    )
+}
+
 #[must_use]
 pub fn has_block_retention(state: &CombatState) -> bool {
     BLOCK_RETENTION_RELICS
@@ -295,32 +334,25 @@ pub fn check_combat_invariants(state: &CombatState, ctx: &str) -> Result<(), Str
     // ever existed inside a live combat; `sts2-py`'s wire round-trip made
     // reconstructed states carry them, so it became reachable.
     //
-    // They still need the arena check, and they must reference a card that
-    // is actually in the pile the annotation is about.
-    let annotation = |uids: &[CardUid], pile: &[CardUid], what: &str| -> Result<(), String> {
+    // An annotation may also outlive its card's stay in the pile: an
+    // auto-play of a Headbutt-pinned card or a played Expertise draw leaves
+    // the uid behind. That is legal, because every reader filters first:
+    // `cards::shuffle` and `pop_next_card` sweep stale pins ("Staleness
+    // guard" in cards.rs), the reshuffle clears them, and the end-of-turn
+    // retain keeps only cards still in hand (combat_loop.rs). So only the
+    // arena check holds: an annotation must name a card that exists (#1105).
+    let annotation = |uids: &[CardUid], what: &str| -> Result<(), String> {
         for u in uids {
             ensure!(
                 state.cards.iter().any(|c| c.uid == *u),
                 "card {u:?} in {what} but not in state.cards arena ({ctx})"
             );
-            ensure!(
-                pile.contains(u),
-                "card {u:?} in {what} but not in the pile it annotates ({ctx})"
-            );
         }
         Ok(())
     };
-    annotation(&state.player.pinned_top, &state.player.draw, "pinned_top")?;
-    annotation(
-        &state.player.pinned_bottom,
-        &state.player.draw,
-        "pinned_bottom",
-    )?;
-    annotation(
-        &state.player.retain_this_turn,
-        &state.player.hand,
-        "retain_this_turn",
-    )?;
+    annotation(&state.player.pinned_top, "pinned_top")?;
+    annotation(&state.player.pinned_bottom, "pinned_bottom")?;
+    annotation(&state.player.retain_this_turn, "retain_this_turn")?;
 
     // 5. Hand cap.
     ensure!(
@@ -379,7 +411,8 @@ pub fn check_combat_invariants(state: &CombatState, ctx: &str) -> Result<(), Str
         );
     }
 
-    // 9. No duplicate PowerKind per owner (player + each creature).
+    // 9. No duplicate PowerKind per owner (player + each creature), except
+    // the kinds C# instances: those may legally hold several instances.
     let resolve = |uids: &[crate::PowerUid]| -> Vec<PowerKind> {
         uids.iter()
             .filter_map(|u| state.powers.get_by_id(u.0).map(|p| p.kind))
@@ -387,6 +420,9 @@ pub fn check_combat_invariants(state: &CombatState, ctx: &str) -> Result<(), Str
     };
     let player_kinds = resolve(&state.player.powers);
     for (i, k) in player_kinds.iter().enumerate() {
+        if power_kind_may_repeat(*k) {
+            continue;
+        }
         for k2 in &player_kinds[i + 1..] {
             ensure!(k != k2, "duplicate PowerKind {k:?} on player ({ctx})");
         }
@@ -394,6 +430,9 @@ pub fn check_combat_invariants(state: &CombatState, ctx: &str) -> Result<(), Str
     for c in &state.creatures {
         let kinds = resolve(&c.powers);
         for (i, k) in kinds.iter().enumerate() {
+            if power_kind_may_repeat(*k) {
+                continue;
+            }
             for k2 in &kinds[i + 1..] {
                 ensure!(
                     k != k2,
@@ -542,7 +581,7 @@ pub fn check_turn_boundary(
 ) -> Result<(), String> {
     // 16. Per-turn counters reset.
     ensure!(
-        state.player.cards_played_this_turn == [0u32; 5],
+        state.player.cards_played_this_turn == [0u32; 6],
         "cards_played_this_turn not reset at round {} ({ctx})",
         state.round
     );
@@ -779,7 +818,7 @@ mod tests {
     #[test]
     fn turn_boundary_counter_not_reset_fails() {
         let mut s = CombatState::default();
-        s.player.cards_played_this_turn = [1, 0, 0, 0, 0];
+        s.player.cards_played_this_turn = [1, 0, 0, 0, 0, 0];
         let anchor = snapshot_turn_anchor(&s);
         let err = check_turn_boundary(&anchor, &s, "t").unwrap_err();
         assert!(err.contains("cards_played_this_turn not reset"), "{err}");
@@ -791,5 +830,39 @@ mod tests {
         let s = CombatState::default();
         let anchor = snapshot_turn_anchor(&s);
         assert!(check_turn_boundary(&anchor, &s, "t").is_ok());
+    }
+
+    fn push_power(s: &mut CombatState, kind: PowerKind) -> crate::PowerUid {
+        let uid = std::num::NonZeroU32::new(u32::try_from(s.powers.len()).unwrap() + 1).unwrap();
+        s.powers.push(crate::Power {
+            id: uid,
+            kind,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        crate::PowerUid(uid)
+    }
+
+    /// Two instances of a C#-instanced power (two Bombs ticking down) are a
+    /// legal state (#1105).
+    #[test]
+    fn instanced_power_twice_passes() {
+        let mut s = CombatState::default();
+        let a = push_power(&mut s, PowerKind::TheBomb);
+        let b = push_power(&mut s, PowerKind::TheBomb);
+        s.player.powers = vec![a, b].into();
+        check_combat_invariants(&s, "t").unwrap();
+    }
+
+    /// Every kind the apply path instances is one the check lets repeat.
+    #[test]
+    fn engine_instanced_kinds_may_repeat() {
+        for &k in PowerKind::all() {
+            if crate::card_effects::power_kind_is_instanced(k) {
+                assert!(power_kind_may_repeat(k), "{k:?}");
+            }
+        }
     }
 }

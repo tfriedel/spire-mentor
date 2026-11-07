@@ -13717,7 +13717,7 @@ pub fn card_cost_locally_zeroed(state: &CombatState, card: &crate::cards::Card) 
 /// roll appended after those attacks overrides the zero until it expires,
 /// and an attack after the roll zeroes it again
 /// ([`crate::cards::VarKey::FlattenOstyAttacksAtRoll`]).
-fn flatten_zeroed(state: &CombatState, card: &crate::cards::Card) -> bool {
+pub(crate) fn flatten_zeroed(state: &CombatState, card: &crate::cards::Card) -> bool {
     if card.card_id != crate::cards::CardId::Flatten {
         return false;
     }
@@ -14306,7 +14306,37 @@ pub fn dispatch_before_card_played_powers_for_card(
     card_uid: Option<CardUid>,
 ) {
     power_hook_dispatch(state, PowerHook::BeforeCardPlayedPowers, |state| {
-        dispatch_before_card_played_powers_body(state, resolved_cost, card_is_ethereal, card_uid);
+        dispatch_before_card_played_powers_body(
+            state,
+            resolved_cost,
+            card_is_ethereal,
+            card_uid,
+            false,
+        );
+    });
+}
+
+/// [`dispatch_before_card_played_powers_for_card`] for a REPLAY iteration of
+/// a play (extra plays, Echo Form, an auto-play's replays): C# fires
+/// `Hook.BeforeCardPlayed` per iteration and `DanseMacabrePower` reads
+/// `EnergyCost.GetResolved()` live each time. `resolved_cost` is the
+/// play-start cost, so when an earlier iteration of this play spent the last
+/// Veilpiercer charge (the 0-cost override for an Ethereal card), the replay
+/// sees the card's real cost again (GH #1150).
+pub fn dispatch_before_card_played_powers_on_replay(
+    state: &mut CombatState,
+    resolved_cost: i32,
+    card_is_ethereal: bool,
+    card_uid: CardUid,
+) {
+    power_hook_dispatch(state, PowerHook::BeforeCardPlayedPowers, |state| {
+        dispatch_before_card_played_powers_body(
+            state,
+            resolved_cost,
+            card_is_ethereal,
+            Some(card_uid),
+            true,
+        );
     });
 }
 
@@ -14317,6 +14347,7 @@ fn dispatch_before_card_played_powers_body(
     resolved_cost: i32,
     card_is_ethereal: bool,
     card_uid: Option<CardUid>,
+    replay: bool,
 ) {
     // present_kinds gate (perf-gates sweep 2026-07-04): every lane below
     // only reacts to kinds in [`BEFORE_CARD_PLAYED_POWERS_KINDS`]; when none
@@ -14404,6 +14435,18 @@ fn dispatch_before_card_played_powers_body(
     // Veilpiercer charge granted DanseMacabre block in C# (cs=6 rs=0). Bead
     // `sts2-rs-4wppb`.
     let mut veilpiercer_removed = false;
+    // A replay whose play-start cost was Veilpiercer's 0 for an Ethereal card,
+    // with no Veilpiercer left now (an earlier iteration spent the last
+    // charge): the live cost is the card's real one (GH #1150).
+    let veilpiercer_gone_since_play_start = replay
+        && card_is_ethereal
+        && resolved_cost == 0
+        && !player_power_uids.iter().any(|uid| {
+            state
+                .powers
+                .get_by_id(uid.0)
+                .is_some_and(|p| p.kind == PowerKind::Veilpiercer && p.amount > 0)
+        });
     for uid in player_power_uids.iter().copied() {
         let Some((kind, amount)) = state.powers.get_by_id(uid.0).map(|p| (p.kind, p.amount)) else {
             continue;
@@ -14415,7 +14458,7 @@ fn dispatch_before_card_played_powers_body(
             PowerKind::DanseMacabre => {
                 let cost = match card_uid {
                     Some(cuid)
-                        if veilpiercer_removed
+                        if (veilpiercer_removed || veilpiercer_gone_since_play_start)
                             && !state
                                 .cards
                                 .get(cuid.0.get() as usize - 1)
@@ -33951,7 +33994,7 @@ mod power_hook_liveness {
             }
             PowerHook::AfterEnergySpent => super::dispatch_after_energy_spent_body(s, 4),
             PowerHook::BeforeCardPlayedPowers => {
-                super::dispatch_before_card_played_powers_body(s, 2, p.card.is_some(), None);
+                super::dispatch_before_card_played_powers_body(s, 2, p.card.is_some(), None, false);
             }
             PowerHook::AfterModifyingCardPlayCount => {
                 let ctx = CardCtx {

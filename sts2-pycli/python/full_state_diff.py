@@ -14,6 +14,8 @@ Osty, relics, the turn counter. On top of that it compares:
 * the hand, draw, discard and exhaust piles **in order** (a shuffle or
   hand-order split is visible at once),
 * each hand card's resolved energy cost,
+* each hand card's affliction and its amount (a Bound split is visible on
+  the step it happens, not at the later ``illegal_play`` reject; GH #1150),
 * every RNG stream cursor both engines report (a stream one read ahead is
   visible even when the value it produced happened to match).
 
@@ -67,6 +69,16 @@ def project_csharp(get_state: dict[str, Any]) -> dict[str, Any]:
         for pile in ("hand", "draw", "discard", "exhaust")
     }
     out["hand_costs"] = [int(c) for c in (get_state.get("hand_costs") or [])]
+    affs = get_state.get("hand_afflictions")
+    amounts = get_state.get("hand_affliction_amounts") or []
+    # ``None`` = an oracle build that predates the field: not compared.
+    out["hand_afflictions"] = (
+        None
+        if affs is None
+        else [
+            _canon_affliction(a, amounts[i] if i < len(amounts) else 0) for i, a in enumerate(affs)
+        ]
+    )
     out["rng"] = {k: int(v) for k, v in (get_state.get("rng_counters") or {}).items()}
     return _drop_uncompared(out)
 
@@ -94,8 +106,20 @@ def project_rust_dict(d: dict[str, Any]) -> dict[str, Any]:
         )
     }
     out["hand_costs"] = [_rust_card_cost(c) for c in (deck.get("hand") or [])]
+    out["hand_afflictions"] = [
+        _canon_affliction(c.get("affliction"), c.get("affliction_stacks") or 0)
+        for c in (deck.get("hand") or [])
+    ]
     out["rng"] = {k: int(v) for k, v in ((d.get("rng") or {}).get("counters") or {}).items()}
     return _drop_uncompared(out)
+
+
+def _canon_affliction(raw: Any, amount: Any) -> dict[str, Any] | None:
+    """One affliction token for both engines: C# reports the model id entry
+    (``BOUND``), Rust the type name (``Bound``)."""
+    if not raw:
+        return None
+    return {"id": str(raw).upper(), "amount": int(amount or 0)}
 
 
 def _drop_uncompared(out: dict[str, Any]) -> dict[str, Any]:
@@ -116,9 +140,13 @@ def diff_full(cs: dict[str, Any], rs: dict[str, Any]) -> list[Divergence]:
     Rust dump carries a few engine-local cursors (and C# a few the Rust
     combat state does not track), and a missing key is a reporting gap, not
     a desync. A hand position holding an X-cost card (``None`` on the Rust
-    side) skips the cost check.
+    side) skips the cost check. Hand afflictions are compared only when the
+    C# ``get_state`` reports them (older oracle builds do not).
     """
     shared = cs["rng"].keys() & rs["rng"].keys()
+    if cs.get("hand_afflictions") is None:
+        cs = {k: v for k, v in cs.items() if k != "hand_afflictions"}
+        rs = {k: v for k, v in rs.items() if k != "hand_afflictions"}
     cs_costs = list(cs["hand_costs"])
     if len(cs_costs) == len(rs["hand_costs"]):
         cs_costs = [None if r is None else c for c, r in zip(cs_costs, rs["hand_costs"])]

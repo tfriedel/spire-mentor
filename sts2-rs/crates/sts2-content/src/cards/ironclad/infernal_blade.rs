@@ -27,8 +27,12 @@ pub(crate) fn play_infernal_blade(
     let Some(spec) = random_ironclad_attack_spec(state) else {
         return EffectResult::Resolved;
     };
-    let uid = spawn_card_into_pile(state, card_from_spec(&spec), PileKind::Hand);
-    set_card_var(state, uid, VarKey::FreeThisTurn, 1);
+    // C# `InfernalBlade.cs:27-28`: `SetToFreeThisTurn()` BEFORE
+    // `AddGeneratedCardToCombat`, so the generation listeners that run
+    // inside the add already see a free card (#1105).
+    let mut card = card_from_spec(&spec);
+    card.set_combat_var(VarKey::FreeThisTurn, 1);
+    spawn_card_into_pile(state, card, PileKind::Hand);
     EffectResult::Resolved
 }
 

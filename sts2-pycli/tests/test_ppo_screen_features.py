@@ -434,6 +434,25 @@ def test_every_removable_curse_reads_as_a_curse() -> None:
         assert types[vocab.cards().index(name)] == vocab.CARD_TYPES.index("CURSE"), name
 
 
+def test_quest_cards_keep_the_skill_type_row() -> None:
+    """GH #1111 gave Quest cards their own engine type; the table did not grow.
+
+    They were Skills before, so promoted champions saw them on the Skill row.
+    """
+    import sts2_rs
+    from ppo import vocab
+
+    kinds = {name: ctype for name, ctype, _ in sts2_rs.card_kinds()}
+    types, _ = vocab.card_kind_rows()
+    # Dowsing is v0.111.0-only, so the default registry may not list it.
+    quests = [n for n in ("BYRDONIS_EGG", "LANTERN_KEY", "SPOILS_MAP", "DOWSING") if n in kinds]
+    assert "SPOILS_MAP" in quests
+    for name in quests:
+        assert kinds[name] == "QUEST", name
+        assert types[vocab.cards().index(name)] == vocab.CARD_TYPES.index("SKILL"), name
+    assert vocab.N_CARD_TYPE == 5
+
+
 def test_card_kind_tables_start_at_zero_so_a_warm_start_is_bit_identical() -> None:
     import torch
     from ppo import schema

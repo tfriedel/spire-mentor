@@ -1918,7 +1918,8 @@ fn listener_burning_sticks(state: &mut CombatState, ctx: &CardEventCtx) -> Effec
     }
     // Re-read the exhausted card POD (Relic mutation above may have
     // invalidated any prior borrow) and clone it into hand.
-    let cloned = state.cards[idx];
+    // C# `card.CreateClone()` (BurningSticks.cs).
+    let cloned = state.cards[idx].create_clone();
     // C# `AddGeneratedCardToCombat(card2, Hand, base.Owner)` (BurningSticks.cs:50):
     // player-created even when the exhaust happens outside a card play (Play
     // pile empty), so pass `added_by_player = true` explicitly.
@@ -12581,7 +12582,7 @@ mod tests {
         let mut state = CombatState::default();
         equip_relic(&mut state, RelicKind::DiamondDiadem);
         // 2 cards played (total) is <= threshold — power must apply.
-        state.player.cards_played_this_turn = [2, 0, 0, 0, 0];
+        state.player.cards_played_this_turn = [2, 0, 0, 0, 0, 0];
         assert!(!player_has_diamond_diadem_power(&state));
         let _ = dispatch_before_turn_end(&mut state, Side::Player);
         assert!(player_has_diamond_diadem_power(&state));
@@ -12594,7 +12595,7 @@ mod tests {
         let mut state = CombatState::default();
         equip_relic(&mut state, RelicKind::DiamondDiadem);
         // 0 cards played also satisfies the <=2 condition.
-        state.player.cards_played_this_turn = [0; 5];
+        state.player.cards_played_this_turn = [0; 6];
         let _ = dispatch_before_turn_end(&mut state, Side::Player);
         assert!(player_has_diamond_diadem_power(&state));
     }
@@ -12606,7 +12607,7 @@ mod tests {
         let mut state = CombatState::default();
         equip_relic(&mut state, RelicKind::DiamondDiadem);
         // 3 total > threshold — no application.
-        state.player.cards_played_this_turn = [1, 1, 1, 0, 0];
+        state.player.cards_played_this_turn = [1, 1, 1, 0, 0, 0];
         let _ = dispatch_before_turn_end(&mut state, Side::Player);
         assert!(!player_has_diamond_diadem_power(&state));
     }
@@ -12617,7 +12618,7 @@ mod tests {
         crate::relics::dispatch::ensure_installed();
         let mut state = CombatState::default();
         equip_relic(&mut state, RelicKind::DiamondDiadem);
-        state.player.cards_played_this_turn = [0; 5];
+        state.player.cards_played_this_turn = [0; 6];
         let _ = dispatch_before_turn_end(&mut state, Side::Enemy);
         assert!(!player_has_diamond_diadem_power(&state));
     }
@@ -12628,7 +12629,7 @@ mod tests {
         crate::relics::dispatch::ensure_installed();
         let mut state = CombatState::default();
         equip_relic(&mut state, RelicKind::Sai); // wrong relic
-        state.player.cards_played_this_turn = [0; 5];
+        state.player.cards_played_this_turn = [0; 6];
         let _ = dispatch_before_turn_end(&mut state, Side::Player);
         assert!(!player_has_diamond_diadem_power(&state));
     }
@@ -14971,6 +14972,66 @@ mod tests {
             state.player.block - block_before,
             super::super::uncommon::REGALITE_BLOCK,
             "Regalite must see the Crossbow card"
+        );
+    }
+
+    /// v0.111.0: Regalite grants Block for the first created card each
+    /// turn only (decomp Regalite.cs:22,39). The Crossbow card is that first
+    /// card, so it takes the 4 Block and sets the latch, and a second
+    /// generation in the same turn grants nothing (#1105).
+    #[test]
+    fn crossbow_card_consumes_regalite_latch_v0111() {
+        use std::num::NonZeroU32;
+        use sts2_core::potions::CharacterId;
+        use sts2_core::relic_effects::{
+            dispatch_after_side_turn_start, dispatch_before_side_turn_start,
+        };
+        use sts2_core::Relic;
+        crate::cards::dispatch::ensure_installed();
+        crate::relics::dispatch::ensure_installed();
+        let mut state = CombatState {
+            game_version: sts2_core::GameVersion::V0_111_0,
+            ..CombatState::default()
+        };
+        equip_relic(&mut state, RelicKind::Crossbow);
+        state.relics.push(Relic {
+            id: NonZeroU32::new(state.relics.len() as u32 + 1).expect("non-zero"),
+            kind: RelicKind::Regalite,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        });
+        state.player.character = Some(CharacterId::Ironclad);
+        let block_before = state.player.block;
+        let regalite_counter = |s: &CombatState| {
+            s.relics
+                .iter()
+                .find(|r| r.kind == RelicKind::Regalite)
+                .expect("regalite equipped")
+                .counter
+        };
+
+        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+        let _ = dispatch_after_side_turn_start(&mut state, Side::Player);
+
+        assert_eq!(
+            state.player.block - block_before,
+            super::super::uncommon::REGALITE_BLOCK_V0111,
+            "the Crossbow card is the turn's first created card"
+        );
+        assert_eq!(
+            regalite_counter(&state),
+            1,
+            "the Crossbow card set the latch"
+        );
+
+        // A second generation the same turn: the latch holds.
+        sts2_core::card_effects::generate_free_attack_in_hand(&mut state);
+        assert_eq!(state.player.hand.len(), 2);
+        assert_eq!(
+            state.player.block - block_before,
+            super::super::uncommon::REGALITE_BLOCK_V0111,
+            "Regalite grants once per turn in v0.111.0"
         );
     }
 

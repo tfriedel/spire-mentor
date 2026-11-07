@@ -2612,24 +2612,61 @@ internal sealed class SimAdvisor
             // keeps getting the raw Description below (human_action).
             CombatEvent ev = CombatEventText.Describe(entry, playerCreature);
             bool byPlayer = playerCreature != null && entry.Actor == playerCreature;
+            int act = (runState?.CurrentActIndex ?? -1) + 1;
+            int floor = runState?.TotalFloor ?? 0;
+
+            // A card play is LOGGED when it starts and REPORTED (wire) when it
+            // finishes. Everything the card does -- the damage, the card
+            // Brand exhausts, the Shiv it adds -- lands in the history between
+            // the two, so a play row written at the finish came AFTER its own
+            // effects, and the frame filed those under the previous step (GH
+            // #1015). The wire still keys on the finish: the advisor's mirror
+            // replays a play once it has resolved.
+            if (entry is CardPlayStartedEntry started)
+            {
+                CardPlay play = started.CardPlay;
+                if (byPlayer && !play.IsAutoPlay && play.PlayIndex == 0)
+                {
+                    // _aiActionsPending is consumed at the finish, below.
+                    bool ai = _aiActionsPending > 0;
+                    SimActionLog.Record(new SimActionLogEntry
+                    {
+                        Actor = ai ? "AI" : "You",
+                        Act = act,
+                        Floor = floor,
+                        DecisionType = "combat",
+                        Action = ev.Text,
+                        Event = ev,
+                        Advice = !ai && _lastBestLabel != null ? $"AI: {_lastBestLabel}" : null,
+                    });
+                    continue;
+                }
+                // An auto-play, a replay (Burst / Echo Form) or a teammate's
+                // play: commentary under whatever step caused it.
+                RecordWorld(ev, act, floor);
+                continue;
+            }
+
+            if (entry is CardPlayFinishedEntry && !byPlayer)
+            {
+                continue; // a teammate's play: logged when it started
+            }
+
             bool isOwnAction = byPlayer && entry is CardPlayFinishedEntry or PotionUsedEntry;
 
             // Everything that is not a decision by us (damage, enemy moves,
-            // block, powers) is world commentary -- the "what happened"
-            // half the workbench log shows and this one was missing.
+            // block, powers, the cards a play exhausts / discards / adds) is
+            // world commentary -- the "what happened" half the workbench log
+            // shows and this one was missing.
             if (!isOwnAction)
             {
-                SimActionLog.Record(new SimActionLogEntry
-                {
-                    Actor = "game",
-                    Act = (runState?.CurrentActIndex ?? -1) + 1,
-                    Floor = runState?.TotalFloor ?? 0,
-                    DecisionType = "",
-                    Action = ev.Text,
-                    Event = ev,
-                });
+                RecordWorld(ev, act, floor);
                 continue;
             }
+
+            // A card play was logged at its start; a potion has no start
+            // entry, so it is logged here.
+            bool logIt = entry is PotionUsedEntry;
 
             // Actions enqueued by the takeover path show up in the same
             // history feed; attribute them to the AI. Still reported on the
@@ -2638,33 +2675,54 @@ internal sealed class SimAdvisor
             if (_aiActionsPending > 0)
             {
                 _aiActionsPending--;
-                SimActionLog.Record(new SimActionLogEntry
+                if (logIt)
                 {
-                    Actor = "AI",
-                    Act = (runState?.CurrentActIndex ?? -1) + 1,
-                    Floor = runState?.TotalFloor ?? 0,
-                    DecisionType = "combat",
-                    Action = ev.Text,
-                    Event = ev,
-                });
+                    SimActionLog.Record(new SimActionLogEntry
+                    {
+                        Actor = "AI",
+                        Act = act,
+                        Floor = floor,
+                        DecisionType = "combat",
+                        Action = ev.Text,
+                        Event = ev,
+                    });
+                }
                 SendHumanAction("ai_play", $"AI: {detail}", PlayOf(entry), DrinkOf(entry));
                 continue;
             }
 
-            SimActionLog.Record(new SimActionLogEntry
+            if (logIt)
             {
-                Actor = "You",
-                Act = (runState?.CurrentActIndex ?? -1) + 1,
-                Floor = runState?.TotalFloor ?? 0,
-                DecisionType = "combat",
-                Action = ev.Text,
-                Event = ev,
-                Advice = _lastBestLabel != null ? $"AI: {_lastBestLabel}" : null,
-            });
+                SimActionLog.Record(new SimActionLogEntry
+                {
+                    Actor = "You",
+                    Act = act,
+                    Floor = floor,
+                    DecisionType = "combat",
+                    Action = ev.Text,
+                    Event = ev,
+                    Advice = _lastBestLabel != null ? $"AI: {_lastBestLabel}" : null,
+                });
+            }
 
             SendHumanAction("card_play", detail, PlayOf(entry), DrinkOf(entry));
         }
         _historySeen = entries.Count;
+    }
+
+    /// <summary>One line of combat commentary (not a decision) in the action
+    /// log.</summary>
+    private static void RecordWorld(CombatEvent ev, int act, int floor)
+    {
+        SimActionLog.Record(new SimActionLogEntry
+        {
+            Actor = "game",
+            Act = act,
+            Floor = floor,
+            DecisionType = "",
+            Action = ev.Text,
+            Event = ev,
+        });
     }
 
     /// <summary>One in-combat action report on the wire (fire-and-forget) --
@@ -3243,9 +3301,12 @@ internal sealed class SimAdvisor
     private static bool ShouldLog(CombatHistoryEntry entry) => entry switch
     {
         CardDrawnEntry => false,
-        CardDiscardedEntry => false,
+        // Not filtered: a discard / exhaust is the card a play CHOSE (Brand,
+        // Survivor, True Grit), which the play row does not say (GH #1015).
+        // The end-of-turn hand flush records no discard entries.
         EnergySpentEntry => false,
-        CardPlayStartedEntry => false, // the Finished twin carries the outcome
+        // Not filtered either: a play's log row is written at its start, so
+        // its effects follow it (see ReportNewHumanActions).
         CreatureAttackedEntry => false, // its DamageReceived entries say who took what
         _ => true,
     };
@@ -3345,7 +3406,10 @@ internal sealed class CombatEvent
     public string Text = "";
 
     /// <summary>The workbench row kind: "damage" | "block" | "power" |
-    /// "monster_move" | "potion" | "card_play" | "other".</summary>
+    /// "monster_move" | "potion" | "card_play" | "card_auto_played" |
+    /// "card_replayed" | "card_exhausted" | "card_discarded" |
+    /// "card_generated" | "other". The frame's net view keeps the card_*
+    /// ones besides card_play (turnLedgerState.ts `keptInNet`).</summary>
     public string Kind = "other";
 
     public string? Verb;
@@ -3403,7 +3467,11 @@ internal static class CombatEventText
         {
             return entry switch
             {
-                CardPlayFinishedEntry e => Play(e, me),
+                CardPlayStartedEntry e => Play(e.CardPlay, e.Actor, me),
+                CardPlayFinishedEntry e => Play(e.CardPlay, e.Actor, me),
+                CardExhaustedEntry e => CardMoved(e.Card, e.Actor, "card_exhausted", "exhausted"),
+                CardDiscardedEntry e => CardMoved(e.Card, e.Actor, "card_discarded", "discarded"),
+                CardGeneratedEntry e => CardMoved(e.Card, e.Actor, "card_generated", "gained"),
                 PotionUsedEntry e => Potion(e, me),
                 DamageReceivedEntry e => Damage(e),
                 BlockGainedEntry e => Block(e),
@@ -3418,23 +3486,70 @@ internal static class CombatEventText
         }
     }
 
-    private static CombatEvent Play(CardPlayFinishedEntry e, Creature? me)
+    private static CombatEvent Play(CardPlay play, Creature? actor, Creature? me)
     {
-        string card = e.CardPlay.Card.Title;
-        Creature? target = e.CardPlay.Target;
+        string card = play.Card.Title;
+        Creature? target = play.Target;
         string onTarget = target == null ? "" : $" → {Name(target)}";
-        bool mine = me != null && e.Actor == me;
+        if (play.IsAutoPlay)
+        {
+            // The engine played it (Havoc, Stampede, Mayhem, ...): never the
+            // card the step label names, so the row is what shows it (#1155).
+            return new CombatEvent
+            {
+                Kind = "card_auto_played",
+                Verb = "auto-played",
+                Actor = Name(actor),
+                ActorSide = SideOf(actor),
+                Target = target == null ? null : Name(target),
+                TargetSide = target == null ? null : SideOf(target),
+                Noun = card,
+                Text = $"{Name(actor)} auto-played {card}{onTarget}.",
+            };
+        }
+        if (play.PlayIndex > 0)
+        {
+            // A replay of the same card (Burst, Echo Form, Duplication): the
+            // decision row already names it.
+            return new CombatEvent
+            {
+                Kind = "card_replayed",
+                Verb = "played",
+                Actor = Name(actor),
+                ActorSide = SideOf(actor),
+                Noun = card,
+                Text = $"{Name(actor)} played {card} again{onTarget}.",
+            };
+        }
+        bool mine = me != null && actor == me;
         return new CombatEvent
         {
             Kind = "card_play",
             Verb = "played",
-            Actor = Name(e.Actor),
-            ActorSide = SideOf(e.Actor),
+            Actor = Name(actor),
+            ActorSide = SideOf(actor),
             Target = target == null ? null : Name(target),
             TargetSide = target == null ? null : SideOf(target),
             Noun = card,
             // Yours is a decision row: its label, in the advice's own shape.
-            Text = mine ? card + onTarget : $"{Name(e.Actor)} played {card}{onTarget}",
+            Text = mine ? card + onTarget : $"{Name(actor)} played {card}{onTarget}",
+        };
+    }
+
+    /// <summary>A card a play (or a power) moved: Brand's exhaust pick,
+    /// Survivor's discard, an added Shiv. The step label names only the card
+    /// played, so this row is the one that says WHICH card (GH #1015).</summary>
+    private static CombatEvent CardMoved(CardModel card, Creature? actor, string kind, string verb)
+    {
+        string name = card.Title;
+        return new CombatEvent
+        {
+            Kind = kind,
+            Verb = verb,
+            Actor = Name(actor),
+            ActorSide = SideOf(actor),
+            Noun = name,
+            Text = $"{Name(actor)} {verb} {name}.",
         };
     }
 

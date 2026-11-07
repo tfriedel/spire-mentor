@@ -335,7 +335,7 @@ pub struct ParsedAlly {
     /// `$.player`'s combat-history counters for this teammate.
     pub history: SeatHistory,
     /// `$.player.cards_played_this_turn` for this teammate.
-    pub cards_played_this_turn: Option<[u32; 5]>,
+    pub cards_played_this_turn: Option<[u32; 6]>,
     /// Their orb belt, as `$.player.orbs` / `orb_slots` (GH #989: a
     /// teammate's Frost orbs block at their turn end).
     pub orbs: Option<Vec<ParsedOrb>>,
@@ -379,7 +379,7 @@ pub struct ParsedPlayer {
     pub orb_slots: Option<u32>,
     pub stars: Option<i32>,
     pub osty: Option<ParsedOsty>,
-    pub cards_played_this_turn: Option<[u32; 5]>,
+    pub cards_played_this_turn: Option<[u32; 6]>,
     /// Run gold. Optional — older producers omit it. Gates in-combat relic
     /// hooks (SealOfGold spends 5 gold for +1 energy at every player turn
     /// start); rebuilt without it the hook could never fire — 90 of the 178
@@ -399,16 +399,21 @@ pub struct ParsedPlayer {
 
 /// `{path}.cards_played_this_turn`: a seat's card plays started this turn, one
 /// bucket per `CardType` in its `index` order, or `None` when absent.
-fn parse_play_buckets<V: WireValue>(d: &V, path: &str) -> WireResult<Option<[u32; 5]>> {
+///
+/// Five entries (Attack..Status) is the historical shape every producer and
+/// fixture uses — the mod drops Quest plays too. GH #1111 added the `Quest`
+/// bucket; a six-entry list carries it, a five-entry list leaves it 0.
+/// Quest cards are Unplayable, so in practice it always is.
+fn parse_play_buckets<V: WireValue>(d: &V, path: &str) -> WireResult<Option<[u32; 6]>> {
     let Some(v) = extract_optional(d, "cards_played_this_turn") else {
         return Ok(None);
     };
     let cp = format!("{path}.cards_played_this_turn");
     let list = as_list(&v, &cp)?;
-    if list.len() != 5 {
-        return Err(schema_err(&cp, "must be a list of 5 counters"));
+    if list.len() != 5 && list.len() != 6 {
+        return Err(schema_err(&cp, "must be a list of 5 or 6 counters"));
     }
-    let mut buckets = [0u32; 5];
+    let mut buckets = [0u32; 6];
     for (i, item) in list.iter().enumerate() {
         buckets[i] = item
             .as_i64()
@@ -420,7 +425,7 @@ fn parse_play_buckets<V: WireValue>(d: &V, path: &str) -> WireResult<Option<[u32
 
 /// The Attack bucket of `buckets`, as an engine counter: C# reads it from
 /// History where the engine keeps a counter (Juggling, Ripple Basin).
-fn attacks_this_turn(buckets: Option<[u32; 5]>) -> i32 {
+fn attacks_this_turn(buckets: Option<[u32; 6]>) -> i32 {
     buckets.map_or(0, |b| {
         i32::try_from(b[sts2_core::cards::CardType::Attack.index()]).unwrap_or(i32::MAX)
     })

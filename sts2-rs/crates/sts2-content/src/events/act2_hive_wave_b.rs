@@ -1063,6 +1063,7 @@ fn card_type_word(card_type: CardType) -> &'static str {
         CardType::Power => "Power",
         CardType::Status => "Status",
         CardType::Curse => "Curse",
+        CardType::Quest => "Quest",
     }
 }
 

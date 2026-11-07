@@ -721,6 +721,43 @@ fn danse_macabre_before_veilpiercer_sees_the_free_cost() {
     );
 }
 
+/// GH #1150: a REPLAY of the play (extra plays / Echo) re-reads the cost live.
+/// The first iteration spent the last Veilpiercer charge with DanseMacabre
+/// listed first (so it saw 0); the replay sees the restored cost 3.
+#[test]
+fn danse_macabre_on_a_replay_reads_the_cost_after_veilpiercer_ran_out() {
+    let mut state = CombatState::default();
+    state.player.current_hp = 50;
+    state.player.max_hp = 50;
+    let _ = state.init_player_creature();
+    let eth = push_ethereal_card(&mut state);
+    state.cards[0].cost = 3;
+    push_player_power(&mut state, PowerKind::DanseMacabre, 6);
+    push_player_power(&mut state, PowerKind::Veilpiercer, 1);
+
+    hooks::dispatch_before_card_played_powers_for_card(&mut state, 0, true, Some(eth));
+    assert_eq!(state.player.block, 0, "first play: still free");
+    hooks::dispatch_before_card_played_powers_on_replay(&mut state, 0, true, eth);
+    assert_eq!(state.player.block, 6, "replay: live cost 3 >= 2");
+}
+
+/// A replay while Veilpiercer still holds the card at 0 grants nothing.
+#[test]
+fn danse_macabre_on_a_replay_under_live_veilpiercer_sees_the_free_cost() {
+    let mut state = CombatState::default();
+    state.player.current_hp = 50;
+    state.player.max_hp = 50;
+    let _ = state.init_player_creature();
+    let eth = push_ethereal_card(&mut state);
+    state.cards[0].cost = 3;
+    push_player_power(&mut state, PowerKind::DanseMacabre, 6);
+    push_player_power(&mut state, PowerKind::Veilpiercer, 3);
+
+    hooks::dispatch_before_card_played_powers_for_card(&mut state, 0, true, Some(eth));
+    hooks::dispatch_before_card_played_powers_on_replay(&mut state, 0, true, eth);
+    assert_eq!(state.player.block, 0);
+}
+
 /// Push an Ethereal card POD and append its uid to the draw pile (front-drawn).
 fn push_ethereal_into_draw(state: &mut CombatState) -> CardUid {
     let uid = push_ethereal_card(state);
@@ -1390,6 +1427,57 @@ fn pagestorm_applied_before_chains_binds_its_nested_draw_first() {
     assert_eq!(
         bound_after_pagestorm_chains_draw([PowerKind::Pagestorm, PowerKind::ChainsOfBinding]),
         [true, true, false, true, false],
+    );
+}
+
+/// GH #1150: Pagestorm (applied first) draws on the Ethereal card, the draw
+/// reshuffles into a Stratagem pick and suspends. C# `Hook.AfterCardDrawn`
+/// awaits Pagestorm's whole draw, pick included, before Chains of Binding sees
+/// the Ethereal card: the resumed draw's Y takes the one `Bound`, and the
+/// Ethereal card finds the cap reached. Rust checked the Ethereal card at the
+/// suspension.
+#[test]
+fn chains_waits_for_a_pagestorm_draw_suspended_on_a_stratagem_pick() {
+    let mut state = CombatState::default();
+    state.player.current_hp = 80;
+    state.player.max_hp = 80;
+    push_player_power(&mut state, PowerKind::Pagestorm, 1);
+    push_player_power(&mut state, PowerKind::ChainsOfBinding, 1);
+    push_player_power(&mut state, PowerKind::Stratagem, 1);
+    let eth = push_ethereal_into_draw(&mut state);
+    let mut plain = || {
+        let uid = CardUid::new(state.cards.len() as u32 + 1).expect("nonzero");
+        state.cards.push(Card {
+            uid,
+            ..Card::pod_defaults()
+        });
+        uid
+    };
+    let (x, y) = (plain(), plain());
+    state.player.discard.extend([x, y]);
+    let bound = |state: &CombatState, uid: CardUid| {
+        state.cards[uid.get() as usize - 1]
+            .affliction
+            .is_some_and(|af| af.kind == sts2_core::card_afflictions::CardAfflictionKind::Bound)
+    };
+
+    state.draw_into_hand(1);
+    assert!(state.pending_choice.is_some(), "Stratagem pick open");
+    assert!(!bound(&state, eth), "Chains waits for Pagestorm's draw");
+
+    let mut sel = smallvec::SmallVec::<[u8; 4]>::new();
+    sel.push(0);
+    let _ = sts2_core::apply(
+        &mut state,
+        sts2_core::Action::ResolveChoice { selection: sel },
+    );
+    assert!(state.pending_choice.is_none());
+    assert_eq!(state.player.hand.len(), 3, "Ethereal + pick + resumed draw");
+    let drawn = *state.player.hand.last().expect("resumed draw");
+    assert!(bound(&state, drawn), "the resumed draw takes the Bound");
+    assert!(
+        !bound(&state, eth),
+        "the Ethereal card finds the cap reached"
     );
 }
 

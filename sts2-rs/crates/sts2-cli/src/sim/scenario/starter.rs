@@ -130,7 +130,7 @@ pub fn build_state_with_ascension(
         creature_uid: None,
         pet_uid: None,
         shivs_played_this_turn: 0,
-        cards_played_this_turn: [0; 5],
+        cards_played_this_turn: [0; 6],
         powered_hits_this_turn: 0,
         powered_hits_by_target_this_turn: smallvec::SmallVec::new(),
         powered_hits_at_card_play_start: 0,

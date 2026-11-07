@@ -18,7 +18,8 @@ pub(crate) fn play_dual_wield(state: &mut CombatState, _t: Option<CreatureUid>) 
     });
     if let Some(uid) = template_uid {
         let idx = uid.0.get() as usize - 1;
-        let template = state.cards[idx];
+        // C# `CreateClone()` of the picked card (DualWield.cs).
+        let template = state.cards[idx].create_clone();
         let _ = sts2_core::card_effects::spawn_card_into_hand(state, template);
     }
     EffectResult::Resolved

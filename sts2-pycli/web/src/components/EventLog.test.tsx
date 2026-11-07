@@ -153,4 +153,23 @@ describe("EventLog", () => {
       "Nibbit dealt 5 damage to The Ironclad.",
     ]);
   });
+
+  it("net mode keeps the card a play exhausted or discarded (GH #1015)", () => {
+    // Brand: the step says "Brand", only the exhaust row says WHICH card went.
+    const entries = [
+      entry({ idx: 0, label: "🤖 Brand", turn: 1, combat_log: [
+        damageRow({ kind: "damage", actor: null, actor_side: null, target: "The Ironclad",
+          target_side: "player", amount: 1, source: null, text: "The Ironclad took 1 damage." }),
+        damageRow({ kind: "card_exhausted", verb: "exhausted", noun: "Defend+",
+          target: null, target_side: null, amount: null, source: null,
+          text: "The Ironclad exhausted Defend+." }),
+        damageRow({ kind: "card_discarded", verb: "discarded", noun: "Strike",
+          target: null, target_side: null, amount: null, source: null,
+          text: "The Ironclad discarded Strike." }),
+      ] }),
+    ];
+    const { container } = render(<EventLog entries={entries} current={0} onPick={() => {}} />);
+    const lines = [...container.querySelectorAll("[data-detail]")].map((d) => d.textContent);
+    expect(lines).toEqual(["The Ironclad exhausted Defend+.", "The Ironclad discarded Strike."]);
+  });
 });

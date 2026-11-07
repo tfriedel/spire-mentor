@@ -61,7 +61,7 @@ def _field_filter(path: str) -> tuple[str, Any] | None:
         return f"{who}.{kind}", lambda e: e["k"] == kind and e.get("who") == who
     for cs_name, key in _PILES.items():
         if path.startswith((f"piles.{key}", f"{key}_count")) or (
-            key == "hand" and path.startswith("hand_costs")
+            key == "hand" and path.startswith(("hand_costs", "hand_afflictions"))
         ):
             return (
                 f"piles.{key}",

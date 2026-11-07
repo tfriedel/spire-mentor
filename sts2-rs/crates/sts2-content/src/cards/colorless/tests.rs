@@ -2550,9 +2550,8 @@ fn play_secret_technique_moves_a_skill_from_draw_to_hand() {
 
 /// C# `SecretTechnique.cs:22` filters `c.Type == CardType.Skill`, and the
 /// Quest cards are `CardType.Quest` (`Dowsing.cs:45`, v0.107.1
-/// `ByrdonisEgg.cs:15`, `LanternKey.cs:17`). Rust models them as Skills, so
-/// the fetch must skip `is_quest()` cards: a draw pile holding only quest
-/// cards moves nothing (Ironclad:6174 @775 moved DOWSING to hand).
+/// `ByrdonisEgg.cs:15`, `LanternKey.cs:17`), so the fetch must skip them: a
+/// draw pile holding only quest cards moves nothing (Ironclad:6174 @775 moved DOWSING to hand).
 #[test]
 fn secret_technique_skips_quest_cards_in_draw() {
     install_pool();
@@ -2564,7 +2563,8 @@ fn secret_technique_skips_quest_cards_in_draw() {
         CardId::LanternKey,
         CardId::SpoilsMap,
     ] {
-        push_draw_card_id(&mut state, id);
+        let uid = push_draw_card_id(&mut state, id);
+        state.cards[uid.0.get() as usize - 1].card_type = CardType::Quest;
     }
     let hand_before = state.player.hand.len();
     let _ = lookup(CardId::SecretTechnique).expect("registered")(&mut state, None);

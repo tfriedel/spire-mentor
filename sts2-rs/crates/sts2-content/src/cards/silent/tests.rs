@@ -2268,8 +2268,8 @@ fn handtrick_state(n_skills: usize) -> CombatState {
 }
 
 /// Flechettes counts C# `Type == CardType.Skill` (`Flechettes.cs:23`). A Quest
-/// card (`SpoilsMap`, C# `CardType.Quest`) is modelled as a Skill in Rust but
-/// must not count: hand = SpoilsMap + one real Skill -> exactly 1 hit.
+/// card (`SpoilsMap`, `CardType::Quest`) must not count: hand = SpoilsMap +
+/// one real Skill -> exactly 1 hit.
 /// Regression for act23 parity Silent seed 1019 (#1054 item 7).
 #[test]
 fn flechettes_does_not_count_quest_cards_as_skills() {
@@ -2282,7 +2282,11 @@ fn flechettes_does_not_count_quest_cards_as_skills() {
             uid,
             card_id,
             cost: 1,
-            card_type: CardType::Skill,
+            card_type: if card_id == CardId::SpoilsMap {
+                CardType::Quest
+            } else {
+                CardType::Skill
+            },
             target_type: TargetType::Self_,
             ..Card::pod_defaults()
         });
@@ -2329,8 +2333,8 @@ fn hand_trick_auto_applies_sly_with_one_skill() {
 }
 
 /// HandTrick's filter is C# `card.Type == CardType.Skill` (`HandTrick.cs:30`);
-/// a Quest card (C# `CardType.Quest`, a Skill in Rust) is not a candidate, so
-/// one real Skill + Dowsing auto-applies to the Skill with no prompt.
+/// a Quest card (`CardType::Quest`) is not a candidate, so one real Skill +
+/// Dowsing auto-applies to the Skill with no prompt.
 #[test]
 fn hand_trick_skips_quest_cards() {
     install_pool();
@@ -2341,7 +2345,7 @@ fn hand_trick_skips_quest_cards() {
         uid: quest,
         card_id: CardId::Dowsing,
         cost: -1,
-        card_type: CardType::Skill,
+        card_type: CardType::Quest,
         target_type: TargetType::Self_,
         ..Card::pod_defaults()
     });

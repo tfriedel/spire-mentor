@@ -356,6 +356,18 @@ pub fn osty_attack_command<R>(state: &mut CombatState, f: impl FnOnce(&mut Comba
     if !outer {
         state.combat_log.osty_attacks_this_turn =
             state.combat_log.osty_attacks_this_turn.saturating_add(1);
+        // Every Flatten's `AfterAttack` appends a fresh `SetThisTurn(0)`
+        // (Flatten.cs `ReduceCost`), which overrides a Transfigure `+1`
+        // appended after an earlier zero (GH #1150).
+        for c in &mut state.cards {
+            if c.card_id == crate::cards::CardId::Flatten
+                && c.combat_vars
+                    .maybe_nonzero(crate::cards::VarKey::CostAddedAfterLocalZero)
+            {
+                c.combat_vars
+                    .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
+            }
+        }
         // `Hook.AfterAttack` runs after the hit loop even when no hit landed
         // (`AttackCommand.cs:551-673`: no live target breaks the loop), so the
         // command owes `BoneFlute.AfterAttack`'s block either way. Bone Shards
@@ -2863,7 +2875,13 @@ pub fn spawn_card_into_pile(
 /// clone of a downgraded card (Anger's copy, Juggling, Dual Wield) inherits
 /// the downgraded level but is not in that list, so it stays downgraded.
 pub fn stamp_generated_in_combat(card: &mut crate::cards::Card) {
-    card.set_combat_var(crate::cards::VarKey::GeneratedInCombat, 1);
+    // A clone keeps its `GENERATED_AS_CLONE` mark (C# `IsClone`).
+    if !card.is_clone() {
+        card.set_combat_var(
+            crate::cards::VarKey::GeneratedInCombat,
+            crate::cards::GENERATED_FRESH,
+        );
+    }
     // Only touch the var when set: writing a 0 would still occupy a slot in
     // the card's inline var store and change its hash.
     if card.combat_var(crate::cards::VarKey::DampenDowngradedMarker) != 0 {
@@ -3407,7 +3425,7 @@ pub(crate) fn fire_rocketpunch_free_on_status_generation(
                 let n = c.combat_var(crate::cards::VarKey::CostReductionUntilPlayed);
                 c.set_combat_var(crate::cards::VarKey::CostReductionUntilPlayed, n + 1);
             } else {
-                c.set_combat_var(crate::cards::VarKey::FreeUntilPlayed, 1);
+                c.set_locally_free(crate::cards::VarKey::FreeUntilPlayed);
             }
         }
     }
@@ -3560,13 +3578,11 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
         }
         _ => return,
     };
-    // `Stomp.cs:53` / `Pinpoint.cs:43`: `if (base.IsClone) return`. The
-    // engine has no clone flag, but a clone copies its source's per-turn
-    // bank: every in-combat copy is shaved on each play (or back-filled on
-    // entry), so a card arriving with a non-zero bank is a copy that has
-    // already accounted for this turn's plays and keeps its cloned cost.
-    // A fresh generation starts with an empty bank. Both builds.
-    if card.combat_var(var) > 0 || card.combat_var(crate::cards::VarKey::CostDebtThisTurn) > 0 {
+    // `Stomp.cs:53` / `Pinpoint.cs:43`: `if (base.IsClone) return`. A clone
+    // keeps the cost it was cloned with. A dupe is a clone too
+    // (`CreateDupe` calls `CreateClone`). Both builds (GH #1094: this used
+    // to guess "clone" from a non-zero per-turn bank).
+    if card.is_clone() || card.combat_var(crate::cards::VarKey::IsDupe) != 0 {
         return;
     }
     let card = &mut state.cards[idx];
@@ -5904,8 +5920,6 @@ pub fn route_generated_into_hand(state: &mut CombatState, uids: &[CardUid]) {
         if let Some(card) = state.cards.get_mut(uid.0.get() as usize - 1) {
             stamp_generated_in_combat(card);
         }
-        state.player.generated_cards_this_combat =
-            state.player.generated_cards_this_combat.saturating_add(1);
         let pile = if state.player.hand.len() < crate::cards::HAND_LIMIT {
             state.player.hand.push(uid);
             PileKind::Hand
@@ -5913,8 +5927,9 @@ pub fn route_generated_into_hand(state: &mut CombatState, uids: &[CardUid]) {
             state.player.discard.push(uid);
             PileKind::Discard
         };
-        fire_after_card_entered_combat(state, uid, pile, true);
-        // Every caller of this "player generates cards into hand" path passes
+        // The shared funnel: the `CardGenerated` event-log row (this path used
+        // to write none, #1105), the Supermassive tally, the entered-combat bus
+        // and the `AfterCardGeneratedForCombat` listeners. Every caller of this "player generates cards into hand" path passes
         // C# `addedByPlayer: true` (SpectrumShift / CallOfTheVoid / SentryMode
         // turn-start powers, BigHat / VexingPuzzlebox / OrangeDough relics,
         // potions, GenerateCards effect, DevourLife) — verified against the C#
@@ -5926,7 +5941,7 @@ pub fn route_generated_into_hand(state: &mut CombatState, uids: &[CardUid]) {
         // seeds 422/494). Fire them with `added_by_player = true` (not the
         // Play-pile heuristic the spawn path uses). Bead
         // `sts2-rs-gen-added-by-player`.
-        fire_card_generated_for_combat_powers(state, uid, true);
+        fire_card_generation_listeners(state, uid, pile, true);
     }
 }
 
@@ -8033,8 +8048,8 @@ mod tests {
             rng: crate::dotnet_rng::Rng::new(0_i32),
             ..Default::default()
         };
-        // A live player: at 0 HP the combat is ending and nothing upgrades.
-        state.player.current_hp = 1;
+        // A live player: at 0 HP combat is ending and nothing upgrades.
+        state.player.current_hp = 50;
         let mut shiv = placeholder_card(crate::cards::CardId::Shiv);
         shiv.card_type = crate::cards::CardType::Attack;
         let u = spawn_card_into_pile(&mut state, shiv, PileKind::Hand);
@@ -8063,11 +8078,39 @@ mod tests {
     /// upgrade by uid leaves it as it is (Bellows used to upgrade Ascender's
     /// Bane).
     #[test]
+    fn upgrade_card_uid_is_a_no_op_while_combat_is_ending() {
+        // C# `CardCmd.Upgrade` bails on `CombatManager.IsEnding`
+        // (CardCmd.cs:267-270): nothing upgrades once the last primary
+        // enemy is dead (GH #1150).
+        let mut state = CombatState {
+            rng: crate::dotnet_rng::Rng::new(0_i32),
+            ..Default::default()
+        };
+        state.player.current_hp = 50;
+        let enemy = state.spawn_enemy(crate::MonsterKind::Nibbit);
+        let mut strike = placeholder_card(crate::cards::CardId::StrikeIronclad);
+        strike.card_type = crate::cards::CardType::Attack;
+        let u = spawn_card_into_pile(&mut state, strike, PileKind::Hand);
+        crate::creature_by_id_mut(&mut state.creatures, enemy.0)
+            .expect("enemy")
+            .current_hp = 0;
+        assert!(crate::combat_loop::combat_is_ending(&state));
+        assert!(!upgrade_card_uid(&mut state, u));
+        assert!(!state.cards[u.0.get() as usize - 1].upgraded);
+
+        crate::creature_by_id_mut(&mut state.creatures, enemy.0)
+            .expect("enemy")
+            .current_hp = 5;
+        assert!(upgrade_card_uid(&mut state, u));
+    }
+
+    #[test]
     fn upgrade_card_uid_skips_a_card_that_cannot_be_upgraded() {
         let mut state = CombatState {
             rng: crate::dotnet_rng::Rng::new(0_i32),
             ..Default::default()
         };
+        state.player.current_hp = 50;
         let mut bane = placeholder_card(crate::cards::CardId::AscendersBane);
         bane.card_type = crate::cards::CardType::Curse;
         let u = spawn_card_into_pile(&mut state, bane, PileKind::Hand);
@@ -8904,6 +8947,44 @@ mod tests {
             state.cards[0].combat_var(crate::cards::VarKey::GeneratedInCombat),
             1
         );
+    }
+
+    /// `route_generated_into_hand` writes the `CardGenerated` event-log row
+    /// every other generation path writes (#1105), and still bumps the
+    /// Supermassive tally once per card.
+    #[test]
+    fn route_generated_into_hand_logs_card_generated() {
+        let mut state = CombatState::default();
+        state.player.current_hp = 80;
+        state.combat_log.event_log.set_recording(true);
+        let card_uid = CardUid::new(1).expect("nz");
+        state.cards.push(crate::cards::Card {
+            uid: card_uid,
+            card_id: crate::cards::CardId::Shiv,
+            ..crate::cards::Card::pod_defaults()
+        });
+
+        route_generated_into_hand(&mut state, &[card_uid]);
+
+        assert_eq!(state.player.generated_cards_this_combat, 1);
+        let generated = state
+            .combat_log
+            .event_log
+            .rows()
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.entry,
+                    crate::event_log::EventLogEntry::CardGenerated {
+                        card: crate::cards::CardId::Shiv,
+                        pile: "hand",
+                        by_player: true,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(generated, 1);
     }
 
     /// `spawn_card_into_hand_with_origin(.., true)` must fire `ArsenalPower`'s

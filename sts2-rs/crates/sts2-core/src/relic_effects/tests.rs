@@ -6791,6 +6791,65 @@ fn snecko_skull_then_unsettling_lamp_fold_is_additive_then_multiplicative() {
     );
 }
 
+/// GH #1150 — once captured, the Lamp doubles a debuff from the capturing
+/// card whatever its applier: C# `ModifyPowerAmountGivenMultiplicative`
+/// compares only `cardSource` (Misery copying a monster-applied debuff after a
+/// player-applied copy captured the trigger). The capture arm still needs the
+/// player as applier.
+#[test]
+#[serial_test::serial(global_registry)]
+fn unsettling_lamp_doubles_a_monster_applied_copy_once_captured() {
+    use std::num::NonZeroU32;
+    ensure_installed();
+    register_before_power_amount_changed(
+        RelicId::UnsettlingLamp,
+        on_before_power_amount_changed_unsettling_lamp as BeforePowerAmountChangedFn,
+    );
+    register_modify_power_amount_given(
+        RelicId::UnsettlingLamp,
+        on_modify_power_amount_given_unsettling_lamp as ModifyPowerAmountGivenFn,
+    );
+    let mut state = CombatState::default();
+    let enemy_a = CreatureUid::new(2).unwrap();
+    let enemy_b = CreatureUid::new(3).unwrap();
+    state.relics.push(crate::Relic {
+        id: NonZeroU32::new(1).unwrap(),
+        kind: crate::RelicKind::UnsettlingLamp,
+        counter: UNSETTLING_LAMP_ARMED,
+        is_wax: false,
+        is_melted: false,
+    });
+    let card = push_resolving_card(&mut state);
+    let monster_copy = crate::hooks::PowerAmountCtx {
+        source_card: Some(card),
+        ..crate::hooks::PowerAmountCtx::new(
+            Some(crate::hooks::CreatureRef::Enemy(enemy_a)),
+            crate::hooks::CreatureRef::Enemy(enemy_b),
+            crate::PowerKind::Weak,
+            2,
+        )
+    };
+    // Armed: a monster-applied copy neither captures nor is doubled.
+    assert_eq!(
+        on_before_power_amount_changed_unsettling_lamp(&mut state, &monster_copy),
+        EffectResult::NotImplemented
+    );
+    assert_eq!(unsettling_lamp_state(&state), Some(UNSETTLING_LAMP_ARMED));
+    assert_eq!(dispatch_modify_power_amount_given(&state, &monster_copy), 2);
+    // A player-applied copy captures the trigger ...
+    let player_copy = crate::hooks::PowerAmountCtx {
+        applier: Some(crate::hooks::CreatureRef::Player),
+        ..monster_copy
+    };
+    let _ = on_before_power_amount_changed_unsettling_lamp(&mut state, &player_copy);
+    assert_eq!(
+        unsettling_lamp_state(&state),
+        Some(UNSETTLING_LAMP_CAPTURED)
+    );
+    // ... and from then on the monster-applied copy is doubled too.
+    assert_eq!(dispatch_modify_power_amount_given(&state, &monster_copy), 4);
+}
+
 /// GH #365 — a POTION's debuff must neither be doubled nor burn the lamp's
 /// once-per-combat trigger.
 ///

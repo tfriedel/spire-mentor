@@ -320,6 +320,10 @@ def card_kind_rows() -> tuple[tuple[int, ...], tuple[int, ...]]:
     types = [N_CARD_TYPE] * reg.size
     rarities = [N_CARD_RARITY] * reg.size
     t_idx = {t: i for i, t in enumerate(CARD_TYPES)}
+    # GH #1111 gave Quest cards their own engine `CardType`; they used to be
+    # Skills. Keep them on the Skill row so the table (and every promoted
+    # champion) is unchanged. `encoder.rs::card_kind_rows` folds them alike.
+    t_idx["QUEST"] = t_idx["SKILL"]
     r_idx = {r: i for i, r in enumerate(CARD_RARITIES)}
     for name, ctype, rarity in sts2_rs.card_kinds():
         i = reg.index(name)

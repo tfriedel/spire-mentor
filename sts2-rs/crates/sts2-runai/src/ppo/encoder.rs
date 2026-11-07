@@ -185,7 +185,10 @@ fn card_kind_rows() -> &'static [(i64, i64)] {
             }
             let t = match spec.card_type {
                 CardType::Attack => 0,
-                CardType::Skill => 1,
+                // GH #1111 split Quest out of Skill. The type table keeps its
+                // five rows so promoted champions load unchanged; Quest stays
+                // on the Skill row it always had (`vocab.py` folds it too).
+                CardType::Skill | CardType::Quest => 1,
                 CardType::Power => 2,
                 CardType::Curse => 3,
                 CardType::Status => 4,

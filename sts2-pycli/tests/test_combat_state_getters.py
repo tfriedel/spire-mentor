@@ -184,12 +184,29 @@ def _check_state(cs: Any, tally: _Tally, deep: bool) -> dict[str, Any]:
     return wire
 
 
-def _check_forecast(end: _EndTurn, wire: dict[str, Any], cs: Any, tally: _Tally) -> None:
-    """The end-turn forecast against the telegraph the next player turn shows."""
+def _check_forecast(
+    end: _EndTurn, wire: dict[str, Any], cs: Any, rows: list[dict[str, Any]], tally: _Tally
+) -> None:
+    """The end-turn forecast against the telegraph the next player turn shows.
+
+    ``rows`` is the combat log since the end turn. An enemy that hit 0 HP in
+    between is skipped like one dead at the end turn: its machine is moot, and
+    a revive (the Test Subject's next form) opens with that form's own move.
+    """
     tele = cs.telegraph()
+    killed = {
+        r["receiver"].get("uid")
+        for r in rows
+        if r.get("kind") == "damage"
+        and r.get("hp_after") == 0
+        and r.get("receiver", {}).get("kind") == "monster"
+    }
     for i, enemy in enumerate(wire["encounter"]):
         uid = enemy["uid"]
         if uid not in end.forecast or enemy.get("is_dead") or "move_state" not in enemy:
+            continue
+        if uid in killed:
+            tally.forecast_excused += 1
             continue
         move_id, certainty, intents = end.forecast[uid]
         if certainty < 1.0:
@@ -293,7 +310,7 @@ def _drive(seed: int, version: str, tally: _Tally) -> None:
             and wire["round"] == end.round + 1
             and wire["phase"] == "PlayerPlayPhase"
         ):
-            _check_forecast(end, wire, cs, tally)
+            _check_forecast(end, wire, cs, rm.combat_log()[end.log_len :], tally)
             _check_draw(end, wire, rm, tally)
         end = None
 

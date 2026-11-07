@@ -4289,7 +4289,7 @@ mod tests {
             let spec = factory();
             let bucket = match spec.card_type {
                 CardType::Attack => 0,
-                CardType::Skill => 1,
+                CardType::Skill | CardType::Quest => 1,
                 CardType::Power => 2,
                 CardType::Curse => 3,
                 CardType::Status => 4,

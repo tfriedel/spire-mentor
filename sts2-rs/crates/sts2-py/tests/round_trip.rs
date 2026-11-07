@@ -639,18 +639,19 @@ fn round_trip_preserves_cards_played_this_turn() {
     // survive the round-trip; a dict without the key must parse to zeros.
     Python::with_gil(|py| {
         let mut s1 = build_seeded_state(py, 3, 0).expect("seed=3 must build");
-        s1.player.cards_played_this_turn = [2, 1, 0, 0, 0];
+        // Last bucket is Quest (GH #1111): emitted only when non-zero.
+        s1.player.cards_played_this_turn = [2, 1, 0, 0, 0, 1];
 
         let dict = state_to_dict(py, &s1).expect("to_dict must succeed");
         let s2 = state_from_dict(&dict).expect("from_dict on emitted dict must succeed");
         assert_eq!(
             s2.player.cards_played_this_turn,
-            [2, 1, 0, 0, 0],
+            [2, 1, 0, 0, 0, 1],
             "mid-turn play counters must survive the round-trip"
         );
 
         // Absent key (all-zero buckets are omitted on emit) → zeros.
-        s1.player.cards_played_this_turn = [0; 5];
+        s1.player.cards_played_this_turn = [0; 6];
         let dict = state_to_dict(py, &s1).expect("to_dict must succeed");
         let player = dict
             .get_item("player")
@@ -664,7 +665,7 @@ fn round_trip_preserves_cards_played_this_turn() {
             "all-zero counters must be omitted for wire-shape stability"
         );
         let s2 = state_from_dict(&dict).expect("from_dict without the key must succeed");
-        assert_eq!(s2.player.cards_played_this_turn, [0; 5]);
+        assert_eq!(s2.player.cards_played_this_turn, [0; 6]);
     });
 }
 

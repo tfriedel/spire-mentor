@@ -2784,8 +2784,8 @@ mod tests {
     }
 
     /// QX79 (Ironclad, v0.111.0): `FromDeckForTransformation` drops
-    /// `CardType.Quest` cards (CardSelectCmd.cs:488). Dowsing (a Quest card
-    /// Rust types as a Skill) in the deck must not be offered, or every later
+    /// `CardType.Quest` cards (CardSelectCmd.cs:488). Dowsing (a Quest card)
+    /// in the deck must not be offered, or every later
     /// offer index lands one card early (WhisperingHollow's Hug transformed
     /// Inflame instead of Thunderclap).
     #[test]

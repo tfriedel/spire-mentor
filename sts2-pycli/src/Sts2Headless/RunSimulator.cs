@@ -1598,6 +1598,12 @@ public class RunSimulator
                 // pin Confused / cost-reduction divergences directly (per-card
                 // cost) instead of inferring from legal-action playability.
                 ["hand_costs"] = pcs?.Hand?.Cards?.Select(c => c.EnergyCost?.GetResolved() ?? 0).ToList(),
+                // GH #1150: per-hand-card affliction (model id entry, e.g.
+                // "BOUND", or null) and its amount, parallel to hand_ids, so
+                // the full-state diff sees a Bound split when it happens
+                // instead of at the later illegal_play reject.
+                ["hand_afflictions"] = pcs?.Hand?.Cards?.Select(c => c.Affliction?.Id.Entry).ToList(),
+                ["hand_affliction_amounts"] = pcs?.Hand?.Cards?.Select(c => c.Affliction == null ? 0 : (int)c.Affliction.Amount).ToList(),
                 ["draw_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
                 // sts2-rs-fqcx0 diagnostics: ordered card-id lists for the
                 // draw/discard piles, mirroring hand_ids above. parity_fuzz
@@ -3258,13 +3264,29 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    /// <summary>
+    /// A10 DoubleBoss: the player stands on the first of the final act's two
+    /// boss nodes. The game proceeds from that boss to the map, where the
+    /// boss node's one child is the second boss (StandardActMap.cs:225-228);
+    /// only the second boss changes act (NRewardsScreen.OnProceedButtonPressed,
+    /// AutoSlayer.cs:220). Calling EnterNextAct here skipped the second boss
+    /// and ended what the oracle could check (GH #1105 H1).
+    /// </summary>
+    private bool AtFirstOfDoubleBoss()
+    {
+        var map = _runState?.Map;
+        return map?.SecondBossMapPoint != null
+            && _runState!.CurrentMapCoord == map.BossMapPoint.coord;
+    }
+
     private Dictionary<string, object?> DoProceed(Player player)
     {
         Log("Proceeding");
 
         // Check if we need to move to next act (boss defeated)
         var room = _runState?.CurrentRoom;
-        if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss)
+        if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss
+            && !AtFirstOfDoubleBoss())
         {
             if (combatRoom.IsPreFinished || !CombatManager.Instance.IsInProgress)
             {
@@ -4703,8 +4725,10 @@ public class RunSimulator
 
         if (OfferNextCardRemovalReward()) return DetectDecisionPoint();
 
-        // Boss → next act
-        if (combatRoom.RoomType == RoomType.Boss)
+        // Boss → next act. Not after the first of A10's two final-act bosses:
+        // the game goes back to the map, whose boss node now leads to the
+        // second boss (AtFirstOfDoubleBoss).
+        if (combatRoom.RoomType == RoomType.Boss && !AtFirstOfDoubleBoss())
         {
             Log("Boss defeated, entering next act");
             try

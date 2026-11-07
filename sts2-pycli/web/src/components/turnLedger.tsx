@@ -1,7 +1,7 @@
 import type { CombatLogRow } from "../api";
 import { readableRows } from "../combatlog";
 import { LogLine } from "./logLine";
-import type { DetailMode } from "./turnLedgerState";
+import { keptInNet, type DetailMode } from "./turnLedgerState";
 
 /**
  * Shared turn-ledger pieces for the two history logs (LiveLog / EventLog).
@@ -120,10 +120,12 @@ export function StepEvents({ rows: allRows, details, mode, dim }: {
       </>
     );
   }
-  // `net` keeps the enemy's turn and every auto-played card's rows: the step
-  // label says what the PLAYER played, never what Stampede / Havoc / Mayhem
-  // played for them, so dropping those would hide the play entirely (GH #1155).
-  const kept = mode === "full" ? rows : rows.filter((r) => r.side === "enemy" || r.auto_played === true);
+  // `net` keeps the enemy's turn, every auto-played card's rows and the cards
+  // a play moved: the step label says what the PLAYER played, never what
+  // Stampede / Havoc / Mayhem played for them (GH #1155), nor which card Brand
+  // exhausted or Survivor discarded (GH #1015), so dropping those would hide
+  // what happened.
+  const kept = mode === "full" ? rows : rows.filter(keptInNet);
   const deaths = details.filter((d) => d.includes("☠"));
   return (
     <>

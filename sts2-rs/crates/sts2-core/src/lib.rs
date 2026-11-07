@@ -1995,7 +1995,7 @@ pub struct PlayerCombatState {
     /// `LunarBlast` (hits = skills played this turn) and `Regent`'s
     /// skill-watch listeners. Bead `sts2-rs-r6l9`
     /// (zlx-countplayed: per-turn cards-played counter on `CombatState`).
-    pub cards_played_this_turn: [u32; 5],
+    pub cards_played_this_turn: [u32; 6],
 
     /// Total Stars *gained* by the player this turn (sum of amounts —
     /// a single `gain_stars(3)` adds 3, not 1). Reset to zero at the
@@ -2942,6 +2942,13 @@ pub struct PendingDrawResume {
     /// `CombatState`, which holds this struct twice, past clippy's
     /// large-stack-array limit.
     pub then_play_sly: bool,
+    /// An Ethereal card whose `ChainsOfBindingPower.AfterCardDrawn` waits on
+    /// this draw: a Pagestorm that listens BEFORE Chains of Binding drew on
+    /// it, and that draw suspended on a reshuffle select (Stratagem). C#
+    /// `Hook.AfterCardDrawn` awaits Pagestorm's `CardPileCmd.Draw`, pick
+    /// included, before Chains checks the card against this turn's `Bound`
+    /// count (GH #1150).
+    pub then_chains_bound: Option<CardUid>,
 }
 
 /// A select opened inside a non-blocking hook walk (a kill's `AfterDeath`:
@@ -8336,6 +8343,12 @@ impl CombatState {
         if self.carry_into_resuspended_draw(&pdr) {
             return Some(StepResult::PendingChoice);
         }
+        // Pagestorm's draw is done: Chains of Binding now checks the Ethereal
+        // card that triggered it, before the outer draw goes on.
+        if let Some(uid) = pdr.then_chains_bound {
+            let stacks = self.chains_of_binding_stacks();
+            self.afflict_bound_from_chains(uid, stacks);
+        }
         // The rider's draw is done: the outer draw it interrupted goes on.
         let pdr = if pdr.outer_draw.remaining() > 0 {
             let _ =
@@ -8492,6 +8505,9 @@ impl CombatState {
         if again.then_relic_after_card_exhausted.is_none() {
             again.then_relic_after_card_exhausted = pdr.then_relic_after_card_exhausted;
             again.then_block_unpowered += pdr.then_block_unpowered;
+        }
+        if again.then_chains_bound.is_none() {
+            again.then_chains_bound = pdr.then_chains_bound;
         }
         true
     }
@@ -8700,6 +8716,29 @@ impl CombatState {
         shuffled
     }
 
+    /// The player's Chains of Binding stack count (0 = none), the cap
+    /// [`Self::afflict_bound_from_chains`] checks this turn's `Bound`s against.
+    fn chains_of_binding_stacks(&self) -> u32 {
+        if self
+            .powers
+            .present_kinds()
+            .contains(crate::powers::PowerKind::ChainsOfBinding)
+        {
+            let mut amt: i32 = 0;
+            for puid in &self.player.powers {
+                if let Some(p) = self.powers.get_by_id(puid.0) {
+                    if p.kind == crate::powers::PowerKind::ChainsOfBinding {
+                        amt = p.amount;
+                        break;
+                    }
+                }
+            }
+            u32::try_from(amt.max(0)).unwrap_or(0)
+        } else {
+            0
+        }
+    }
+
     /// `ChainsOfBindingPower.AfterCardDrawn` for one drawn card
     /// (ChainsOfBindingPower.cs:37-47): afflict it with `Bound` while this
     /// turn's Chains-applied `Bound` count is under the power's stacks
@@ -8719,9 +8758,12 @@ impl CombatState {
                 crate::card_afflictions::CardAfflictionKind::Bound,
                 c.card_type,
             )
+            // `CardCmd.AfflictAndPreview<Bound>(…, base.Amount, …)`: the
+            // affliction's amount is the power's stack count (nothing reads
+            // it, but it reaches the wire and the PPO encoder).
             && c.set_affliction(crate::card_afflictions::CardAffliction::new(
                 crate::card_afflictions::CardAfflictionKind::Bound,
-                1,
+                i32::try_from(chains_stacks).unwrap_or(i32::MAX),
             ))
         {
             self.combat_log.bound_cards_afflicted_by_chains_this_turn = self
@@ -8953,24 +8995,7 @@ impl CombatState {
         // replaces the per-drawn-card `player.powers` walk. Gated on the
         // `present_kinds` superset first: no live ChainsOfBinding anywhere ⇒
         // the walk would find nothing ⇒ 0, bit-identically.
-        let chains_stacks: u32 = if self
-            .powers
-            .present_kinds()
-            .contains(crate::powers::PowerKind::ChainsOfBinding)
-        {
-            let mut amt: i32 = 0;
-            for puid in &self.player.powers {
-                if let Some(p) = self.powers.get_by_id(puid.0) {
-                    if p.kind == crate::powers::PowerKind::ChainsOfBinding {
-                        amt = p.amount;
-                        break;
-                    }
-                }
-            }
-            u32::try_from(amt.max(0)).unwrap_or(0)
-        } else {
-            0
-        };
+        let chains_stacks: u32 = self.chains_of_binding_stacks();
 
         // Perf 2026-07-04: `present_kinds` is a conservative superset of every
         // live power kind, so a miss proves the per-drawn-card Automation walk
@@ -9406,8 +9431,21 @@ impl CombatState {
                 crate::event_log::flash_player_power(self, PowerKind::Pagestorm);
             }
         }
+        let draw_was_suspended = self.pending_draw_resume.is_some();
         if pagestorm_draws > 0 {
             crate::cards::draw_via_state(self, pagestorm_draws);
+        }
+        // Pagestorm's draw suspended on a reshuffle select (Stratagem): Chains
+        // checks the Ethereal card only after the pick (GH #1150). With
+        // Stratagem live, card-effect draws run one card per call, so one card
+        // waits; any other is checked now.
+        let mut chains_after_pagestorm = chains_after_pagestorm.into_iter();
+        if !draw_was_suspended && self.pending_choice.is_some() {
+            if let Some(pdr) = self.pending_draw_resume.as_mut() {
+                if pdr.then_chains_bound.is_none() {
+                    pdr.then_chains_bound = chains_after_pagestorm.next();
+                }
+            }
         }
         for uid in chains_after_pagestorm {
             self.afflict_bound_from_chains(uid, chains_stacks);
@@ -10235,6 +10273,14 @@ impl CombatState {
     /// `EndOfTurn | WhenPlayed`, whichever comes first, so this edge fires far
     /// more often than the rare pure-`SetUntilPlayed`.
     pub fn restore_wire_cost_expiring_on_play(&mut self, card_uid: crate::CardUid) {
+        // Flatten's Osty-attack zero is `SetThisTurn(0)` (EndOfTurn only), so
+        // it survives the play, and so does a Transfigure `+1` appended after
+        // it (GH #1150).
+        let flatten_zero_holds = self
+            .cards
+            .iter()
+            .find(|c| c.uid == card_uid)
+            .is_some_and(|c| crate::hooks::flatten_zeroed(self, c));
         let Some(c) = card_by_uid_mut(&mut self.cards, card_uid) else {
             return;
         };
@@ -10257,8 +10303,10 @@ impl CombatState {
         // never appends, so a v0.107.1 card is untouched.
         c.combat_vars
             .zero(crate::cards::VarKey::CostReductionUntilPlayed);
-        c.combat_vars
-            .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
+        if !flatten_zero_holds {
+            c.combat_vars
+                .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
+        }
         let banked = c.combat_var(crate::cards::VarKey::WireCostExpiringOnPlay);
         if banked == 0 {
             return;
@@ -11959,7 +12007,8 @@ fn resolve_add_generated_choice(
     // cloned blade 19 vs C# 29 → enemy hp rust=22 vs cs=12).
     let mut card = if let Some(template) = opt
         .card_uid
-        .and_then(|uid| state.cards.get(uid.0.get() as usize - 1).copied())
+        .and_then(|uid| state.cards.get(uid.0.get() as usize - 1))
+        .map(crate::cards::Card::create_clone)
     {
         template
     } else {
@@ -11998,7 +12047,7 @@ fn resolve_add_generated_choice(
     if free_this_turn {
         let idx = uid.0.get() as usize - 1;
         if let Some(c) = state.cards.get_mut(idx) {
-            c.set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+            c.set_locally_free(crate::cards::VarKey::FreeThisTurn);
         }
     }
 }
@@ -12077,7 +12126,7 @@ fn resolve_add_from_discard_free(state: &mut CombatState, pc: &PendingChoice, se
     };
     let card = state.player.discard.remove(pos);
     if let Some(c) = state.cards.iter_mut().find(|c| c.uid == card) {
-        c.set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+        c.set_locally_free(crate::cards::VarKey::FreeThisTurn);
     }
     if state.player.hand.len() < crate::cards::HAND_LIMIT {
         state.player.hand.push(card);
@@ -19329,6 +19378,60 @@ mod tests {
         probe.cards[0].cost
     }
 
+    /// GH #1150: a Transfigure `+1` appended after Flatten's Osty-attack zero
+    /// survives the play (the zero is `SetThisTurn`, not `WhenPlayed`), and a
+    /// later attack's fresh zero overrides it.
+    #[test]
+    fn transfigure_plus_one_after_a_flatten_zero_lives_until_a_new_zero() {
+        let mut state = snecko_hand_state(2);
+        state.cards[0].card_id = crate::cards::CardId::Flatten;
+        let uid = state.player.hand[0];
+        state.combat_log.osty_attacks_this_turn = 1;
+        apply_transfigure(&mut state, uid);
+        assert_eq!(crate::hooks::effective_card_cost(&state, uid), 1, "0 + 1");
+
+        state.restore_wire_cost_expiring_on_play(uid);
+        assert_eq!(
+            crate::hooks::effective_card_cost(&state, uid),
+            1,
+            "played and returned the same turn: still 0 + 1"
+        );
+
+        crate::card_effects::osty_attack_command(&mut state, |_| ());
+        assert_eq!(
+            crate::hooks::effective_card_cost(&state, uid),
+            0,
+            "a later Osty attack appends a new zero after the +1"
+        );
+    }
+
+    /// GH #1150: a free-this-turn `+1` dies on play with its zero, and a new
+    /// free-this-turn zero after Transfigure overrides the `+1`.
+    #[test]
+    fn transfigure_plus_one_after_free_this_turn_is_overridden_by_a_new_zero() {
+        let mut state = snecko_hand_state(2);
+        let uid = state.player.hand[0];
+        state.cards[0].set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        apply_transfigure(&mut state, uid);
+        assert_eq!(crate::hooks::effective_card_cost(&state, uid), 1, "0 + 1");
+
+        state.cards[0].set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        assert_eq!(
+            crate::hooks::effective_card_cost(&state, uid),
+            0,
+            "new zero last"
+        );
+
+        state.cards[0].set_combat_var(crate::cards::VarKey::CostAddedAfterLocalZero, 1);
+        state.restore_wire_cost_expiring_on_play(uid);
+        assert_eq!(
+            state.cards[0].combat_var(crate::cards::VarKey::CostAddedAfterLocalZero),
+            0,
+            "the free-this-turn zero clears on play, and the +1 with it"
+        );
+        assert_eq!(crate::hooks::effective_card_cost(&state, uid), 3, "2 + 1");
+    }
+
     /// Flatten's `SetThisTurn(0)` (Osty attacked) and a Snecko roll are both
     /// Absolute local modifiers folded in insertion order, so a roll after
     /// the attack sets the cost and an attack after the roll zeroes it again.
@@ -20990,7 +21093,7 @@ mod tests {
         state.player.hand.push(CardUid::new(1).expect("non-zero"));
         state.player.energy = 3;
         state.player.stars = 0;
-        state.player.cards_played_this_turn = [0; 5];
+        state.player.cards_played_this_turn = [0; 6];
         assert!(
             legal_actions(&state)
                 .iter()

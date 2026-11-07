@@ -155,6 +155,7 @@ pub const fn card_type_python_name(t: CardType) -> &'static str {
         CardType::Power => "Power",
         CardType::Status => "Status",
         CardType::Curse => "Curse",
+        CardType::Quest => "Quest",
     }
 }
 

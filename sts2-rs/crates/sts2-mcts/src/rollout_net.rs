@@ -1111,7 +1111,9 @@ pub fn action_features(
             x[7] = (ctx.energy - cost).max(0) as f32 / 3.0;
             match card.card_type {
                 CardType::Attack => x[8] = 1.0,
-                CardType::Skill => x[9] = 1.0,
+                // Quest cards were Skills before GH #1111; keep the slot the
+                // trained rollout net saw (they are Unplayable anyway).
+                CardType::Skill | CardType::Quest => x[9] = 1.0,
                 CardType::Power => x[10] = 1.0,
                 CardType::Curse | CardType::Status => x[11] = 1.0,
             }

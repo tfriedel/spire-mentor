@@ -246,6 +246,19 @@ pub fn card_to_value(state: &CombatState, card: &Card) -> Value {
     Value::Object(d)
 }
 
+/// `cards_played_this_turn` on the wire: the historical five buckets
+/// (Attack..Status), plus the Quest bucket only when it is non-zero, so every
+/// existing producer, consumer and golden keeps its shape (GH #1111; the
+/// parser accepts both lengths).
+fn play_buckets_wire(buckets: &[u32; 6]) -> Vec<u32> {
+    let quest = sts2_core::cards::CardType::Quest.index();
+    if buckets[quest] == 0 {
+        buckets[..quest].to_vec()
+    } else {
+        buckets.to_vec()
+    }
+}
+
 fn pile_to_value(
     state: &CombatState,
     uids: &[CardUid],
@@ -878,7 +891,7 @@ pub fn combat_state_to_value(state: &CombatState) -> Result<Value, EmitError> {
         set(
             &mut player,
             "cards_played_this_turn",
-            state.player.cards_played_this_turn.to_vec(),
+            play_buckets_wire(&state.player.cards_played_this_turn),
         );
     }
     // ChainsOfBinding's once-per-turn Bound gate — same rationale as the
@@ -1251,7 +1264,7 @@ pub fn combat_state_to_value(state: &CombatState) -> Result<Value, EmitError> {
                     set(
                         &mut m,
                         "cards_played_this_turn",
-                        a.cards_played_this_turn.to_vec(),
+                        play_buckets_wire(&a.cards_played_this_turn),
                     );
                 }
                 if !a.potions.is_empty() {

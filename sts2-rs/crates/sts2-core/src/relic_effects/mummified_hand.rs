@@ -100,7 +100,9 @@ pub(crate) fn on_after_card_played_mummified_hand(
     // `card.cost = 0` directly would leave a zeroed-but-unplayed card stuck at
     // 0 forever once it cycles discard → draw into a later turn (Regent seed
     // 1005: a Mummified-Hand-freed Strike stayed free two turns later).
-    crate::card_effects::set_card_var(state, chosen_uid, crate::cards::VarKey::FreeThisTurn, 1);
+    if let Some(card) = crate::card_by_uid_mut(&mut state.cards, chosen_uid) {
+        card.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+    }
     EffectResult::Resolved
 }
 

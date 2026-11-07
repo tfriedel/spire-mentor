@@ -313,13 +313,19 @@ fn on_card_drawn_stub(state: &mut CombatState, card_uid: CardUid, _from_hand_dra
 /// Python entry: `enchantments.py:126` —
 /// `after_player_turn_start(owner, combat)`.
 ///
-/// Empty-bus early-out: if no card in the draw pile has any
-/// enchantments, skip the walk entirely.
+/// Empty-bus early-out: if no card in any pile has any enchantments, skip
+/// the walk entirely.
 pub fn dispatch_after_player_turn_start(state: &mut CombatState) {
-    if !pile_has_any_enchantments(state, &state.player.draw)
-        && !pile_has_any_enchantments(state, &state.player.hand)
-        && !pile_has_any_enchantments(state, &state.player.discard)
-        && !pile_has_any_enchantments(state, &state.player.exhaust)
+    let p = &state.player;
+    if ![
+        &p.hand[..],
+        &p.draw[..],
+        &p.discard[..],
+        &p.exhaust[..],
+        &p.play[..],
+    ]
+    .into_iter()
+    .any(|pile| pile_has_any_enchantments(state, pile))
     {
         return;
     }
@@ -329,8 +335,12 @@ pub fn dispatch_after_player_turn_start(state: &mut CombatState) {
 /// Listener body.
 ///
 /// **Wave 3 (`sts2-rs-g7rni`):** Imbued auto-play. On the first player turn
-/// only, scan the draw pile for cards carrying the Imbued enchantment and
-/// auto-play each.
+/// only, auto-play every card carrying the Imbued enchantment, wherever it
+/// sits. `Hook.AfterAutoPrePlayPhaseEntered` walks the listener list that
+/// `CombatState.IterateHookListeners` snapshots up front: the cards of Hand,
+/// Draw, Discard, Exhaust and Play, in that order (CombatState.cs). So an
+/// Imbued card drawn into the opening hand (a deck of 5 cards or fewer) plays
+/// too, and before the ones still in the draw pile (GH #1094).
 ///
 /// **v0.107.1 retime/rewindow (§8):** C# `Imbued.cs` moved its body from
 /// `BeforePlayPhaseStart` to `AfterAutoPrePlayPhaseEntered` and changed the
@@ -363,34 +373,38 @@ fn after_player_turn_start_stub(state: &mut CombatState) {
     if state.turn_number() > 1 {
         return;
     }
-    // Snapshot the Imbued uids in hook-listener order: C# walks every
-    // combat pile's enchantments, `AllPiles` = Hand, Draw, Discard, Exhaust,
-    // Play (PlayerCombatState.cs:82), and `CardCmd.AutoPlay` plays the card
-    // wherever it sits. A Power Cell that drew the Imbued card into the hand
-    // before the opening draw still sees it auto-played (loadout Defect 1235
-    // v0.107.1: Rust left an Imbued Overclock in hand).
-    let imbued: Vec<CardUid> = [
-        state.player.hand.as_slice(),
-        state.player.draw.as_slice(),
-        state.player.discard.as_slice(),
-        state.player.exhaust.as_slice(),
-    ]
-    .into_iter()
-    .flat_map(|pile| pile.iter().copied())
-    .filter(|uid| {
-        let idx = (uid.get() as usize).saturating_sub(1);
-        state
-            .cards
-            .get(idx)
-            .is_some_and(|c| c.has_enchantment(EnchantmentId::Imbued))
-    })
-    .collect();
+    // Snapshot the Imbued uids in C#'s listener order: Hand, Draw, Discard,
+    // Exhaust, Play.
+    let p = &state.player;
+    let imbued: Vec<CardUid> = p
+        .hand
+        .iter()
+        .chain(p.draw.iter())
+        .chain(p.discard.iter())
+        .chain(p.exhaust.iter())
+        .chain(p.play.iter())
+        .copied()
+        .filter(|uid| {
+            let idx = (uid.get() as usize).saturating_sub(1);
+            state
+                .cards
+                .get(idx)
+                .is_some_and(|c| c.has_enchantment(EnchantmentId::Imbued))
+        })
+        .collect();
     for uid in imbued {
-        // Out of the draw pile, play it from its own pile.
+        if state.is_over {
+            break;
+        }
+        // `CardCmd.AutoPlay` plays the card from whatever pile it is in now.
+        // Outside the draw pile no top-of-pile bookkeeping applies: the
+        // any-pile auto-play moves it to Play and resolves it.
         let Some(pos) = state.player.draw.iter().position(|u| *u == uid) else {
-            let _ = crate::combat_loop::auto_play_specific_card_from_discard(
-                state, uid, /*force_exhaust=*/ false,
-            );
+            if !state.player.play.contains(&uid) {
+                let _ = crate::combat_loop::auto_play_specific_card_from_discard(
+                    state, uid, /*force_exhaust=*/ false,
+                );
+            }
             continue;
         };
         if state.player.deferred_draw_order {

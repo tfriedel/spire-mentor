@@ -264,7 +264,7 @@ fn stomp_and_pinpoint_clones_keep_their_cloned_cost() {
             c.cost = base - 2;
             c.set_combat_var(bank, 2);
 
-            let clone = state.cards[orig.0.get() as usize - 1];
+            let clone = state.cards[orig.0.get() as usize - 1].create_clone();
             let uid = sts2_core::card_effects::spawn_card_into_hand(&mut state, clone);
             let cost = state.cards[uid.0.get() as usize - 1].cost;
             assert_eq!(cost, base - 2, "{v:?} {id:?} clone");

@@ -34,7 +34,7 @@
 //! `uxyf` pins the 12-column layout). Re-ordering MUST flow back
 //! through `uxyf` + the Texel harness (`vsqc.3`) in lockstep.
 
-use sts2_core::cards::{CardTag, TargetType};
+use sts2_core::cards::{CardTag, CardType, TargetType};
 use sts2_core::{
     eval_features, eval_features_wide, legal_actions, Action, Card, CombatState, PowerKind,
     WIDE_FEATURE_DIM,
@@ -86,7 +86,8 @@ pub const RELIC_SLOT_MAX: usize = 32;
 /// Per-card static-feature width (Lever A, stage (b)). Layout:
 /// `cost(1) | card_type one-hot(5) | target_type one-hot(5) |
 /// upgraded(1) | base_damage(1) | base_block(1) | tags multi-hot(5)`.
-/// Pinned to the live `sts2_core` enum cardinalities (CardType=5,
+/// Pinned to the `sts2_core` enum cardinalities (CardType=5 — Quest shares
+/// the Skill slot —
 /// TargetType=5, CardTag=5); bump here + in `card_feat_vec` +
 /// `value_policy_net_generalist.py::CARD_FEAT_DIM` together if any
 /// enum grows. Stage (b) of `docs/perf/2026-05-26-embedding-inference-
@@ -108,8 +109,14 @@ pub fn card_feat_vec(card: &Card) -> [f32; CARD_FEAT_DIM] {
     } else {
         f32::from(card.cost) / 3.0
     };
-    // card_type one-hot [1..6] (CardType::index is 0..5).
-    f[1 + card.card_type.index()] = 1.0;
+    // card_type one-hot [1..6]. Quest (GH #1111) keeps the Skill slot it
+    // had while it was folded into Skill, so the width and trained nets hold.
+    let ty = if card.card_type == CardType::Quest {
+        CardType::Skill
+    } else {
+        card.card_type
+    };
+    f[1 + ty.index()] = 1.0;
     // target_type one-hot [6..11].
     let t = match card.target_type {
         TargetType::Enemy => 0,
