@@ -1,0 +1,15 @@
+# Runs e2e-driver.service every 5 min (plan section 8 Runbook).
+#
+# Install:  cp e2e-driver.service e2e-driver.timer ~/.config/systemd/user/
+#           systemctl --user daemon-reload
+#           systemctl --user enable --now e2e-driver.timer
+[Unit]
+Description=Ironclad e2e campaign driver, every 5 min
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

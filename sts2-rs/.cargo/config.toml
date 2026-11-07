@@ -17,5 +17,11 @@ rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
 # getrandom 0.4 (via tract-onnx → rand 0.10, PPO in the browser workbench)
 # refuses wasm32-unknown-unknown unless told which backend to use. Nothing
 # first-party asks it for entropy; the cfg only unblocks the build.
+#
+# `+simd128`: wasm SIMD for the browser workbench (Chrome 91+, Firefox 89+,
+# Safari 16.4+). The e2e student's matmuls run ~3.6x faster with it. It grows
+# the engine past Cloudflare Pages' 25 MiB per-file cap, which is why the
+# static build ships the wasm gzipped (`sts2-pycli/scripts/workbench_static.py`)
+# and the engine worker inflates it.
 [target.wasm32-unknown-unknown]
-rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\"", "-C", "target-feature=+simd128"]

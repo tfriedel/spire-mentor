@@ -1,0 +1,15 @@
+# One pass of the Ironclad e2e campaign driver (#1097, plan section 8 Runbook).
+# e2e-driver.timer starts it every 5 min.
+#
+# %h/runs/e2e/driver.env holds two lines, written at deploy (RUNBOOK.md):
+#   E2E_PY=<the campaign worktree's venv python>
+#   E2E_DRIVER=<the campaign worktree>/sts2-pycli/scripts/e2e_driver.py
+[Unit]
+Description=Ironclad e2e campaign driver (one pass)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/runs/e2e/driver.env
+ExecStart=/usr/bin/env ${E2E_PY} ${E2E_DRIVER} --campaign %h/runs/e2e run
+Nice=10
+TimeoutStartSec=600

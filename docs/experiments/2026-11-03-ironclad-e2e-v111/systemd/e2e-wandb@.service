@@ -1,0 +1,27 @@
+# Mirror lane %i's logs to wandb (#1097): ppo.e2e.wandb_sync tails stats.jsonl,
+# throughput.jsonl, ops/events.jsonl and evals/done from its own process, so the
+# learner never imports wandb and a wandb outage cannot touch training.
+#
+# Install:  cp e2e-wandb@.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload
+# Start:    systemctl --user enable --now e2e-wandb@<lane>   (after e2e-lane@<lane>)
+#
+# Credentials: ~/.netrc (api.wandb.ai). Project sts2-ppo-ironclad-e2e, run name
+# ironclad-e2e-<lane>; the run id is kept in the lane's ops/wandb_sync.json, so a
+# restart (or a hot-swap's new worktree) continues the same wandb run.
+[Unit]
+Description=wandb mirror of Ironclad e2e lane %i
+After=e2e-lane@%i.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/runs/e2e/lanes/%i/lane.env
+WorkingDirectory=/
+ExecStart=/usr/bin/env bash -c 'cd "$E2E_WORKTREE/sts2-pycli" && PYTHONPATH=python exec "$E2E_PY" -m ppo.e2e.wandb_sync %h/runs/e2e/lanes/%i --name ironclad-e2e-%i --interval 60'
+Restart=on-failure
+RestartSec=300
+Nice=10
+MemoryMax=4G
+
+[Install]
+WantedBy=default.target

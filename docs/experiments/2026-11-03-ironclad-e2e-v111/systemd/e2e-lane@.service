@@ -1,0 +1,34 @@
+# One lane of the Ironclad e2e campaign (#1097): the watchdog, which runs the
+# learner as its own child (plan section 8 Ops; RUNBOOK.md, "Host setup").
+#
+# Install:  cp e2e-lane@.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload
+# Deploy:   e2e_driver.py init-lane <lane> ...   (writes lane.env, lane.args)
+# Start:    systemctl --user enable --now e2e-lane@<lane>
+#
+# lane.env names the worktree (E2E_WORKTREE) and the python (E2E_PY). Each
+# deploy is a new worktree, so a hot-swap changes lane.env, never this file.
+[Unit]
+Description=Ironclad e2e lane %i (watchdog and learner)
+StartLimitIntervalSec=3600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+EnvironmentFile=%h/runs/e2e/lanes/%i/lane.env
+ExecStart=/usr/bin/env bash ${E2E_WORKTREE}/sts2-pycli/scripts/e2e_watchdog.sh %h/runs/e2e/lanes/%i
+# The watchdog exits 1 only on its own errors; 2-9 are deliberate stops
+# (ppo.e2e.ops_contract.WD_NO_RESTART_CODES), so systemd restarts on 1 alone.
+Restart=on-failure
+RestartSec=120
+RestartPreventExitStatus=2 3 4 5 6 7 8 9
+# The memory cap of the whole lane: learner, workers and evals. The watchdog's
+# RSS backstop (E2E_WD_RSS_MAX_GB, 200 GB) covers a host without delegation.
+MemoryMax=200G
+# SIGTERM goes to the watchdog, which stops the learner (SIGTERM, then SIGKILL
+# to its process group after 600 s); systemd kills what is left after 900 s.
+KillMode=mixed
+TimeoutStopSec=900
+
+[Install]
+WantedBy=default.target
