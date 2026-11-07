@@ -190,3 +190,10 @@ def test_a_learner_state_passes_through_ckpt(tmp_path: Path) -> None:
     rc, v = _main(tmp_path, "--ckpt", str(lane / "state.pt"))
     assert rc == 0 and v is not None and v["ok"], v and v["problems"]
     assert v["net"]["cfg"]["dim"] == TL.TINY["dim"]
+
+
+# The e2e lane is Linux-only (systemd units, /dev/shm); the public CI also runs Windows.
+pytestmark = pytest.mark.skipif(
+    'sys.platform == "win32"',
+    reason="f7check drives the learner, which needs POSIX shared memory (see test_learner.py). Linux only.",
+)

@@ -126,3 +126,10 @@ def test_an_eval_error_row_carries_the_stamps() -> None:
     row = EV.error_row(1_300_000_031, "ppo.e2e.net:make_student", "boom")
     assert (row["outcome"], row["won"], row["error"]) == ("error", False, "boom")
     _check(row, "eval error row")
+
+
+# The e2e lane is Linux-only (systemd units, /dev/shm); the public CI also runs Windows.
+pytestmark = pytest.mark.skipif(
+    'sys.platform == "win32"',
+    reason="the stamps test runs the learner, which needs POSIX shared memory (see test_learner.py). Linux only.",
+)

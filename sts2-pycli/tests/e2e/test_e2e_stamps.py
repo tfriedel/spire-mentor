@@ -62,13 +62,14 @@ def test_a_spawned_worker_stamps_the_same(monkeypatch: pytest.MonkeyPatch) -> No
 def test_file_digest_reads_the_name_and_the_bytes(tmp_path: Path) -> None:
     a, b, c = tmp_path / "a.py", tmp_path / "b.py", tmp_path / "sub"
     c.mkdir()
-    a.write_text("x = 1\n", encoding="utf-8")
-    b.write_text("x = 1\n", encoding="utf-8")
-    (c / "a.py").write_text("x = 1\n", encoding="utf-8")
+    # write_bytes, not write_text: the digest hashes bytes, and Windows text mode writes CRLF.
+    a.write_bytes(b"x = 1\n")
+    b.write_bytes(b"x = 1\n")
+    (c / "a.py").write_bytes(b"x = 1\n")
     assert S.file_digest(a) == S.file_digest(c / "a.py")
     assert S.file_digest(a) != S.file_digest(b)
     before = S.file_digest(a)
-    a.write_text("x = 2\n", encoding="utf-8")
+    a.write_bytes(b"x = 2\n")
     assert S.file_digest(a) != before
     data = b"x = 2\n"
     want = hashlib.sha256(b"a.py\0" + len(data).to_bytes(8, "little") + data).hexdigest()[:16]

@@ -515,3 +515,10 @@ def test_a_policy_that_does_not_load_stops_the_call(tmp_path):
     assert "could not build its policy/env" in r.stderr and "no_such_module" in r.stderr
     assert not list((tmp_path / "SMOKE" / "BAD" / "shards").glob("*.jsonl"))
     assert not (tmp_path / "SMOKE" / "BAD.sha256").exists()
+
+
+# The e2e lane is Linux-only (systemd units, /dev/shm); the public CI also runs Windows.
+pytestmark = pytest.mark.skipif(
+    'sys.platform == "win32"',
+    reason="evaluate runs its shards under a stripped POSIX environment (no HOME/USERPROFILE). Linux only, like the lane.",
+)

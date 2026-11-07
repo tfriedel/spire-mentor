@@ -123,7 +123,11 @@ def export_weights(ckpt: str, out: str) -> dict[str, Any]:
 def _arr(a: np.ndarray) -> dict[str, Any]:
     a = np.asarray(a)
     if a.dtype == np.float16:
-        return {"dtype": "f16bits", "shape": list(a.shape), "data": a.view(np.uint16).ravel().tolist()}
+        return {
+            "dtype": "f16bits",
+            "shape": list(a.shape),
+            "data": a.view(np.uint16).ravel().tolist(),
+        }
     return {"dtype": str(a.dtype), "shape": list(a.shape), "data": a.ravel().tolist()}
 
 
@@ -176,7 +180,10 @@ def play_fixture(pol: Any, seed: int, out_dir: pathlib.Path) -> dict[str, Any]:
                 "row_scalars": {k: int(np.asarray(rb[k])[0]) for k in ROW_SCALARS},
                 "rowb": {
                     k: _arr(rb[k])
-                    for k in POLICY_TOKEN_FIELDS + POLICY_CLASS_FIELDS + POLICY_POOL_FIELDS + ENV_MEMBER_FIELDS
+                    for k in POLICY_TOKEN_FIELDS
+                    + POLICY_CLASS_FIELDS
+                    + POLICY_POOL_FIELDS
+                    + ENV_MEMBER_FIELDS
                 },
                 "logits": [float(x) for x in logits],
                 "chosen": chosen,

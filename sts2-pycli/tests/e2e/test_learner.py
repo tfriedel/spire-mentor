@@ -2329,3 +2329,10 @@ def test_a_stop_with_an_unread_update_result_is_quick_and_frees_its_held_rows(
     assert drained, "the unread result was not drained at the stop"
     held = {r["held"]["shm"] for r in drained if isinstance(r, dict) and r.get("held")}
     assert not (held & _psm())  # its held rows' block, if it had one, is gone
+
+
+# The e2e lane is Linux-only (systemd units, /dev/shm); the public CI also runs Windows.
+pytestmark = pytest.mark.skipif(
+    'sys.platform == "win32"',
+    reason="the learner ships rows through POSIX shared memory that outlives its creator; Windows unlinks a block when its last handle closes. The lane runs on Linux only.",
+)
