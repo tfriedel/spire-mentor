@@ -18,8 +18,19 @@ pub(crate) fn play_dodge_and_roll(
     // Dexterity'd / Frail'd Dodge and Roll carries the modified block into
     // next turn. The prior port carried the unmodified base, dropping the
     // modifier (Silent sweep BlockNextTurn off-by-one cluster).
+    let positive = sts2_core::card_effects::player_block_move_is_positive(state, blk);
     let gained = gain_block_player(state, blk);
-    apply_power_to_player(state, PowerKind::BlockNextTurn, gained);
+    if gained > 0 {
+        apply_power_to_player(state, PowerKind::BlockNextTurn, gained);
+    } else if positive {
+        // C# passes the unfloored decimal (Dexterity -3 and Frail: 0.75), so
+        // the power still lands, at `(int)0.75 == 0` (loadout Silent 1291
+        // v0.111.0).
+        sts2_core::card_effects::apply_truncated_zero_power_to_player(
+            state,
+            PowerKind::BlockNextTurn,
+        );
+    }
     EffectResult::Resolved
 }
 

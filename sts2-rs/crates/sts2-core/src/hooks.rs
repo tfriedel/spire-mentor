@@ -4316,7 +4316,14 @@ fn relic_modify_damage_multiplicative(
             // double damage when `dealer is owner and card is
             // tagged Minion`. Owner is the player (relic owner);
             // source card comes from the play-stack top.
-            if owner != Some(ctx.dealer) {
+            //
+            // C# keys on the hit's `cardSource`, which a relic or power hit
+            // landing mid-play does not carry. `DamageCtx` has no card slot,
+            // but every Minion card's damage is `ValueProp.Move` (powered),
+            // while those hits are unpowered: a Kusarigama proc during a
+            // Minion Dive Bomb dealt 12 instead of 6 (loadout Regent 1282
+            // v0.111.0).
+            if owner != Some(ctx.dealer) || !ctx.props.is_powered() {
                 return DamageMul::ONE;
             }
             let is_minion = crate::card_effects::resolving_card_inst(state)
@@ -5933,6 +5940,18 @@ pub fn modify_card_cost(
             // mirror-low, on the 2026-08-03 live Regent A1 corpus). Read the
             // instance tally that `combat_loop` now maintains instead. Bead
             // `sts2-rs-jxz`.
+            //
+            // `ShouldSkip` also leaves a card outside the Hand and Play piles
+            // alone (VoidFormPower.cs:84-100): Decisions, Decisions re-plays
+            // its Equilibrium from the discard pile at full cost, so
+            // Intimidating Helmet grants on the 2nd and 3rd plays (loadout
+            // Regent 1002 v0.111.0: block cs=68 rs=60).
+            if ctx
+                .card_uid
+                .is_some_and(|uid| !card_in_hand_or_play(state, uid))
+            {
+                return None;
+            }
             let played = crate::combat_loop::void_form_cards_played_this_turn(state);
             crate::powers::regent::void_form_cost_override(power.amount, played, true)
                 .map(CardCostMod::Override)
@@ -11304,7 +11323,7 @@ fn dispatch_after_damage_given_body(
                     let corpse_uid = target_ref
                         .to_creature_uid(state)
                         .expect("corpse check already resolved the uid");
-                    crate::card_effects::apply_power_to_creature_allow_dead(
+                    crate::card_effects::apply_power_to_creature_cardless_allow_dead(
                         state,
                         corpse_uid,
                         PowerKind::MonarchsGazeStrengthDown,
@@ -11318,27 +11337,19 @@ fn dispatch_after_damage_given_body(
                             -mg_amount,
                         );
                     }
-                } else {
-                    apply_effect(
+                } else if let Some(target_uid) = target_ref.to_creature_uid(state) {
+                    // The shared temporary-Strength apply: the drain lands
+                    // before the power (`BeforeApplied`), Artifact eats both
+                    // legs, and `cardSource` is null (MonarchsGazePower.cs:17),
+                    // so Unsettling Lamp does not double it though Crush Under
+                    // is resolving (loadout Regent 1062 v0.111.0: StrengthDown
+                    // cs=1 rs=2).
+                    crate::card_effects::apply_temporary_strength_debuff_cardless(
                         state,
-                        Effect::ApplyPower {
-                            target: target_ref,
-                            kind: PowerKind::MonarchsGazeStrengthDown,
-                            amount: mg_amount,
-                            applier: None,
-                        },
+                        target_uid,
+                        PowerKind::MonarchsGazeStrengthDown,
+                        mg_amount,
                     );
-                    if !absorbed_by_artifact {
-                        apply_effect(
-                            state,
-                            Effect::ApplyPower {
-                                target: target_ref,
-                                kind: PowerKind::Strength,
-                                amount: -mg_amount,
-                                applier: None,
-                            },
-                        );
-                    }
                 }
             }
         }
@@ -11448,8 +11459,14 @@ fn dispatch_after_damage_given_body(
                     .creatures
                     .iter()
                     .any(|c| c.id == target_uid.0 && c.current_hp <= 0);
+            // `PowerCmd.Apply<PoisonPower>(target, Amount, Owner, null)`
+            // (EnvenomPower.cs:24, ConcoctPower.cs:20): no card source, so
+            // Unsettling Lamp does not double it, while the attacking card's
+            // own debuff still triggers the Lamp (loadout Silent 1062
+            // v0.111.0: Suppress's Weak doubled, the Envenom Poison not;
+            // Rust doubled both, Poison cs=1 rs=2).
             for amount in pending_envenom {
-                crate::card_effects::apply_power_to_creature_allow_dead(
+                crate::card_effects::apply_power_to_creature_cardless_allow_dead(
                     state,
                     target_uid,
                     PowerKind::Poison,
@@ -11539,19 +11556,14 @@ fn dispatch_after_damage_given_body(
             for amount in pending_papercuts {
                 state.creature_lose_max_hp(player_uid, amount);
             }
+            // The Wounds land in `AfterAttack`, after the whole hit chain
+            // (`combat_loop`'s end-of-attack flush): a Thorns kill mid-chain
+            // whose Gremlin Horn draw reshuffles the discard shuffles none of
+            // them in (loadout Silent 1157 v0.107.1).
             for amount in pending_painful_stabs {
-                if amount <= 0 {
-                    continue;
-                }
-                // C# `PainfulStabsPower.cs:66` flashes once per `AfterAttack`
-                // call where at least one Wound was added (`anyWoundApplied`)
-                // — matched here as "this instance's Wound count is > 0".
-                crate::event_log::flash_power(state, dealer_uid, PowerKind::PainfulStabs);
-                for _ in 0..amount {
-                    crate::card_effects::spawn_wound_into_pile(
-                        state,
-                        crate::card_effects::PileKind::Discard,
-                    );
+                if amount > 0 {
+                    let owed = &mut state.combat_log.painful_stabs_wounds_owed;
+                    *owed = owed.saturating_add(u8::try_from(amount).unwrap_or(u8::MAX));
                 }
             }
         }
@@ -12618,6 +12630,26 @@ dispatch_fold_hook!(
 /// threaded yet — same insertion-only deferral as `modify_damage`.
 #[must_use]
 pub fn modify_block(state: &CombatState, base_block: i32, ctx: &BlockCtx) -> i32 {
+    let (after_add, mul) = modify_block_parts(state, base_block, ctx);
+    // Step 3: single floor at end via div_euclid.
+    let after_mul = mul.apply(after_add);
+    // Step 4: clamp to non-negative.
+    after_mul.max(0)
+}
+
+/// Is C#'s unfloored `Hook.ModifyBlock` result above zero? `CreatureCmd.GainBlock`
+/// returns that decimal (CreatureCmd.cs:680-700), so a card that passes it on
+/// (Dodge and Roll's `BlockNextTurnPower`) sees 0.75 where [`modify_block`]
+/// floors to 0.
+#[must_use]
+pub fn modify_block_is_positive(state: &CombatState, base_block: i32, ctx: &BlockCtx) -> bool {
+    let (after_add, mul) = modify_block_parts(state, base_block, ctx);
+    after_add > 0 && mul.num > 0 && mul.den > 0
+}
+
+/// [`modify_block`] before its single floor: the additive total and the
+/// composed multiplier.
+fn modify_block_parts(state: &CombatState, base_block: i32, ctx: &BlockCtx) -> (i32, DamageMul) {
     // Single-pass listener fold (additive sum + multiplicative compose are
     // independent accumulators). Walks `iter_power_listeners` /
     // `iter_relic_listeners` once each instead of twice (the prior
@@ -12712,12 +12744,7 @@ pub fn modify_block(state: &CombatState, base_block: i32, ctx: &BlockCtx) -> i32
         }
         _ => mul,
     };
-
-    // Step 3: single floor at end via div_euclid.
-    let after_mul = mul.apply(after_add);
-
-    // Step 4: clamp to non-negative.
-    after_mul.max(0)
+    (after_add, mul)
 }
 
 /// Power kinds with a non-default arm in [`modify_block_additive`]
@@ -13661,6 +13688,13 @@ const MODIFY_CARD_COST_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_ki
     PowerKind::Curious,
 ]);
 
+/// Whether `uid` is in the player's Hand or Play pile: C# cost hooks that
+/// gate on `card.Pile?.Type is Hand or Play` (VoidFormPower `ShouldSkip`).
+#[must_use]
+pub fn card_in_hand_or_play(state: &CombatState, uid: CardUid) -> bool {
+    state.player.hand.contains(&uid) || state.player.play.contains(&uid)
+}
+
 /// True when the card's LOCAL base energy cost is zeroed for this play —
 /// the `FreeThisTurn` / `FreeUntilPlayed` riders, or Flatten-after-osty-
 /// attack — BEFORE the global `modify_card_cost` walk runs. This is the
@@ -13707,6 +13741,7 @@ pub fn local_card_cost(state: &CombatState, card: &crate::cards::Card) -> i32 {
     } else {
         base - card.combat_var(crate::cards::VarKey::CostReductionUntilPlayed)
             - card.combat_var(crate::cards::VarKey::CostDebtThisCombat)
+            - card.combat_var(crate::cards::VarKey::CostDebtThisTurn)
     }
 }
 
@@ -13828,6 +13863,7 @@ pub fn effective_card_cost_inst_with_mask(
         i32::from(card.cost)
             - card.combat_var(crate::cards::VarKey::CostReductionUntilPlayed)
             - card.combat_var(crate::cards::VarKey::CostDebtThisCombat)
+            - card.combat_var(crate::cards::VarKey::CostDebtThisTurn)
     };
     // C# `Hook.ModifyEnergyCostInCombat` returns a negative `originalCost`
     // untouched (Hook.cs:1720-1723, both builds), so a card whose local
@@ -15123,16 +15159,27 @@ fn dispatch_before_hand_draw_arms(state: &mut CombatState, only: u16) -> u16 {
                     .iter()
                     .position(|(p, _)| *p == puid)
                     .map(|i| state.combat_log.nightmare_snapshots.remove(i).1);
-                if let Some(template) = snapshot {
+                if let Some(mut template) = snapshot {
+                    let flags = template.combat_var(crate::cards::VarKey::CloneTurnFlags);
+                    template
+                        .combat_vars
+                        .zero(crate::cards::VarKey::CloneTurnFlags);
                     for _ in 0..count.max(0) {
                         // C# `AddGeneratedCardToCombat(card2, Hand, base.Owner.Player)`
                         // (NightmarePower.cs:49) at BeforeHandDraw: Play pile empty, so
                         // the heuristic would drop the player-created flag.
-                        crate::card_effects::spawn_card_into_hand_with_origin(
+                        let copy = crate::card_effects::spawn_card_into_hand_with_origin(
                             state,
                             template.create_clone(),
                             true,
                         );
+                        // Each copy inherits the snapshot's single-turn Retain / Sly.
+                        if flags & 1 != 0 && !state.player.retain_this_turn.contains(&copy) {
+                            state.player.retain_this_turn.push(copy);
+                        }
+                        if flags & 2 != 0 && !state.player.sly_this_turn.contains(&copy) {
+                            state.player.sly_this_turn.push(copy);
+                        }
                     }
                 } else if let Some(card_uid) = card_uid {
                     clone_card_to_hand(state, card_uid, count, true);
@@ -15471,30 +15518,17 @@ pub(crate) fn withering_presence_after_card_played(state: &mut CombatState, _ctx
         if played < total {
             continue;
         }
-        // Reached `amount` cards: reset the countdown and add a Wither,
-        // FakeUpgraded once per accumulated `WitherUpgradeCount` (the owning
-        // monster's AI counter; 0 if no AI is attached).
+        // Reached `amount` cards: reset the countdown and add a Wither (the
+        // generated-for-combat dispatch matches it to the Aeonglass
+        // `WitherUpgradeCount`).
         if let Some(p) = state.powers.get_mut_by_id(pid) {
             p.counter = 0;
         }
-        let upgrade_count = state
-            .creatures
-            .iter()
-            .find(|c| c.id == cid)
-            .and_then(|c| c.ai.as_ref())
-            .map_or(0, crate::monster_ai::MonsterAi::counter)
-            .max(0);
-        let card_uid =
+        let _ =
             crate::card_effects::spawn_wither_into_pile(state, crate::card_effects::PileKind::Hand);
         // C# `WitheringPresencePower.cs:56` flashes right after the Wither is
         // added, before `CardsLeft` resets.
         crate::event_log::flash_power(state, CreatureUid(cid), PowerKind::WitheringPresence);
-        for _ in 0..upgrade_count {
-            if let Some(card) = state.cards.get_mut(card_uid.0.get() as usize - 1) {
-                let next = card.combat_var(crate::cards::VarKey::WitherFakeUpgradeLevel) + 1;
-                card.set_combat_var(crate::cards::VarKey::WitherFakeUpgradeLevel, next);
-            }
-        }
     }
 }
 
@@ -15524,6 +15558,7 @@ const AFTER_CARD_PLAYED_PLAYER_REACT_KINDS: crate::PowerKindSet =
         PowerKind::Juggling,
         PowerKind::Tender,
         PowerKind::Monologue,
+        PowerKind::BlackHole,
     ]);
 
 /// Per-pass sub-masks of [`AFTER_CARD_PLAYED_PLAYER_REACT_KINDS`] (perf
@@ -15550,6 +15585,7 @@ const AFTER_CARD_PLAYED_ORDERED_ENEMY_HIT_KINDS: crate::PowerKindSet =
         PowerKind::Panache,
         PowerKind::Calamity,
         PowerKind::Juggling,
+        PowerKind::BlackHole,
     ]);
 
 /// C# `SkittishPower.AfterAttack`
@@ -15688,6 +15724,18 @@ pub fn dispatch_after_card_played_ordered_enemy_hits(state: &mut CombatState, ct
             None => continue,
         };
         match kind {
+            // `BlackHolePower.AfterCardPlayed` (BlackHolePower.cs:21-27): the
+            // stars this play spent in `SpendResources` deal the AoE now, in
+            // the player's power order — a Calamity applied earlier adds its
+            // card first (loadout Regent 1299 v0.107.1: the AoE kill's Gremlin
+            // Horn draw landed before Calamity's card in Rust). See
+            // `CombatState::spend_card_play_stars`.
+            PowerKind::BlackHole => {
+                let spent = std::mem::take(&mut state.combat_log.black_hole_stars_spent_on_play);
+                if spent > 0 {
+                    state.apply_black_hole_on_stars_event(spent);
+                }
+            }
             // SerpentForm: `counter` holds the pre-OnPlay AMOUNT snapshot (set
             // by the before-play arm; only instances armed BEFORE this card's
             // OnPlay fire, so a freshly-played SerpentForm card deals no
@@ -27421,6 +27469,12 @@ mod tests {
         };
         // unblocked_damage = 6 (>0) → connecting hit.
         dispatch_after_damage_given(&mut state, &ctx, 6, 6, false);
+        assert_eq!(
+            state.player.discard.len(),
+            discard_pre,
+            "the Wounds wait for the attack command's end (`AfterAttack`)",
+        );
+        crate::combat_loop::flush_painful_stabs_wounds(&mut state, enemy_uid);
 
         assert_eq!(
             state.player.discard.len() - discard_pre,
@@ -27457,6 +27511,7 @@ mod tests {
         };
         // unblocked_damage = 0 → fully blocked, no Wound.
         dispatch_after_damage_given(&mut state, &ctx, 0, 6, true);
+        crate::combat_loop::flush_painful_stabs_wounds(&mut state, enemy_uid);
 
         assert_eq!(
             state.player.discard.len(),
@@ -30984,6 +31039,23 @@ mod tests {
             props: ValueProps::MOVE,
         };
         assert_eq!(modify_damage(&state, 5, &ctx), 10);
+    }
+
+    /// A relic's unpowered hit landing while a Minion card resolves (a
+    /// Kusarigama proc) has no card source in C#, so it is not doubled
+    /// (loadout Regent 1282 v0.111.0).
+    #[test]
+    fn vitruvian_minion_leaves_an_unpowered_hit_during_a_minion_play_alone() {
+        let mut state = state_with_vitruvian_minion();
+        let tags = crate::cards::CardTags::NONE.with(crate::cards::CardTag::Minion);
+        let _ = push_play_card_with_tags(&mut state, tags);
+
+        let ctx = DamageCtx {
+            dealer: CreatureRef::Player,
+            target: CreatureRef::Enemy(CreatureUid::new(99).unwrap()),
+            props: ValueProps::UNPOWERED,
+        };
+        assert_eq!(modify_damage(&state, 6, &ctx), 6);
     }
 
     /// VitruvianMinion leaves non-Minion card damage unchanged.

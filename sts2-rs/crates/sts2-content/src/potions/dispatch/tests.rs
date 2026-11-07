@@ -2012,6 +2012,36 @@ fn touch_of_insanity_single_candidate_auto_frees() {
     assert_eq!(state.cards[idx].cost, 0, "the lone candidate is freed");
 }
 
+/// C# filters on the cost with modifiers, not the printed one: a Flatten an
+/// Osty attack already zeroed is no option, so the lone 2-cost card is freed
+/// with no prompt (loadout Necrobinder 3159 v0.111.0).
+#[test]
+fn touch_of_insanity_skips_a_card_whose_modified_cost_is_zero() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 80);
+    let c1 = push_test_card(&mut state, 1, 2, false);
+    let flatten = push_test_card(&mut state, 2, 2, false);
+    state.cards[flatten.0.get() as usize - 1].card_id = sts2_core::cards::CardId::Flatten;
+    state.combat_log.osty_attacks_this_turn = 1;
+    for uid in [c1, flatten] {
+        state.player.hand.push(uid);
+    }
+    assert_eq!(
+        sts2_core::hooks::effective_card_cost(&state, flatten),
+        0,
+        "the Osty attack zeroed Flatten"
+    );
+
+    let _ = dispatch(&mut state, PotionKind::TouchOfInsanity, None);
+
+    assert!(state.pending_choice.is_none(), "Flatten is not an option");
+    assert_eq!(
+        state.cards[c1.0.get() as usize - 1].cost,
+        0,
+        "the other card is freed"
+    );
+}
+
 /// gh#180 (CALAMITY): a TouchOfInsanity-freed card that is later upgraded
 /// in-combat by a cost-reducing upgrade (CALAMITY 3→2 via ARMAMENTS+1)
 /// must STAY at cost 0, not underflow to -1. C# `SetThisCombat(0)` is an

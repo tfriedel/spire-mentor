@@ -32,21 +32,22 @@ pub(crate) fn play_apotheosis(state: &mut CombatState, _t: Option<CreatureUid>) 
     uids.extend(state.player.discard.iter().copied());
     uids.extend(state.player.play.iter().copied());
     uids.extend(state.player.exhaust.iter().copied());
-    let version = state.game_version;
     for uid in uids {
         if Some(uid) == played {
             continue;
         }
         let idx = uid.0.get() as usize - 1;
-        if let Some(card) = state.cards.get_mut(idx) {
-            // C# `Apotheosis.OnPlay` gates on `card.IsUpgradable`
-            // (Apotheosis.cs:26) — same class as BlessingOfTheForge's gate
-            // (sweep seed 1248): a bogus upgraded flag on a non-upgradable
-            // card shifts the reshuffle pre-sort's instance tie-order.
-            if card.is_upgradable() {
-                // GH #793: the upgrade delta of the combat's game build.
-                let _ = card.upgrade_for(version);
-            }
+        // C# `Apotheosis.OnPlay` gates on `card.IsUpgradable`
+        // (Apotheosis.cs:26) — same class as BlessingOfTheForge's gate
+        // (sweep seed 1248): a bogus upgraded flag on a non-upgradable
+        // card shifts the reshuffle pre-sort's instance tie-order.
+        if state
+            .cards
+            .get(idx)
+            .is_some_and(sts2_core::Card::is_upgradable)
+        {
+            // `CardCmd.Upgrade`, with its combat-ending no-op.
+            let _ = sts2_core::card_effects::upgrade_card_uid(state, uid);
         }
     }
     EffectResult::Resolved

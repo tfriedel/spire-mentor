@@ -2303,6 +2303,38 @@ fn play_mad_science_wisdom_draws_three() {
     assert!(state.player.draw.is_empty(), "draw pile emptied into hand");
 }
 
+/// The Chaos card goes into hand with a plain `CardPileCmd.Add`
+/// (MadScience.cs:286-288), not `AddGeneratedCardToCombat`, so Regalite's
+/// `AfterCardGeneratedForCombat` grants nothing: a Skill Mad Science gains its
+/// 8 block only (loadout Defect 1221 v0.107.1: Rust gained 10).
+#[test]
+fn mad_science_chaos_card_is_not_generated_for_regalite() {
+    use sts2_core::potions::CharacterId;
+    install_pool();
+    crate::relics::dispatch::ensure_installed();
+    let (mut state, enemy) = fresh_state(CardId::MadScience, 12, 0);
+    state.player.character = Some(CharacterId::Ironclad);
+    state.player.current_hp = 70;
+    state.player.max_hp = 70;
+    let _ = state.init_player_creature();
+    state.relics.push(sts2_core::Relic {
+        id: std::num::NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::Regalite,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    });
+    set_mad_science_variant(&mut state.cards[0], CardType::Skill, TinkerTimeRider::Chaos);
+    let generated_before = state.player.generated_cards_this_combat;
+    let f = lookup(CardId::MadScience).expect("registered");
+    f(&mut state, Some(enemy));
+    assert_eq!(state.player.block, 8, "Skill block only, no Regalite");
+    assert_eq!(
+        state.player.generated_cards_this_combat, generated_before,
+        "not a generated card"
+    );
+}
+
 /// `sts2-rs-m3n0g.8`: Chaos rider generates one distinct card from the
 /// owner's CHARACTER pool (C# `MadScience.cs:280-285`
 /// `CardFactory.GetDistinctForCombat(Owner,

@@ -10,14 +10,25 @@ use super::prelude::*;
 /// the channel, dropping the per-orb passive triggers — faithfulness-
 /// audit fix 2026-05-29 (bead `sts2-rs-c2ffw`).
 pub(crate) fn play_darkness(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    use sts2_core::orbs::{focus_bonus, Orb};
+    use sts2_core::orbs::Orb;
     orbs::channel_orb(state, Orb::dark());
     let trigger_count = if current_card_upgraded(state) { 2 } else { 1 };
-    let per_trigger = 6 + focus_bonus(state);
-    for slot in &mut state.player.orbs.slots {
-        if let Orb::Dark { stored } = slot {
-            let bumped = stored.saturating_add(per_trigger.saturating_mul(trigger_count));
-            *slot = Orb::Dark { stored: bumped };
+    // `OrbCmd.Passive` per Dark orb, front to back: `DarkOrb.Passive` adds
+    // `PassiveVal = ModifyOrbValue(6)`, which floors at 0 (Focus can't make a
+    // Dark orb lose damage). Adding a raw `6 + focus` took an upgraded
+    // Darkness under Focus -12 to evoke -6 (loadout Defect 1110 v0.107.1,
+    // C# 6).
+    let dark_slots: smallvec::SmallVec<[usize; 10]> = state
+        .player
+        .orbs
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(i, o)| matches!(o, Orb::Dark { .. }).then_some(i))
+        .collect();
+    for idx in dark_slots {
+        for _ in 0..trigger_count {
+            orbs::trigger_orb_passive_at(state, idx);
         }
     }
     EffectResult::Resolved

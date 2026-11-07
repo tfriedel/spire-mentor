@@ -56,6 +56,10 @@ struct Setup {
     enemy_hps: Vec<i32>,
     relics: Vec<Relic>,
     stars: i8,
+    player_powers: Vec<(sts2_core::PowerKind, i32)>,
+    version: sts2_core::GameVersion,
+    /// The first enemy is a mid-revive corpse: 0 HP with `Adaptable`.
+    adaptable_corpse: bool,
 }
 
 impl Setup {
@@ -65,6 +69,9 @@ impl Setup {
             enemy_hps: vec![400],
             relics: vec![earring(false)],
             stars: 0,
+            player_powers: Vec::new(),
+            version: sts2_core::GameVersion::default(),
+            adaptable_corpse: false,
         }
     }
 }
@@ -119,6 +126,7 @@ fn run_turn(setup: Setup, round: Option<u16>) -> (CombatState, Vec<CardUid>, Ste
         relics: setup.relics.into(),
         player,
         enemy_uids,
+        game_version: setup.version,
         ..CombatState::default()
     };
     let _ = start_combat(&mut state);
@@ -130,6 +138,22 @@ fn run_turn(setup: Setup, round: Option<u16>) -> (CombatState, Vec<CardUid>, Ste
         state.round = r;
     }
     state.player.stars = setup.stars;
+    let player_uid = state.player.creature_uid.expect("player mirror");
+    for &(kind, amount) in &setup.player_powers {
+        sts2_core::card_effects::apply_power_to_creature(&mut state, player_uid, kind, amount);
+    }
+    if setup.adaptable_corpse {
+        let first = state.enemy_uids[0];
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            first,
+            sts2_core::PowerKind::Adaptable,
+            1,
+        );
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id == first.0) {
+            c.current_hp = 0;
+        }
+    }
     let res = start_player_turn(&mut state);
     (state, uids, res)
 }
@@ -372,4 +396,107 @@ fn selection_inside_a_played_card_resolves_vakuu_style() {
     assert!(state.player.hand.is_empty());
     assert_eq!(state.player.block, 5);
     assert_eq!(state.player.energy, 3);
+}
+
+/// The Earring pays a Guiding Star's 2 stars in `SpendResources()`, but its
+/// `CardCmd.AutoPlay` passes `ResourceInfo.StarsSpent = 0` (CardCmd.cs:126,
+/// both builds), so `BlackHolePower.AfterCardPlayed` (`StarsSpent > 0`) stays
+/// quiet: only the card's 12 land. Rust queued the hand play's Black Hole AoE
+/// as well (loadout Regent 1094 v0.107.1: Mecha Knight cs=200 rs=197).
+#[test]
+fn earring_star_spend_does_not_fire_black_hole() {
+    let mut setup = Setup::new(&[CardId::GuidingStar]);
+    setup.stars = 2;
+    setup.player_powers = vec![(sts2_core::PowerKind::BlackHole, 3)];
+    let (state, _uids, _) = run_turn_one(setup);
+    assert_eq!(state.player.stars, 0, "the stars were spent");
+    assert_eq!(
+        ids(&state, &state.player.discard),
+        vec![CardId::GuidingStar],
+        "the Earring played Guiding Star"
+    );
+    assert_eq!(hp(&state, 0), 400 - 12, "Guiding Star only, no Black Hole");
+}
+
+/// Not the Earring, but the same turn-1 harness: Mayhem auto-plays the draw
+/// top after the hand draw. C# `CardPileCmd.AutoPlayFromDrawPile` runs under
+/// a power hook, outside any card or potion effect, so the auto-play's
+/// `OnPlayWrapper` ends with `CheckForEmptyHand` (CardModel.cs:1993 v0.107.1,
+/// :2006 v0.111.0). A Shadow Step that discards the whole hand lets Unceasing
+/// Top draw (loadout Silent 1095 v0.111.0: C# drew Gold Axe, Rust nothing).
+#[test]
+fn mayhem_auto_play_that_empties_the_hand_triggers_unceasing_top() {
+    for version in [
+        sts2_core::GameVersion::V0_107_1,
+        sts2_core::GameVersion::V0_111_0,
+    ] {
+        let mut setup = Setup::new(&[
+            STRIKE,
+            STRIKE,
+            STRIKE,
+            STRIKE,
+            STRIKE,
+            CardId::ShadowStep,
+            DEFEND,
+        ]);
+        setup.relics = vec![Relic {
+            id: std::num::NonZeroU32::new(1).expect("non-zero"),
+            kind: RelicKind::UnceasingTop,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        }];
+        setup.player_powers = vec![(sts2_core::PowerKind::Mayhem, 1)];
+        setup.version = version;
+        let (state, _uids, _) = run_turn_one(setup);
+        assert_eq!(
+            ids(&state, &state.player.hand),
+            vec![DEFEND],
+            "{version:?}: Unceasing Top draws after Shadow Step empties the hand"
+        );
+    }
+}
+
+/// `CardModel.CanPlay()` asks for no target, so with the only enemy a
+/// mid-revive corpse the Earring still takes the Strike first: it pays 1 and
+/// `CardCmd.AutoPlay` (no hittable enemy to roll) moves it to the discard
+/// pile unplayed, then the Defend plays (loadout Silent 1104 v0.107.1: Rust
+/// skipped the attacks and kept their energy).
+#[test]
+fn pays_for_an_enemy_card_with_no_living_enemy() {
+    let mut setup = Setup::new(&[STRIKE, DEFEND]);
+    setup.adaptable_corpse = true;
+    let (state, _uids, _) = run_turn_one(setup);
+    assert!(state.player.hand.is_empty(), "both cards left the hand");
+    assert_eq!(ids(&state, &state.player.discard), vec![STRIKE, DEFEND]);
+    assert_eq!(state.player.energy, 2, "4 - Strike 1 - Defend 1");
+    assert_eq!(state.player.block, 5);
+}
+
+/// Not the Earring, same harness: Ninja Scroll's turn-1 Shivs are real Shivs
+/// (`Shiv.CreateInHand`, NinjaScroll.cs:28). A hand-built card lacked the
+/// `Shiv` tag, so Accuracy did not add to them (loadout Silent 1157 v0.107.1:
+/// a Ninja Scroll Shiv under Accuracy 4 hit for 8 in C#, 4 in Rust).
+#[test]
+fn ninja_scroll_shivs_carry_the_shiv_tag() {
+    let mut setup = Setup::new(&[DEFEND, DEFEND, DEFEND, DEFEND, DEFEND]);
+    setup.relics = vec![Relic {
+        id: std::num::NonZeroU32::new(1).expect("non-zero"),
+        kind: RelicKind::NinjaScroll,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    }];
+    let (state, _uids, _) = run_turn_one(setup);
+    let shivs: Vec<_> = state
+        .player
+        .hand
+        .iter()
+        .map(|u| &state.cards[u.0.get() as usize - 1])
+        .filter(|c| c.card_id == CardId::Shiv)
+        .collect();
+    assert_eq!(shivs.len(), 3);
+    for c in shivs {
+        assert!(c.tags.contains(sts2_core::cards::CardTag::Shiv));
+    }
 }

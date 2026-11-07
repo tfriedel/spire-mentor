@@ -72,7 +72,13 @@ pub(crate) fn on_modify_power_amount_given_unsettling_lamp(
     if unsettling_lamp_state(state) != Some(UNSETTLING_LAMP_CAPTURED) {
         return ctx.amount;
     }
-    if !unsettling_lamp_eligible(ctx) {
+    // `ModifyPowerAmountGivenMultiplicative` (UnsettlingLamp.cs:105-122) has
+    // no applier check, unlike the capture: once Misery's first copy (a
+    // player-applied debuff) captured it, a copy of a monster-applied debuff
+    // from the same play is doubled too. The enemy-target gate stays.
+    let mut doubling = *ctx;
+    doubling.applier = None;
+    if !unsettling_lamp_eligible(&doubling) {
         return ctx.amount;
     }
     ctx.amount.saturating_mul(2)

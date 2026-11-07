@@ -499,6 +499,12 @@ class FullSplit:
     # split step (``split_trace.explain``) and the sources behind it.
     trace: list[str] = field(default_factory=list)
     suspects: list[str] = field(default_factory=list)
+    # The C# world threw during the split step (``Game.world_errors`` grew):
+    # its latest exception line. A swallowed throw aborts the rest of the
+    # command's await chain, a card play left on the Play pile for one (loadout
+    # Silent 1037: ``Hook.AfterBlockBroken`` on a creature Outbreak had just
+    # removed). That is the game's own bug, which Rust does not reproduce.
+    cs_threw: str | None = None
 
     @property
     def classes(self) -> str:
@@ -508,7 +514,8 @@ class FullSplit:
             c = path_class(line.split(":", 1)[0])
             if c not in seen:
                 seen.append(c)
-        return ",".join(seen[:3])
+        tag = "cs_threw|" if self.cs_threw else ""
+        return tag + ",".join(seen[:3])
 
     def __str__(self) -> str:
         sus = f" src={self.suspects}" if self.suspects else ""
@@ -529,6 +536,17 @@ def full_state_divs(g: Any, r: Any) -> tuple[dict[str, Any], list[dict[str, Any]
     if combat is None:
         return cs_state, []
     return cs_state, diff_full(project_csharp(cs_state), project_rust(combat))
+
+
+def _cs_world_errors(g: Any) -> dict[str, Any] | None:
+    """``Game.world_errors`` of the C# backend, or ``None`` when it has none."""
+    fn = getattr(g, "world_errors", None)
+    if fn is None:
+        return None
+    try:
+        return fn()
+    except Exception:
+        return None
 
 
 def _split_lines(divs: list[dict[str, Any]]) -> list[str]:
@@ -733,6 +751,7 @@ def run_one_invincible(
     res = RunResult(seed=seed, steps=0, terminal="error")
     out = InvRun(result=res, character=character)
     saved_acts: set[int] = set()
+    cs_errs_seen = 0
     step0 = 0
     try:
         if meta is not None and from_checkpoint is not None:
@@ -987,10 +1006,18 @@ def run_one_invincible(
             ):
                 cs_state, divs = full_state_divs(g, r)
                 split = _split_lines(divs)
+                errs = _cs_world_errors(g)
+                # Did the C# world throw since the last compared step?
+                threw = errs is not None and errs["count"] > cs_errs_seen
+                if errs is not None:
+                    cs_errs_seen = errs["count"]
                 if not split and trace_split:
                     trace_seq = cs_state.get("trace_seq") or trace_seq
                 if split:
                     out.full_split = FullSplit(step, out.max_act, split[:FULL_SPLIT_MAX_PATHS])
+                    if threw and errs is not None:
+                        sample = errs["sample"]
+                        out.full_split.cs_threw = sample[-1] if sample else "exception"
                     if trace_split:
                         segs = (
                             g.send({"cmd": "get_trace", "since": trace_seq}).get("segments") or []
@@ -1549,6 +1576,8 @@ def main() -> int:
         if out.full_split is not None:
             fs = out.full_split
             print(f"FULL-STATE SPLIT @step {fs.step} act{fs.act}")
+            if fs.cs_threw:
+                print(f"  C# THREW during the split step: {fs.cs_threw}")
             for line in fs.paths:
                 print(f"  {line}")
             if fs.trace:

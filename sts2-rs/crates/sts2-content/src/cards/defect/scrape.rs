@@ -47,10 +47,21 @@ fn draw_own_cards(
 ) -> smallvec::SmallVec<[sts2_core::CardUid; 8]> {
     let iteration_can_fire = state.player_power_amount(sts2_core::PowerKind::Iteration) > 0
         && state.combat_log.status_cards_drawn_this_turn == 0;
-    if !iteration_can_fire {
+    // Hellraiser auto-plays a drawn Strike mid-draw; a Pommel Strike's own
+    // draw then puts a card in hand that `Draw` never returned to Scrape
+    // (loadout Ironclad 3138 v0.107.1: Rust discarded that Burning Pact). Take
+    // the cards one at a time from the draw's own report.
+    let hellraiser = state.player_power_amount(sts2_core::PowerKind::Hellraiser) > 0;
+    if !iteration_can_fire && !hellraiser {
         let pre = state.player.hand.len();
-        let _ = sts2_core::cards::draw_via_state(state, draws);
-        return state.player.hand[pre..].iter().copied().collect();
+        let pile_before = state.player.draw.len();
+        let drawn = sts2_core::cards::draw_via_state(state, draws);
+        // Not a Stratagem pick the reshuffle made without a prompt (loadout
+        // Defect 1167 v0.107.1: Rust discarded a 2-cost Synthesis it never
+        // drew).
+        return sts2_core::cards::cards_returned_by_draw(state, pre, pile_before, drawn)
+            .into_iter()
+            .collect();
     }
     let mut own = smallvec::SmallVec::new();
     for i in 0..draws {
@@ -59,7 +70,11 @@ fn draw_own_cards(
         // the draw is blocked (NoDraw), and then the first call moves nothing.
         let drawn = sts2_core::cards::draw_via_state(state, 1);
         if drawn > 0 {
-            if let Some(&uid) = state.player.hand.get(pre) {
+            // The card this draw took, even if a rider moved it on.
+            if let Some(uid) = state
+                .last_drawn_card
+                .or_else(|| state.player.hand.get(pre).copied())
+            {
                 own.push(uid);
             }
         }

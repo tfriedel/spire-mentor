@@ -992,11 +992,25 @@ public class RunSimulator
                 var list = GetBackingList<RelicModel>(player, "_relics");
                 if (list != null)
                 {
+                    // A relic the player already owns keeps its instance, and
+                    // with it its saved state (Silken Tress's spent Glam, a
+                    // counter): re-creating it from the canonical model reset
+                    // that, which the Rust engine's set_player does not (random
+                    // loadout Ironclad v0.111.0 3056: Silken Tress enchanted a
+                    // second card reward).
+                    var previous = list.ToList();
                     list.Clear();
                     foreach (var rEl in relicsEl.EnumerateArray())
                     {
                         var id = rEl.GetString();
                         if (id == null) continue;
+                        var kept = previous.FirstOrDefault(r => r.Id.Entry == id);
+                        if (kept != null)
+                        {
+                            previous.Remove(kept);
+                            list.Add(kept);
+                            continue;
+                        }
                         var model = ModelDb.GetById<RelicModel>(new ModelId("RELIC", id));
                         if (model != null)
                         {
@@ -1394,6 +1408,16 @@ public class RunSimulator
                 // `try_fairy_in_a_bottle_prevent_death`. An ORACLE artifact,
                 // not an engine divergence.
                 if (potions[i].Usage == MegaCrit.Sts2.Core.Entities.Potions.PotionUsage.Automatic)
+                {
+                    continue;
+                }
+                // An AnyEnemy potion with no living enemy has nothing to aim
+                // at in the game, and UsePotionAction with a null target is
+                // cancelled (the apply path then discarded it by hand, while
+                // Rust drank it). Neither engine offers it (loadout Regent
+                // 1078 v0.111.0, a mid-revive Adaptable corpse).
+                if (aliveCount == 0
+                    && potions[i].TargetType == TargetType.AnyEnemy)
                 {
                     continue;
                 }
@@ -2855,7 +2879,7 @@ public class RunSimulator
 
         Log($"Card selection: indices [{string.Join(",", indices)}]");
 
-        _cardSelector.ResolvePendingByIndices(indices);
+        ResolveSelection(() => _cardSelector.ResolvePendingByIndices(indices));
         _syncCtx.Pump();
         // A resumed play can open the next card's select (Catastrophe's
         // second auto-play, GH #1131). The real game prompts for it, so it
@@ -2900,12 +2924,40 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    /// <summary>
+    /// Complete the pending card selection. Its awaiting continuation runs
+    /// inline on the completing thread (<see cref="GameSyncContext.Post"/>). In
+    /// an event option that continuation can reach the blocking
+    /// <c>GetSelectedCardReward</c> (Neow's Bones: Precarious Shears' removal
+    /// select, then Kaleidoscope's rewards, seed 3033), and on the game thread
+    /// that blocks the very thread that has to answer it. So while an
+    /// event-option task is stashed, complete it from the pool, as the option
+    /// was launched (<see cref="RunOnPool"/>), and wait until it is done or a
+    /// reward is pending; the stashed task is driven on from there.
+    /// </summary>
+    private void ResolveSelection(Action resolve)
+    {
+        if (_pendingEventOptionTask == null)
+        {
+            resolve();
+            return;
+        }
+        var done = Task.Run(resolve);
+        WaitFor(() => done.IsCompleted || _cardSelector.HasPendingReward, 30000,
+            "selection continuation (until done or a card reward is pending)");
+        if (done.IsFaulted)
+        {
+            try { done.GetAwaiter().GetResult(); }
+            catch (Exception ex) { LogException("Selection continuation fault", ex); }
+        }
+    }
+
     private Dictionary<string, object?> DoSkipSelect(Player player)
     {
         if (_cardSelector.HasPending)
         {
             Log("Skipping card selection");
-            _cardSelector.CancelPending();
+            ResolveSelection(() => _cardSelector.CancelPending());
             _syncCtx.Pump();
             WaitForActionExecutor(stopOnSelection: true);
 

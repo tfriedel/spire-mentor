@@ -4464,9 +4464,14 @@ impl RunManager {
             || !self.run_state.pending_deck_enchants.is_empty();
         if !still_picking {
             let opened_card_reward = self.drain_pending_rewards();
+            // A deferred Scroll Boxes (NeowsBones' 2nd relic after a Pomander
+            // pick) queues its pack choice; C# awaits it inside the same
+            // `RewardsSet.Offer()` (loadout Necrobinder 3116 v0.107.1: Rust
+            // went to the map and never offered the packs).
             if opened_card_reward
                 || !self.run_state.relic_rewards.is_empty()
                 || !self.run_state.pending_card_selects.is_empty()
+                || !self.run_state.pending_bundles.is_empty()
             {
                 self.phase = Phase::CardReward;
                 self.advance_after_card_reward();

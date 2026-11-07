@@ -397,3 +397,214 @@ fn reboot_draw_waits_for_stratagem_pick_v0111() {
 fn reboot_draw_waits_for_stratagem_pick_v0107() {
     reboot_draw_waits_for_stratagem_pick(V107);
 }
+
+// ── Calculated Gamble plays its Sly cards after its suspended draw ───────
+
+/// Calculated Gamble discards a Sly Ricochet and draws 1 from an empty draw
+/// pile, so the reshuffle (Ricochet included) opens Stratagem's grid. C#
+/// `CardCmd.DiscardAndDraw` awaits the whole `CardPileCmd.Draw`, the pick
+/// and the card after it included, before it auto-plays the Sly cards
+/// (CardCmd.cs:197-204, both builds). Rust auto-played Ricochet straight
+/// from the draw pile while the pick was still open, so the resumed draw
+/// took the card under it (loadout Silent 1053 v0.107.1: hand cs=6 rs=7).
+fn calculated_gamble_plays_sly_after_suspended_draw(version: GameVersion) {
+    let (mut state, enemy) = fresh(version);
+    state.player.character = Some(CharacterId::Silent);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    for id in [CardId::StrikeSilent, CardId::DefendSilent] {
+        let uid = new_card(&mut state, id);
+        state.player.discard.push(uid);
+    }
+    let _ = push_hand(&mut state, CardId::Ricochet);
+    let ricochet = state.player.hand[0];
+    let cg = push_hand(&mut state, CardId::CalculatedGamble);
+    let _ = sts2_core::combat_loop::play_card(&mut state, cg, None);
+
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    assert!(
+        state.player.draw.contains(&ricochet),
+        "Ricochet waits in the reshuffled draw pile: draw {:?}",
+        state.player.draw
+    );
+    let hp = |s: &CombatState| {
+        s.creatures
+            .iter()
+            .find(|c| c.id == enemy.0)
+            .expect("enemy")
+            .current_hp
+    };
+    assert_eq!(hp(&state), 500, "no Sly auto-play before the pick");
+
+    // Pick a card other than Ricochet.
+    let pick = pc
+        .options
+        .iter()
+        .position(|o| o.card_uid != Some(ricochet))
+        .expect("a non-Sly option");
+    resolve(&mut state, u8::try_from(pick).expect("u8"));
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert!(hp(&state) < 500, "Ricochet auto-played after the draw");
+    assert!(!state.player.draw.contains(&ricochet));
+    assert!(!state.player.hand.contains(&ricochet));
+}
+
+#[test]
+fn calculated_gamble_plays_sly_after_suspended_draw_v0111() {
+    calculated_gamble_plays_sly_after_suspended_draw(V111);
+}
+
+#[test]
+fn calculated_gamble_plays_sly_after_suspended_draw_v0107() {
+    calculated_gamble_plays_sly_after_suspended_draw(V107);
+}
+
+// ── An auto-played card reaches its pile after its AfterCardPlayed draw ──
+
+/// A draw-top auto-play (Mayhem) of a Strike is Iron Club's 4th card: its
+/// `AfterCardPlayed` draw finds the draw pile empty, and the reshuffle opens
+/// Stratagem's grid. C# awaits `Hook.AfterCardPlayed`, the pick and the
+/// drawn card included, before the result-pile move (CardModel.cs:1960 ->
+/// :1980-1989), so Nostalgia puts the Strike on the draw top only after Iron
+/// Club drew. Rust moved the Strike first and the resumed draw took it back
+/// (loadout Defect 1038 v0.107.1: hand Barrage vs C# Overclock).
+fn auto_play_reaches_its_pile_after_its_after_played_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::Nostalgia, 1);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::IronClub,
+        counter: 3,
+        is_wax: false,
+        is_melted: false,
+    });
+    for id in [CardId::DefendIronclad, CardId::Bash, CardId::Anger] {
+        let uid = new_card(&mut state, id);
+        state.player.discard.push(uid);
+    }
+    let strike = push_draw(&mut state, CardId::StrikeIronclad);
+    assert!(sts2_core::combat_loop::auto_play_card_from_draw_top(
+        &mut state, false
+    ));
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    assert!(
+        state.player.play.contains(&strike),
+        "the Strike waits on Play for the pick"
+    );
+
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert!(state.pending_autoplay_resume.is_none());
+    assert_eq!(
+        state.player.hand.len(),
+        2,
+        "the pick + Iron Club's card: hand {:?}",
+        state.player.hand
+    );
+    assert!(!state.player.hand.contains(&strike));
+    assert_eq!(
+        state.player.draw.first(),
+        Some(&strike),
+        "Nostalgia put the Strike on top after the draw"
+    );
+}
+
+#[test]
+fn auto_play_reaches_its_pile_after_its_after_played_draw_v0111() {
+    auto_play_reaches_its_pile_after_its_after_played_draw(V111);
+}
+
+#[test]
+fn auto_play_reaches_its_pile_after_its_after_played_draw_v0107() {
+    auto_play_reaches_its_pile_after_its_after_played_draw(V107);
+}
+
+// ── v0.111.0 Expertise retains every card its suspended draw returns ─────
+
+/// Expertise draws 2: Strike off the top, then an empty draw pile reshuffles
+/// into Stratagem's grid. C# `foreach (item in await CardPileCmd.Draw(..))
+/// ApplySingleTurnRetain(item)` (Expertise.cs:21-24) retains both drawn
+/// cards, the second drawn after the pick, but not the pick. Rust read the
+/// drawn cards as soon as the draw suspended and so retained only the
+/// Strike (loadout Silent 1060 v0.111.0).
+#[test]
+fn expertise_retains_cards_drawn_after_a_stratagem_pick_v0111() {
+    let (mut state, _enemy) = fresh(V111);
+    state.player.character = Some(CharacterId::Silent);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    let strike = push_draw(&mut state, CardId::StrikeSilent);
+    for id in [CardId::DefendSilent, CardId::Neutralize, CardId::Survivor] {
+        let uid = new_card(&mut state, id);
+        state.player.discard.push(uid);
+    }
+    let e = push_hand(&mut state, CardId::Expertise);
+    let _ = sts2_core::combat_loop::play_card(&mut state, e, None);
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    let pick = pc.options[0].card_uid.expect("uid");
+
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert_eq!(state.player.hand.len(), 3, "Strike, the pick, one more");
+    let second = *state
+        .player
+        .hand
+        .iter()
+        .find(|&&u| u != strike && u != pick)
+        .expect("the card drawn after the pick");
+    assert!(state.player.retain_this_turn.contains(&strike));
+    assert!(
+        state.player.retain_this_turn.contains(&second),
+        "the card drawn after the pick retains: {:?}",
+        state.player.retain_this_turn
+    );
+    assert!(
+        !state.player.retain_this_turn.contains(&pick),
+        "the Stratagem pick was not drawn"
+    );
+}
+
+// ── Scrape discards only the cards its own draw returned ──────────────────
+
+/// Scrape draws a Slimed off the top, then the draw pile runs out and the
+/// reshuffle offers Stratagem a single card, which `FromCombatPile` picks
+/// without a prompt. The pick is not part of `CardPileCmd.Draw`'s result, so
+/// Scrape's filter (Scrape.cs OnPlay) discards the Slimed and keeps the
+/// 2-cost Synthesis in hand (loadout Defect 1167 v0.107.1: Rust discarded
+/// both).
+fn scrape_keeps_an_auto_picked_stratagem_card(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    state.player.character = Some(CharacterId::Defect);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    let slimed = push_draw(&mut state, CardId::Slimed);
+    let synthesis = new_card(&mut state, CardId::Synthesis);
+    state.player.discard.push(synthesis);
+    let s = push_hand(&mut state, CardId::Scrape);
+    let _ = sts2_core::combat_loop::play_card(&mut state, s, Some(0));
+    assert!(
+        state.pending_choice.is_none(),
+        "{version:?}: one option, no prompt"
+    );
+    assert!(
+        state.player.hand.contains(&synthesis),
+        "{version:?}: the Stratagem pick stays in hand: hand {:?} discard {:?}",
+        state.player.hand,
+        state.player.discard
+    );
+    assert!(state.player.discard.contains(&slimed), "{version:?}");
+}
+
+#[test]
+fn scrape_keeps_an_auto_picked_stratagem_card_v0111() {
+    scrape_keeps_an_auto_picked_stratagem_card(V111);
+}
+
+#[test]
+fn scrape_keeps_an_auto_picked_stratagem_card_v0107() {
+    scrape_keeps_an_auto_picked_stratagem_card(V107);
+}

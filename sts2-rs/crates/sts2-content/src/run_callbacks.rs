@@ -2198,6 +2198,47 @@ mod tests {
     }
 
     #[test]
+    fn neows_bones_deferred_scroll_boxes_offers_its_packs_after_a_pomander_pick() {
+        // Loadout Necrobinder 3116 v0.107.1: NeowsBones rolled Pomander then
+        // ScrollBoxes. Pomander's upgrade pick defers ScrollBoxes; once the
+        // pick resolves, ScrollBoxes is granted and C# awaits its pack choice
+        // inside the same `RewardsSet.Offer()`. Rust went to the map.
+        use sts2_core::run_manager::{Phase, RunAction, RunManager};
+        use sts2_core::NeowRelic;
+        crate::relics::dispatch::ensure_installed();
+        let mut rm = RunManager::new(0, CharacterId::Ironclad)
+            .with_content_callbacks(ironclad_content_callbacks())
+            .with_neow_start();
+        rm.run_state.direct_event_relic_grant = true;
+        rm.run_state.interactive_card_upgrade = true;
+        for _ in 0..5 {
+            let mut c = sts2_core::cards::Card::pod_defaults();
+            c.card_id = sts2_core::cards::CardId::StrikeIronclad;
+            rm.run_state.master_deck.push(c);
+        }
+        let mut offers = rm.run_state.neow_offers.expect("neow offers rolled");
+        offers.positive_2 = NeowRelic::Pomander;
+        rm.run_state.neow_offers = Some(offers);
+        let _ = rm.take_action(RunAction::EventChoice { idx: 1 });
+        assert!(
+            rm.get_available_actions()
+                .iter()
+                .any(|a| matches!(a, RunAction::UpgradeDeckCard { .. })),
+            "Pomander's upgrade pick is open: {:?}",
+            rm.get_available_actions()
+        );
+        rm.run_state
+            .pending_post_pick_relic_grants
+            .push(RelicId::ScrollBoxes);
+
+        let _ = rm.take_action(RunAction::UpgradeDeckCard { idx: 0 });
+
+        assert!(rm.run_state.relics.contains(&RelicId::ScrollBoxes));
+        assert_eq!(rm.phase(), Phase::CardReward, "the pack choice is open");
+        assert!(rm.card_reward_bundles().is_some(), "offered as bundles");
+    }
+
+    #[test]
     fn neows_bones_deferred_relic_grant_drains_chained_reward_and_lands_curse() {
         // Parity `deck_size_minus1_step2` (SEED A5P41 Ironclad A5): NeowsBones
         // grants relic#1 = LostCoffer (whose `AfterObtained` surfaces a card

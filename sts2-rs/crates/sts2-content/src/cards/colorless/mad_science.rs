@@ -117,7 +117,9 @@ pub(crate) fn play_mad_science(
                 if let Some(&card_id) = ids.first() {
                     if let Some(mut card) = card_pod_from_id(card_id, false) {
                         card.set_combat_var(VarKey::FreeThisTurn, 1);
-                        sts2_core::card_effects::spawn_card_into_hand(state, card);
+                        // A plain `CardPileCmd.Add(cardModel, Hand)`, not
+                        // `AddGeneratedCardToCombat`: no generation hooks.
+                        sts2_core::card_effects::add_new_card_to_hand(state, card);
                     }
                 }
             }

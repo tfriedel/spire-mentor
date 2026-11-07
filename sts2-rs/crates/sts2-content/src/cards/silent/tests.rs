@@ -1257,6 +1257,52 @@ fn well_laid_plans_no_prompt_once_combat_is_ending() {
     assert_eq!(state.player.pending_retain_count, 0);
 }
 
+/// `WellLaidPlansPower.BeforeFlushLate` returns before its select when the
+/// hand will not be flushed (`!Hook.ShouldFlush`, WellLaidPlansPower.cs:21):
+/// under RetainHandPower the whole hand stays, so no retain pick opens
+/// (loadout Silent 1286 v0.107.1).
+#[test]
+fn well_laid_plans_no_prompt_while_retain_hand_keeps_the_hand() {
+    use sts2_core::combat_loop::{end_player_turn_phase_one, end_player_turn_phase_two};
+    use sts2_core::{CardUid, CombatPhase, StepResult};
+    install_pool();
+    let (mut state, _euid) = fresh_state(CardId::WellLaidPlans, 0, 0);
+    state.player.current_hp = 70;
+    state.player.max_hp = 70;
+    let _ = state.init_player_creature();
+    let f = lookup(CardId::WellLaidPlans).expect("registered");
+    assert_eq!(f(&mut state, None), EffectResult::Resolved);
+    let player = state.player.creature_uid.expect("player row");
+    sts2_core::card_effects::apply_power_to_creature(
+        &mut state,
+        player,
+        sts2_core::PowerKind::RetainHand,
+        1,
+    );
+
+    state.player.play.clear();
+    let card_uid = CardUid(NonZeroU32::new(2).expect("nz"));
+    state.cards.push(Card {
+        uid: card_uid,
+        card_id: CardId::StrikeSilent,
+        cost: 1,
+        card_type: CardType::Attack,
+        target_type: TargetType::Enemy,
+        ..Card::pod_defaults()
+    });
+    state.player.hand.push(card_uid);
+
+    state.phase = CombatPhase::PlayerPlayPhase;
+    end_player_turn_phase_one(&mut state);
+    let r2 = end_player_turn_phase_two(&mut state);
+    assert_ne!(r2, StepResult::PendingChoice, "no retain select");
+    assert!(state.pending_choice.is_none());
+    assert!(
+        state.player.hand.contains(&card_uid),
+        "RetainHand keeps the card"
+    );
+}
+
 /// Direct plumbing test: a card explicitly flagged in
 /// `retain_this_turn` survives the end-of-turn flush even with no
 /// retain-granting power. Locks the side-table contract used by

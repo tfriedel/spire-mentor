@@ -316,7 +316,11 @@ fn on_card_drawn_stub(state: &mut CombatState, card_uid: CardUid, _from_hand_dra
 /// Empty-bus early-out: if no card in the draw pile has any
 /// enchantments, skip the walk entirely.
 pub fn dispatch_after_player_turn_start(state: &mut CombatState) {
-    if !pile_has_any_enchantments(state, &state.player.draw) {
+    if !pile_has_any_enchantments(state, &state.player.draw)
+        && !pile_has_any_enchantments(state, &state.player.hand)
+        && !pile_has_any_enchantments(state, &state.player.discard)
+        && !pile_has_any_enchantments(state, &state.player.exhaust)
+    {
         return;
     }
     after_player_turn_start_stub(state);
@@ -359,24 +363,34 @@ fn after_player_turn_start_stub(state: &mut CombatState) {
     if state.turn_number() > 1 {
         return;
     }
-    // Snapshot Imbued uids in current draw order.
-    let imbued: Vec<CardUid> = state
-        .player
-        .draw
-        .iter()
-        .copied()
-        .filter(|uid| {
-            let idx = (uid.get() as usize).saturating_sub(1);
-            state
-                .cards
-                .get(idx)
-                .is_some_and(|c| c.has_enchantment(EnchantmentId::Imbued))
-        })
-        .collect();
+    // Snapshot the Imbued uids in hook-listener order: C# walks every
+    // combat pile's enchantments, `AllPiles` = Hand, Draw, Discard, Exhaust,
+    // Play (PlayerCombatState.cs:82), and `CardCmd.AutoPlay` plays the card
+    // wherever it sits. A Power Cell that drew the Imbued card into the hand
+    // before the opening draw still sees it auto-played (loadout Defect 1235
+    // v0.107.1: Rust left an Imbued Overclock in hand).
+    let imbued: Vec<CardUid> = [
+        state.player.hand.as_slice(),
+        state.player.draw.as_slice(),
+        state.player.discard.as_slice(),
+        state.player.exhaust.as_slice(),
+    ]
+    .into_iter()
+    .flat_map(|pile| pile.iter().copied())
+    .filter(|uid| {
+        let idx = (uid.get() as usize).saturating_sub(1);
+        state
+            .cards
+            .get(idx)
+            .is_some_and(|c| c.has_enchantment(EnchantmentId::Imbued))
+    })
+    .collect();
     for uid in imbued {
-        // The card may have been auto-played + exhausted already if a
-        // prior auto-play reshuffled — check it's still in draw.
+        // Out of the draw pile, play it from its own pile.
         let Some(pos) = state.player.draw.iter().position(|u| *u == uid) else {
+            let _ = crate::combat_loop::auto_play_specific_card_from_discard(
+                state, uid, /*force_exhaust=*/ false,
+            );
             continue;
         };
         if state.player.deferred_draw_order {
@@ -1550,6 +1564,41 @@ mod tests {
         assert!(
             state.player.draw.len() < draw_before || !state.player.draw.contains(&uid(1)),
             "Imbued card should have been auto-played out of draw on round 1",
+        );
+    }
+
+    /// C# hook listeners are every combat pile's enchantments, so an Imbued
+    /// card already in the hand on turn 1 (a Power Cell pulled it there
+    /// before the opening draw) is auto-played from the hand (loadout Defect
+    /// 1235 v0.107.1).
+    #[test]
+    fn imbued_card_in_hand_is_auto_played_on_turn_one() {
+        let mut state = CombatState::default();
+        state.player.current_hp = 80;
+        state.player.max_hp = 80;
+        let _ = state.init_player_creature();
+        let mut c = Card {
+            uid: uid(1),
+            card_id: CardId::DefendIronclad,
+            cost: 1,
+            card_type: CardType::Skill,
+            target_type: TargetType::Self_,
+            base_block: 5,
+            ..Card::pod_defaults()
+        };
+        c.set_enchantment(EnchantmentId::Imbued, 1);
+        state.cards.push(c);
+        state.player.hand.push(uid(1));
+
+        dispatch_after_player_turn_start(&mut state);
+
+        assert!(
+            !state.player.hand.contains(&uid(1)),
+            "auto-played out of the hand"
+        );
+        assert!(
+            state.player.discard.contains(&uid(1)),
+            "it lands in discard"
         );
     }
 

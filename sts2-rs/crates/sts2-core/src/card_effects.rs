@@ -500,6 +500,58 @@ pub fn modify_player_block_move(state: &CombatState, base: i32) -> i32 {
     hooks::modify_block(state, base, &ctx)
 }
 
+/// [`hooks::modify_block_is_positive`] for the player's powered card block,
+/// with the same ctx as [`modify_player_block_move`].
+#[must_use]
+pub fn player_block_move_is_positive(state: &CombatState, base: i32) -> bool {
+    let ctx = BlockCtx {
+        target: CreatureRef::Player,
+        props: ValueProps::MOVE,
+        card_source: resolving_card_uid(state),
+    };
+    hooks::modify_block_is_positive(state, base, &ctx)
+}
+
+/// C# `PowerCmd.Apply` with a decimal amount in (0, 1): non-zero, so it
+/// applies, but `PowerModel.ApplyInternal` stores `(int)amount`
+/// (PowerModel.cs:564-573), leaving a 0-amount instance. Onto an existing
+/// instance the truncated 0 adds nothing. No-op when the player already has
+/// one or has no creature row.
+pub fn apply_truncated_zero_power_to_player(state: &mut CombatState, kind: PowerKind) {
+    let Some(player_uid) = state.player.creature_uid else {
+        return;
+    };
+    let Some(creature_idx) = state.creatures.iter().position(|c| c.id == player_uid.0) else {
+        return;
+    };
+    let has = state.creatures[creature_idx].powers.iter().any(|puid| {
+        state
+            .powers
+            .get_by_id(puid.0)
+            .is_some_and(|p| p.kind == kind)
+    });
+    if has || crate::combat_loop::combat_is_ending(state) {
+        return;
+    }
+    let next_id_raw = state
+        .powers
+        .iter()
+        .map(|p| p.id.get())
+        .max()
+        .map_or(1, |m| m.saturating_add(1));
+    let new_id = NonZeroU32::new(next_id_raw).expect("power id non-zero");
+    state.powers.push(Power {
+        id: new_id,
+        kind,
+        amount: 0,
+        counter: 0,
+        applier: Some(player_uid),
+        skip_next_tick: false,
+    });
+    state.creatures[creature_idx].powers.push(PowerUid(new_id));
+    crate::coop::stamp_power_seat(state, new_id, kind);
+}
+
 /// Block a player card gives co-op teammate `ally` (`state.allies[ally]`):
 /// C# `CreatureCmd.GainBlock(cardPlay.Target, block, Move, cardPlay)` from an
 /// `AnyAlly` card. Runs the powered block pipeline with the teammate as the
@@ -991,6 +1043,21 @@ pub fn apply_power_to_creature_allow_dead(
     );
 }
 
+/// [`apply_power_to_creature_allow_dead`] for a power hook's own
+/// `PowerCmd.Apply(..., cardSource: null)` on the target of a hit (Envenom's
+/// Poison, `EnvenomPower.cs:24`): no card source, so Unsettling Lamp neither
+/// captures nor doubles it (see [`apply_power_to_creature_cardless`]).
+pub fn apply_power_to_creature_cardless_allow_dead(
+    state: &mut CombatState,
+    target_uid: CreatureUid,
+    kind: PowerKind,
+    amount: i32,
+) {
+    apply_power_to_creature_inner(
+        state, target_uid, kind, amount, /*allow_dead=*/ true, true, None,
+    );
+}
+
 /// Whether a dead creature may still receive powers. C#
 /// `Creature.CanReceivePowers` asks every combat hook listener
 /// `ShouldAllowHitting`, and `DieForYouPower.ShouldAllowHitting` returns
@@ -1378,6 +1445,32 @@ pub fn apply_temporary_strength_debuff(
         amount,
         false,
         false,
+        Some(temporary_strength_leg),
+    );
+}
+
+/// [`apply_temporary_strength_debuff`] for a power hook's own
+/// `PowerCmd.Apply(..., cardSource: null)`: Monarch's Gaze's
+/// `Apply<MonarchsGazeStrengthDownPower>(target, Amount, Owner, null)`
+/// (MonarchsGazePower.cs:17). No card source, so Unsettling Lamp neither
+/// captures nor doubles it, though a card's attack is resolving.
+pub fn apply_temporary_strength_debuff_cardless(
+    state: &mut CombatState,
+    target_uid: CreatureUid,
+    kind: PowerKind,
+    amount: i32,
+) {
+    debug_assert!(
+        crate::afflictions::is_temporary_power_debuff(kind),
+        "apply_temporary_strength_debuff_cardless is for TemporaryStrengthPower debuffs"
+    );
+    apply_power_to_creature_inner(
+        state,
+        target_uid,
+        kind,
+        amount,
+        false,
+        true,
         Some(temporary_strength_leg),
     );
 }
@@ -2399,7 +2492,10 @@ pub fn scrape_discard_drawn(state: &mut CombatState, drawn: &[CardUid]) {
                     || card.cost < 0
                     || hooks::effective_card_cost_inst(state, card, uid) != 0
             } else {
-                card.is_x_cost() || hooks::local_card_cost(state, card) != 0
+                // `GetWithModifiers(Local)` ends in `Math.Max(0, num)`: a Stomp
+                // shaved past 0 this turn reads 0 and stays (loadout Ironclad
+                // 3138 v0.107.1: Rust discarded it on its -1 debt).
+                card.is_x_cost() || card.cost < 0 || hooks::local_card_cost(state, card).max(0) != 0
             }
         })
         .collect();
@@ -2483,13 +2579,76 @@ pub fn discard_and_draw_then(
     }
     // C# draws AFTER every discard fires its hook (CardCmd.cs:197-200), BEFORE
     // the Sly auto-play.
+    let was_suspended = state.pending_draw_resume.is_some();
     if draw_count > 0 {
         let _ = crate::cards::draw_via_state(state, draw_count);
     }
     // Auto-play each Sly card BY REFERENCE wherever it now sits (the draw may
     // have reshuffled it from discard into draw/hand) — CardCmd.cs:201-204.
-    play_discarded_sly(state, &sly, then);
+    if then.is_none() {
+        play_discarded_sly_after_draw(state, &sly, was_suspended);
+    } else {
+        // Only the no-draw discard surface carries a follow-up.
+        debug_assert!(draw_count == 0, "a DiscardAndDraw draw with a follow-up");
+        play_discarded_sly(state, &sly, then);
+    }
     discarded
+}
+
+/// [`play_discarded_sly`] for a `CardCmd.DiscardAndDraw` whose draw just ran.
+///
+/// C# awaits the whole `CardPileCmd.Draw` before the Sly auto-plays
+/// (CardCmd.cs:197-204, both builds). When that draw suspended on a
+/// reshuffle's Stratagem pick (`state.pending_draw_resume` set now but not
+/// before, `was_suspended`), the cards still to draw come first: the
+/// auto-plays are owed to the suspended draw and run once it finishes
+/// ([`crate::CombatState::resume_suspended_draw`]). Playing them at once took
+/// a Sly card the reshuffle had put on top straight from the draw pile, so
+/// the resumed draw took the next card instead (loadout Silent 1053: a
+/// Calculated Gamble whose Ricochet C# drew and then played).
+pub fn play_discarded_sly_after_draw(
+    state: &mut CombatState,
+    sly: &[CardUid],
+    was_suspended: bool,
+) {
+    if !was_suspended && state.pending_choice.is_some() {
+        if let Some(pdr) = state.pending_draw_resume.as_mut() {
+            pdr.then_play_sly = true;
+            let mut next = state
+                .cards
+                .iter()
+                .map(|c| c.combat_var(crate::cards::VarKey::SlyOwedAfterDraw))
+                .max()
+                .unwrap_or(0);
+            for &uid in sly {
+                if let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) {
+                    next += 1;
+                    card.set_combat_var(crate::cards::VarKey::SlyOwedAfterDraw, next);
+                }
+            }
+            return;
+        }
+    }
+    play_discarded_sly(state, sly, None);
+}
+
+/// The Sly cards [`play_discarded_sly_after_draw`] marked as owed to a
+/// suspended draw, in the order they were discarded; clears the marks.
+pub fn take_sly_owed_after_draw(state: &mut CombatState) -> smallvec::SmallVec<[CardUid; 4]> {
+    let key = crate::cards::VarKey::SlyOwedAfterDraw;
+    let mut owed: smallvec::SmallVec<[(i32, CardUid); 4]> = state
+        .cards
+        .iter()
+        .filter(|c| c.combat_var(key) > 0)
+        .map(|c| (c.combat_var(key), c.uid))
+        .collect();
+    owed.sort_unstable_by_key(|&(order, _)| order);
+    for &(_, uid) in &owed {
+        if let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) {
+            card.combat_vars.zero(key);
+        }
+    }
+    owed.into_iter().map(|(_, uid)| uid).collect()
 }
 
 /// Auto-play the discarded Sly `cards` in order, then apply `then`.
@@ -2919,6 +3078,33 @@ pub(crate) fn fire_card_generated_for_combat_powers(
     fire_trash_to_treasure_orbs_on_status_generation(state, uid, added_by_player);
     fire_rocketpunch_free_on_status_generation(state, uid, added_by_player);
     fire_soulbound_on_soul_generation(state, uid, added_by_player);
+    match_generated_wither_to_aeonglass(state, uid);
+}
+
+/// C# `Aeonglass.AfterCardGeneratedForCombat`: every Wither generated for
+/// combat, whoever makes it, is `FakeUpgrade`d once per `WitherUpgradeCount`
+/// (the boss's AI counter). That covers the boss's own Withers (Increasing
+/// Intensity, Withering Presence) and a card transformed into a Wither
+/// (`CardCmd.Transform` raises the hook too; loadout Defect 1241 v0.107.1:
+/// Entropy turned a Dazed into a level-0 Wither while the count was 4).
+fn match_generated_wither_to_aeonglass(state: &mut CombatState, uid: CardUid) {
+    let idx = uid.0.get() as usize - 1;
+    if state.cards.get(idx).map(|c| c.card_id) != Some(crate::cards::CardId::Wither) {
+        return;
+    }
+    let levels: i32 = state
+        .creatures
+        .iter()
+        .filter(|c| c.species == Some(crate::MonsterKind::Aeonglass) && c.current_hp > 0)
+        .filter_map(|c| c.ai.as_ref())
+        .map(|ai| ai.counter().max(0))
+        .sum();
+    if levels > 0 {
+        if let Some(card) = state.cards.get_mut(idx) {
+            let next = card.combat_var(crate::cards::VarKey::WitherFakeUpgradeLevel) + levels;
+            card.set_combat_var(crate::cards::VarKey::WitherFakeUpgradeLevel, next);
+        }
+    }
 }
 
 /// v0.111.0 `SoulboundPower.AfterCardGeneratedForCombat`: when the player who
@@ -3277,8 +3463,8 @@ fn wither_card_pod() -> crate::cards::Card {
 
 /// Spawn one [`CardId::Wither`] into `pile`, firing the
 /// `after_card_entered_combat` buses (same path as the content-side
-/// `cards::status::spawn_wither`). The returned [`CardUid`] lets the caller
-/// `FakeUpgrade` the fresh instance (Aeonglass `WitherUpgradeCount` sync).
+/// `cards::status::spawn_wither`); the generated-for-combat dispatch matches
+/// it to the Aeonglass `WitherUpgradeCount`.
 /// Bead `sts2-rs-v0107-content-port-wb8lk.2`.
 pub fn spawn_wither_into_pile(state: &mut CombatState, pile: PileKind) -> CardUid {
     spawn_card_into_pile_with_origin(state, wither_card_pod(), pile, false)
@@ -3380,17 +3566,20 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
     // entry), so a card arriving with a non-zero bank is a copy that has
     // already accounted for this turn's plays and keeps its cloned cost.
     // A fresh generation starts with an empty bank. Both builds.
-    if card.combat_var(var) > 0 {
+    if card.combat_var(var) > 0 || card.combat_var(crate::cards::VarKey::CostDebtThisTurn) > 0 {
         return;
     }
     let card = &mut state.cards[idx];
-    let shave = i32::try_from(plays)
-        .unwrap_or(i32::MAX)
-        .min(i32::from(card.cost.max(0)));
+    let plays = i32::try_from(plays).unwrap_or(i32::MAX);
+    let shave = plays.min(i32::from(card.cost.max(0)));
     if shave > 0 {
         card.cost -= shave as i8;
         let banked = card.combat_var(var);
         card.set_combat_var(var, banked.saturating_add(shave));
+    }
+    // `ReduceCostBy` is `AddThisTurn(-amount)`, unclamped: keep the rest.
+    if card.cost == 0 && plays > shave {
+        card.set_combat_var(crate::cards::VarKey::CostDebtThisTurn, plays - shave);
     }
 }
 
@@ -3583,6 +3772,26 @@ pub fn spawn_card_into_hand_with_origin(
     card: crate::cards::Card,
     added_by_player: bool,
 ) -> CardUid {
+    spawn_card_into_hand_inner(state, card, Some(added_by_player))
+}
+
+/// A new card put into hand with a plain C# `CardPileCmd.Add(card, Hand)`
+/// rather than `AddGeneratedCardToCombat`: it enters combat (the
+/// entered-combat hooks fire) but is not "generated", so no
+/// `History.CardGenerated` tally and no `AfterCardGeneratedForCombat`
+/// (Regalite, Arsenal, ...). Mad Science's Chaos rider (MadScience.cs:286-288;
+/// loadout Defect 1221 v0.107.1: Rust's Regalite gave 2 block).
+pub fn add_new_card_to_hand(state: &mut CombatState, card: crate::cards::Card) -> CardUid {
+    spawn_card_into_hand_inner(state, card, None)
+}
+
+/// `generated`: `Some(added_by_player)` for `AddGeneratedCardToCombat`,
+/// `None` for a plain `CardPileCmd.Add`.
+fn spawn_card_into_hand_inner(
+    state: &mut CombatState,
+    card: crate::cards::Card,
+    generated: Option<bool>,
+) -> CardUid {
     let raw = u32::try_from(state.cards.len() + 1).expect("cards arena fits in u32");
     let uid = CardUid::new(raw).expect("non-zero uid");
     let mut card = card;
@@ -3598,8 +3807,10 @@ pub fn spawn_card_into_hand_with_origin(
     // `_generated_cards_combat.append(target)` runs unconditionally —
     // overflow-to-discard still counts). Read by Supermassive via
     // `CombatState::count_player_generated_cards_this_combat`.
-    state.player.generated_cards_this_combat =
-        state.player.generated_cards_this_combat.saturating_add(1);
+    if generated.is_some() {
+        state.player.generated_cards_this_combat =
+            state.player.generated_cards_this_combat.saturating_add(1);
+    }
     if state.player.hand.len() < crate::cards::HAND_LIMIT {
         state.player.hand.push(uid);
     } else {
@@ -3613,7 +3824,11 @@ pub fn spawn_card_into_hand_with_origin(
         // fires AFTER the spawn is committed (matches C# `Hook.AfterCard
         // EnteredCombat` post-`CardPileCmd` ordering — listeners observe a
         // state where the new uid is already in its destination zone).
-        let _ = crate::relic_effects::dispatch_after_card_entered_combat(state, uid, true);
+        // Its one listener, Regalite, is C#'s `AfterCardGeneratedForCombat`,
+        // so a plain `CardPileCmd.Add` (`generated == None`) skips it.
+        if generated.is_some() {
+            let _ = crate::relic_effects::dispatch_after_card_entered_combat(state, uid, true);
+        }
         // Bead `sts2-rs-ig66w`: sibling monster-power dispatch lane (9l5c2
         // sub-2). Walks every alive creature's `powers` vector and routes
         // through the per-`PowerKind` registry — fires HungerPower's
@@ -3642,7 +3857,9 @@ pub fn spawn_card_into_hand_with_origin(
     // Until GH #639 this site called only the Arsenal / PillarOfCreation pair,
     // so a Status generated straight into hand silently reached neither
     // Smokestack nor RocketPunch.
-    fire_card_generated_for_combat_powers(state, uid, added_by_player);
+    if let Some(added_by_player) = generated {
+        fire_card_generated_for_combat_powers(state, uid, added_by_player);
+    }
     uid
 }
 
@@ -4117,13 +4334,21 @@ pub fn transform_card_in_place(
 /// `sts2-rl-agent@01c094d:sts2_env/run/run_state.py:259-261`).
 ///
 /// Bead `sts2-rs-6ynt.2`.
+///
+/// Like C# `CardCmd.Upgrade` (CardCmd.cs:265-270, both builds), it does
+/// nothing once the combat is ending:
+///
+/// [decompiled C# omitted — see the cited path]
+///
+/// So a card that kills the last enemy is not upgraded by Razor Tooth, and an
+/// upgraded Armaments whose Juggernaut hit ends the fight upgrades no hand
+/// card. Every in-combat `CardCmd.Upgrade` port goes through here.
 pub fn upgrade_card_uid(state: &mut CombatState, uid: CardUid) -> bool {
-    let idx = uid.0.get() as usize - 1;
+    if crate::combat_loop::combat_is_ending(state) {
+        return false;
+    }
     let version = state.game_version;
-    state
-        .cards
-        .get_mut(idx)
-        .is_some_and(|c| c.upgrade_for(version))
+    crate::card_by_uid_mut(&mut state.cards, uid).is_some_and(|c| c.upgrade_for(version))
 }
 
 /// Clear the `upgraded` flag on the card at `uid`. Returns `true` iff
@@ -5673,6 +5898,12 @@ pub fn sample_distinct_colorless_cards(
 /// `spawn_card_into_hand`; this brings the batch-route path in line.
 pub fn route_generated_into_hand(state: &mut CombatState, uids: &[CardUid]) {
     for &uid in uids {
+        // A generated card has no `DeckVersion`: Thieving Hopper never steals
+        // it (loadout Regent 1255 v0.107.1: Rust stole an Orange Dough Mind
+        // Blast instead of a deck card).
+        if let Some(card) = state.cards.get_mut(uid.0.get() as usize - 1) {
+            stamp_generated_in_combat(card);
+        }
         state.player.generated_cards_this_combat =
             state.player.generated_cards_this_combat.saturating_add(1);
         let pile = if state.player.hand.len() < crate::cards::HAND_LIMIT {
@@ -7802,6 +8033,8 @@ mod tests {
             rng: crate::dotnet_rng::Rng::new(0_i32),
             ..Default::default()
         };
+        // A live player: at 0 HP the combat is ending and nothing upgrades.
+        state.player.current_hp = 1;
         let mut shiv = placeholder_card(crate::cards::CardId::Shiv);
         shiv.card_type = crate::cards::CardType::Attack;
         let u = spawn_card_into_pile(&mut state, shiv, PileKind::Hand);
@@ -8647,6 +8880,29 @@ mod tests {
         assert_eq!(
             state.player.block, 4,
             "turn-start (empty Play pile) generation must still grant PillarOfCreation block"
+        );
+    }
+
+    /// A card generated into hand has no `DeckVersion` in C#, so Thieving
+    /// Hopper's steal skips it (loadout Regent 1255 v0.107.1: an Orange Dough
+    /// Mind Blast was stolen in Rust).
+    #[test]
+    fn route_generated_into_hand_marks_the_card_generated() {
+        let mut state = CombatState::default();
+        state.player.current_hp = 80;
+        let card_uid = CardUid::new(1).expect("nz");
+        state.cards.push(crate::cards::Card {
+            uid: card_uid,
+            card_id: crate::cards::CardId::Shiv,
+            card_type: crate::cards::CardType::Attack,
+            ..crate::cards::Card::pod_defaults()
+        });
+
+        route_generated_into_hand(&mut state, &[card_uid]);
+
+        assert_eq!(
+            state.cards[0].combat_var(crate::cards::VarKey::GeneratedInCombat),
+            1
         );
     }
 

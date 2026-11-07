@@ -55,13 +55,10 @@ pub(crate) fn play_armaments(state: &mut CombatState, _t: Option<CreatureUid>) -
 
     if upgraded_branch {
         // Upgraded Armaments: upgrade EVERY un-upgraded hand card (C# `foreach`).
-        let version = state.game_version;
+        // `CardCmd.Upgrade`: nothing once a block-gain reaction (Juggernaut)
+        // killed the last enemy.
         for uid in &upgradable {
-            let idx = uid.0.get() as usize - 1;
-            if let Some(c) = state.cards.get_mut(idx) {
-                // GH #793: the upgrade delta of the combat's game build.
-                let _ = c.upgrade_for(version);
-            }
+            let _ = sts2_core::card_effects::upgrade_card_uid(state, *uid);
         }
         return EffectResult::Resolved;
     }
@@ -99,12 +96,7 @@ pub(crate) fn play_armaments(state: &mut CombatState, _t: Option<CreatureUid>) -
         });
     } else if let Some(uid) = upgradable.first() {
         // Exactly one upgradable card — auto-upgrade (decomp FirstOrDefault).
-        let idx = uid.0.get() as usize - 1;
-        let version = state.game_version;
-        if let Some(c) = state.cards.get_mut(idx) {
-            // GH #793: the upgrade delta of the combat's game build.
-            let _ = c.upgrade_for(version);
-        }
+        let _ = sts2_core::card_effects::upgrade_card_uid(state, *uid);
     }
     EffectResult::Resolved
 }

@@ -3059,11 +3059,21 @@ pub fn dispatch_after_turn_end(state: &mut CombatState, side: Side) -> EffectRes
     if is_empty_after_turn_end() {
         return EffectResult::NotImplemented;
     }
+    // Parrying Shield reads `block_before_late_turn_end`, the Block before the
+    // late powers. C# walks the relics in order and it reads live Block, so
+    // Block an earlier relic gains here counts: Joss Paper's turn-end draw
+    // reshuffles, The Abacus grants 6 (loadout Silent 1297 v0.107.1). Carry
+    // each listener's Block change into the snapshot.
     walk_guarded_event(
         registry_after_turn_end(),
         GuardedChannel::AfterTurnEnd,
         state,
-        |f, state| f(state, side),
+        |f, state| {
+            let block_before = state.player.block;
+            let result = f(state, side);
+            state.combat_log.block_before_late_turn_end += state.player.block - block_before;
+            result
+        },
     )
 }
 

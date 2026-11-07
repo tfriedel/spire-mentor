@@ -645,7 +645,6 @@ fn aeonglass_ebb_effect(state: &mut CombatState, owner: CreatureUid) {
 fn aeonglass_increasing_intensity_effect(state: &mut CombatState, owner: CreatureUid) {
     use sts2_core::ascension::{get_value_if_ascension, AscensionLevel::DeadlyEnemies};
     use sts2_core::card_effects::PileKind;
-    use sts2_core::cards::VarKey;
 
     let base_strength = crate::ascension_scaling::scaled_buff(
         state.ascension,
@@ -665,17 +664,12 @@ fn aeonglass_increasing_intensity_effect(state: &mut CombatState, owner: Creatur
     // 2. WitherUpgradeCount++.
     let count_after = count_before + 1;
     aeonglass_set_wither_upgrade_count(state, count_after);
-    // 3. Add `wither_amount` Withers, each matched to the new upgrade count.
+    // 3. Add `wither_amount` Withers; the generated-for-combat dispatch
+    // matches each to the new upgrade count (`AfterCardGeneratedForCombat`).
     // Co-op: every player the move targets gets these cards.
     sts2_core::coop::each_player(state, |state| {
         for _ in 0..wither_amount {
-            let card_uid = crate::cards::status::spawn_wither(state, PileKind::Discard);
-            for _ in 0..count_after {
-                if let Some(card) = state.cards.get_mut(card_uid.0.get() as usize - 1) {
-                    let next = card.combat_var(VarKey::WitherFakeUpgradeLevel) + 1;
-                    card.set_combat_var(VarKey::WitherFakeUpgradeLevel, next);
-                }
-            }
+            let _ = crate::cards::status::spawn_wither(state, PileKind::Discard);
         }
     });
     // 4. Grant self Strength = base + AdditionalStrength(count_before).
@@ -4372,6 +4366,48 @@ mod tests {
         let mut levels = wither_levels(&state);
         levels.sort_unstable();
         assert_eq!(levels, vec![2, 2], "both Withers synced to upgrade count 2");
+    }
+
+    /// C# `Aeonglass.AfterCardGeneratedForCombat` matches EVERY Wither
+    /// generated for combat, and `CardCmd.Transform` raises that hook, so a
+    /// card transformed into a Wither (Entropy rolling Wither off a Dazed)
+    /// starts at the boss's `WitherUpgradeCount`, not level 0 (loadout Defect
+    /// 1241 v0.107.1).
+    #[test]
+    fn aeonglass_matches_a_card_transformed_into_a_wither() {
+        use sts2_core::card_effects::PileKind;
+        use sts2_core::cards::{CardId, VarKey};
+        use sts2_core::{CombatState, MonsterKind};
+
+        let mut state = CombatState::default();
+        state.player.current_hp = 70;
+        state.player.max_hp = 70;
+        let _player = state.init_player_creature();
+        let owner = state.spawn_enemy(MonsterKind::Aeonglass);
+        state.set_creature_ai(owner, create_aeonglass_ai());
+        aeonglass_set_wither_upgrade_count(&mut state, 4);
+
+        let dazed = crate::cards::status::spawn_dazed(&mut state, PileKind::Hand);
+        let wither = sts2_core::card_effects::transform_card_in_place(
+            &mut state,
+            dazed,
+            sts2_core::cards::Card {
+                card_id: CardId::Wither,
+                card_type: sts2_core::cards::CardType::Status,
+                ..sts2_core::cards::Card::pod_defaults()
+            },
+        )
+        .expect("transformed");
+        let level =
+            state.cards[wither.0.get() as usize - 1].combat_var(VarKey::WitherFakeUpgradeLevel);
+        assert_eq!(
+            state.cards[wither.0.get() as usize - 1].card_id,
+            CardId::Wither
+        );
+        assert_eq!(
+            level, 4,
+            "the transformed-in Wither is matched to the count"
+        );
     }
 
     #[test]

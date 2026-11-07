@@ -436,6 +436,34 @@ pub enum VarKey {
     /// added to). Cleared with the free-this-turn / until-played riders.
     /// Appended so no existing discriminant moves.
     CostAddedAfterLocalZero,
+    /// The part of the card's `AddThisTurn` reductions (Pinpoint per Skill,
+    /// Stomp per Attack) that took its cost below 0. Like
+    /// [`Self::CostDebtThisCombat`], C# keeps them as unclamped Relative
+    /// local modifiers, so a global surcharge (Tangled's +1) lands on the
+    /// negative local cost and leaves it at 0. Subtracted from the local
+    /// base; cleared at the owner's turn start with the per-turn banks.
+    /// Appended so no existing discriminant moves.
+    CostDebtThisTurn,
+    /// C# `Regret.CardsInHand`: the hand size this Regret stored in its
+    /// `BeforeSideTurnEnd`, which it does only while it is in the hand
+    /// (Regret.cs:31-42). A Regret drawn after that point (an orb-kill draw)
+    /// keeps the value it had, normally 0, and `OnTurnEndInHand` deals that
+    /// and resets it. Appended so no existing discriminant moves.
+    RegretCardsInHand,
+    /// A discarded Sly card whose auto-play a suspended `DiscardAndDraw`
+    /// owes: its 1-based place in the discard order, played once the draw
+    /// carrying [`crate::PendingDrawResume::then_play_sly`] finishes. Kept on
+    /// the card, not in `CombatState`, which sits at clippy's
+    /// large-stack-array limit. Appended so no existing discriminant moves.
+    SlyOwedAfterDraw,
+    /// On a Nightmare snapshot only: the single-turn flags C#'s
+    /// `CardModel.CreateClone` copied from the picked card
+    /// (`HasSingleTurnRetain` = 1, `HasSingleTurnSly` = 2). The player's
+    /// `retain_this_turn` / `sly_this_turn` lists hold them for live cards;
+    /// the snapshot is in no pile, so the flush's `EndOfTurnCleanup` never
+    /// clears them and the next-turn copies inherit them. Appended so no
+    /// existing discriminant moves.
+    CloneTurnFlags,
 }
 
 /// [`VarKey::SneckoRollLive`]: the Snecko roll raised `CostAbsolutelySet`, so
@@ -1246,6 +1274,7 @@ impl Card {
         // The later Absolute also supersedes the earlier Relative
         // `AddThisCombat` reductions.
         self.combat_vars.zero(VarKey::CostDebtThisCombat);
+        self.combat_vars.zero(VarKey::CostDebtThisTurn);
         self.set_combat_var(VarKey::CostAbsolutelySet, 1);
         self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, 0);
         self.set_combat_var(VarKey::SneckoRollLive, 0);
@@ -3486,6 +3515,35 @@ pub(crate) fn card_effect_draw_blocked(state: &crate::CombatState) -> bool {
 /// Rust analogue of C# `Hook.ShouldDraw(fromHandDraw = false)`
 /// (`CardPileCmd.cs:753`), shared with
 /// [`crate::CombatState::draw_into_hand_card_effect`].
+/// The cards a [`draw_via_state`] call returned (C# `CardPileCmd.Draw`'s
+/// result), given the hand length and draw-pile length before it and the
+/// count it reported. The hand's new tail also holds a Stratagem pick the
+/// reshuffle resolved without a prompt (a single option): it lands between
+/// the cards drawn before the pile ran out and the next drawn card
+/// (`ShuffleIfNecessary` runs before each card, CardPileCmd.cs:860) and is not
+/// part of the result, so a card filtering what it drew (Scrape, v0.111.0
+/// Expertise) leaves it alone (loadout Defect 1167 v0.107.1).
+#[must_use]
+pub fn cards_returned_by_draw(
+    state: &crate::CombatState,
+    hand_before: usize,
+    pile_before: usize,
+    drawn: usize,
+) -> smallvec::SmallVec<[CardUid; 10]> {
+    let mut own: smallvec::SmallVec<[CardUid; 10]> = state
+        .player
+        .hand
+        .get(hand_before..)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .collect();
+    if own.len() == drawn + 1 && pile_before < own.len() {
+        own.remove(pile_before);
+    }
+    own
+}
+
 pub fn draw_via_state(state: &mut crate::CombatState, n: i32) -> usize {
     // Reset the single-card draw report (bead `sts2-rs-pillage-hellraiser`);
     // the per-card / batch branches below set it to the drawn card when one

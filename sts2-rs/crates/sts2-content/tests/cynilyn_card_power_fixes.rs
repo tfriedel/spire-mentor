@@ -450,6 +450,269 @@ fn bone_shards_block_after_killing_the_dampen_caster_is_upgraded() {
     }
 }
 
+/// `HiddenCache.OnPlay` gains its star FIRST and reads `StarNextTurnPower`
+/// after: a Black Hole hit off that star that kills the Dampen caster
+/// re-upgrades the card, so the power is the upgraded 4. Rust applied the
+/// power before the stars (loadout Regent 1258 v0.111.0: C# 4, Rust 3).
+#[test]
+fn hidden_cache_star_next_turn_after_killing_the_dampen_caster_is_upgraded() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Regent);
+        let caster = add_enemy(&mut state, 2, 1);
+        let _survivor = add_enemy(&mut state, 3, 100);
+        let cache = new_card(&mut state, CardId::HiddenCache, true);
+        state.player.hand.push(cache);
+        sts2_core::monster_power_effects::install_dampen_power_handlers();
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            PowerKind::BlackHole,
+            3,
+        );
+        sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+        let pid = state
+            .powers
+            .iter()
+            .find(|p| p.kind == PowerKind::Dampen)
+            .map(|p| p.id)
+            .expect("Dampen applied");
+        state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+        let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+            Some(caster),
+        );
+        assert!(!state.cards[cache.0.get() as usize - 1].upgraded, "{v:?}");
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+        assert_eq!(
+            hp_of(&state, caster),
+            0,
+            "{v:?}: Black Hole killed the caster"
+        );
+        assert_eq!(
+            power_amount(&state, player, PowerKind::StarNextTurn),
+            4,
+            "{v:?}: re-upgraded amount"
+        );
+    }
+}
+
+/// C# fires the player's `AfterCardPlayed` powers in application order, and
+/// Black Hole's after-play AoE is one of them: with Calamity applied first,
+/// Calamity's card lands before the Black Hole kill's Gremlin Horn draw
+/// (loadout Regent 1299 v0.107.1: Rust fired Black Hole ahead of every power).
+#[test]
+fn black_hole_after_play_hit_follows_an_earlier_calamity() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Regent);
+        let _target = add_enemy(&mut state, 2, 100);
+        let victim = add_enemy(&mut state, 3, 2);
+        add_relic(&mut state, sts2_core::RelicKind::GremlinHorn);
+        fill_draw(&mut state, 1);
+        state.player.stars = 5;
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            PowerKind::Calamity,
+            1,
+        );
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            PowerKind::BlackHole,
+            3,
+        );
+        let blast = push_hand(&mut state, CardId::GammaBlast, false);
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, blast, Some(0));
+
+        assert_eq!(
+            hp_of(&state, victim),
+            0,
+            "{v:?}: Black Hole killed the victim"
+        );
+        let hand: Vec<_> = state
+            .player
+            .hand
+            .iter()
+            .map(|u| state.cards[u.0.get() as usize - 1])
+            .collect();
+        assert_eq!(hand.len(), 2, "{v:?}: {hand:?}");
+        assert_eq!(
+            hand[0].combat_var(sts2_core::cards::VarKey::GeneratedInCombat),
+            1,
+            "{v:?}: Calamity's card first"
+        );
+        assert_eq!(
+            hand[1].card_id,
+            CardId::StrikeIronclad,
+            "{v:?}: the Gremlin Horn draw after"
+        );
+    }
+}
+
+/// v0.111.0 Juggling clones the turn's 3rd Attack in `BeforeCardPlayed`,
+/// ahead of the card listeners, so an auto-played Stomp's copy is not shaved
+/// for that play: it keeps the cost it was cloned with (loadout Ironclad 3165
+/// v0.111.0: a Catastrophe-played Stomp's copy cost 0 in Rust, 1 in C#).
+#[test]
+fn juggling_copy_of_an_auto_played_stomp_keeps_its_cloned_cost() {
+    let mut state = fresh(V111, CharacterId::Ironclad);
+    let _enemy = add_enemy(&mut state, 2, 200);
+    let player = state.player.creature_uid.expect("player");
+    sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Juggling, 1);
+    for p in &mut state.powers {
+        if p.kind == PowerKind::Juggling {
+            p.counter = 2;
+        }
+    }
+    // Two Attacks this turn already shaved the Stomp from 3 to 1.
+    state.player.cards_played_this_turn[sts2_core::cards::CardType::Attack.index()] = 2;
+    let stomp = new_card(&mut state, CardId::Stomp, false);
+    {
+        let card = &mut state.cards[stomp.0.get() as usize - 1];
+        card.cost = 1;
+        card.set_combat_var(sts2_core::cards::VarKey::StompCostReductionThisTurn, 2);
+    }
+    state.player.draw.push(stomp);
+
+    let _ = sts2_core::combat_loop::auto_play_card_from_draw_top(&mut state, false);
+
+    let copies: Vec<_> = state
+        .player
+        .hand
+        .iter()
+        .map(|u| state.cards[u.0.get() as usize - 1])
+        .filter(|c| c.card_id == CardId::Stomp)
+        .collect();
+    assert_eq!(copies.len(), 1, "Juggling copied the 3rd Attack");
+    assert_eq!(copies[0].cost, 1, "the copy keeps its cloned cost");
+}
+
+/// Scrape filters the cards `CardPileCmd.Draw` returned. Hellraiser
+/// auto-plays a drawn Pommel Strike mid-draw, and the card Pommel Strike draws
+/// is not part of Scrape's draw, so Scrape keeps it (loadout Ironclad 3138
+/// v0.107.1: Rust discarded that Burning Pact).
+#[test]
+fn scrape_keeps_the_card_a_hellraiser_pommel_strike_drew() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Ironclad);
+        let _enemy = add_enemy(&mut state, 2, 200);
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            PowerKind::Hellraiser,
+            1,
+        );
+        let pommel = new_card(&mut state, CardId::PommelStrike, false);
+        let pact = new_card(&mut state, CardId::BurningPact, false);
+        state.player.draw.push(pommel);
+        state.player.draw.push(pact);
+        for _ in 0..4 {
+            let defend = new_card(&mut state, CardId::DefendIronclad, false);
+            state.player.draw.push(defend);
+        }
+        let scrape = push_hand(&mut state, CardId::Scrape, false);
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, scrape, Some(0));
+
+        assert!(
+            state.player.hand.contains(&pact),
+            "{v:?}: Burning Pact stays"
+        );
+        assert_eq!(
+            state.player.hand.len(),
+            1,
+            "{v:?}: the drawn Defends are discarded"
+        );
+        assert!(
+            state.player.discard.contains(&pommel),
+            "{v:?}: Pommel Strike was auto-played"
+        );
+    }
+}
+
+/// Thrash folds an exhausted `CalculatedDamage` attack's `Calculate(null)`: a
+/// Supermassive adds 5 + 3 per card generated this combat, not its bare 5
+/// (loadout Ironclad 3111 v0.107.1: C# folded 21, Rust 5).
+#[test]
+fn thrash_folds_a_supermassive_with_its_generated_card_bonus() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Ironclad);
+        let _enemy = add_enemy(&mut state, 2, 500);
+        state.player.generated_cards_this_combat = 2;
+        let thrash = push_hand(&mut state, CardId::Thrash, false);
+        let supermassive = new_card(&mut state, CardId::Supermassive, false);
+        state.player.hand.push(supermassive);
+        let thrash_uid = state.player.hand[usize::from(thrash)];
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, thrash, Some(0));
+
+        assert!(state.player.exhaust.contains(&supermassive), "{v:?}");
+        assert_eq!(
+            state.cards[thrash_uid.0.get() as usize - 1].base_damage,
+            4 + 5 + 3 * 2,
+            "{v:?}: Thrash grew by Supermassive's calculated damage"
+        );
+    }
+}
+
+/// A free-this-turn Banshee's Cry shaved by a later Ethereal play folds
+/// `Absolute(0) - 2` locally, so Borrowed Time's `+1` global surcharge skips
+/// the negative cost and it stays free (loadout Necrobinder 3109 v0.111.0:
+/// C# 0, Rust 1).
+#[test]
+fn borrowed_time_leaves_a_free_banshees_cry_shaved_after_it_free() {
+    let mut state = fresh(V111, CharacterId::Necrobinder);
+    let cry = new_card(&mut state, CardId::BansheesCry, false);
+    state.player.hand.push(cry);
+    state.cards[cry.0.get() as usize - 1].set_combat_var(sts2_core::cards::VarKey::FreeThisTurn, 1);
+    let player = state.player.creature_uid.expect("player");
+    sts2_core::card_effects::apply_power_to_creature(
+        &mut state,
+        player,
+        PowerKind::BorrowedTime,
+        1,
+    );
+    assert_eq!(
+        sts2_core::hooks::effective_card_cost(&state, cry),
+        1,
+        "0 + Borrowed Time"
+    );
+
+    state.discount_banshees_cry_on_ethereal_play();
+
+    assert_eq!(sts2_core::hooks::effective_card_cost(&state, cry), 0);
+}
+
+/// v0.107.1 Scrape keeps a drawn card whose LOCAL cost is 0, and
+/// `GetWithModifiers` clamps at 0: a Stomp shaved past 0 this turn stays
+/// (loadout Ironclad 3138 v0.107.1: Rust discarded it on its debt).
+#[test]
+fn scrape_keeps_a_stomp_shaved_past_zero() {
+    let mut state = fresh(V107, CharacterId::Ironclad);
+    let _enemy = add_enemy(&mut state, 2, 200);
+    let stomp = new_card(&mut state, CardId::Stomp, false);
+    {
+        let card = &mut state.cards[stomp.0.get() as usize - 1];
+        card.cost = 0;
+        card.set_combat_var(sts2_core::cards::VarKey::StompCostReductionThisTurn, 3);
+        card.set_combat_var(sts2_core::cards::VarKey::CostDebtThisTurn, 1);
+    }
+    state.player.draw.push(stomp);
+    fill_draw(&mut state, 3);
+    let scrape = push_hand(&mut state, CardId::Scrape, false);
+
+    let _ = sts2_core::combat_loop::play_card(&mut state, scrape, Some(0));
+
+    assert!(state.player.hand.contains(&stomp), "the 0-cost Stomp stays");
+}
+
 /// `HighFive.cs:31-35` reads `DynamicVars.Vulnerable` for its
 /// `PowerCmd.Apply<VulnerablePower>` only AFTER the Osty attack, so a hit that
 /// kills the Dampen caster re-upgrades the card (`DampenPower.AfterDeath` ->

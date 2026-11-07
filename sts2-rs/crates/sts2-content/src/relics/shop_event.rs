@@ -4293,17 +4293,17 @@ fn listener_ninja_scroll(state: &mut CombatState, side: Side) -> EffectResult {
         return EffectResult::NotImplemented;
     }
     for _ in 0..NINJA_SCROLL_SHIVS {
-        let mut card = sts2_core::cards::Card::pod_defaults();
-        card.card_id = sts2_core::cards::CardId::Shiv;
-        card.card_type = sts2_core::cards::CardType::Attack;
-        card.cost = 0;
-        card.base_damage = 4;
-        card.base_block = 0;
-        card.target_type = sts2_core::cards::TargetType::Enemy;
         // C# `Shiv.CreateInHand(base.Owner, ..)` → `AddGeneratedCardsToCombat(..,
         // creator ?? owner)` (NinjaScroll.cs:28, Shiv.cs:103) at turn start,
-        // Play pile empty — player-created, so pass `true` explicitly.
-        let _ = sts2_core::card_effects::spawn_card_into_hand_with_origin(state, card, true);
+        // Play pile empty — player-created, so pass `true` explicitly. The
+        // real Shiv spec: a hand-built POD lacked the `Shiv` tag (and the
+        // Exhaust keyword), so Accuracy skipped these Shivs (loadout Silent
+        // 1157 v0.107.1: Shiv cs=8 rs=4).
+        let _ = crate::cards::status::spawn_shiv_with_origin(
+            state,
+            sts2_core::card_effects::PileKind::Hand,
+            true,
+        );
     }
     EffectResult::Resolved
 }

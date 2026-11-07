@@ -7,9 +7,13 @@ pub(crate) fn play_hidden_cache(state: &mut CombatState, _t: Option<CreatureUid>
     // C# HiddenCache.cs OnUpgrade bumps StarNextTurnPower 3->4. Python
     // pin port had only base. StarsVar(1) stays — the gain_stars call
     // grants 1 in both arms. Bead `sts2-rs-obiw0`.
+    // C# `HiddenCache.OnPlay`: `GainStars` first, then `StarNextTurn`, its
+    // amount read only then. The stars can fire Black Hole and kill a Magi
+    // Knight, whose Dampen comes off and re-upgrades this card mid-play
+    // (loadout Regent 1258 v0.111.0: C# applied 4, Rust 3).
+    gain_stars(state, 1);
     let amt = if current_card_upgraded(state) { 4 } else { 3 };
     apply_power_to_player(state, PowerKind::StarNextTurn, amt);
-    gain_stars(state, 1);
     EffectResult::Resolved
 }
 

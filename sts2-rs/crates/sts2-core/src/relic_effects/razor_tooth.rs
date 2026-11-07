@@ -11,8 +11,7 @@ pub(crate) fn on_after_card_played_razor_tooth(
     let Some(uid) = ctx.card_uid else {
         return EffectResult::NotImplemented;
     };
-    let version = state.game_version;
-    let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) else {
+    let Some(card) = crate::card_by_uid(&state.cards, uid) else {
         return EffectResult::NotImplemented;
     };
     if !matches!(
@@ -21,7 +20,8 @@ pub(crate) fn on_after_card_played_razor_tooth(
     ) {
         return EffectResult::NotImplemented;
     }
-    card.upgrade_for(version);
+    // `CardCmd.Upgrade`: nothing once the play killed the last enemy.
+    crate::card_effects::upgrade_card_uid(state, uid);
     EffectResult::Resolved
 }
 

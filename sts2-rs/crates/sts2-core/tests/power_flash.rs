@@ -1893,6 +1893,9 @@ fn painful_stabs_flashes_only_when_a_wound_is_actually_added() {
     // C# as long as `list.Any(UnblockedDamage > 0)` upstream — that filter
     // is applied by the caller, not this dispatcher, so drive it directly.
     sts2_core::hooks::dispatch_after_damage_given(&mut state, &ctx, 5, 5, false);
+    // The Wounds (and the flash) wait for the attack command's end.
+    assert_eq!(flash_rows(&state, PowerKind::PainfulStabs), 0);
+    sts2_core::combat_loop::flush_painful_stabs_wounds(&mut state, enemy);
     assert_eq!(flash_rows(&state, PowerKind::PainfulStabs), 1);
     assert_eq!(
         state.player.discard.len(),

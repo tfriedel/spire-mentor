@@ -23,7 +23,11 @@ pub(crate) fn play_hand_trick(state: &mut CombatState, _t: Option<CreatureUid>) 
 
     // C# `CardSelectCmd.FromHand(prefs(1), filter: Type == Skill &&
     // !IsSlyThisTurn)` → `CardCmd.ApplySingleTurnSly`. IsSlyThisTurn = the
-    // permanent `Sly` keyword OR an already-applied single-turn Sly.
+    // card's `Sly` keyword (printed, or added in combat by Master Planner's
+    // `ApplyKeyword`) OR an already-applied single-turn Sly: `card_is_sly`.
+    // Ignoring Master Planner's Sly offered two already-Sly Skills, so Rust
+    // prompted where C# auto-picked the lone candidate (loadout Silent 1150
+    // v0.111.0: Nightmare then copied a Shiv instead of Haze).
     let candidates: Vec<sts2_core::CardUid> = state
         .player
         .hand
@@ -34,8 +38,7 @@ pub(crate) fn play_hand_trick(state: &mut CombatState, _t: Option<CreatureUid>) 
             state.cards.get(idx).is_some_and(|c| {
                 c.card_type == CardType::Skill
                     && !c.is_quest()
-                    && !sts2_core::card_effects::card_sly_in(c.card_id, state.game_version)
-                    && !state.player.sly_this_turn.contains(uid)
+                    && !sts2_core::card_effects::card_is_sly(state, *uid)
             })
         })
         .collect();

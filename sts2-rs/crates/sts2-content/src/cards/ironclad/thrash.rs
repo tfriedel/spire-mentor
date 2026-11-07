@@ -284,6 +284,37 @@ fn exhaust_fold_base_damage(state: &CombatState, uid: sts2_core::CardUid) -> i32
         // under-count (Stampede auto-played that Thrash for 2 hits) left
         // VineShambler alive at 9 where C# killed it.
         CardId::GangUp => 5,
+        // The other `CalculatedDamage` attacks fold `Calculate(null)`: their
+        // previews with no target (a target-keyed multiplier — Bully's
+        // Vulnerable, Time's Up's Doom — is 0, as under C#'s null). A
+        // Supermassive folded only its base 5 where C# folded 5 + 3 × the
+        // cards generated this combat (loadout Ironclad 3111 v0.107.1).
+        CardId::Bully => crate::cards::ironclad::bully::preview_bully(state, card, None),
+        CardId::CrescentSpear => {
+            crate::cards::regent::crescent_spear::preview_crescent_spear(state, card, None)
+        }
+        CardId::Supermassive => {
+            crate::cards::regent::supermassive::preview_supermassive(state, card, None)
+        }
+        CardId::DeathMarch => {
+            crate::cards::necrobinder::death_march::preview_death_march(state, card, None)
+        }
+        CardId::Protector => {
+            crate::cards::necrobinder::protector::preview_protector(state, card, None)
+        }
+        CardId::SoulStorm => {
+            crate::cards::necrobinder::soul_storm::preview_soul_storm(state, card, None)
+        }
+        CardId::Squeeze => crate::cards::necrobinder::squeeze::preview_squeeze(state, card, None),
+        CardId::TimesUp => crate::cards::necrobinder::times_up::preview_times_up(state, card, None),
+        CardId::Unleash => crate::cards::necrobinder::unleash::preview_unleash(state, card, None),
+        CardId::MementoMori => {
+            crate::cards::silent::memento_mori::preview_memento_mori(state, card, None)
+        }
+        CardId::Murder => crate::cards::silent::murder::preview_murder(state, card, None),
+        CardId::PreciseCut => {
+            crate::cards::silent::precise_cut::preview_precise_cut(state, card, None)
+        }
         // Rampage grows its damage on each play. C# stores the growth IN
         // `Damage.BaseValue` (`Rampage.cs:54` `Damage.BaseValue += Increase`),
         // so Thrash folds the GROWN value (Thrash.cs:60 `else` branch reads

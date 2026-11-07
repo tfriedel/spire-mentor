@@ -550,3 +550,40 @@ fn outer_draw_waits_behind_a_pagestorm_draws_stratagem_pick() {
         assert!(state.player.draw.is_empty(), "{v:?}");
     }
 }
+
+/// A turn-end Lightning passive kills one of two Nibbits, and Gremlin Horn's
+/// `AfterDeath` draw reshuffles into Stratagem's grid. The hook's action is
+/// queued behind the end-turn action, and C# flushes the hand
+/// (`EndPlayerTurnPhaseTwoInternal`) only once the queue is empty, so the
+/// pick opens before the flush: the Strike is still in hand. Rust parked it
+/// until the next player turn (loadout Defect 1119 v0.107.1).
+#[test]
+fn turn_end_orb_kill_select_opens_before_the_hand_flush() {
+    for v in BOTH {
+        let (mut state, _dying, _reshuffled) =
+            horn_stratagem_fixture(v, 1, &[CardId::DefendIronclad, CardId::Bash, CardId::Anger]);
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id.get() == 3) {
+            c.current_hp = 1;
+        }
+        state.player.character = Some(sts2_core::potions::CharacterId::Defect);
+        state.player.orbs.ensure_defect_base();
+        sts2_core::orbs::channel_orb(&mut state, sts2_core::orbs::Orb::Lightning);
+        let strike = new_card(&mut state, CardId::StrikeIronclad);
+        state.player.hand.push(strike);
+
+        let r = sts2_core::apply(&mut state, sts2_core::Action::EndTurn);
+
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{v:?}");
+        let pc = state.pending_choice.as_ref().expect("the grid surfaced");
+        assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand, "{v:?}");
+        assert!(
+            state.player.hand.contains(&strike),
+            "{v:?}: the hand is not flushed yet"
+        );
+        resolve(&mut state, 0);
+        assert!(
+            !state.player.hand.contains(&strike),
+            "{v:?}: the flush ran after the pick"
+        );
+    }
+}

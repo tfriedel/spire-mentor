@@ -8209,6 +8209,38 @@ fn parrying_shield_damages_random_enemy_when_block_meets_threshold() {
     );
 }
 
+/// Block a relic earlier in the turn-end walk gains counts: Joss Paper's
+/// threshold draw reshuffles the discard, The Abacus grants 6, and Parrying
+/// Shield then sees 9 + 6 (C# reads live Block in relic order; loadout Silent
+/// 1297 v0.107.1).
+#[test]
+#[serial_test::serial(global_registry)]
+fn parrying_shield_sees_block_an_earlier_turn_end_relic_gains() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(70, 70);
+    give_player_relic(&mut state, RelicKind::JossPaper);
+    give_player_relic(&mut state, RelicKind::TheAbacus);
+    give_player_relic(&mut state, RelicKind::ParryingShield);
+    state.relics[0].counter = 5;
+    let card = crate::CardUid::new(u32::try_from(state.cards.len() + 1).unwrap()).unwrap();
+    state.cards.push(crate::cards::Card {
+        uid: card,
+        ..crate::cards::Card::pod_defaults()
+    });
+    state.player.discard.push(card);
+    state.player.block = 9;
+    state.combat_log.block_before_late_turn_end = 9;
+    let enemy = push_enemy(&mut state, 903, 30);
+
+    let _ = dispatch_after_turn_end(&mut state, Side::Player);
+    assert_eq!(state.player.block, 15, "The Abacus on the reshuffle");
+    assert_eq!(
+        enemy_current_hp(&state, enemy),
+        30 - 6,
+        "ParryingShield sees the Abacus block"
+    );
+}
+
 #[test]
 #[serial_test::serial(global_registry)]
 fn parrying_shield_inert_when_block_below_threshold() {

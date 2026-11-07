@@ -48,7 +48,7 @@ pub(crate) fn play_frantic_escape(
     {
         if let Some(card) = state.cards.get_mut(idx) {
             if card.card_id == CardId::FranticEscape {
-                card.cost = card.cost.saturating_add(1);
+                card.add_cost_this_combat(1);
             }
         }
     }

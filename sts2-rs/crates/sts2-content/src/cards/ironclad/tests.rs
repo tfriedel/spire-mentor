@@ -5168,7 +5168,9 @@ fn hellraiser_strike_that_ends_the_combat_takes_no_confused_roll() {
 
     let _ = sts2_core::cards::draw_via_state(&mut state, 1);
 
-    assert!(state.player.discard.contains(&strike), "Strike auto-played");
+    // Auto-played; its move to Discard is refused once the combat is ending
+    // (`CardPileCmd.Add`, CardPileCmd.cs:312), so it stays in Play.
+    assert!(state.player.play.contains(&strike), "Strike auto-played");
     assert!(sts2_core::combat_loop::combat_is_ending(&state));
     assert_eq!(
         state.run_rng.combat_energy_costs.counter(),

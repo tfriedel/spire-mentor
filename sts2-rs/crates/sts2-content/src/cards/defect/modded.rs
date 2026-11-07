@@ -29,7 +29,9 @@ pub(crate) fn play_modded(state: &mut CombatState, _t: Option<CreatureUid>) -> E
         sts2_core::card_effects::resolving_card_uid(state).map(|u| u.0.get() as usize - 1)
     {
         if let Some(card) = state.cards.get_mut(idx) {
-            card.cost = card.cost.saturating_add(1);
+            // `EnergyCost.AddThisCombat(1)` (Modded.cs:28): pays off a
+            // below-zero cost debt first, as C#'s unclamped Relative does.
+            card.add_cost_this_combat(1);
         }
     }
     EffectResult::Resolved

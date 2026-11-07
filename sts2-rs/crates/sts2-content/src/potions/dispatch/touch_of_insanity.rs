@@ -44,7 +44,15 @@ pub(crate) fn drink_touch_of_insanity(
             // both halves: raw energy cost > 0, or a positive star cost.
             // `effective_star_cost` returns 0 once a card is already free
             // (StarCostFreeThisCombat) so it won't be re-selected.
-            c.cost > 0 || sts2_core::effective_star_cost(c) > 0
+            // `CostsEnergyOrStars(false) || CostsEnergyOrStars(true)`: the cost
+            // with its local modifiers, or with the global ones too — not
+            // the printed cost. A Flatten zeroed by an Osty attack is no
+            // option (loadout Necrobinder 3159 v0.111.0: Rust offered it,
+            // shifting the pick onto Mimic instead of Melancholy).
+            let energy = c.cost >= 0
+                && (sts2_core::hooks::local_card_cost(state, c) > 0
+                    || sts2_core::hooks::effective_card_cost_inst(state, c, *uid) > 0);
+            energy || sts2_core::effective_star_cost(c) > 0
         })
         .collect();
     match candidates.as_slice() {
