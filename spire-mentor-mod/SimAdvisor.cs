@@ -40,6 +40,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using Godot;
@@ -2607,6 +2608,9 @@ internal sealed class SimAdvisor
             }
 
             string detail = SafeDescription(entry);
+            // The log line is for reading (display names, "you"); the advisor
+            // keeps getting the raw Description below (human_action).
+            CombatEvent ev = CombatEventText.Describe(entry, playerCreature);
             bool byPlayer = playerCreature != null && entry.Actor == playerCreature;
             bool isOwnAction = byPlayer && entry is CardPlayFinishedEntry or PotionUsedEntry;
 
@@ -2621,7 +2625,8 @@ internal sealed class SimAdvisor
                     Act = (runState?.CurrentActIndex ?? -1) + 1,
                     Floor = runState?.TotalFloor ?? 0,
                     DecisionType = "",
-                    Action = detail,
+                    Action = ev.Text,
+                    Event = ev,
                 });
                 continue;
             }
@@ -2639,7 +2644,8 @@ internal sealed class SimAdvisor
                     Act = (runState?.CurrentActIndex ?? -1) + 1,
                     Floor = runState?.TotalFloor ?? 0,
                     DecisionType = "combat",
-                    Action = detail,
+                    Action = ev.Text,
+                    Event = ev,
                 });
                 SendHumanAction("ai_play", $"AI: {detail}", PlayOf(entry), DrinkOf(entry));
                 continue;
@@ -2651,7 +2657,8 @@ internal sealed class SimAdvisor
                 Act = (runState?.CurrentActIndex ?? -1) + 1,
                 Floor = runState?.TotalFloor ?? 0,
                 DecisionType = "combat",
-                Action = detail,
+                Action = ev.Text,
+                Event = ev,
                 Advice = _lastBestLabel != null ? $"AI: {_lastBestLabel}" : null,
             });
 
@@ -3239,6 +3246,7 @@ internal sealed class SimAdvisor
         CardDiscardedEntry => false,
         EnergySpentEntry => false,
         CardPlayStartedEntry => false, // the Finished twin carries the outcome
+        CreatureAttackedEntry => false, // its DamageReceived entries say who took what
         _ => true,
     };
 
@@ -3311,5 +3319,300 @@ public static class ChooseACardOfferPatch
         {
             Logger.Log($"[SimAdvisor] Could not log a card offer: {ex.Message}");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CombatEventText: combat-history entries as action-log lines.
+//
+// Lives in this file (its only caller) on purpose: the public export ratchets
+// references to the game's namespaces (release/export_unit.py, content-marker
+// baseline), and these types need exactly the ones SimAdvisor already imports.
+// ---------------------------------------------------------------------------
+// One combat-history entry as the workbench's combat-log
+// display row (sts2-pycli/python/workbench/combatlog.py `display_row`: kind,
+// verb, actor / target with their sides, amount, noun), with the game's
+// display names ("Jaw Worm", "Strike", "Weak") instead of the debug
+// Description's ids ("IRONCLAD played STRIKE_IRONCLAD targeting JAW_WORM").
+//
+// Display only: the action log (in-game it shows `Text`; the frame's log
+// renders the row with the workbench's own LogLine, so a hit reads the same
+// in both). The advisor still gets the raw Description in `human_action`.
+
+internal sealed class CombatEvent
+{
+    /// <summary>The plain sentence (in-game log, and LogLine's fallback).</summary>
+    public string Text = "";
+
+    /// <summary>The workbench row kind: "damage" | "block" | "power" |
+    /// "monster_move" | "potion" | "card_play" | "other".</summary>
+    public string Kind = "other";
+
+    public string? Verb;
+    public string? Actor;
+    public string? ActorSide;
+    public string? Target;
+    public string? TargetSide;
+    public int? Amount;
+    public string? Noun;
+
+    /// <summary>Whose turn it was ("player" | "enemy"), from the entry's own
+    /// CurrentSide; null when the game would not say. Not the actor's side:
+    /// Thorns, Curl Up or a Strength-on-hit monster reacting to your Strike
+    /// is an enemy actor on YOUR turn.</summary>
+    public string? Side;
+
+    /// <summary>Damage: the receiver died.</summary>
+    public bool Killed;
+}
+
+internal static class CombatEventText
+{
+    public static CombatEvent Describe(CombatHistoryEntry entry, Creature? me)
+    {
+        CombatEvent ev = DescribeEntry(entry, me);
+        ev.Side = TurnSide(entry);
+        return ev;
+    }
+
+    // CombatHistoryEntry.CurrentSide is private in v0.107.1 and v0.111.0
+    // (public in v0.103.2; see the decompiled CombatHistoryEntry.cs). The
+    // constructor sets it, so it is the turn the event happened on, not the
+    // turn we read it on.
+    private static readonly PropertyInfo? CurrentSideProp =
+        typeof(CombatHistoryEntry).GetProperty(
+            "CurrentSide", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+    private static string? TurnSide(CombatHistoryEntry entry)
+    {
+        try
+        {
+            return CurrentSideProp?.GetValue(entry) is CombatSide side
+                ? side == CombatSide.Player ? "player" : "enemy"
+                : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static CombatEvent DescribeEntry(CombatHistoryEntry entry, Creature? me)
+    {
+        try
+        {
+            return entry switch
+            {
+                CardPlayFinishedEntry e => Play(e, me),
+                PotionUsedEntry e => Potion(e, me),
+                DamageReceivedEntry e => Damage(e),
+                BlockGainedEntry e => Block(e),
+                PowerReceivedEntry e => Power(e),
+                MonsterPerformedMoveEntry e => Move(e),
+                _ => new CombatEvent { Text = Pretty(entry.Description) },
+            };
+        }
+        catch (Exception)
+        {
+            return new CombatEvent { Text = entry.GetType().Name };
+        }
+    }
+
+    private static CombatEvent Play(CardPlayFinishedEntry e, Creature? me)
+    {
+        string card = e.CardPlay.Card.Title;
+        Creature? target = e.CardPlay.Target;
+        string onTarget = target == null ? "" : $" → {Name(target)}";
+        bool mine = me != null && e.Actor == me;
+        return new CombatEvent
+        {
+            Kind = "card_play",
+            Verb = "played",
+            Actor = Name(e.Actor),
+            ActorSide = SideOf(e.Actor),
+            Target = target == null ? null : Name(target),
+            TargetSide = target == null ? null : SideOf(target),
+            Noun = card,
+            // Yours is a decision row: its label, in the advice's own shape.
+            Text = mine ? card + onTarget : $"{Name(e.Actor)} played {card}{onTarget}",
+        };
+    }
+
+    private static CombatEvent Potion(PotionUsedEntry e, Creature? me)
+    {
+        string potion = e.Potion.Title.GetFormattedText();
+        string onTarget = e.Target == null ? "" : $" → {Name(e.Target)}";
+        bool mine = me != null && e.Actor == me;
+        return new CombatEvent
+        {
+            Kind = "potion",
+            Verb = "drank",
+            Actor = Name(e.Actor),
+            ActorSide = SideOf(e.Actor),
+            Noun = potion,
+            Text = mine ? potion + onTarget : $"{Name(e.Actor)} drank {potion}.",
+        };
+    }
+
+    private static CombatEvent Damage(DamageReceivedEntry e)
+    {
+        int dmg = e.Result.UnblockedDamage;
+        string target = Name(e.Receiver);
+        string? dealer = e.Dealer == null ? null : Name(e.Dealer);
+        return new CombatEvent
+        {
+            Kind = "damage",
+            Verb = dealer == null ? "took" : "dealt",
+            Actor = dealer,
+            ActorSide = e.Dealer == null ? null : SideOf(e.Dealer),
+            Target = target,
+            TargetSide = SideOf(e.Receiver),
+            Amount = dmg,
+            Killed = e.Result.WasTargetKilled,
+            Text = dealer == null ? $"{target} took {dmg} damage." : $"{dealer} dealt {dmg} damage to {target}.",
+        };
+    }
+
+    private static CombatEvent Block(BlockGainedEntry e)
+    {
+        string actor = Name(e.Receiver);
+        return new CombatEvent
+        {
+            Kind = "block",
+            Verb = "gained",
+            Actor = actor,
+            ActorSide = SideOf(e.Receiver),
+            Amount = e.Amount,
+            Noun = "Block",
+            Text = $"{actor} gained {e.Amount} Block.",
+        };
+    }
+
+    private static CombatEvent Power(PowerReceivedEntry e)
+    {
+        string power = e.Power.Title.GetFormattedText();
+        int amount = (int)e.Amount;
+        string target = Name(e.Actor);
+        string? applier = e.Applier == null ? null : Name(e.Applier);
+        return new CombatEvent
+        {
+            Kind = "power",
+            Verb = applier == null ? "gained" : "applied",
+            Actor = applier ?? target,
+            ActorSide = SideOf(e.Applier ?? e.Actor),
+            Target = target,
+            TargetSide = SideOf(e.Actor),
+            Amount = amount,
+            Noun = power,
+            Text = applier == null
+                ? $"{target} gained {amount} {power}."
+                : $"{applier} applied {amount} {power} to {target}.",
+        };
+    }
+
+    private static CombatEvent Move(MonsterPerformedMoveEntry e)
+    {
+        string monster = e.Monster.Title.GetFormattedText() + TagSuffix(e.Actor);
+        string move = MoveName(e.Move.Id);
+        return new CombatEvent
+        {
+            Kind = "monster_move",
+            Verb = "used",
+            Actor = monster,
+            ActorSide = "enemy",
+            Noun = move,
+            Text = $"{monster} used {move}.",
+        };
+    }
+
+    private static string SideOf(Creature? c) => c != null && c.IsEnemy ? "enemy" : "player";
+
+    /// <summary>The display name, with the "#k" the advisor and the HUD give
+    /// an enemy that shares its name ("Two-Tailed Rat #2"), so the log says
+    /// which rat was hit and a play matches the advice's label.</summary>
+    private static string Name(Creature? c) => BareName(c) + TagSuffix(c);
+
+    private static string BareName(Creature? c)
+    {
+        if (c == null)
+        {
+            return "?";
+        }
+        try
+        {
+            return c.Name;
+        }
+        catch (Exception)
+        {
+            return "?";
+        }
+    }
+
+    /// <summary>" #k" for an enemy sharing its name, numbered over the combat's
+    /// enemy list as EnemyTagText numbers it. The creature itself counts even
+    /// when dead: the entry for the Strike that killed rat #2 is read after
+    /// the kill, but the advice named that rat while it was alive.</summary>
+    private static string TagSuffix(Creature? c)
+    {
+        if (c == null || !c.IsEnemy)
+        {
+            return "";
+        }
+        try
+        {
+            IReadOnlyList<Creature>? enemies = CombatManager.Instance?.DebugOnlyGetState()?.Enemies;
+            if (enemies == null || enemies.Count < 2)
+            {
+                return "";
+            }
+            var names = new List<string?>(enemies.Count);
+            int at = -1;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                Creature e = enemies[i];
+                if (e == c)
+                {
+                    at = i;
+                }
+                bool counted;
+                try { counted = e == c || e.IsAlive; } catch (Exception) { counted = true; }
+                names.Add(counted ? BareName(e) : null);
+            }
+            string? tag = at < 0 ? null : EnemyTagText.Tags(names)[at];
+            return tag == null ? "" : " " + tag;
+        }
+        catch (Exception)
+        {
+            return "";
+        }
+    }
+
+    /// <summary>Moves have no display title on this path: the id, prettified
+    /// as the workbench does ("OIL_SPRAY_MOVE" -> "Oil Spray"; the "_MOVE"
+    /// most ids end in says nothing).</summary>
+    internal static string MoveName(string id)
+    {
+        string s = id ?? "";
+        if (s.EndsWith("_MOVE", StringComparison.Ordinal))
+        {
+            s = s[..^5];
+        }
+        return Pretty(s);
+    }
+
+    /// <summary>"CHOMP" / "STRIKE_IRONCLAD" -> "Chomp" / "Strike Ironclad".
+    /// Text that is not an all-caps id comes back as is.</summary>
+    internal static string Pretty(string id)
+    {
+        if (string.IsNullOrEmpty(id) || id != id.ToUpperInvariant() || id.Contains(' '))
+        {
+            return id;
+        }
+        string[] words = id.Replace('-', '_').ToLowerInvariant().Split('_', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; i++)
+        {
+            words[i] = char.ToUpperInvariant(words[i][0]) + words[i][1..];
+        }
+        return string.Join(' ', words);
     }
 }

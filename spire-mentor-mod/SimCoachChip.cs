@@ -58,6 +58,15 @@ internal sealed class SimCoachChip
     private CanvasLayer? _layer;
     private VBoxContainer? _stack;
 
+    /// <summary>How long a chip of this kind stays up unpinned (FrameLink's
+    /// welcome replays only chips still inside it).</summary>
+    internal static double ChipSeconds(string kind) => kind switch
+    {
+        "turn" => TurnChipSeconds,
+        Autobattle.ChipKind => double.PositiveInfinity,
+        _ => ChoiceChipSeconds,
+    };
+
     private SimCoachChip()
     {
         SimRuntime.Changed += () => Callable.From(RefreshVisibility).CallDeferred();
@@ -71,6 +80,13 @@ internal sealed class SimCoachChip
     {
         Guard(() =>
         {
+            // Framed: the frame gets every chip (it runs its own timers and
+            // pins); panels outside the game: it is the only place they show.
+            FrameLink.Chip(text, inCombat);
+            if (FrameLink.UiOutside)
+            {
+                return;
+            }
             if (!EnsureLayer())
             {
                 return;
@@ -102,12 +118,7 @@ internal sealed class SimCoachChip
                 // turn chip is not tied to the next turn start.
                 // An autobattle chip stays up while the player decides;
                 // SimAdvisor withdraws it once the AI plays on.
-                Seconds = text.Kind switch
-                {
-                    "turn" => TurnChipSeconds,
-                    Autobattle.ChipKind => double.PositiveInfinity,
-                    _ => ChoiceChipSeconds,
-                },
+                Seconds = ChipSeconds(text.Kind),
             };
             Build(chip, text);
             _chips.Add(chip);
@@ -116,12 +127,27 @@ internal sealed class SimCoachChip
         });
     }
 
+    /// <summary>The panels moved out of the game (FrameLink): the in-game
+    /// chips go (the frame already has them). Main thread.</summary>
+    public void OnFrameUiModeChanged()
+    {
+        if (!FrameLink.UiOutside)
+        {
+            return;
+        }
+        foreach (Chip c in _chips.ToList())
+        {
+            Remove(c, fade: false);
+        }
+    }
+
     /// <summary>Hide every chip showing one of <paramref name="ids"/> --
     /// pinned too: a withdrawn grade is gone.</summary>
     public void Withdraw(IReadOnlyCollection<string> ids)
     {
         Guard(() =>
         {
+            FrameLink.ChipWithdraw(ids);
             foreach (Chip c in _chips.Where(c => ids.Contains(c.Id)).ToList())
             {
                 Remove(c, fade: true);
@@ -133,6 +159,7 @@ internal sealed class SimCoachChip
     public void ClearUnpinned() =>
         Guard(() =>
         {
+            FrameLink.ChipClearUnpinned();
             foreach (Chip c in _chips.Where(c => !c.Pinned).ToList())
             {
                 Remove(c, fade: false);

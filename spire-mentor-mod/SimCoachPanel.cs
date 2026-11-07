@@ -58,16 +58,37 @@ internal sealed class SimCoachPanel
     {
         Guard(() =>
         {
+            // Panels outside the game: the frame draws it; keep _shown so the
+            // screen / turn rules below still decide when it goes (Clear
+            // tells the frame).
+            if (FrameLink.UiOutside)
+            {
+                Clear();
+                _shown = text;
+                FrameLink.CoachPanel(text);
+                return;
+            }
             if (!EnsureLayer())
             {
                 return;
             }
             Clear();
             _shown = text;
+            FrameLink.CoachPanel(text); // framed, panels inside: keep the frame current
             _collapsed = false;
             Build(text);
             RefreshVisibility();
         });
+    }
+
+    /// <summary>The panels moved into or out of the game (FrameLink): show
+    /// the standing recap / autopsy where it now belongs. Main thread.</summary>
+    public void OnFrameUiModeChanged()
+    {
+        if (_shown is { } text)
+        {
+            Show(text);
+        }
     }
 
     /// <summary>Hide the panel if it shows one of <paramref name="ids"/>.</summary>
@@ -119,6 +140,10 @@ internal sealed class SimCoachPanel
 
     private void Clear()
     {
+        if (FrameLink.Framed && _shown != null)
+        {
+            FrameLink.CoachPanelHide(new[] { _shown.Id });
+        }
         _shown = null;
         if (_panel != null && GodotObject.IsInstanceValid(_panel))
         {

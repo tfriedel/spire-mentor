@@ -234,6 +234,7 @@ export default defineConfig(({ mode }) => {
           cardskin: "cardskin.html",
           simlab: "simlab.html",
           catalog: "catalog.html",
+          frame: "frame.html",
         },
       },
     },

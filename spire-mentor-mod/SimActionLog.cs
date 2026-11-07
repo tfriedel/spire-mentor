@@ -41,6 +41,10 @@ internal sealed class SimActionLogEntry
     public string Action = "";
     public string? Advice;
 
+    /// <summary>A combat-history line's structure (CombatEventText), for the
+    /// frame's log; null on every other entry.</summary>
+    public CombatEvent? Event;
+
     // The panel renders with BBCode enabled, so every line carries its own
     // colours and every piece of GAME text has to be escaped -- a card called
     // "[Redacted]" would otherwise be silently swallowed as an unknown tag.
@@ -133,6 +137,7 @@ internal static class SimActionLog
     /// <summary>Append an entry. Safe from any thread; never throws.</summary>
     public static void Record(SimActionLogEntry entry)
     {
+        FrameLink.Log(entry);
         try
         {
             string line = entry.Render();
@@ -191,9 +196,27 @@ internal static class SimActionLog
         }
     }
 
+    /// <summary>The panels moved out of the game (FrameLink): close the
+    /// in-game log (the frame has its own). Main thread.</summary>
+    public static void OnFrameUiModeChanged()
+    {
+        if (FrameLink.UiOutside && _panel != null && _panel.IsAlive)
+        {
+            _panel.Close();
+            _panel = null;
+        }
+    }
+
     /// <summary>Toggle the in-game log panel (Ctrl+L / console). Main thread.</summary>
     public static void TogglePanel()
     {
+        // Panels outside the game: the log is a frame panel; Ctrl+L shows /
+        // hides that one.
+        if (FrameLink.UiOutside)
+        {
+            FrameLink.TogglePanel("log");
+            return;
+        }
         try
         {
             if (_panel != null && _panel.IsAlive)

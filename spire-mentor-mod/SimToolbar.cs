@@ -211,6 +211,9 @@ internal sealed class SimToolbar
             {
                 Name = "SpireMentorToolbarLayer",
                 Layer = 98,
+                // Panels outside the game: the frame draws the toolbar; this
+                // one only ticks (OnFrameUiModeChanged flips it).
+                Visible = !FrameLink.UiOutside,
             };
 
             var container = new VBoxContainer
@@ -326,15 +329,20 @@ internal sealed class SimToolbar
                 }, SetHint));
             buttons.AddChild(SimUiKit.MakeMenuButton("Panels",
                 "Hide all (Ctrl+H) · Log (Ctrl+L) · HUD (F4) · Help (F1) · Settings (works mid-run) · Report a bug (Ctrl+Shift+B)",
-                new SimUiKit.MenuEntry[]
-                {
+                (SimUiKit.MenuEntry[])
+                [
                     new("Hide all  (Ctrl+H)", "Hide everything but the pill for a quick look -- click the pill or Ctrl+H to bring it back", SimActions.ToggleHideAll),
                     new("Log  (Ctrl+L)", "Show / hide the action log (Ctrl+L)", SimActions.ToggleLog),
                     new("HUD  (F4)", "Show / hide the advice HUD (F4)", SimActions.ToggleHud),
                     new("Help  (F1)", "What everything does (F1)", SimActions.ToggleHelp),
                     new("Settings", "Mod settings -- works mid-run (the main-menu page is run-locked)", SimSettingsPanel.Instance.Toggle),
                     new("Report a bug  (Ctrl+Shift+B)", "Send this position and the logs to the developers, with a note on what went wrong", SimActions.ReportBug),
-                }, SetHint));
+                    // Launched by the Spire Mentor frame with the panels moved
+                    // inside: the way back out (the frame's own menu is hidden).
+                    .. (FrameLink.Framed
+                        ? new SimUiKit.MenuEntry[] { new("Panels outside the game", "Put these panels back around the game, in the Spire Mentor frame", () => FrameLink.SetUiOutside(true)) }
+                        : System.Array.Empty<SimUiKit.MenuEntry>()),
+                ], SetHint));
             buttons.AddChild(SimUiKit.MakeMenuButton("Workbench",
                 "Open the workbench in your browser · Copy state (Ctrl+Shift+C) to paste a position into it",
                 new SimUiKit.MenuEntry[]
@@ -492,6 +500,12 @@ internal sealed class SimToolbar
             }
             // Speed and autoplay-armed raise no Changed event; poll them.
             RefreshLiveLabels();
+            // Framed: feed the frame's toolbar in both UI modes (FrameLink
+            // dedups unchanged snapshots).
+            if (FrameLink.Framed)
+            {
+                FrameLink.PublishUi(FrameSnapshot());
+            }
         }
         catch (Exception ex)
         {
@@ -670,6 +684,16 @@ internal sealed class SimToolbar
         {
             return;
         }
+        string status = StatusText();
+        bool interesting = _expanded ||
+            (SimRuntime.Mode == SimMode.Autopilot && !SimRuntime.AutopilotEngaged);
+        _statusLabel.Text = status;
+        _statusLabel.Visible = interesting && SimRuntime.Mode != SimMode.Off && !SimUiHide.Hidden;
+    }
+
+    /// <summary>The status line: mode, advisor state, last action, note.</summary>
+    private string StatusText()
+    {
         string status = $"Spire Mentor · {SimRuntime.Mode}";
         // Autopilot armed by the config file but with nobody driving it: say
         // so, and say how to get out. Silence here is what let a human play a
@@ -704,10 +728,55 @@ internal sealed class SimToolbar
         {
             status += $"\n{_note}";
         }
-        bool interesting = _expanded ||
-            (SimRuntime.Mode == SimMode.Autopilot && !SimRuntime.AutopilotEngaged);
-        _statusLabel.Text = status;
-        _statusLabel.Visible = interesting && SimRuntime.Mode != SimMode.Off && !SimUiHide.Hidden;
+        return status;
+    }
+
+    /// <summary>The panels moved into or out of the game (FrameLink). Main thread.</summary>
+    public void OnFrameUiModeChanged()
+    {
+        if (_layer != null && GodotObject.IsInstanceValid(_layer))
+        {
+            _layer.Visible = !FrameLink.UiOutside;
+        }
+        Refresh();
+    }
+
+    /// <summary>Everything the toolbar shows, for the frame's toolbar
+    /// (FrameLink `ui`). Main thread (reads Godot-side state).</summary>
+    private object FrameSnapshot()
+    {
+        SimMode mode = SimRuntime.Mode;
+        IReadOnlyList<SimAiPartner> partners = SimAiPartner.All;
+        bool partnerShow = partners.Count > 0 && CombatManager.Instance.IsInProgress;
+        SimAiPartner? waiting = partnerShow
+            ? partners.FirstOrDefault(p => p.Brain.Waiting != PartnerWait.None)
+            : null;
+        return new
+        {
+            mode = mode.ToString().ToLowerInvariant(),
+            mode_name = mode == SimMode.Off ? "AI off" : CoachStyle.ModeName((SimModeLite)(int)mode, SimRuntime.Style),
+            power_label = CoachStyle.PowerLabel((SimModeLite)(int)mode),
+            style_label = CoachStyle.StyleLabel(SimRuntime.Style),
+            coach_style = SimRuntime.CoachStyleActive,
+            takeover_enabled = mode == SimMode.Advisor,
+            autoplay_armed = SimRuntime.AdvisorAutoplayArmed,
+            autobattle_on = SimAdvisor.Instance.AutobattleOn,
+            speed = SpeedSteps.Label(SimSpeed.Desired),
+            partner_go = new
+            {
+                show = partnerShow,
+                waiting = waiting != null,
+                seconds = waiting?.Brain.HoldSecondsLeft ?? 0,
+            },
+            advisor_status = _advisorStatus.ToString().ToLowerInvariant(),
+            build_elapsed = _advisorStatus == SimAdvisorStatus.Building ? BuildElapsed() : null,
+            hud_shown = SpireMentorModConfig.ShowHud,
+            hidden = SimUiHide.Hidden,
+            last_action = _lastActionSummary,
+            note = _note,
+            status = StatusText(),
+            ui_outside = FrameLink.UiOutside,
+        };
     }
 
     private static void RunOnMainThread(Action action)

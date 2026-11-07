@@ -1,0 +1,505 @@
+/* The Spire Mentor frame page. Tokens come from ../theme.css. */
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  background: oklch(14% 0.015 265);
+  font-size: 13px;
+}
+
+.fr-root {
+  display: grid;
+  height: 100vh;
+  grid-template-columns: var(--fr-left) minmax(0, 1fr) var(--fr-right);
+  grid-template-rows: var(--fr-top) minmax(0, 1fr) var(--fr-bottom);
+  gap: 0;
+}
+
+/* ---- docks ---------------------------------------------------------- */
+.fr-dock {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.fr-dock-top {
+  grid-column: 1 / 4;
+  grid-row: 1;
+  padding-bottom: 5px;
+}
+.fr-dock-bottom {
+  grid-column: 1 / 4;
+  grid-row: 3;
+  padding-top: 6px;
+}
+.fr-dock-left {
+  grid-column: 1;
+  grid-row: 2;
+  padding-right: 6px;
+}
+.fr-dock-right {
+  grid-column: 3;
+  grid-row: 2;
+  padding-left: 6px;
+}
+.fr-dock-h {
+  flex-direction: row;
+}
+.fr-dock-v {
+  flex-direction: column;
+}
+.fr-dock-empty {
+  padding: 0;
+}
+.fr-dragging .fr-dock {
+  outline: 1px dashed oklch(60% 0.08 85 / 0.5);
+  outline-offset: -3px;
+  background: oklch(80% 0.13 85 / 0.04);
+}
+.fr-drop-marker {
+  flex: 0 0 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: var(--glow-gold);
+}
+
+.fr-splitter {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+}
+.fr-splitter:hover {
+  background: oklch(80% 0.13 85 / 0.35);
+}
+.fr-splitter-top,
+.fr-splitter-bottom {
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+.fr-splitter-top {
+  bottom: 0;
+}
+.fr-splitter-bottom {
+  top: 0;
+}
+.fr-splitter-left,
+.fr-splitter-right {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.fr-splitter-left {
+  right: 0;
+}
+.fr-splitter-right {
+  left: 0;
+}
+
+/* ---- the game slot ---------------------------------------------------- */
+.fr-slot {
+  grid-column: 2;
+  grid-row: 2;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+}
+.fr-game {
+  position: absolute;
+  background: oklch(10% 0.01 265);
+  outline: 1px solid oklch(72% 0.15 80 / 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fr-game-placeholder {
+  color: var(--muted);
+  max-width: 60%;
+  text-align: center;
+}
+
+/* ---- panels ----------------------------------------------------------- */
+.fr-panel {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--elev-1);
+  overflow: hidden;
+}
+.fr-dock-top .fr-panel-toolbar,
+.fr-dock-bottom .fr-panel-toolbar {
+  flex: 3 1 0;
+}
+.fr-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  background: var(--panel-raised);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fr-panel-title {
+  flex: 1;
+}
+.fr-grip {
+  color: var(--muted);
+}
+.fr-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+}
+
+.fr-icon {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 3px;
+  line-height: 1;
+}
+.fr-icon:hover {
+  color: var(--text);
+}
+
+.fr-dim {
+  color: var(--muted);
+}
+.fr-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+.fr-warn {
+  color: oklch(80% 0.14 75);
+}
+.fr-note {
+  color: var(--text);
+  margin-top: 4px;
+}
+
+/* ---- toolbar ---------------------------------------------------------- */
+.fr-toolbar-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
+/* Dragged into a side column: the buttons wrap, the status takes a row. */
+.fr-dock-v .fr-toolbar-row {
+  flex-wrap: wrap;
+}
+.fr-dock-v .fr-status {
+  flex-basis: 100%;
+  margin-left: 0;
+}
+.fr-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--field-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.fr-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.fr-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fr-btn-on {
+  background: var(--accent-weak);
+  border-color: var(--accent-strong);
+  color: var(--gold);
+}
+.fr-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 3px;
+}
+.fr-speed {
+  min-width: 34px;
+  text-align: center;
+  font-family: var(--mono);
+}
+.fr-status {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fr-menu {
+  position: relative;
+}
+.fr-menu-list {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--elev-3);
+  padding: 4px;
+}
+.fr-menu-item {
+  font: inherit;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: pre;
+}
+.fr-menu-item:hover {
+  background: var(--accent-weak);
+}
+/* A panel body clips; let a toolbar menu escape it. */
+.fr-panel-toolbar,
+.fr-panel-toolbar .fr-panel-body {
+  overflow: visible;
+}
+.fr-dock:has(.fr-panel-toolbar) {
+  overflow: visible;
+  z-index: 3;
+}
+
+/* ---- advice ----------------------------------------------------------- */
+.fr-eval-text {
+  font-family: var(--mono);
+}
+.fr-eval-bar {
+  height: 8px;
+  background: oklch(30% 0.08 25);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 3px 0 6px;
+}
+.fr-eval-bar > span {
+  display: block;
+  height: 100%;
+}
+.fr-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.fr-opt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px 64px 34px 58px;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 2px;
+}
+.fr-opt-best {
+  color: var(--gold);
+  background: var(--accent-weak);
+  border-radius: 3px;
+}
+.fr-opt-label {
+  font-family: var(--font);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fr-opt-q,
+.fr-opt-share {
+  text-align: right;
+}
+.fr-opt-bar {
+  height: 7px;
+  background: oklch(30% 0.01 265);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.fr-opt-bar > span {
+  display: block;
+  height: 100%;
+}
+.fr-opt-wlt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.fr-pv {
+  margin-top: 4px;
+  color: oklch(78% 0.06 265);
+}
+.fr-peek {
+  color: var(--gold);
+  font-size: 14px;
+}
+
+/* ---- coach ------------------------------------------------------------ */
+.fr-coach {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fr-chip,
+.fr-recap {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: var(--field-bg);
+}
+.fr-chip {
+  cursor: pointer;
+}
+.fr-chip-pinned {
+  box-shadow: var(--glow-gold);
+}
+.fr-tone-good {
+  border-left-color: oklch(72% 0.15 145);
+}
+.fr-tone-slip {
+  border-left-color: oklch(80% 0.14 75);
+}
+.fr-tone-blunder {
+  border-left-color: oklch(65% 0.2 25);
+}
+.fr-tone-info {
+  border-left-color: var(--block);
+}
+.fr-chip-head,
+.fr-recap-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fr-chip-title {
+  flex: 1;
+  font-weight: 600;
+}
+.fr-chip-line {
+  font-size: 12px;
+}
+.fr-recap-section {
+  margin-top: 4px;
+}
+.fr-recap-heading {
+  color: var(--gold);
+}
+
+/* ---- log -------------------------------------------------------------- */
+.fr-panel-log .fr-panel-body {
+  overflow: hidden;
+  display: flex;
+}
+
+/* ---- workbench -------------------------------------------------------- */
+.fr-panel-workbench .fr-panel-body {
+  padding: 0;
+  overflow: hidden;
+}
+.fr-workbench {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* ---- compact layout (the game gets the height) ------------------------ */
+.fr-panel-head {
+  padding: 1px 6px;
+}
+.fr-panel-body {
+  padding: 4px 6px;
+}
+.fr-panel-compact {
+  flex-direction: row;
+  align-items: center;
+}
+.fr-panel-compact > .fr-panel-body {
+  padding: 2px 6px 2px 2px;
+}
+.fr-grip-compact {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  cursor: grab;
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+.fr-btn {
+  padding: 2px 8px;
+}
+/* In a column: advice and the log share the height; the coach sizes to its
+   chips (it is empty most of the time) but never crowds the other two out. */
+.fr-dock-v .fr-panel-coach {
+  flex: 0 1 auto;
+  max-height: 40%;
+}
+.fr-dock-v .fr-panel-log {
+  flex: 1.3 1 0;
+}
+
+/* ---- scrollbars: always visible (Windows 11's overlay scrollbars in the
+   web view hide until you hover the exact edge) ------------------------ */
+.fr-root ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.fr-root ::-webkit-scrollbar-track {
+  background: oklch(20% 0.015 265);
+  border-radius: 5px;
+}
+.fr-root ::-webkit-scrollbar-thumb {
+  background: oklch(42% 0.02 265);
+  border-radius: 5px;
+  border: 2px solid oklch(20% 0.015 265);
+}
+.fr-root ::-webkit-scrollbar-thumb:hover {
+  background: oklch(55% 0.04 85);
+}
+
+/* ---- the action log: the workbench's EventLog, in a scroll box ---------- */
+.fr-log-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: scroll;
+  padding-right: 4px;
+}
+/* EventLog's "Event log" caption opens with an 18px top margin meant for the
+   workbench's page flow; in a panel it is wasted height. */
+.fr-log-list > div > div:first-child {
+  margin-top: 0 !important;
+}

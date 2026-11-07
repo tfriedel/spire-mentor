@@ -112,6 +112,9 @@ public static class MainFile
             Logger.Log($"TCP bridge failed to start: {ex.Message}");
         }
 
+        // Launched by the Spire Mentor frame: feed its panels (FrameLink.cs).
+        FrameLink.Start();
+
         try
         {
             SpireMentorModConfig.Register();

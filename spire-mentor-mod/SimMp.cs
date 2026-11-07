@@ -143,6 +143,10 @@ public static class SimMp
     /// <summary>The toast for a feature refused in co-op.</summary>
     public static string RefusedMessage(string feature) => $"{feature} is not available in co-op.";
 
+    /// <summary><c>--spire-mentor-frame-port N</c>: launched by the Spire
+    /// Mentor frame, which listens on N for the panel feed (FrameLink).</summary>
+    public static int? FramePort => int.TryParse(CmdlineValue("spire-mentor-frame-port"), out int p) ? p : null;
+
     /// <summary><c>--spire-mentor-port N</c>: this instance's bridge port.</summary>
     public static int? PortOverride => int.TryParse(CmdlineValue("spire-mentor-port"), out int p) ? p : null;
 

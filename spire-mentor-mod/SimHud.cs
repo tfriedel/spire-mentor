@@ -473,6 +473,44 @@ internal sealed class SimHud
     public void SetAdvisorStatus(SimAdvisorStatus status) =>
         SimToolbar.Instance.SetAdvisorStatus(status);
 
+    /// <summary>The panels moved into or out of the game (FrameLink): redraw
+    /// the standing advice, or the F5 peek, where it now belongs. Main thread.</summary>
+    public void OnFrameUiModeChanged()
+    {
+        if (_peekShowing)
+        {
+            // RenderAdvice leaves a peek alone (Coach style), so move it here:
+            // out of the game it is the frame's alone (ShowPeekLine already
+            // sent it); back in, draw it again.
+            if (FrameLink.UiOutside)
+            {
+                HideInGameAdvicePanel();
+            }
+            else if (!ShowPeekNow())
+            {
+                ShowPeekThinking();
+            }
+            return;
+        }
+        if (_latestAdvice != null)
+        {
+            RenderAdvice(_latestAdvice, _latestPlayer);
+        }
+        else if (FrameLink.UiOutside)
+        {
+            HideInGameAdvicePanel();
+        }
+    }
+
+    private void HideInGameAdvicePanel()
+    {
+        ClearAdvicePanelRows();
+        if (_advicePanel != null && GodotObject.IsInstanceValid(_advicePanel))
+        {
+            _advicePanel.Visible = false;
+        }
+    }
+
     /// <summary>Drop advice + card labels (stale state / combat end).</summary>
     public void ClearAdvice()
     {
@@ -583,12 +621,15 @@ internal sealed class SimHud
         {
             return false;
         }
-        ClearPreActionSurfaces();
+        // No "no advice" to the frame first: the peek replaces it.
+        ClearPreActionSurfaces(publish: false);
         _peekShowing = true;
         try
         {
             if (best?.Col != null && best.Row != null && PeekMapMarker(best))
             {
+                // In game the marker is the peek; the frame gets the line.
+                FrameLink.PublishAdvice(null, "AI would: " + label);
                 return true;
             }
             if (best?.CardIndex != null)
@@ -613,7 +654,7 @@ internal sealed class SimHud
             {
                 return;
             }
-            ClearPreActionSurfaces();
+            ClearPreActionSurfaces(publish: false);
             _peekShowing = true;
             ShowPeekLine("AI is thinking…", new Color(0.7f, 0.7f, 0.75f));
         });
@@ -636,6 +677,13 @@ internal sealed class SimHud
 
     private void ShowPeekLine(string text, Color color)
     {
+        // Framed: the frame's advice panel shows the peek too (both UI
+        // modes); panels outside the game: only there.
+        FrameLink.PublishAdvice(null, text);
+        if (FrameLink.UiOutside)
+        {
+            return;
+        }
         if (_adviceRows == null || !GodotObject.IsInstanceValid(_adviceRows) ||
             _advicePanel == null || !GodotObject.IsInstanceValid(_advicePanel))
         {
@@ -679,12 +727,21 @@ internal sealed class SimHud
         return false;
     }
 
-    /// <summary>Remove every pre-action advice surface (Coach style).</summary>
-    private void ClearPreActionSurfaces()
+    /// <summary>Remove every pre-action advice surface (Coach style).
+    /// <paramref name="publish"/>: also clear the frame's advice panel (not
+    /// when a peek is about to replace it).</summary>
+    private void ClearPreActionSurfaces(bool publish = true)
     {
         ClearCardLabels();
         ClearMapMarkers();
-        ClearAdvicePanel();
+        if (publish)
+        {
+            ClearAdvicePanel();
+        }
+        else
+        {
+            ClearAdvicePanelRows();
+        }
         if (_advicePanel != null && GodotObject.IsInstanceValid(_advicePanel))
         {
             _advicePanel.Visible = false;
@@ -708,8 +765,22 @@ internal sealed class SimHud
 
     private void RenderAdvicePanel(SimAdvice advice)
     {
-        ClearAdvicePanel();
+        // Panels outside the game: the frame draws the advice panel (all of
+        // it -- the frame has the room the in-game toggles were rationing).
+        if (FrameLink.UiOutside)
+        {
+            ClearAdvicePanelRows();
+            if (_advicePanel != null && GodotObject.IsInstanceValid(_advicePanel))
+            {
+                _advicePanel.Visible = false;
+            }
+            _panelAdvice = advice;
+            FrameLink.PublishAdvice(advice);
+            return;
+        }
+        ClearAdvicePanelRows();
         _panelAdvice = advice;
+        FrameLink.PublishAdvice(advice); // framed, panels inside: keep the frame current
 
         bool hasRanked = advice.Options.Exists(o => o.PWin != null || o.Q != null || o.VisitShare != null);
         bool hasEval = advice.BestQ != null || advice.PWin != null;
@@ -943,7 +1014,17 @@ internal sealed class SimHud
         return toggle;
     }
 
+    /// <summary>Empty the in-game advice panel, and the frame's.</summary>
     private void ClearAdvicePanel()
+    {
+        FrameLink.PublishAdvice(null);
+        ClearAdvicePanelRows();
+    }
+
+    /// <summary>Empty the in-game advice panel only: for a caller about to
+    /// publish the replacement, so the frame never flashes "No advice" in
+    /// between (and the wire carries one message, not two).</summary>
+    private void ClearAdvicePanelRows()
     {
         if (_adviceRows == null || !GodotObject.IsInstanceValid(_adviceRows))
         {

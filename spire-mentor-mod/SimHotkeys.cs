@@ -72,6 +72,17 @@ public static class SimHotkeys
     private const string ActionReportBug = "spirementor_report_bug";
     private const string ActionPartnerGo = "spirementor_partner_go";
 
+    // The workbench's single-key play shortcuts (its ? help: g play the
+    // recommended move, p peek, h hint, f play on), only when the Spire Mentor
+    // frame launched the game: there the workbench and the game sit side by
+    // side and one set of keys should drive both. Free in the game's own key
+    // map (NInputManager: E S D X A M, digits, arrows, space) -- which is
+    // also why the workbench's "a" is not here.
+    private const string ActionWbGo = "spirementor_wb_go";
+    private const string ActionWbPeek = "spirementor_wb_peek";
+    private const string ActionWbHint = "spirementor_wb_hint";
+    private const string ActionWbPlayOn = "spirementor_wb_play_on";
+
     private static bool _installed;
 
     /// <summary>Wait for the game to come up, then install on the main
@@ -119,6 +130,13 @@ public static class SimHotkeys
             // fields would be a worse trade than a two-modifier chord.
             RegisterAction(ActionCopyState, Key.C, ctrl: true, shift: true);
             RegisterAction(ActionReportBug, Key.B, ctrl: true, shift: true);
+            if (FrameLink.Framed)
+            {
+                RegisterAction(ActionWbGo, Key.G);
+                RegisterAction(ActionWbPeek, Key.P);
+                RegisterAction(ActionWbHint, Key.H);
+                RegisterAction(ActionWbPlayOn, Key.F);
+            }
 
             BindActions(manager);
 
@@ -183,6 +201,24 @@ public static class SimHotkeys
         manager.PushHotkeyPressedBinding(ActionRestartRoom, SimActions.RestartRoom);
         manager.PushHotkeyPressedBinding(ActionCopyState, SimActions.CopyState);
         manager.PushHotkeyPressedBinding(ActionReportBug, SimActions.ReportBug);
+        if (FrameLink.Framed)
+        {
+            // Godot matches an action's modifiers non-exactly: Ctrl+F must stay
+            // the game's / the OS's, not "play on".
+            manager.PushHotkeyPressedBinding(ActionWbGo, () => Plain(() => SimActions.AiOnce("G (play the recommended move)")));
+            manager.PushHotkeyPressedBinding(ActionWbPeek, () => Plain(SimActions.Peek));
+            manager.PushHotkeyPressedBinding(ActionWbHint, () => Plain(SimActions.Peek));
+            manager.PushHotkeyPressedBinding(ActionWbPlayOn, () => Plain(() => SimActions.ToggleAutoplay("F (the AI plays on until you press F or F7 again)")));
+        }
+    }
+
+    /// <summary>Run a single-key shortcut only when no modifier is held.</summary>
+    private static void Plain(Action action)
+    {
+        if (!Input.IsKeyPressed(Key.Ctrl) && !Input.IsKeyPressed(Key.Alt) && !Input.IsKeyPressed(Key.Shift) && !Input.IsKeyPressed(Key.Meta))
+        {
+            action();
+        }
     }
 
     private static void RegisterAction(string name, Key key, bool ctrl = false, bool shift = false)
