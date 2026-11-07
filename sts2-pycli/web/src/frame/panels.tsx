@@ -163,6 +163,15 @@ export function ToolbarPanel(props: {
           disabled={!takeover}
           active={ui?.autobattle_on}
         />
+        {ui?.brain?.show && (
+          <Btn
+            label={ui.brain.label}
+            title="Advisor brain, click to switch (Shift+F8): Search thinks ahead (a search over the fight, the run net for the screens); Instinct is the end-to-end net, no search (Ironclad on v0.111.0 for now)"
+            action="toggle_brain"
+            disabled={!connected}
+            active={ui.brain.value === "instinct"}
+          />
+        )}
         {ui?.partner_go.show && (
           <Btn
             label={ui.partner_go.waiting ? `▶ Partner go${ui.partner_go.seconds > 0 ? ` ${ui.partner_go.seconds}s` : ""}` : "Partner go"}
@@ -194,13 +203,13 @@ export function ToolbarPanel(props: {
               onClick: p.toggle,
             })),
             {
-              label: "Panels inside the game",
+              label: "Move the panels into the game",
               title: "Full-size game with the panels drawn over it, as without the frame (the in-game Panels menu brings them back out)",
               onClick: props.onPanelsInside,
               separatorBefore: true,
             },
             {
-              label: "In-game HUD (F4)",
+              label: "Card scores and map markers (F4)",
               title: "Card scores, map markers and enemy tags in the game",
               action: "toggle_hud",
               separatorBefore: true,
@@ -328,6 +337,7 @@ export function AdvicePanel({ state }: { state: FrameState }) {
       ))}
       {advice.pv.length > 0 && <div className="fr-pv">line: {advice.pv.join(" · ")}</div>}
       {advice.low_confidence && <div className="fr-warn">low confidence</div>}
+      {advice.source_tag && <div className="fr-note">{advice.source_tag}</div>}
       {advice.note && <div className="fr-note">{advice.note}</div>}
     </div>
   );

@@ -44,6 +44,24 @@ for character in champions.characters():
         raise SystemExit(f"champion hash mismatch for {character!r}: {mismatch}")
     print(f"bundling champion: {character} -> {os.path.basename(src)}")
     datas.append((src, "data/ppo"))
+# Instinct, the e2e student (realgame_instinct): its weights, at the path the
+# advisor resolves (`runtime_paths.data_root() / WEIGHTS_RELPATH`). Required: a
+# release that silently lost it would answer every Instinct request with the
+# search. The public export ships no weights (`data/e2e` is private), so a build
+# from it opts out explicitly with SIMADVISOR_NO_INSTINCT=1; the mod then shows
+# no Search / Instinct switch (the advisor advertises no Instinct).
+import realgame_instinct  # noqa: E402
+
+instinct = os.path.join(PYCLI, str(realgame_instinct.WEIGHTS_RELPATH))
+if os.path.isfile(instinct):
+    print(f"bundling Instinct: {os.path.basename(instinct)}")
+    datas.append((instinct, str(realgame_instinct.WEIGHTS_RELPATH.parent).replace(os.sep, "/")))
+elif os.environ.get("SIMADVISOR_NO_INSTINCT") == "1":
+    print("no Instinct weights: building without Instinct (SIMADVISOR_NO_INSTINCT=1)")
+else:
+    raise SystemExit(
+        f"no Instinct weights at {instinct} (set SIMADVISOR_NO_INSTINCT=1 to build without it)"
+    )
 loc = glob.glob(os.path.join(PYCLI, "localization_eng", "*.json"))
 if not loc:
     raise SystemExit("no localization_eng/*.json found")

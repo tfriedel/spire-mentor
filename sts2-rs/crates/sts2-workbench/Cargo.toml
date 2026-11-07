@@ -22,6 +22,9 @@ sts2-mcts = { workspace = true }
 # pathing surface + HeuristicV. Default features OFF so tract-onnx / rayon
 # sweep code stays out of the wasm graph.
 sts2-runai = { path = "../sts2-runai", version = "0.0.1", default-features = false }
+# The `e2e` brain: the e2e Ironclad student (env driver, tokenizer, forward
+# in plain Rust, no ML crate) playing every decision of a run, no search.
+sts2-e2e = { path = "../sts2-e2e", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 crc32fast = { workspace = true }
@@ -36,8 +39,11 @@ smallvec = { workspace = true }
 # The PPO run policy (tract-onnx) — the champion net loaded from bytes
 # (`ppo::load`), node values, the probability panel, the `ppo` brain. On
 # by default so the native tests cover it; the wasm shell enables it too.
-default = ["ppo"]
+default = ["ppo", "e2e"]
 ppo = ["sts2-runai/ppo"]
+# The `e2e` brain (`e2e::load`, `Session::e2e_step`). On by default; the wasm
+# shell enables it too. Its net is fetched separately (`dist/e2e/`).
+e2e = ["dep:sts2-e2e"]
 
 [dev-dependencies]
 # Golden-parity test: SHA-256 of the normalized response, matching the

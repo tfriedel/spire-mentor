@@ -97,6 +97,14 @@ _REQUIREMENTS: dict[str, tuple[Path, str]] = {
         _MONO / "logs" / "2026-10-18-rollout-net-recipe" / "boss800.jsonl",
         "private run logs (logs/ is not exported)",
     ),
+    "instinct_corpus": (
+        _MONO / "logs" / "2026-11-07-instinct-live" / "run1-requests.jsonl.gz",
+        "private run logs (logs/ is not exported) + the private Instinct net (data/e2e)",
+    ),
+    "decomp_v0111": (
+        _MONO / "sts2-wiki" / "decompiled" / "v0.111.0",
+        "the C# decompilation (decompiled/ is not exported)",
+    ),
 }
 
 # Node-id prefix (relative to tests/) -> requirement. A bare module prefix
@@ -161,9 +169,15 @@ _NEEDS: dict[str, str] = {
     "turnplan/test_root_filter.py::test_a_cell_with_the_knob_reports_a_filtered_root": "combat_bench",
     # --- the rollout-net recipe's boss800 holdout list (private logs/)
     "test_combat_ctx.py::test_jobs_hold_out_every_holdout_run": "rollout_recipe",
+    "test_realgame_instinct_live.py": "instinct_corpus",
+    # --- the combat-PPO start pool subtracts every combat-bench run
+    "test_combat_ppo.py::test_train_pool_holds_out_every_holdout_run": "combat_bench",
     "test_elite_gap_tools.py::test_takeover_forces_a_human_line_exactly": "combat_bench",
     "test_elite_gap_tools.py::test_takeover_records_both_first_turns_with_rollouts": "combat_bench",
     "test_leaf_correction.py::test_play_and_label_rebuilds_the_final_value": "combat_bench",
+    # --- the e2e F9 ledger's card types, checked against the v0.111.0 decomp
+    "e2e/test_e2e_invariants.py::test_no_v0111_power_is_typed_as_a_non_power": "decomp_v0111",
+    "e2e/test_e2e_invariants.py::test_the_instanced_powers_match_the_decomp": "decomp_v0111",
 }
 
 

@@ -154,6 +154,7 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
 | `port` | `9002` | TCP listen port (loopback only) |
 | `auto_start` | `false` | Launch Autopilot at boot (the unattended sweep lane). `false` = Off, or Advisor if the "Turn the coach on when the game starts" setting is ticked (default; Windows only) |
 | `advisor_autoplay` | `false` | Testing: once a run is live, switch to Advisor mode and toggle AI autoplay (the F8+F7 path) unattended. Forces `pause_on` empty |
+| `advisor_brain` | `null` | `"search"` / `"instinct"`: the advisor brain for this session, overriding the in-game setting (not saved over it) until a player switches brain in game; `null` = the in-game setting. How an unattended run plays with Instinct (`ascension_climb.py --advisor-brain instinct`) |
 | `pause_on` | `"unsupported"` | Where F7 stops and hands the decision back (F7 resumes). `unsupported` = decisions the AI has no real policy for (the advisor's `hand_back`); add event ids / `advice_for` values to always play those yourself, e.g. `"unsupported, Neow"`; `""` = never pause. A JSON array works too |
 | `character` / `ascension` / `seed` | `"Ironclad"` / `0` / `null` | Run setup for Autopilot; `seed: null` = fresh random seed |
 | `num_runs` | `1` | Runs to play in sequence before going idle |
@@ -182,8 +183,21 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
   speed) are flat buttons; the one-shot verbs sit in three dropdowns
   (`SimUiKit.MakeMenuButton`): **Rewind ▾** (`⟲ Turn` / `⟲ Room` /
   `⟲⟲ Back`), **Panels ▾** (log, HUD, help, mid-run **Settings** —
-  `SimSettingsPanel.cs` — and **Report a bug**) and **Workbench ▾** (open
-  the browser view, copy state). Click the pill to collapse the strip.
+  `SimSettingsPanel.cs` — **Report a bug** and **Panels in their own
+  window**) and **Workbench ▾** (open the browser view, copy state). Click
+  the pill to collapse the strip.
+- **Panels in their own window** (`SimFrameLauncher.cs`, `FrameLaunchRules.cs`;
+  Windows) — the mod starts the Spire Mentor frame (`../spire-mentor-frame/`,
+  shipped in `mods/SpireMentor/SpireMentorFrame/`, .NET Framework 4.8) next
+  to the running game: the frame adopts the game's window and lays the
+  toolbar, advice, coach and action log out around it, from the bundled
+  workbench's `frame.html` on the advisor's control plane (:8079;
+  `SpireMentorModConfig.FrameUrl` overrides it, e.g. the Vite dev server).
+  `FrameLink.Attach` feeds it. The settings pages' tickbox and the Panels ▾
+  entry turn it on, and it reopens on the next start; closing the frame window
+  gives the game its window back, puts the panels in again and unticks it. A
+  fullscreen game goes windowed first. The workbench keys (g / p / h / f)
+  stay bound only for a game the frame launched (`--spire-mentor-frame-port`).
 - **Hotkeys** (`SimHotkeys.cs`) — `F1` help panel (the in-game documentation:
   current mode, every key, file locations), `Ctrl+L` action-log panel (it
   sits under the advice column and follows it until you drag it; a dragged

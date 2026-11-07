@@ -808,6 +808,9 @@ internal sealed class SimAiPartnerBrain
         state["turn"] = turn;
         state["type"] = "advice_request";
         state["advice_for"] = "combat_action";
+        // The player's brain choice plays the partners too; their advisor
+        // decides per character whether Instinct can (PROTOCOL.md s5, v5.2).
+        state["brain"] = SimAdvisor.CurrentBrain;
         long stateId = state.TryGetValue("state_id", out object? sidObj) && sidObj is long sid ? sid : -1;
         _inflightSignature = sig;
         _inflightAt = DateTime.UtcNow;

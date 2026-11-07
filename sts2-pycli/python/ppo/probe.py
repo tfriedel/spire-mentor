@@ -62,12 +62,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--combat",
-        choices=("mcts", "surrogate"),
+        choices=("mcts", "surrogate", "policy"),
         default="mcts",
         help="combat backend: play every fight (mcts) or fast-forward it through "
         "the combat surrogate (surrogate; requires --surrogate-path)",
     )
     ap.add_argument("--surrogate-path", type=str, default=None, help="combat surrogate net JSON")
+    ap.add_argument(
+        "--combat-ckpt",
+        type=str,
+        default=None,
+        help="combat-PPO checkpoint for --combat policy (greedy, no search)",
+    )
     ap.add_argument(
         "--run-timeout",
         type=float,
@@ -97,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     sts2_client.apply_game_version_arg(args)
     if args.combat == "surrogate" and not args.surrogate_path:
         ap.error("--combat surrogate requires --surrogate-path")
+    if args.combat == "policy" and not args.combat_ckpt:
+        ap.error("--combat policy requires --combat-ckpt")
     search = None
     if args.policy == "net_search":
         search = {
@@ -130,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         boss_sims=args.boss_sims,
         combat=args.combat,
         surrogate_path=args.surrogate_path,
+        combat_ckpt=args.combat_ckpt,
         run_timeout_s=(args.run_timeout if args.run_timeout is not None else DEFAULT_RUN_TIMEOUT_S),
         search=search,
         act1=args.act1,

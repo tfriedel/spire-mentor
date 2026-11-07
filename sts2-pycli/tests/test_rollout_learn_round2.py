@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import sts2_client
 from ppo import rollout_learn, rollout_starts
 from ppo.combat_bench import agents
 
@@ -32,6 +33,21 @@ def _restore_environ() -> Iterator[None]:
     yield
     os.environ.clear()
     os.environ.update(saved)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _v0107_engine() -> Iterator[None]:
+    """Run this module on v0.107.1 under any `--game-version`.
+
+    Its fights and expected numbers are v0.107.1's: until e2e WP1 plumbed the
+    active game version into `rollout_starts.build_fight` and friends, no
+    `game_version` reached the engine here, so every fight was the engine's
+    default build, v0.107.1.
+    """
+    before = sts2_client.GAME_VERSION
+    sts2_client.set_game_version("v0.107.1")
+    yield
+    sts2_client.set_game_version(before)
 
 
 REPO = Path(__file__).resolve().parents[2]

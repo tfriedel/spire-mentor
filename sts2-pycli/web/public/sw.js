@@ -14,7 +14,7 @@
 //     after.
 //     The cache is named after the build id the Vite build stamps below, so
 //     each deploy installs a fresh shell and drops the previous build's
-//     chunks (a wasm engine is 5 MB; they must not pile up).
+//     chunks (the gzipped wasm engine is ~7 MB; they must not pile up).
 //   * ART — every request to the art origin (the asset bucket or the local
 //     /assets mount), cache-first, as it is fetched. That is how a fight you
 //     have already seen renders offline; art you never loaded is not there.
@@ -33,6 +33,9 @@ const ART = "wb-art-v1";
 // per character, kept cache-first across deploys — a promotion changes the
 // filename, so a stale entry is simply never asked for again.
 const PPO = "wb-ppo-v1";
+// The e2e student (/e2e/<file>.e2ew, ~21 MB) lives in the same cache: fetched
+// only when that brain is chosen (never precached, never in "Download for
+// offline"), then cache-first like a champion.
 const PRECACHE_LIST = "/wb-precache.json";
 // Files under public/ the shell needs that carry no content hash.
 const SHELL_EXTRAS = [
@@ -95,7 +98,10 @@ function isArt(url) {
 }
 
 function isChampion(url) {
-  return url.origin === self.location.origin && url.pathname.startsWith("/ppo/");
+  return (
+    url.origin === self.location.origin &&
+    (url.pathname.startsWith("/ppo/") || url.pathname.startsWith("/e2e/"))
+  );
 }
 
 // Art and champions are cached under their BARE url. VFX frames, the vfx

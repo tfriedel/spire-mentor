@@ -1264,6 +1264,8 @@ class AdvisorMirror:
         state: dict[str, Any],
         cfg: RecommendConfig | None,
         sims: int | None,
+        picker: Any = None,
+        picker_note: str | None = None,
     ) -> dict[str, Any] | None:
         """Answer an IN-COMBAT ``card_select`` with the combat MCTS, or give up.
 
@@ -1275,6 +1277,10 @@ class AdvisorMirror:
         (already parked / end of turn / a potion / the opening play), searches
         it, drops the fork, and remembers the picks for a multi-pick follow-up.
         One code path with the driver, no second dialect to drift.
+
+        ``picker`` / ``picker_note``: who picks on the parked fork instead of
+        the combat MCTS, and the note that says so (Instinct,
+        :mod:`realgame_instinct`); see ``realgame_mcts.pick_card_select_mirrored``.
 
         Returns ``None`` for every reason not to answer -- no embedded combat
         (a deck screen), no live mirror, an unreplayable source, a fork that
@@ -1480,7 +1486,9 @@ class AdvisorMirror:
                     upgraded=state.get("source_upgraded"),
                     on=fork,
                 )
-            action, picks = realgame_mcts.pick_card_select_mirrored(state, cfg, fork, sims=sims)
+            action, picks = realgame_mcts.pick_card_select_mirrored(
+                state, cfg, fork, sims=sims, picker=picker
+            )
         except Exception as exc:
             # The FORK failed, so the live fight is not implicated and is left
             # alone. Only a proven-wrong picture drops it, and `replay_opening_play`
@@ -1522,9 +1530,12 @@ class AdvisorMirror:
             }
             for i, label in enumerate(labels)
         ]
-        note = f"combat MCTS · {len(picks)} pick(s) searched"
-        if len(picks) > 1:
-            note += " (one search per pick)"
+        if picker_note is not None:
+            note = picker_note
+        else:
+            note = f"combat MCTS · {len(picks)} pick(s) searched"
+            if len(picks) > 1:
+                note += " (one search per pick)"
         best = (
             {"action": "choose", "index": options[best_i]["index"], "label": labels[best_i]}
             if best_i is not None and best_i < len(options)

@@ -158,7 +158,7 @@ def main() -> int:
 
     from ppo import vocab
     from ppo.encoder import featurize_row
-    from ppo.env import PpoRunEnv, Terminal
+    from ppo.env import Decision, PpoRunEnv, Terminal
 
     olds = old_registries(a.old, a.old_rev)
     news = {acc: getattr(vocab, acc)() for acc, *_ in KINDS}
@@ -197,6 +197,9 @@ def main() -> int:
             d = env.reset()
             n_runs += 1
             while not isinstance(d, Terminal):
+                # Combat resolves in-engine here (no --combat policy), so every
+                # stop is a run-level Decision, never a CombatTurn.
+                assert isinstance(d, Decision), type(d)
                 feat_new = featurize_row(d.obs, d.actions, d.metrics)
                 with patched_vocab(olds):
                     feat_old = featurize_row(d.obs, d.actions, d.metrics)

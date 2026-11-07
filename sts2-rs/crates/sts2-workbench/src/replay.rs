@@ -23,7 +23,6 @@ use crate::enrich::{asset_url, enrich, enrich_map_nodes, log_names, EnrichCtx};
 use crate::game::{Game, GameError};
 use crate::localization::{resolve_state_names, Loc};
 use crate::render::{describe_action, NATIVE_ACTION};
-use crate::rmx;
 use crate::runlog::{resume_capability, ReplayStore, Step};
 use crate::runmode;
 use crate::statediff::diff_states;
@@ -323,8 +322,12 @@ impl Rebuilt {
                     ident.seed
                 )
             })?;
-            game.start_faithful(&ident.character, seed, ident.ascension)
-                .map_err(|GameError(m)| m)?;
+            if ident.e2e_setup {
+                start_e2e(&mut game, seed, ident.ascension)?;
+            } else {
+                game.start_faithful(&ident.character, seed, ident.ascension)
+                    .map_err(|GameError(m)| m)?;
+            }
         } else {
             game.start(&ident.character, &ident.seed, ident.ascension, &ident.act1)
                 .map_err(|GameError(m)| m)?;
@@ -351,10 +354,9 @@ impl Rebuilt {
             let total = self.line.len();
             let n = self.applied + 1;
             if action == NATIVE_ACTION {
-                let ra = rmx::action_from_value(&args).map_err(|e| {
+                let result = self.game.take_native_value(&args).map_err(|e| {
                     format!("replay diverged at step {n}/{total} (action '{action}'): {e}")
                 })?;
-                let result = rmx::result_str(&self.game.take_native(ra));
                 if result != "advanced" && result != "run_over" {
                     return Err(format!(
                         "replay diverged at step {n}/{total} (action '{action}'): take_action returned '{result}'"
@@ -645,5 +647,20 @@ mod tests {
             !b["message"].as_str().unwrap_or("").contains(".title"),
             "{b}"
         );
+    }
+}
+
+/// `Game::start_e2e`, or an error in a build without the `e2e` feature.
+fn start_e2e(game: &mut Game, seed: i32, ascension: u8) -> Result<(), String> {
+    #[cfg(feature = "e2e")]
+    {
+        game.start_e2e(seed, ascension)
+            .map(|_| ())
+            .map_err(|GameError(m)| m)
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        let _ = (game, seed, ascension);
+        Err("this build has no e2e feature; cannot rebuild an e2e run".to_string())
     }
 }

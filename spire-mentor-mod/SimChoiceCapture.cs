@@ -208,7 +208,9 @@ internal static class SimChoiceCapture
 
     private static Record? Latch(SimScreenDecision d)
     {
-        if (d.Local || d.AdviceFor is "game_over" or "crystal_sphere" or "reward_screen")
+        // potion_swap (v5.2): not graded yet -- an ungraded kind must not
+        // fall through to the skip report when the loot screen closes.
+        if (d.Local || d.AdviceFor is "game_over" or "crystal_sphere" or "reward_screen" or PotionSwapAdvice.AdviceFor)
         {
             return null;
         }

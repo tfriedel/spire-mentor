@@ -626,8 +626,10 @@ def encounter_table(encounters: list[str]) -> dict[str, dict[str, Any]]:
     encounter's monsters carry spawn arguments (Kin Follower slots, Corpse
     Slug and Chomper openers, ...) that the override path drops.
     """
+    import sts2_client
     import sts2_rs
 
+    ver = sts2_client.GAME_VERSION
     out: dict[str, dict[str, Any]] = {}
     for enc in sorted(set(encounters)):
         row: dict[str, Any] = {"default": None, "randomized": False, "lossless": False}
@@ -635,7 +637,15 @@ def encounter_table(encounters: list[str]) -> dict[str, dict[str, Any]]:
             rosters, same = [], True
             for seed in (11, 12, 13):
                 st = sts2_rs.build_scenario_state(
-                    seed, CHARACTER, _PROBE_DECK, 50, 80, [], enc, ascension=ASCENSION
+                    seed,
+                    CHARACTER,
+                    _PROBE_DECK,
+                    50,
+                    80,
+                    [],
+                    enc,
+                    ascension=ASCENSION,
+                    game_version=ver,
                 )
                 roster = [_snake(e["id"]) for e in st.get_state()["enemies"]]
                 again = sts2_rs.build_scenario_state(
@@ -648,6 +658,7 @@ def encounter_table(encounters: list[str]) -> dict[str, dict[str, Any]]:
                     enc,
                     ascension=ASCENSION,
                     monsters=roster,
+                    game_version=ver,
                 )
                 same &= st.state_hash() == again.state_hash()
                 rosters.append(roster)
@@ -889,10 +900,12 @@ def _verify_job(job: tuple[dict[str, Any], list[str] | None]) -> dict[str, Any]:
     built on the encounter's own roster and flagged `roster_unmatched`.
     Returns `{"key", "ok", "reason", "detail", "monsters", "fallback"}`.
     """
+    import sts2_client
     import sts2_rs
 
     rec, monsters = job
     seed = _fight_seed(rec["key"]) * 100
+    ver = sts2_client.GAME_VERSION
 
     def attempt(mons: list[str] | None) -> None:
         if not rec["hp_before"] or not rec["max_hp"]:
@@ -908,9 +921,13 @@ def _verify_job(job: tuple[dict[str, Any], list[str] | None]) -> dict[str, Any]:
             ascension=int(rec["ascension"]),
             monsters=mons,
             potions=rec["potions"],
+            game_version=ver,
         )
         rm = sts2_rs.RunManager(
-            seed=seed, character=rec["character"], ascension_level=int(rec["ascension"])
+            seed=seed,
+            character=rec["character"],
+            ascension_level=int(rec["ascension"]),
+            game_version=ver,
         )
         rm.debug_enter_combat(state, rec["room_type"])
         if rm.phase() != "combat" or rm.is_over():
@@ -972,6 +989,7 @@ def rl2_pools(hbank: list[dict[str, Any]], recipe_dir: str) -> tuple[set[str], s
 
 def _old_buildable_job(f: dict[str, Any]) -> tuple[str, bool]:
     """Worker: does an old-schema bank row build (as `rollout_learn` built it)?"""
+    import sts2_client
     import sts2_rs
 
     key = f"{f['file']}:{f['floor']}"
@@ -986,6 +1004,7 @@ def _old_buildable_job(f: dict[str, Any]) -> tuple[str, bool]:
             f["encounter"],
             ascension=int(f["ascension"]),
             potions=f["potions"][:3],
+            game_version=sts2_client.GAME_VERSION,
         )
         return key, True
     except ValueError:

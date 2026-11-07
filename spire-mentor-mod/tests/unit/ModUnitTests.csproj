@@ -39,5 +39,8 @@
     <Compile Include="../../RewardSwapLayout.cs" Link="RewardSwapLayout.cs" />
     <Compile Include="../../PartnerCharacters.cs" Link="PartnerCharacters.cs" />
     <Compile Include="../../WindowsChildProcess.cs" Link="WindowsChildProcess.cs" />
+    <Compile Include="../../AdvisorBrainRules.cs" Link="AdvisorBrainRules.cs" />
+    <Compile Include="../../PotionSwapAdvice.cs" Link="PotionSwapAdvice.cs" />
+    <Compile Include="../../FrameLaunchRules.cs" Link="FrameLaunchRules.cs" />
   </ItemGroup>
 </Project>

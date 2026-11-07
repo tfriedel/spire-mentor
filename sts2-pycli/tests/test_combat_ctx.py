@@ -15,9 +15,11 @@ import json
 import os
 import random
 import re
+from collections.abc import Iterator
 
 import numpy as np
 import pytest
+import sts2_client
 import sts2_rs
 from ppo import rollout_starts
 from ppo.combat_bench import agents
@@ -59,6 +61,21 @@ def engine_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if agents.is_engine_env(key):
             monkeypatch.delenv(key)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _v0107_engine() -> Iterator[None]:
+    """Run this module on v0.107.1 under any `--game-version`.
+
+    Its fights and expected numbers are v0.107.1's: until e2e WP1 plumbed the
+    active game version into `rollout_starts.build_fight` and friends, no
+    `game_version` reached the engine here, so every fight was the engine's
+    default build, v0.107.1.
+    """
+    before = sts2_client.GAME_VERSION
+    sts2_client.set_game_version("v0.107.1")
+    yield
+    sts2_client.set_game_version(before)
 
 
 def _walk(seed: int = 7, n: int = 30) -> list:

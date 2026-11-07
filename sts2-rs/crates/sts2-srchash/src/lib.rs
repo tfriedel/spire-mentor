@@ -105,6 +105,25 @@ pub const PY_DATA_INPUTS: [(&str, &str); 0] = [];
 pub const RUNAI_DATA_INPUTS: [(&str, &str); 1] =
     [("data/runai/heuristic_v.toml", "data/runai/heuristic_v.toml")];
 
+/// Extra out-of-`src` engine inputs for sts2-e2e: the v0.111.0 tables the
+/// student's tokenizer bakes in with `include_str!` (`src/vocab.rs`,
+/// `src/sctx.rs`, `src/tactical.rs`). Linked into `sts2_rs` for the mod's
+/// Instinct advisor.
+pub const E2E_DATA_INPUTS: [(&str, &str); 3] = [
+    (
+        "crates/sts2-e2e/data/vocab_v0111.tsv",
+        "crates/sts2-e2e/data/vocab_v0111.tsv",
+    ),
+    (
+        "crates/sts2-e2e/data/card_types_v0111.tsv",
+        "crates/sts2-e2e/data/card_types_v0111.tsv",
+    ),
+    (
+        "crates/sts2-e2e/data/hits_v0111.tsv",
+        "crates/sts2-e2e/data/hits_v0111.tsv",
+    ),
+];
+
 /// Extra out-of-`src` engine inputs for sts2-mcts: the built-in playout nets
 /// `src/rollout_net.rs` bakes in with `include_str!`, one per character, and
 /// the built-in Ironclad move prior (`data/prior_nets`, GH #830) it bakes in
@@ -149,7 +168,7 @@ pub const MCTS_DATA_INPUTS: [(&str, &str); 6] = [
 /// (the PPO trainer's guard, `wheel-venv.sh`'s keep-the-PGO-wheel path). The
 /// sts2-py test `engine_crates_are_what_sts2_rs_links` checks the list against
 /// `cargo metadata`, so a new dependency cannot be left out again.
-pub const ENGINE_CRATES: [&str; 8] = [
+pub const ENGINE_CRATES: [&str; 9] = [
     "sts2-core",
     "sts2-content",
     "sts2-mcts",
@@ -158,6 +177,7 @@ pub const ENGINE_CRATES: [&str; 8] = [
     "sts2-wire",
     "sts2-cli",
     "sts2-vocab",
+    "sts2-e2e",
 ];
 
 /// The out-of-`src` inputs of engine crate `krate`, as `(label, path relative
@@ -167,6 +187,7 @@ pub fn data_inputs(krate: &str) -> &'static [(&'static str, &'static str)] {
         "sts2-py" => &PY_DATA_INPUTS,
         "sts2-runai" => &RUNAI_DATA_INPUTS,
         "sts2-mcts" => &MCTS_DATA_INPUTS,
+        "sts2-e2e" => &E2E_DATA_INPUTS,
         _ => &[],
     }
 }

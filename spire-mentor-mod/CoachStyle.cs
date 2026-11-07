@@ -29,9 +29,10 @@ public enum SimModeLite
 
 internal static class CoachStyle
 {
-    /// <summary>The persisted "start in Coach style" default for a fresh
-    /// config (spec: default for new installs is Coach).</summary>
-    public const bool CoachByDefault = true;
+    /// <summary>The persisted style flag for a fresh config: Hints (the AI's
+    /// opinion while you decide). After that the style switched last is kept
+    /// (SimActions.SwitchStyle saves it).</summary>
+    public const bool CoachByDefault = false;
 
     /// <summary>
     /// F8 / the on-off button: AI off &lt;-&gt; on, in whatever style is set.

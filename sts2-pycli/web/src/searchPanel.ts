@@ -2,6 +2,7 @@
 // state. Kept out of App.tsx so the precedence rules below are unit-testable
 // without standing up the whole network-driven app.
 import type { Enemy, LastSearch, Score } from "./api";
+import { isE2eScores } from "./advisor";
 
 // `LastSearch` is a wire shape, so it is declared in api.ts alongside the rest
 // of them; re-exported here because this module is where it gets interpreted.
@@ -44,7 +45,11 @@ export function reasoningView(opts: {
   autoHints: boolean;
 }): PanelView {
   const { autoRunning, scores, pv, lastSearch, hintBusy, autoHints } = opts;
-  if (scores.length > 0) return { kind: "scores", scores, pv, title: null, enemies: null };
+  // The e2e advisor's rows are a policy's probabilities, not a search: the
+  // caption says whose they are.
+  if (scores.length > 0) {
+    return { kind: "scores", scores, pv, title: isE2eScores(scores) ? "Instinct" : null, enemies: null };
+  }
   if (lastSearch && lastSearch.scores.length > 0) {
     return {
       kind: "scores",
@@ -52,7 +57,7 @@ export function reasoningView(opts: {
       // The agent's step record carries no principal variation — only the
       // root distribution — so there is nothing honest to put here.
       pv: null,
-      title: `last search → ${lastSearch.action}`,
+      title: `${isE2eScores(lastSearch.scores) ? "last Instinct pick" : "last search"} → ${lastSearch.action}`,
       enemies: lastSearch.enemies,
     };
   }

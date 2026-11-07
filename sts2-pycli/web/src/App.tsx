@@ -12,7 +12,7 @@ import "./theme.css";
 import "./game-skin.css";
 import "./responsive.css";
 import { encodePositionHash } from "./simlab/positionHash";
-import { api, DEFAULT_MCTS_CONFIG, type Step, type Score, type TimelineEntry, type MapRow, type MapGraph, type FullMap, type LiveTimeline, type SaveMeta, type CombatState, type ResumeCapability, type ImportFidelity, type CapabilityFeatures } from "./api";
+import { api, DEFAULT_MCTS_CONFIG, type Step, type Score, type TimelineEntry, type MapRow, type MapGraph, type FullMap, type LiveTimeline, type SaveMeta, type CombatState, type ResumeCapability, type ImportFidelity, type CapabilityFeatures, type Advisor } from "./api";
 import Board from "./components/Board";
 import MapView from "./components/MapView";
 import MapOverlay from "./components/MapOverlay";
@@ -74,7 +74,7 @@ import TopBar from "./topbar/TopBar";
 import { buildCommands } from "./topbar/commands";
 import { usePaletteChord } from "./topbar/paletteEntries";
 import TreasureReveal from "./components/TreasureReveal";
-import { debugSettingsLine, debugStepLine } from "./debugLog";
+import { addE2eTiming, debugSettingsLine, debugStepLine, e2eTimingLine, type E2eTiming } from "./debugLog";
 import { shouldRerunRegret } from "./regretCache";
 import { panelVisible, reasoningView, type LastSearch } from "./searchPanel";
 import { liveSeekTargetForDecision } from "./liveSeek";
@@ -86,7 +86,8 @@ import SoundBridge from "./sound/SoundBridge";
 import { cueForUi, type UiCueKind } from "./sound/runCues";
 import { actionCues, cardPlayCues } from "./sound/appSoundCues";
 import RunEnded from "./components/RunEnded";
-import RunLauncher from "./components/RunLauncher";
+import RunLauncher, { type OffCombatBrain } from "./components/RunLauncher";
+import { ADVISOR_KEY, E2E_CHARACTER, E2E_GAME_VERSION, e2eAdvisable, readAdvisorPref } from "./advisor";
 import { generateSeed } from "./seed";
 import { computeRunEnd, shouldShowViewToggle, type EndedRun } from "./runControl";
 import { parseFollowParams, resolveRunPath, seekIndex } from "./followUrl";
@@ -292,6 +293,8 @@ function AppBody() {
   const advisors = features.advisors !== false;
   const runMode = features.run_mode !== false;
   const simlab = features.simlab !== false;
+  // Opt-in, unlike the flags above: only the Rust engine has the e2e student.
+  const e2eAvailable = features.e2e === true;
   // The browser build's engine reports `bug_reports: false` (it has no
   // upload target); the HOST may have one — Cloudflare Pages runs the
   // bug-report Function, a plain static host / a local preview do not — so static mode
@@ -518,7 +521,65 @@ function AppBody() {
   // combat MCTS agent, which always runs regardless of brain). Both
   // axes are posted server-side via `api.live.runMode` and then driven move-
   // by-move by the single unified `api.live.runModeStep` stepper.
-  const [offCombatBrain, setOffCombatBrain] = useState<"heuristic" | "ppo">("ppo");
+  const [offCombatBrain, setOffCombatBrain] = useState<OffCombatBrain>("ppo");
+  // The e2e student plays only Ironclad on v0.111.0: picking it fixes both,
+  // and picking another character while it is chosen falls back to PPO.
+  const pickBrain = (b: OffCombatBrain) => {
+    setOffCombatBrain(b);
+    if (b === "e2e") {
+      setCharacter(E2E_CHARACTER);
+      setGameVersionPick(E2E_GAME_VERSION);
+      // Picking the student to watch picks it to advise you, too.
+      pickAdvisor("e2e");
+    }
+  };
+  // Who advises a hand-played run: the search (combat MCTS + run PPO) or the
+  // e2e student. A preference (persisted here and posted to the engine, which
+  // applies it to every run it installs that the student can read: Ironclad,
+  // v0.111.0); the chip and the launcher's picker offer it only there.
+  const [advisor, setAdvisor] = useState<Advisor>(readAdvisorPref);
+  // The e2e advice could not be had for this position (no net, a position the
+  // student cannot read): said where the hint would be.
+  const [advisorNote, setAdvisorNote] = useState<string | null>(null);
+  // The live run's advisor, as the engine applies the preference: the e2e
+  // student only on a run it can read.
+  const liveAdvisable = mode === "play" && !!live
+    && e2eAdvisable(e2eAvailable, live.state.player?.name ?? "", liveGameVersion);
+  const liveAdvisor: Advisor = liveAdvisable ? advisor : "search";
+  // Read by the hint fetch (a closure the auto-hint effect keeps).
+  const liveAdvisorRef = useRef<Advisor>(liveAdvisor);
+  liveAdvisorRef.current = liveAdvisor;
+  // The engine keeps the preference per page load: tell it once the build
+  // says it has the student, whichever it is (a resumed run may carry the
+  // other). Posting it fetches no net; the first advice call does.
+  useEffect(() => {
+    if (e2eAvailable) void api.advisor(advisor).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per build probe
+  }, [e2eAvailable]);
+  const pickAdvisor = (a: Advisor) => {
+    setAdvisor(a);
+    setAdvisorNote(null);
+    try { localStorage.setItem(ADVISOR_KEY, a); } catch { /* private mode */ }
+    if (!e2eAvailable) return;
+    void api.advisor(a)
+      .then(() => {
+        // The scores on screen are the other advisor's: drop them and let the
+        // auto-hint effect ask the new one.
+        autoHintedRef.current = false;
+        setLive((s) => (s ? { ...s, scores: [], pv: null } : s));
+      })
+      .catch((e) => setAdvisorNote(`could not switch the advisor: ${e}`));
+  };
+  const pickCharacter = (c: string) => {
+    setCharacter(c);
+    if (offCombatBrain === "e2e" && c !== E2E_CHARACTER) setOffCombatBrain("ppo");
+  };
+  // Per-decision timing of the e2e student over the current autoplay.
+  const [e2eTiming, setE2eTiming] = useState<E2eTiming | null>(null);
+  // Who made the play-to-end loop's last move (the step's `debug.brain`):
+  // the student plays a hand-played run under the e2e advisor even when the
+  // launcher's brain is another, so the progress label reads it from here.
+  const [autoBrain, setAutoBrain] = useState<string | null>(null);
   const [combatPreset, setCombatPreset] = useState<CombatPreset>("benchmark");
   // The budget the SERVER is searching at, as last posted. Kept apart from the
   // three inputs above so the live toolbar can tell "you typed 4000" from "the
@@ -1270,6 +1331,7 @@ function AppBody() {
         // Off-combat steps carry no search; keep the last combat one on screen
         // rather than blanking the panel between fights.
         if (r.search) setLastSearch(r.search);
+        setE2eTiming((t) => addE2eTiming(t, r.debug));
         if (r.debug?.summary) pushDebug(debugStepLine(r.debug));
         if (r.diff) setAutobattleDiff(r.diff);
         setAutobattleOver({ over: r.over, won: r.won });
@@ -1529,7 +1591,13 @@ function AppBody() {
     try {
       const r = await api.live.hint({ ...hintConfigRef.current });
       setLive((s) => (s ? { ...s, scores: r.scores, pv: r.pv } : s));
+      setAdvisorNote(r.advisor === "e2e" && r.error ? `Instinct: ${r.error}` : null);
       return r.scores;
+    } catch (e) {
+      // The e2e advisor without its net (a failed download) answers 424:
+      // say so where the hint would be instead of failing silently.
+      if (liveAdvisorRef.current === "e2e") setAdvisorNote(`Instinct unavailable: ${e instanceof Error ? e.message : String(e)}`);
+      throw e;
     } finally {
       hintInFlight.current = false;
       setHintBusy(false);
@@ -1694,8 +1762,10 @@ function AppBody() {
       setAutoAct(null);
       if (debugEnabledRef.current) setDebugLog([]);
       setLastSearch(null);
+      setE2eTiming(null);
+      setAutoBrain(null);
       pushDebug(settingsLine());
-      pushDebug(`▶ play to end · brain=${offCombatBrain} · combat=${combatPreset}`);
+      pushDebug(`▶ play to end · brain=${offCombatBrain} · advisor=${liveAdvisorRef.current} · combat=${combatPreset}`);
     }
     trackProgress(start);
     // Throttle the branch-tree refresh: a full `GET /timeline` every single step
@@ -1729,6 +1799,8 @@ function AppBody() {
         // Off-combat steps carry no search; keep the last combat one on screen
         // rather than blanking the panel between fights.
         if (r.search) setLastSearch(r.search);
+        setE2eTiming((t) => addE2eTiming(t, r.debug));
+        setAutoBrain(r.debug?.brain ?? "search");
         trackProgress(r.step);
         if (r.debug?.summary) pushDebug(debugStepLine(r.debug));
         await liveRefresh();
@@ -1787,15 +1859,21 @@ function AppBody() {
         // there is no live session yet for it to configure.
         const runSeed = seed || generateSeed();
         if (runSeed !== seed) setSeed(runSeed);
-        started = await api.live.startFaithful({
-          character,
-          seed: runSeed,
-          ascension,
-          sims: monsterSims,
-          boss_sims: bossSims,
-          threads: faithfulThreads,
-          ...gameVersionBody(gameVersion),
-        });
+        started = await api.live.startFaithful(
+          offCombatBrain === "e2e"
+            ? // The engine forces the student's run (Ironclad, v0.111.0,
+              // act 1 rolled, potion swap on); only seed + ascension vary.
+              { character: E2E_CHARACTER, seed: runSeed, ascension, e2e: true }
+            : {
+                character,
+                seed: runSeed,
+                ascension,
+                sims: monsterSims,
+                boss_sims: bossSims,
+                threads: faithfulThreads,
+                ...gameVersionBody(gameVersion),
+              },
+        );
         setMode("play");
         resetReplayView();
         setLive(started);
@@ -2020,6 +2098,11 @@ function AppBody() {
               on: hints.on, toggle: hints.toggle,
               title: "advice style. 💡 Hints: show the machine's opinion WITHOUT being asked — the PPO policy panel, auto combat hints, the EV analyzers, the synergy/archetype chips and the map's planned route. 🎓 Coach: nothing unprompted before you act; the press-first tools (hint, peek P, the reviews, search) still work. Both grade your turns and choices after you act.",
             } : undefined,
+            advisor: liveAdvisable && advisors ? {
+              on: advisor === "e2e",
+              toggle: () => pickAdvisor(advisor === "e2e" ? "search" : "e2e"),
+              title: "who advises your moves. 🔎 search: the combat MCTS in fights, the PPO run policy elsewhere. 🧠 Instinct: one transformer, no search — for every decision (hints, the policy panel, play best G / A, the choice coach, the map route). Its probabilities are a policy's, not win chances.",
+            } : undefined,
             autobattle: mode === "play" && live && advisors && runMode ? {
               on: autobattleOn,
               toggle: () => {
@@ -2129,7 +2212,8 @@ function AppBody() {
           {mode === "play" && autoRunning && (() => {
             const d = live?.decision;
             const label =
-              d === "combat_play" ? "searching combat (MCTS)…"
+              (autoBrain ?? offCombatBrain) === "e2e" ? "Instinct deciding…"
+              : d === "combat_play" ? "searching combat (MCTS)…"
               : d === "card_reward" ? "evaluating card rewards…"
               : d === "card_select" ? "choosing card…"
               : d === "map_select" ? "choosing path…"
@@ -2160,6 +2244,7 @@ function AppBody() {
                   {where ? ` · ${where}` : ""} · ~{pct}% · {fmtDuration(autoRunElapsed)} elapsed
                   {eta != null ? ` · ETA ${fmtDuration(eta)}` : ""}
                   {autoStepElapsed >= 1 ? ` · this step ${autoStepElapsed.toFixed(1)}s` : ""}
+                  {e2eTiming ? ` · ${e2eTimingLine(e2eTiming)}` : ""}
                 </span>
                 <div className="auto-progress" title={`~${pct}% (estimated from floor ${autoFloor ?? "?"} of ~${EST_TOTAL_FLOORS})`}
                   style={{ flex: 1, minWidth: 80, height: 6, borderRadius: 3,
@@ -2315,7 +2400,7 @@ function AppBody() {
               )}
               {!live && !endedRun && (
                 <RunLauncher
-                  character={character} onCharacter={setCharacter}
+                  character={character} onCharacter={pickCharacter}
                   seed={seed} onSeed={setSeed}
                   ascension={ascension} onAscension={setAscension}
                   act1={act1} onAct1={setAct1}
@@ -2325,7 +2410,8 @@ function AppBody() {
                   onWatch={runMode ? launchAutoplay : undefined}
                   busy={autoRunning}
                   error={liveError}
-                  offCombatBrain={offCombatBrain} onOffCombatBrain={setOffCombatBrain}
+                  offCombatBrain={offCombatBrain} onOffCombatBrain={pickBrain} e2eAvailable={e2eAvailable}
+                  advisor={advisor} onAdvisor={advisors ? pickAdvisor : undefined}
                   combat={{
                     preset: combatPreset, monsterSims, bossSims, threads: faithfulThreads,
                     onPreset: setCombatPreset, onMonsterSims: setMonsterSims, onBossSims: setBossSims,
@@ -2529,6 +2615,12 @@ function AppBody() {
                   height={reasoningHeight}
                   onResize={setReasoningHeight}
                 >
+                  {liveAdvisor === "e2e" && advisorNote && (
+                    <div className="mono" data-testid="advisor-note"
+                      style={{ color: "var(--muted)", fontSize: 11, marginBottom: 6 }}>
+                      {advisorNote}
+                    </div>
+                  )}
                   {view.kind === "message" ? (
                     <div className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>
                       {view.text}
@@ -2563,6 +2655,7 @@ function AppBody() {
                     onWatchChange={setAutobattleWatch}
                     onAdvance={advanceAutobattle}
                     onStop={() => { stopAutoRef.current = true; }}
+                    timing={e2eTiming ? e2eTimingLine(e2eTiming) : null}
                   />
                 )}
                 {peek && mode === "play" && <PeekBanner text={peek} onDismiss={() => setPeek(null)} />}

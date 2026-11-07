@@ -27,6 +27,8 @@ pub mod bench;
 pub mod combat_import;
 pub mod combat_view;
 pub mod deck;
+#[cfg(feature = "e2e")]
+pub mod e2e;
 pub mod enemy_labels;
 pub mod enrich;
 pub mod game;
@@ -36,6 +38,8 @@ pub mod runmode;
 pub mod saves;
 pub mod session;
 pub mod session_choice;
+#[cfg(feature = "e2e")]
+mod session_e2e;
 mod session_runmode;
 pub mod simlab;
 pub mod simlab_catalog;

@@ -37,6 +37,12 @@ fn character_from_str(s: &str) -> PyResult<CharacterId> {
     sts2_wire::emit::names::character_from_str(s).map_err(PyValueError::new_err)
 }
 
+/// A `sts2_wire::graft` rejection, raised as `ValueError`.
+#[allow(clippy::needless_pass_by_value)] // the `map_err` shape
+fn graft_err(e: String) -> PyErr {
+    PyValueError::new_err(e)
+}
+
 fn card_id_from_str(s: &str) -> PyResult<CardId> {
     // Accept both `CARD.STRIKE` (sts2log / scraped `.run` shape) and
     // `STRIKE` (canonical python_name). `names::card_id_from_str`
@@ -123,6 +129,17 @@ pub struct PyRunManager {
 }
 
 impl PyRunManager {
+    /// Wrap a run built in Rust (the e2e campaign run, `e2e::e2e_new_run`).
+    pub(crate) fn from_inner(inner: RunManager) -> Self {
+        let seed = inner.seed;
+        Self {
+            inner,
+            seed,
+            record_card_plays: false,
+            record_combat_log: false,
+        }
+    }
+
     /// Re-assert the sticky play-log recording flag onto the live combat
     /// before stepping the engine. A freshly-started combat resets
     /// `TurnEvents` to its default (`record_card_play_log = false`), so the
@@ -1122,6 +1139,168 @@ impl PyRunManager {
         };
         self.inner.debug_enter_combat(state.inner.clone(), rt);
         Ok(())
+    }
+
+    // ---- Graft setters (`sts2_wire::graft`) ---------------------------------
+    //
+    // Park a rebuilt run AT the decision the live game shows. Each takes data
+    // in the shape its matching getter emits, so `setter(getter())` on a real
+    // run reproduces `get_available_actions()`. Reconstruction surfaces: no
+    // RNG read, no on-obtain hook — never call one on a recorded or
+    // parity-pinned run. Card specs are `{"id", "upgraded" (bool | level),
+    // "enchantment" (str | (str, amount) | None), "enchantment_amount"}` or
+    // a bare id (`"BASH"`, `"BASH+1"`); ids in any getter / mod spelling.
+
+    /// Replace the master deck with `cards` (card specs, deck order), each
+    /// built for the run's game version with its enchantment stamped. No
+    /// relic / on-obtain / deck-add hook fires. Returns the ids it could not
+    /// build (left out of the deck).
+    fn debug_set_master_deck(&mut self, cards: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+        let cards: serde_json::Value = pythonize::depythonize(cards)?;
+        sts2_wire::graft::set_master_deck(&mut self.inner, &cards).map_err(graft_err)
+    }
+
+    /// Set the current room's type (`current_room()["room_type"]` names:
+    /// monster / elite / boss / event / shop / rest_site / treasure), keeping
+    /// its map node; a coord-less room is made when there is none. The
+    /// reward chain reads it (a card reward after a `?` fight).
+    fn debug_set_room_type(&mut self, room_type: &str) -> PyResult<()> {
+        sts2_wire::graft::set_room_type(&mut self.inner, room_type).map_err(graft_err)
+    }
+
+    /// Open the card-reward phase with `cards` (card specs; upgrade and
+    /// enchantment are kept by the pick). `choose_screen` marks a run-effect
+    /// choose screen (`card_offer_choose_screen`), `can_skip=False` a forced
+    /// pick (no skip, no Pael's Wing). With `bundles` (`card_reward_bundles()`
+    /// shape: a list of packs of card ids/specs) it is a Scroll Boxes pack
+    /// pick instead and `cards` is ignored. Raises `ValueError` on an unknown
+    /// id or an empty offer.
+    #[pyo3(signature = (cards, can_skip = true, choose_screen = false, bundles = None))]
+    fn debug_open_card_offer(
+        &mut self,
+        cards: &Bound<'_, PyAny>,
+        can_skip: bool,
+        choose_screen: bool,
+        bundles: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let cards: serde_json::Value = pythonize::depythonize(cards)?;
+        let bundles: Option<serde_json::Value> = bundles.map(pythonize::depythonize).transpose()?;
+        sts2_wire::graft::open_card_offer(
+            &mut self.inner,
+            &cards,
+            can_skip,
+            choose_screen,
+            bundles.as_ref(),
+        )
+        .map_err(graft_err)
+    }
+
+    /// Stand in an Event room bound to `event_id` at page 0, phase `event`,
+    /// as real room entry leaves it. Accepts the game's C# `Id.Entry`
+    /// (`TEA_MASTER`, `NEOW`), the engine name (`TeaMaster`), an `EVENT.`
+    /// prefix, a missing/extra `THE_`, and the loc aliases `MR_STRUGGLES` /
+    /// `PROCEED`. Returns the bound event's python name; `ValueError` when
+    /// unknown. Does not advance the act's visited-events cursor and leaves
+    /// every RNG cursor as it was; later pages are reached by replaying
+    /// `take_action(event_choice)` from page 0.
+    fn debug_enter_event(&mut self, event_id: &str) -> PyResult<String> {
+        sts2_wire::graft::enter_event(&mut self.inner, event_id).map_err(graft_err)
+    }
+
+    /// Stand at a rest site (phase `rest_site`) and return the offered option
+    /// ids (`rest_site_options()` ids, `rest_option` index order). `taken`
+    /// lists options already used this visit (MiniatureTent's second pick):
+    /// they are not offered again, and leaving becomes legal.
+    #[pyo3(signature = (taken = Vec::new()))]
+    fn debug_enter_rest_site(&mut self, taken: Vec<String>) -> PyResult<Vec<String>> {
+        sts2_wire::graft::enter_rest_site(&mut self.inner, &taken).map_err(graft_err)
+    }
+
+    /// Queue `n` interactive deck removals (`remove_deck_card` preempts).
+    fn debug_queue_deck_removals(&mut self, n: u32) {
+        self.inner.debug_queue_deck_removals(n);
+    }
+
+    /// Queue `n` interactive deck upgrades (`upgrade_deck_card` preempts).
+    fn debug_queue_deck_upgrades(&mut self, n: u32) {
+        self.inner.debug_queue_deck_upgrades(n);
+    }
+
+    /// Queue `n` interactive deck transforms (NewLeaf shape: the replacement
+    /// is rolled after the pick). `basic_only` limits the pool to Basic cards
+    /// (Wood Carvings), whose fixed replacement is not modelled.
+    #[pyo3(signature = (n, basic_only = false))]
+    fn debug_queue_deck_transforms(&mut self, n: u32, basic_only: bool) {
+        self.inner.debug_queue_deck_transforms(n, basic_only);
+    }
+
+    /// Queue `count` interactive deck enchants stamping `amount` of
+    /// `enchantment` (`GOOPY`, `ENCHANTMENT.SHARP`, …); `optional` for an
+    /// "up to N" screen; `card_type` (`attack` / `skill` / `power`) to
+    /// restrict the pool (Self-Help Book).
+    #[pyo3(signature = (enchantment, amount = 1, optional = false, count = 1, card_type = None))]
+    fn debug_queue_deck_enchant(
+        &mut self,
+        enchantment: &str,
+        amount: i32,
+        optional: bool,
+        count: u32,
+        card_type: Option<&str>,
+    ) -> PyResult<()> {
+        sts2_wire::graft::queue_deck_enchant(
+            &mut self.inner,
+            enchantment,
+            amount,
+            optional,
+            count,
+            card_type,
+        )
+        .map_err(graft_err)
+    }
+
+    /// Queue a multi-pick card grant over `cards` (card specs): pick up to
+    /// `pick`, at least `min_pick` (`card_grant_options()` /
+    /// `pending_card_grants` / `pending_card_grant_min` read it back).
+    #[pyo3(signature = (cards, pick = 1, min_pick = 1))]
+    fn debug_queue_card_grant(
+        &mut self,
+        cards: &Bound<'_, PyAny>,
+        pick: usize,
+        min_pick: usize,
+    ) -> PyResult<()> {
+        let cards: serde_json::Value = pythonize::depythonize(cards)?;
+        sts2_wire::graft::queue_card_grant(&mut self.inner, &cards, pick, min_pick)
+            .map_err(graft_err)
+    }
+
+    /// Queue a full-belt potion reward of `potion_id` (`FIRE_POTION`,
+    /// `FirePotion`, `POTION.X`): the `potion_swap` decision (decline first,
+    /// then one per belt slot) preempts. Needs `interactive_potion_swap=True`
+    /// only for the engine to RAISE swaps itself; a queued one always shows.
+    fn debug_queue_potion_swap(&mut self, potion_id: &str) -> PyResult<()> {
+        sts2_wire::graft::queue_potion_swap(&mut self.inner, potion_id).map_err(graft_err)
+    }
+
+    /// Open the boss-relic phase with `relic_ids` (`boss_relic_options()`
+    /// PascalCase, `RELIC.X`, `X`) — also the Act 2/3 Ancient's choice. The
+    /// player counts as already healed (no Ancient heal, no DustyTome read,
+    /// no MawBank). The pick advances the act first iff the run stands in a
+    /// Boss room below act 3 (`debug_place_on_map` at the previous act's boss
+    /// node); placed on the new act's map, it keeps the act.
+    fn debug_open_boss_relic(&mut self, relic_ids: Vec<String>) -> PyResult<()> {
+        sts2_wire::graft::open_boss_relic(&mut self.inner, &relic_ids).map_err(graft_err)
+    }
+
+    /// Open the shop with `inventory` in exactly `shop_inventory()`'s shape.
+    /// Prices are the DISPLAYED ones (after Courier / Membership Card) and
+    /// are inverted to the stored base the forward computation reproduces;
+    /// a row may instead carry `"base_price"` (and the dict
+    /// `"removal_base_cost"`) to set the stored value directly. Returns the
+    /// rows no base price maps onto (`"cards[2]"`, `"removal_cost"`), which
+    /// keep the displayed value.
+    fn debug_open_shop(&mut self, inventory: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+        let inventory: serde_json::Value = pythonize::depythonize(inventory)?;
+        sts2_wire::graft::open_shop(&mut self.inner, &inventory).map_err(graft_err)
     }
 
     #[getter]

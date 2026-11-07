@@ -44,3 +44,29 @@ export function debugStepLine(dbg: FaithfulDebug): string {
   if (dbg.reward?.sims != null) extra.push(`reward-sims=${dbg.reward.sims}`);
   return extra.length ? `${dbg.summary} · ${extra.join(" ")}` : dbg.summary;
 }
+
+/** Milliseconds for a readout: one decimal under 10 ms, whole above. */
+export function fmtMs(ms: number): string {
+  return ms < 10 ? ms.toFixed(1) : String(Math.round(ms));
+}
+
+/** The e2e student's decision timing over an autoplayed run: decisions
+ *  counted, their summed and last milliseconds (forced steps excluded). */
+export interface E2eTiming {
+  n: number;
+  totalMs: number;
+  lastMs: number;
+}
+
+/** Fold one run-mode step's debug into the timing (unchanged for steps that
+ *  are not an e2e decision). */
+export function addE2eTiming(t: E2eTiming | null, dbg: FaithfulDebug | null | undefined): E2eTiming | null {
+  if (!dbg || dbg.brain !== "e2e" || dbg.forced || dbg.ms == null) return t;
+  const prev = t ?? { n: 0, totalMs: 0, lastMs: 0 };
+  return { n: prev.n + 1, totalMs: prev.totalMs + dbg.ms, lastMs: dbg.ms };
+}
+
+/** "Instinct 9.4 ms/decision (last 8.7)" for the autoplay bar. */
+export function e2eTimingLine(t: E2eTiming): string {
+  return `Instinct ${fmtMs(t.totalMs / t.n)} ms/decision (last ${fmtMs(t.lastMs)})`;
+}

@@ -1988,6 +1988,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sts2-e2e"
+version = "0.0.1"
+dependencies = [
+ "flate2",
+ "half",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "sts2-content",
+ "sts2-core",
+ "sts2-mcts",
+ "sts2-srchash",
+ "sts2-vocab",
+ "sts2-wire",
+]
+
+[[package]]
 name = "sts2-mcts"
 version = "0.0.1"
 dependencies = [
@@ -2020,6 +2037,7 @@ dependencies = [
  "sts2-cli",
  "sts2-content",
  "sts2-core",
+ "sts2-e2e",
  "sts2-mcts",
  "sts2-runai",
  "sts2-srchash",
@@ -2093,6 +2111,7 @@ dependencies = [
  "smallvec",
  "sts2-content",
  "sts2-core",
+ "sts2-e2e",
  "sts2-mcts",
  "sts2-runai",
  "sts2-wire",

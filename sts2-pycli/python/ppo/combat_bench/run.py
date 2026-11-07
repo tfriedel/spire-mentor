@@ -270,10 +270,17 @@ def build_run(fight: dict[str, Any], seed: int) -> Any:
         seed: The cell seed.
 
     Returns:
-        The `sts2_rs.RunManager`, in phase `combat`.
+        The `sts2_rs.RunManager`, in phase `combat`, on the selected
+        `sts2_client.GAME_VERSION` (v0.107.1 unless `STS2_GAME_VERSION` says
+        otherwise).
+
+    Raises:
+        sts2_client.GameVersionMismatch: The engine built another version.
     """
+    import sts2_client
     import sts2_rs
 
+    ver = sts2_client.GAME_VERSION
     character = fight_character(fight)
     state = sts2_rs.build_scenario_state(
         seed,
@@ -289,8 +296,14 @@ def build_run(fight: dict[str, Any], seed: int) -> Any:
         # The human's belt size (A10 TightBelt, slot relics); a set without
         # the field keeps the harness's 3 slots.
         potion_slots=fight.get("potion_slots"),
+        game_version=ver,
     )
-    rm = sts2_rs.RunManager(seed=seed, character=character, ascension_level=int(fight["ascension"]))
+    rm = sts2_rs.RunManager(
+        seed=seed, character=character, ascension_level=int(fight["ascension"]), game_version=ver
+    )
+    # `debug_enter_combat` takes any state without comparing builds.
+    sts2_client.check_game_version(state, ver, what="combat_bench combat state")
+    sts2_client.check_game_version(rm, ver, what="combat_bench RunManager")
     rm.debug_enter_combat(state, fight["room_type"])
     # Display-side log only: search never sees it (`MctsTree::new` disarms
     # its root clone), so arming it cannot change the play.

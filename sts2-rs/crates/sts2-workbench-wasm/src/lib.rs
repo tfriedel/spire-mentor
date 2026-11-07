@@ -33,6 +33,22 @@ fn js_now_ms() -> f64 {
     js_sys::Date::now()
 }
 
+/// `performance.now()` (the worker's high-resolution clock) for the e2e
+/// brain's per-decision timing; `Date.now()` where it is missing.
+fn js_perf_ms() -> f64 {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    js_sys::Reflect::get(&global, &JsValue::from_str("performance"))
+        .ok()
+        .filter(|p| !p.is_undefined() && !p.is_null())
+        .and_then(|perf| {
+            let now = js_sys::Reflect::get(&perf, &JsValue::from_str("now")).ok()?;
+            let now: js_sys::Function = now.dyn_into().ok()?;
+            now.call0(&perf).ok()?.as_f64()
+        })
+        .unwrap_or_else(js_sys::Date::now)
+}
+
 /// `[[filename, text], …]` → the `(filename, text)` pairs the log routes take.
 fn parse_logs(logs_json: &str) -> Result<Vec<(String, String)>, ApiError> {
     let v: Value = serde_json::from_str(logs_json)
@@ -88,6 +104,7 @@ impl Workbench {
             config.assets_base = base.to_string();
         }
         config.now_ms = Some(js_now_ms);
+        config.perf_ms = Some(js_perf_ms);
         Ok(Self {
             inner: sts2_workbench::api::Workbench::new(config),
         })
@@ -231,6 +248,32 @@ impl Workbench {
     #[must_use]
     pub fn has_ppo(&self, character: &str) -> bool {
         self.inner.has_ppo(character)
+    }
+
+    /// The e2e student's weights filename the page fetches on demand
+    /// (`/e2e/<file>`).
+    #[must_use]
+    pub fn e2e_file() -> String {
+        sts2_workbench::api::Workbench::e2e_file().to_string()
+    }
+
+    /// Load the e2e student from the fetched `.e2ew` bytes; the live run
+    /// picks it up. 400 when the bytes are not a weights file of the build
+    /// the student plays.
+    #[must_use]
+    pub fn load_e2e(&mut self, bytes: &[u8]) -> String {
+        reply(self.inner.load_e2e(bytes))
+    }
+
+    /// Record why the page could not fetch the e2e weights.
+    pub fn set_e2e_error(&mut self, reason: &str) {
+        self.inner.set_e2e_error(reason);
+    }
+
+    /// Whether the e2e student is loaded.
+    #[must_use]
+    pub fn has_e2e(&self) -> bool {
+        self.inner.has_e2e()
     }
 
     /// Whether a run is live (cheap probe for the worker).

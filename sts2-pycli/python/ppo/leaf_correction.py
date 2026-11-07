@@ -112,6 +112,7 @@ def play_and_label(
 
 def gen_fight(job: tuple[Any, ...]) -> dict[str, Any]:
     path, combat_id, starts, sims, k, keep_state = job
+    import sts2_client
     import sts2_rs
 
     from ppo.bc_human import replay
@@ -137,6 +138,7 @@ def gen_fight(job: tuple[Any, ...]) -> dict[str, Any]:
                 seed=seed,
                 character=rec["character"].capitalize(),
                 ascension_level=rec["ascension"] or 0,
+                game_version=sts2_client.GAME_VERSION,
             )
             rm.debug_enter_combat(state.clone(), room)
             if mode == "human":

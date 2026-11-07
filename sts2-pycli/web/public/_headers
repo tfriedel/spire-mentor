@@ -9,7 +9,20 @@
 /wb-assets/*
   ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
+# The engine ships gzipped (*.wasm-<hash>.gz) and the worker inflates it
+# (src/worker/wasmLoad.ts): opaque bytes, so octet-stream (not compressed on
+# the fly) and no-transform (Cloudflare must not re-encode or strip it).
+/wb-assets/*.gz
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable, no-transform
+  ! Content-Type
+  Content-Type: application/octet-stream
 /ppo/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable
+  ! Content-Type
+  Content-Type: application/octet-stream
+/e2e/*
   ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
   ! Content-Type

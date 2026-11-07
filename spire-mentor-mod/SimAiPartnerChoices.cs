@@ -133,6 +133,8 @@ internal sealed class SimAiPartnerChoices
         }
         state["type"] = "advice_request";
         state["advice_for"] = adviceFor;
+        // Same brain as the player's advice (SimAiPartnerBrain's combat asks).
+        state["brain"] = SimAdvisor.CurrentBrain;
         _inflightKey = key;
         _inflightAt = DateTime.UtcNow;
         if (!advisor.Request(state, root => OnReply(key, root)))

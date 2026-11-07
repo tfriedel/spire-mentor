@@ -109,10 +109,16 @@ class _EntryRecorder:
         self._potions = _id_forms("potion")
 
     def _roster(self, encounter: str) -> list[str]:
+        import sts2_client
         import sts2_rs
 
         if encounter not in self._rosters:
-            fresh = sts2_rs.RunManager(seed=1, character="Ironclad", ascension_level=0)
+            fresh = sts2_rs.RunManager(
+                seed=1,
+                character="Ironclad",
+                ascension_level=0,
+                game_version=sts2_client.GAME_VERSION,
+            )
             self._rosters[encounter] = [m["id"] for m in fresh.dump_roster(encounter)]
         return self._rosters[encounter]
 

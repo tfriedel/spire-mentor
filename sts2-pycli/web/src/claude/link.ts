@@ -87,6 +87,7 @@ export const READ_ONLY_LIVE: ReadonlySet<string> = new Set([
   "/api/live/decision-advisor/stream",
   "/api/live/auto-action",
   "/api/live/ppo-policy",
+  "/api/live/e2e-advice",
   "/api/live/last-turn-grade",
   "/api/live/last-choice-grade",
   "/api/live/last-choice-check/stream",

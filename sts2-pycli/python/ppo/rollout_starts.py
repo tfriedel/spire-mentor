@@ -101,7 +101,7 @@ def traj_seed(key: str, rep: int, rep0: int = DEFAULT_REP0) -> int:
     return _fight_seed(key) * SEED_STRIDE + rep0 + rep
 
 
-def build_fight(fight: dict[str, Any], seed: int) -> Any:
+def build_fight(fight: dict[str, Any], seed: int, game_version: str | None = None) -> Any:
     """`fight` as a live `RunManager` in combat, built from `seed`.
 
     The same build as `rollout_learn gen` / the old `rl` starts /
@@ -109,9 +109,21 @@ def build_fight(fight: dict[str, Any], seed: int) -> Any:
     row; a combat-bench row's `monsters` and `potion_slots` are honoured as
     `combat_bench.run.build_run` does. The combat log stays off, so neither
     the states nor their playouts carry one.
+
+    The fight simulates `game_version` (default: the selected
+    `sts2_client.GAME_VERSION`, v0.107.1 unless `STS2_GAME_VERSION` says
+    otherwise), and the state and the run are read back to prove it.
+
+    Raises:
+        sts2_client.GameVersionMismatch: The engine built another version, or
+            `game_version` names no supported build.
     """
+    import sts2_client
     import sts2_rs
 
+    ver = (
+        sts2_client.require_game_version(game_version) if game_version else sts2_client.GAME_VERSION
+    )
     character = fight_character(fight)
     slots = fight.get("potion_slots")
     potions = list(fight["potions"]) if slots is not None else list(fight["potions"])[:3]
@@ -127,8 +139,14 @@ def build_fight(fight: dict[str, Any], seed: int) -> Any:
         potions=potions,
         monsters=fight.get("monsters"),
         potion_slots=slots,
+        game_version=ver,
     )
-    rm = sts2_rs.RunManager(seed=seed, character=character, ascension_level=int(fight["ascension"]))
+    rm = sts2_rs.RunManager(
+        seed=seed, character=character, ascension_level=int(fight["ascension"]), game_version=ver
+    )
+    # `debug_enter_combat` takes any state without comparing builds.
+    sts2_client.check_game_version(state, ver, what="build_fight combat state")
+    sts2_client.check_game_version(rm, ver, what="build_fight RunManager")
     rm.debug_enter_combat(state, fight["room_type"])
     return rm
 

@@ -27,7 +27,7 @@ public static class MainFile
 {
     public const string ModId = "SpireMentor";
     // Keep in sync with SpireMentor.json "version" (package.ps1 reads that one).
-    public const string ModVersion = "0.9.2";
+    public const string ModVersion = "0.10.0-beta.3";
 
     private static Harmony? _patcher;
     private static SimAutoSlayer? _autoSlayer;
@@ -124,10 +124,22 @@ public static class MainFile
             Logger.Log($"Settings page registration failed (non-fatal): {ex.Message}");
         }
 
+        // The panels in their own window when the player asked for that (a
+        // persisted setting, so after Register): the mod starts the frame
+        // next to this game. Not in Autopilot (sweeps, climbs).
+        if (SimRuntime.Mode != SimMode.Autopilot)
+        {
+            SimFrameLauncher.OpenAtStartupIfWanted();
+        }
+
         if (SimMp.SpeedOverride is double speed)
         {
             SimSpeed.Apply(speed, showVfx: false);
             Logger.Log($"--spire-mentor-speed: game speed {SimSpeed.Current:0.0}x");
+        }
+        else
+        {
+            SpireMentorModConfig.ApplyLastGameSpeed();
         }
 
         TaskHelper.RunSafely(SimVfxCap.InstallWhenReadyAsync());

@@ -12,6 +12,10 @@ export interface Ui {
   autoplay_armed: boolean;
   autobattle_on: boolean;
   speed: string;
+  /** The advisor brain switch (mod protocol v5.2): shown where the advisor's
+   *  Instinct can play this run, or while Instinct is still chosen. Optional:
+   *  an older mod's `ui` has none. */
+  brain?: { show: boolean; value: string; label: string };
   partner_go: { show: boolean; waiting: boolean; seconds: number };
   advisor_status: string;
   build_elapsed: string | null;
@@ -51,6 +55,11 @@ export interface Advice {
   pick_reason: string | null;
   pick_gap_hp: number | null;
   hand_back: string | null;
+  /** v5.2: who answered (`search` / `instinct`), why Instinct did not, and
+   *  the HUD's own source line. Optional: older mods send none. */
+  brain?: string | null;
+  instinct_unavailable?: string | null;
+  source_tag?: string | null;
   options: AdviceOption[];
 }
 

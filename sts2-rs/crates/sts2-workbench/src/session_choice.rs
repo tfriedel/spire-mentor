@@ -43,6 +43,9 @@ pub struct ChoiceSnapshot {
     pub parent_id: u64,
     pub decision: String,
     pub rm: RunManager,
+    /// The e2e advisor's evaluation of the position (`Session::e2e_advice`)
+    /// when the student advised the run: the grade is agreement with IT.
+    pub e2e: Option<Value>,
 }
 
 /// [`grade_choice`]'s result.
@@ -114,6 +117,33 @@ fn option_index(options: &[ChoiceOption], action: &str, args: &Value) -> Option<
         .position(|o| o.action == action && native_action(Some(&o.action), &o.args) == want)
 }
 
+/// The e2e advisor's options (`Session::e2e_advice`) as coach options;
+/// a class with no engine action (a multi-pick selection) is left out.
+fn e2e_choice_options(adv: &Value) -> Vec<ChoiceOption> {
+    adv["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|o| {
+            Some(ChoiceOption {
+                action: o["action"].as_str()?.to_string(),
+                args: o["args"].clone(),
+                label: o["label"].as_str().unwrap_or("").to_string(),
+                prob: o["prob"].as_f64()?,
+                native: crate::rmx::action_from_value(&o["run_action"]).ok()?,
+            })
+        })
+        .collect()
+}
+
+/// An advisor label without its merged-class suffix (`"Strike (×2)"`).
+fn class_label(label: &str) -> &str {
+    match label.rfind(" (×") {
+        Some(i) if label.ends_with(')') => &label[..i],
+        _ => label,
+    }
+}
+
 impl Session {
     /// Snapshot the run at the active node before a human choice is
     /// applied. Clears the previous snapshot first; leaves none at a combat
@@ -131,10 +161,23 @@ impl Session {
         let Some(rm) = self.game.as_ref().and_then(|g| g.native_run()).cloned() else {
             return;
         };
+        // Under the e2e advisor the coach grades against the student (its
+        // evaluation is the per-node cache the panel already filled).
+        #[cfg(feature = "e2e")]
+        let e2e = if self.advisor_is_e2e() {
+            self.e2e_advice()
+                .ok()
+                .filter(|a| a["available"] == json!(true) && a["forced"] != json!(true))
+        } else {
+            None
+        };
+        #[cfg(not(feature = "e2e"))]
+        let e2e = None;
         self.last_choice = Some(ChoiceSnapshot {
             parent_id: node_id,
             decision,
             rm,
+            e2e,
         });
     }
 
@@ -193,6 +236,21 @@ impl Session {
         if node.parent_id != Some(snap.parent_id) {
             return None;
         }
+        if let Some(adv) = snap.e2e.as_ref() {
+            let options = e2e_choice_options(adv);
+            if options.len() < 2 {
+                return None;
+            }
+            // A move the student merged into one class with others (a second
+            // copy of the same card) is that class: match it by its label.
+            let played =
+                option_index(&options, node.action.as_deref()?, &node.args).or_else(|| {
+                    options
+                        .iter()
+                        .position(|o| class_label(&o.label) == node.label)
+                })?;
+            return Some((snap, options, played));
+        }
         let options = self.choice_options(snap)?;
         let played = option_index(&options, node.action.as_deref()?, &node.args)?;
         Some((snap, options, played))
@@ -213,7 +271,7 @@ impl Session {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         let (you, top) = (&options[played], &options[g.top]);
-        Ok(Some(json!({
+        let mut out = json!({
             "node_id": node.id,
             "parent_id": snap.parent_id,
             "decision": snap.decision,
@@ -226,8 +284,15 @@ impl Session {
                 .map(|o| json!({"label": o.label, "prob": o.prob}))
                 .collect::<Vec<_>>(),
             "n_options": options.len(),
-            "checkable": g.verdict != "agree",
-        })))
+            // The rollout check plays the PPO / search; the student's grade
+            // is agreement only.
+            "checkable": g.verdict != "agree" && snap.e2e.is_none(),
+        });
+        // Named only for the student (a PPO grade keeps its bytes).
+        if snap.e2e.is_some() {
+            out["policy"] = json!("e2e");
+        }
+        Ok(Some(out))
     }
 }
 

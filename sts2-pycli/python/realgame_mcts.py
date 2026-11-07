@@ -411,6 +411,7 @@ def pick_card_select_mirrored(
     mirror: Any,
     *,
     sims: int | None = None,
+    picker: Any = None,
 ) -> tuple[dict[str, Any], list[int] | None]:
     """Answer a MID-COMBAT ``card_select`` off the fight's persistent mirror.
 
@@ -436,6 +437,12 @@ def pick_card_select_mirrored(
         cfg: MCTS knobs.
         mirror: The fight's :class:`combat_mirror.CombatMirror`.
         sims: Per-decision simulation budget override.
+        picker: Who picks once the mirror is parked on the world's choice:
+            ``picker(mirror, n_options=, min_select=, max_select=)`` returning
+            the option positions. ``None`` = the combat MCTS
+            (``mirror.search_choice_picks``). Instinct passes its own
+            (``realgame_instinct``), so it answers the SAME parked choice the
+            search would, through the same replay and injection.
 
     Returns:
         ``(bridge action, picked option indices)``. The caller applies the
@@ -561,13 +568,16 @@ def pick_card_select_mirrored(
     # mirror atomically either way, so state fidelity does not depend on this
     # — it is a policy-quality change. Same contract as the DLL driver
     # (`headless_eval.pick_card_select_mirrored`), which calls the same method.
-    picked = mirror.search_choice_picks(
-        call_cfg,
-        hand=wire["deck"]["hand"],
-        n_options=n,
-        min_select=min_select,
-        max_select=max_select,
-    )
+    if picker is not None:
+        picked = picker(mirror, n_options=n, min_select=min_select, max_select=max_select)
+    else:
+        picked = mirror.search_choice_picks(
+            call_cfg,
+            hand=wire["deck"]["hand"],
+            n_options=n,
+            min_select=min_select,
+            max_select=max_select,
+        )
     if not picked and min_select <= 0:
         return {"action": "skip"}, []
     if not picked:

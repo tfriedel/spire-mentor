@@ -34,6 +34,40 @@ pub struct ApiError {
     pub detail: String,
 }
 
+/// Whether the e2e student advises the live run's hand-played moves
+/// (`advisor: "e2e"`): the hint, the auto-action, the policy panel and the
+/// choice ranker then answer with its evaluation (`session_e2e.rs`).
+fn advises_e2e(sess: &Session) -> bool {
+    cfg!(feature = "e2e") && sess.advisor_is_e2e()
+}
+
+/// One advisor surface the e2e student answers in the search's shape.
+#[derive(Clone, Copy, Debug)]
+enum E2eSurface {
+    Hint,
+    RankChoice,
+    Recommended,
+    PolicyPanel,
+}
+
+/// The e2e student's answer on `which` (`None` = the route's 409).
+fn e2e_surface(sess: &mut Session, which: E2eSurface) -> Result<Option<Value>, ApiError> {
+    #[cfg(feature = "e2e")]
+    {
+        Ok(match which {
+            E2eSurface::Hint => sess.e2e_hint()?,
+            E2eSurface::RankChoice => sess.e2e_rank_choice()?,
+            E2eSurface::Recommended => sess.e2e_recommended()?,
+            E2eSurface::PolicyPanel => sess.e2e_policy_panel()?,
+        })
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        let _ = (sess, which);
+        Ok(None)
+    }
+}
+
 /// `body["config"]` of an advisor request (`HintRequest.config`, default `{}`).
 fn config_of(body: &Value) -> Value {
     body.get("config")
@@ -117,6 +151,10 @@ pub struct Config {
     /// browser). `None` = no wall-clock bound on the verify arms (native
     /// builds fall back to `Instant`).
     pub now_ms: Option<fn() -> f64>,
+    /// A high-resolution millisecond clock (`performance.now()` in the
+    /// browser) the e2e brain times its decisions with. `None` = the crate's
+    /// fallback (`Instant` natively).
+    pub perf_ms: Option<fn() -> f64>,
 }
 
 impl Default for Config {
@@ -124,6 +162,7 @@ impl Default for Config {
         Self {
             assets_base: "/assets".to_string(),
             now_ms: None,
+            perf_ms: None,
         }
     }
 }
@@ -146,6 +185,17 @@ pub struct Workbench {
     /// the host's reason a load was not attempted / failed (`set_ppo_error`).
     ppo: std::collections::BTreeMap<String, ppo::Net>,
     ppo_errors: std::collections::BTreeMap<String, String>,
+    /// The e2e Ironclad student (`load_e2e`) and why it is not loaded
+    /// (`set_e2e_error`).
+    #[cfg(feature = "e2e")]
+    e2e: Option<crate::e2e::Net>,
+    #[cfg(feature = "e2e")]
+    e2e_error: Option<String>,
+    /// The host's advisor preference (`POST /api/advisor`), applied to every
+    /// run installed after it — start, save-load, import, resume — that the
+    /// advisor can read; `None` until the host says (a resumed run keeps the
+    /// advisor it was persisted with).
+    advisor_pref: Option<String>,
     /// The SimLab distribution sweeps (GH #707), stepped by the host
     /// (`sweep_tick`).
     sweeps: crate::simlab_sweep::SweepRegistry,
@@ -166,6 +216,11 @@ impl Workbench {
             pending_logs: std::collections::VecDeque::new(),
             ppo: std::collections::BTreeMap::new(),
             ppo_errors: std::collections::BTreeMap::new(),
+            #[cfg(feature = "e2e")]
+            e2e: None,
+            #[cfg(feature = "e2e")]
+            e2e_error: None,
+            advisor_pref: None,
             sweeps: crate::simlab_sweep::SweepRegistry::default(),
         }
     }
@@ -389,11 +444,130 @@ impl Workbench {
         self.ppo.contains_key(&character.to_lowercase())
     }
 
+    // ── the e2e student (host-loaded, on demand) ───────────────────────
+
+    /// The e2e weights filename the host serves under `/e2e/`.
+    #[must_use]
+    pub fn e2e_file() -> &'static str {
+        #[cfg(feature = "e2e")]
+        {
+            crate::e2e::E2E_FILE
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            ""
+        }
+    }
+
+    /// Load the e2e student from the `.e2ew` bytes and attach it to the live
+    /// run. 400 with the loader's error when the bytes are not a weights file
+    /// of the build the student plays.
+    pub fn load_e2e(&mut self, bytes: &[u8]) -> Result<Value, ApiError> {
+        #[cfg(feature = "e2e")]
+        {
+            let net = crate::e2e::load(bytes).map_err(|e| ApiError::new(400, e))?;
+            let header = json!({
+                "source": net.header().source,
+                "source_sha256": net.header().source_sha256,
+                "game_version": net.header().game_version,
+            });
+            self.e2e = Some(net);
+            self.e2e_error = None;
+            self.attach_ppo();
+            Ok(json!({"ok": true, "file": crate::e2e::E2E_FILE, "header": header}))
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            let _ = bytes;
+            Err(ApiError::new(400, "this build has no e2e feature"))
+        }
+    }
+
+    /// Record why the host could not load the e2e student; clears on a later
+    /// `load_e2e`.
+    pub fn set_e2e_error(&mut self, reason: &str) {
+        #[cfg(feature = "e2e")]
+        {
+            self.e2e_error = Some(reason.to_string());
+            self.attach_ppo();
+        }
+        #[cfg(not(feature = "e2e"))]
+        let _ = reason;
+    }
+
+    /// Whether the e2e student is loaded.
+    #[must_use]
+    pub fn has_e2e(&self) -> bool {
+        #[cfg(feature = "e2e")]
+        {
+            self.e2e.is_some()
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            false
+        }
+    }
+
+    /// `POST /api/e2e/selfplay {seed, ascension?, max_decisions?}`: the
+    /// student plays a fresh campaign run with no UI (speed + parity probe).
+    fn e2e_selfplay(&mut self, body: &Value) -> Result<Value, ApiError> {
+        #[cfg(feature = "e2e")]
+        {
+            let net = self.e2e.clone().ok_or_else(|| {
+                ApiError::new(
+                    crate::e2e::NO_NET_STATUS,
+                    crate::e2e::missing_net_error(self.e2e_error.as_deref()),
+                )
+            })?;
+            let seed = match body.get("seed") {
+                Some(Value::Number(n)) => n.as_i64(),
+                Some(Value::String(s)) => Some(i64::from(crate::runmode::hash_seed(s))),
+                _ => None,
+            }
+            .filter(|s| (0..1_i64 << 31).contains(s))
+            .ok_or_else(|| {
+                ApiError::new(
+                    400,
+                    "seed must be an integer in [0, 2**31) or a run_N string",
+                )
+            })?;
+            let ascension = body.get("ascension").and_then(Value::as_u64).map_or(
+                Ok(crate::e2e::DEFAULT_ASCENSION),
+                |a| {
+                    u8::try_from(a)
+                        .ok()
+                        .filter(|a| *a <= 10)
+                        .ok_or_else(|| ApiError::new(400, format!("ascension {a} out of range")))
+                },
+            )?;
+            let max_decisions = body
+                .get("max_decisions")
+                .and_then(Value::as_u64)
+                .map_or(usize::MAX, |m| usize::try_from(m).unwrap_or(usize::MAX));
+            let clock = self.config.perf_ms.unwrap_or(crate::e2e::fallback_ms);
+            Ok(crate::e2e::selfplay(
+                &net,
+                seed,
+                ascension,
+                max_decisions,
+                clock,
+            ))
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            let _ = body;
+            Err(ApiError::new(404, "this build has no e2e feature"))
+        }
+    }
+
     /// Point the live session at its character's net (or error).
     fn attach_ppo(&mut self) {
         let Some(sess) = self.live.as_mut() else {
             return;
         };
+        sess.set_perf_clock(self.config.perf_ms);
+        #[cfg(feature = "e2e")]
+        sess.set_e2e(self.e2e.clone(), self.e2e_error.clone());
         let key = sess.character.to_lowercase();
         let net = self.ppo.get(&key).cloned();
         let error = self
@@ -426,6 +600,49 @@ impl Workbench {
         }
         self.live = Some(sess);
         self.attach_ppo();
+        self.apply_advisor_pref();
+    }
+
+    /// Put the host's advisor preference on the live run: the e2e advisor
+    /// where the student can read the run, the search everywhere else.
+    fn apply_advisor_pref(&mut self) {
+        let (Some(pref), Some(sess)) = (self.advisor_pref.as_deref(), self.live.as_mut()) else {
+            return;
+        };
+        if sess.set_advisor(pref).is_err() {
+            sess.advisor = crate::session::ADVISOR_SEARCH.to_string();
+        }
+    }
+
+    /// `POST /api/advisor {advisor}`: the host's advisor preference
+    /// (`search` | `e2e`), kept for the runs installed after it and put on
+    /// the live run where the student can read it. `{advisor, live}`: the
+    /// preference and the live run's advisor (`null` without a run). 400 for
+    /// an unknown name or `e2e` in a build without the e2e feature.
+    fn set_advisor_pref(&mut self, body: &Value) -> Result<Value, ApiError> {
+        let a = body
+            .get("advisor")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::new(400, "advisor must be a string"))?;
+        match a {
+            crate::session::ADVISOR_SEARCH => {}
+            crate::session::ADVISOR_E2E if cfg!(feature = "e2e") => {}
+            crate::session::ADVISOR_E2E => {
+                return Err(ApiError::new(400, "this build has no e2e feature"));
+            }
+            other => {
+                return Err(ApiError::new(
+                    400,
+                    format!("advisor must be search|e2e, got '{other}'"),
+                ));
+            }
+        }
+        self.advisor_pref = Some(a.to_string());
+        self.apply_advisor_pref();
+        Ok(json!({
+            "advisor": a,
+            "live": self.live.as_ref().map(|s| s.advisor.clone()),
+        }))
     }
 
     /// A fresh session in game build `version`, pre-wired to `character`'s
@@ -438,6 +655,9 @@ impl Workbench {
             .get(&key)
             .map(|r| ppo::missing_net_error(character, Some(r)));
         sess.set_ppo(self.ppo.get(&key).cloned(), error);
+        sess.set_perf_clock(self.config.perf_ms);
+        #[cfg(feature = "e2e")]
+        sess.set_e2e(self.e2e.clone(), self.e2e_error.clone());
         sess
     }
 
@@ -514,6 +734,9 @@ impl Workbench {
                     // desktop's process pool, see `simlab_sweep.rs`.
                     "simlab": true,
                     "simlab_sweeps": true,
+                    // The `e2e` brain (the e2e Ironclad student, every
+                    // decision, no search); its net is fetched on demand.
+                    "e2e": cfg!(feature = "e2e"),
                 },
                 // GH #801: the game builds a run can be started in (the
                 // `game_version` of start / start-faithful / import-state) —
@@ -576,28 +799,53 @@ impl Workbench {
             ("POST", "/api/bench") => self.bench(body),
             // ── advisors (M2) ────────────────────────────────────────
             ("POST", "/api/live/hint") => {
-                advisors::hint_remembered(self.live()?, &config_of(body))?
-                    .ok_or_else(|| ApiError::new(409, "hint only available during combat"))
+                let sess = self.live()?;
+                let out = if advises_e2e(sess) {
+                    e2e_surface(sess, E2eSurface::Hint)?
+                } else {
+                    advisors::hint_remembered(sess, &config_of(body))?
+                };
+                out.ok_or_else(|| ApiError::new(409, "hint only available during combat"))
             }
+            ("POST", "/api/live/e2e-advice") => self.live_e2e_advice(),
             ("POST", "/api/live/search_tree") => {
                 advisors::live_search_tree(self.live()?, &config_of(body))?
                     .ok_or_else(|| ApiError::new(409, "search tree only available during combat"))
             }
             ("POST", "/api/live/choice-ranker") => {
-                advisors::rank_choice(self.live()?, &config_of(body))?.ok_or_else(|| {
+                let sess = self.live()?;
+                let out = if advises_e2e(sess) {
+                    e2e_surface(sess, E2eSurface::RankChoice)?
+                } else {
+                    advisors::rank_choice(sess, &config_of(body))?
+                };
+                out.ok_or_else(|| {
                     ApiError::new(
                         409,
                         "choice ranker only available at an in-combat card-select",
                     )
                 })
             }
-            ("POST", "/api/live/auto-action") => self
-                .live()?
-                .recommended_action()
-                .ok_or_else(|| ApiError::new(409, "no recommendation here")),
+            ("POST", "/api/live/auto-action") => {
+                let sess = self.live()?;
+                let out = if advises_e2e(sess) {
+                    e2e_surface(sess, E2eSurface::Recommended)?
+                } else {
+                    sess.recommended_action()
+                };
+                out.ok_or_else(|| ApiError::new(409, "no recommendation here"))
+            }
             ("POST", "/api/live/last-turn-grade") => {
-                advisors::last_turn_grade(self.live()?, &config_of(body))?
-                    .ok_or_else(|| ApiError::new(409, "no gradable turn just ended"))
+                let sess = self.live()?;
+                // The per-turn coach grades against the combat search; under
+                // the e2e advisor it stays silent rather than contradict the
+                // student's hints with the search's line.
+                let out = if advises_e2e(sess) {
+                    None
+                } else {
+                    advisors::last_turn_grade(sess, &config_of(body))?
+                };
+                out.ok_or_else(|| ApiError::new(409, "no gradable turn just ended"))
             }
             ("POST", "/api/live/last-choice-grade") => self
                 .live()?
@@ -621,6 +869,8 @@ impl Workbench {
             }
             // ── run mode / autobattle / PPO / WPA (M3) ──────────────
             ("POST", "/api/live/run-mode") => self.live_run_mode(body),
+            ("POST", "/api/advisor") => self.set_advisor_pref(body),
+            ("POST", "/api/e2e/selfplay") => self.e2e_selfplay(body),
             ("POST", "/api/live/run-mode-step" | "/api/live/faithful-step") => {
                 let sess = self.live()?;
                 let out = sess.run_mode_step()?;
@@ -676,9 +926,17 @@ impl Workbench {
                 }))
             }
             ("GET", "/api/live/autobattle/verdict") => Ok(self.live()?.autobattle_verdict()?),
-            ("POST", "/api/live/ppo-policy") => self.live()?.ppo_policy_panel().ok_or_else(|| {
-                ApiError::new(409, "ppo policy only available at a non-combat decision")
-            }),
+            ("POST", "/api/live/ppo-policy") => {
+                let sess = self.live()?;
+                let out = if advises_e2e(sess) {
+                    e2e_surface(sess, E2eSurface::PolicyPanel)?
+                } else {
+                    sess.ppo_policy_panel()
+                };
+                out.ok_or_else(|| {
+                    ApiError::new(409, "ppo policy only available at a non-combat decision")
+                })
+            }
             ("POST", "/api/live/wpa-review") => Ok(self.live()?.wpa_review(&config_of(body))?),
             ("POST", "/api/live/wpa-verify") => self.live_wpa_verify(body),
             ("POST", "/api/live/quit") => {
@@ -1071,6 +1329,7 @@ impl Workbench {
         let idx = idx_of(body)?;
         let (ident, line) = replay::resume_plan(self.store()?, idx)?;
         let mut sess = self.new_session(&ident.character, ident.game_version);
+        sess.set_e2e_setup(ident.run_mode && ident.e2e_setup);
         let state = match sess.load_line(
             &ident.character,
             &ident.seed,
@@ -1109,22 +1368,42 @@ impl Workbench {
                     }),
             }
         };
-        let character = s("character", "Ironclad");
+        // `e2e: true`: the e2e student's training run (Ironclad, v0.111.0,
+        // act 1 rolled, potion swap on; ascension default 10) driven by the
+        // `e2e` brain. The run's character and build are forced.
+        let e2e = body.get("e2e").and_then(Value::as_bool).unwrap_or(false);
+        if e2e && !cfg!(feature = "e2e") {
+            return Err(ApiError::new(400, "this build has no e2e feature"));
+        }
+        let character = if e2e {
+            "Ironclad".to_string()
+        } else {
+            s("character", "Ironclad")
+        };
         let seed = s("seed", "run_1");
-        let ascension = body.get("ascension").and_then(Value::as_i64).unwrap_or(0);
+        let default_asc = if e2e { 10 } else { 0 };
+        let ascension = body
+            .get("ascension")
+            .and_then(Value::as_i64)
+            .unwrap_or(default_asc);
         let ascension = u8::try_from(ascension)
             .map_err(|_| ApiError::new(400, format!("ascension {ascension} out of range")))?;
         let sims = u("sims", 1000)?;
         let boss_sims = u("boss_sims", 4000)?;
         let threads = u("threads", 1)?;
-        let version = body_game_version(body)?;
+        let version = if e2e {
+            GameVersion::V0_111_0
+        } else {
+            body_game_version(body)?
+        };
         let seed_int = crate::runmode::hash_seed(&seed);
         let mut sess = self.new_session(&character, version);
+        sess.set_e2e_setup(e2e);
         let state = match sess.start_run_mode(
             &character,
             seed_int,
             ascension,
-            "heuristic",
+            if e2e { "e2e" } else { "heuristic" },
             "rust",
             sims,
             boss_sims,
@@ -1147,6 +1426,9 @@ impl Workbench {
         let sess = self.live()?;
         let str_of = |k: &str| body.get(k).and_then(Value::as_str);
         let int_of = |k: &str| body.get(k).and_then(Value::as_i64);
+        if let Some(a) = str_of("advisor") {
+            sess.set_advisor(a)?;
+        }
         sess.set_run_mode(
             str_of("off_combat_brain"),
             str_of("ppo_impl"),
@@ -1156,6 +1438,19 @@ impl Workbench {
             int_of("reward_sims"),
         )?;
         Ok(sess.run_mode_config())
+    }
+
+    /// `POST /api/live/e2e-advice`: the e2e student's evaluation of the live
+    /// node (`Session::e2e_advice`); 424 until its net is loaded.
+    fn live_e2e_advice(&mut self) -> Result<Value, ApiError> {
+        #[cfg(feature = "e2e")]
+        {
+            Ok(self.live()?.e2e_advice()?)
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            Err(ApiError::new(404, "this build has no e2e feature"))
+        }
     }
 
     /// `POST /api/live/wpa-verify {node_id, max_steps?, max_seconds?}`.
@@ -1234,7 +1529,7 @@ impl Workbench {
         }
         let (line, progress) = sess.active_line()?;
         let values = sess.active_node_values()?;
-        Ok(saves::build_save(
+        let mut out = saves::build_save(
             name,
             saved_at,
             &sess.character,
@@ -1247,7 +1542,12 @@ impl Workbench {
             &progress,
             &line,
             &values,
-        ))
+        );
+        // Named only for an e2e start (every other save keeps its bytes).
+        if sess.e2e_setup() {
+            out["e2e_setup"] = json!(true);
+        }
+        Ok(out)
     }
 
     /// `POST /api/saves/load`: restore a save payload into a fresh session,
@@ -1284,6 +1584,7 @@ impl Workbench {
         let mut failures = Vec::new();
         for run_mode in ident.restore_attempts() {
             let mut sess = self.new_session(&ident.character, ident.game_version);
+            sess.set_e2e_setup(run_mode && ident.e2e_setup);
             match sess.load_line(
                 &ident.character,
                 &ident.seed,

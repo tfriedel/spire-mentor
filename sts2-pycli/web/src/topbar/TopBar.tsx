@@ -10,7 +10,7 @@ import type { Command } from "./commands";
  * asks — "what am I looking at", "what is the AI doing for me", "what can I
  * do to this run" — instead of one row of every button.
  *
- *   [Live | Replay | MCTS]  [🎓 coach | 💡 hints] [⚔️ autobattle]  …context…  [Run ▾] [Analyze ▾] [Tools ▾]  act · floor  ▤
+ *   [Live | Replay | MCTS]  [🎓 coach | 💡 hints] [🔎 search | 🧠 e2e net] [⚔️ autobattle]  …context…  [Run ▾] [Analyze ▾] [Tools ▾]  act · floor  ▤
  *
  *  - The VIEW switch and the three PERSISTENT AI CHIPS are always on the
  *    bar: their state matters at a glance, and there are at most four.
@@ -41,8 +41,10 @@ export interface TopBarProps {
   commands: Command[];
 
   /** `undefined` ⇒ not offered in this mode / build. */
-  /** `hints` is the advice-style switch: on = Hints, off = Coach. */
-  chips: { hints?: Chip; autobattle?: Chip };
+  /** `hints` is the advice-style switch: on = Hints, off = Coach.
+   *  `advisor`: on = the e2e student advises, off = the search (offered
+   *  only on a run the student can read). */
+  chips: { hints?: Chip; autobattle?: Chip; advisor?: Chip };
 
   /** Replay's context controls; only rendered in replay mode. */
   replay?: {
@@ -151,6 +153,7 @@ export default function TopBar(p: TopBarProps) {
     for (const [id, chip, label] of [
       ["hints", p.chips.hints, "💡 hints style (off = 🎓 coach)"],
       ["autobattle", p.chips.autobattle, "⚔️ autobattle"],
+      ["advisor", p.chips.advisor, "🧠 Instinct advises (off = 🔎 search)"],
     ] as const) {
       if (chip) out.push({ id, group: "AI", label, title: chip.title, checked: chip.on, run: chip.toggle });
     }
@@ -165,7 +168,7 @@ export default function TopBar(p: TopBarProps) {
     out.push({ id: "help", group: "Tools", label: "keyboard shortcuts", shortcut: "?", run: p.tools.onHelp });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.mode, p.showViewToggle, p.replayCount, p.chips.hints, p.chips.autobattle, p.commands, p.tools.simlabLink, p.tools.debug.on, p.tools.gameVersion]);
+  }, [p.mode, p.showViewToggle, p.replayCount, p.chips.hints, p.chips.autobattle, p.chips.advisor, p.commands, p.tools.simlabLink, p.tools.debug.on, p.tools.gameVersion]);
 
   const chip = (id: string, c: Chip | undefined, off: string, on: string) => c && (
     <button key={id} onClick={c.toggle} aria-pressed={c.on} title={c.title}
@@ -193,9 +196,10 @@ export default function TopBar(p: TopBarProps) {
         </span>
 
         {/* Persistent AI switches */}
-        {(p.chips.hints || p.chips.autobattle) && (
+        {(p.chips.hints || p.chips.autobattle || p.chips.advisor) && (
           <span className="wb-chips">
             {chip("hints", p.chips.hints, "🎓 coach", "💡 hints")}
+            {chip("advisor", p.chips.advisor, "🔎 search", "🧠 Instinct")}
             {chip("autobattle", p.chips.autobattle, "⚔️ autobattle", "⚔️ autobattle ✓")}
           </span>
         )}

@@ -17,6 +17,8 @@ export default function ChoiceChip({ grade, onDismiss }: {
 }) {
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const { verdict, played, top, kind } = grade;
+  // Graded against the e2e advisor instead of the PPO run policy.
+  const ai = grade.policy === "e2e" ? "Instinct" : "AI";
   const flag = verdict === "flag";
   const tone = flag ? "var(--warn, #c79a3a)" : "var(--accent-strong)";
 
@@ -39,18 +41,18 @@ export default function ChoiceChip({ grade, onDismiss }: {
       color: tone, border: `1px solid ${tone}`, background: "var(--field-bg)",
       fontSize: 11, display: "flex", gap: 8, alignItems: "baseline" }}>
       <div style={{ flex: 1 }}>
-        {verdict === "agree" && <>✓ AI agrees — <b>{played.label}</b></>}
+        {verdict === "agree" && <>✓ {ai} agrees — <b>{played.label}</b></>}
         {verdict === "tossup" && (
           <>
-            <div>✓ toss-up — <b>{played.label}</b> · no strong AI preference</div>
-            <div>{kind} · AI's top picks: {grade.alternatives.map((a) => a.label).join(", ") || top.label}</div>
+            <div>✓ toss-up — <b>{played.label}</b> · no strong {ai} preference</div>
+            <div>{kind} · {ai}'s top picks: {grade.alternatives.map((a) => a.label).join(", ") || top.label}</div>
           </>
         )}
         {flag && (
           <>
             <div>{kind} · you: <b>{played.label}</b></div>
             <div>
-              AI would take: <b>{top.label}</b> ({grade.strength}) · {played.label} was its {ordinal(played.rank)} choice
+              {ai} would take: <b>{top.label}</b> ({grade.strength}) · {played.label} was its {ordinal(played.rank)} choice
             </div>
           </>
         )}

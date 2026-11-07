@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { debugSettingsLine, debugStepLine, type DebugSettings } from "./debugLog";
+import { addE2eTiming, debugSettingsLine, debugStepLine, e2eTimingLine, fmtMs, type DebugSettings } from "./debugLog";
 import type { FaithfulDebug } from "./api";
 
 const SETTINGS: DebugSettings = {
@@ -59,5 +59,18 @@ describe("debugStepLine", () => {
   it("treats sims=0 as present (cheap heuristic pick), not omitted", () => {
     const dbg: FaithfulDebug = { phase: "card_reward", summary: "Choose card", reward: { sims: 0 } };
     expect(debugStepLine(dbg)).toBe("Choose card · reward-sims=0");
+  });
+});
+
+describe("e2e timing", () => {
+  it("averages the student's decisions, skipping forced steps and other brains", () => {
+    let t = addE2eTiming(null, { phase: "combat", summary: "x", sims: 1000 });
+    expect(t).toBeNull();
+    t = addE2eTiming(t, { phase: "combat", summary: "x", brain: "e2e", ms: 10 });
+    t = addE2eTiming(t, { phase: "map", summary: "x", brain: "e2e", forced: true });
+    t = addE2eTiming(t, { phase: "map", summary: "x", brain: "e2e", ms: 6 });
+    expect(t).toEqual({ n: 2, totalMs: 16, lastMs: 6 });
+    expect(e2eTimingLine(t!)).toBe("Instinct 8.0 ms/decision (last 6.0)");
+    expect(fmtMs(123.4)).toBe("123");
   });
 });

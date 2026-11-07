@@ -97,6 +97,7 @@ def _step_card(view: dict[str, Any], action: dict[str, Any] | None) -> str | Non
 
 def pilot_trace(rec: dict[str, Any], sims: int, seed: int) -> dict[str, Any]:
     """The pilot (deployed `MctsCombatAgent` at `sims`) playing the fight from its start."""
+    import sts2_client
     import sts2_rs
 
     from ppo.combat_bench import agents
@@ -106,6 +107,7 @@ def pilot_trace(rec: dict[str, Any], sims: int, seed: int) -> dict[str, Any]:
         seed=seed,
         character=rec["character"].capitalize(),
         ascension_level=rec["ascension"] or 0,
+        game_version=sts2_client.GAME_VERSION,
     )
     room = (
         "boss"

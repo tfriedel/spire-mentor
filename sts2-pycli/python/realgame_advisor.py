@@ -69,6 +69,7 @@ from realgame_advisor_mirror import AdvisorMirror
 from realgame_bridge import DEFAULT_HOST, DEFAULT_PORT, RealGameBridgeClient
 from realgame_coach import CoachGrader, GraderThread
 from realgame_control import BRIDGE_MESSAGE_TYPES, BugReportForward, ControlPlane, StaticSite
+from realgame_instinct import InstinctAdvisor, InstinctUnavailable
 from realgame_livetree import LiveRunTree
 from realgame_workbench_log import WorkbenchRunLogger
 from sts2_hint.calibration import calibrated_p_win
@@ -116,7 +117,12 @@ HONEST_SEARCH = {
 #: drop on them. ``coach: 2`` (v5.1) adds the fight recap and the death
 #: autopsy: the mod sends ``combat_ended`` and its Advisor-mode ``game_over``
 #: only to an advisor at 2 or above.
-ADVISOR_CAPABILITIES = {"coach": 2}
+ADVISOR_CAPABILITIES = {"coach": 2, "potion_swap": 1}
+
+#: Instinct, the e2e student (:mod:`realgame_instinct`): loaded on first use,
+#: so an advisor nobody asks for Instinct never reads its 21 MB of weights.
+#: ``--instinct-weights`` replaces it in :func:`main`.
+INSTINCT = InstinctAdvisor()
 
 #: Acts in a standard run; the fallback for a mod too old to send
 #: ``run_state.is_last_act``.
@@ -609,6 +615,9 @@ SCREEN_ADVICE_FOR = (
     "boss_relic",
     "treasure",
     "card_bundle",
+    # A full-belt potion reward (PROTOCOL.md v5.2): the mod asks it only of an
+    # advisor that advertises `capabilities.potion_swap`.
+    "potion_swap",
 )
 
 #: Surfaces answered by a DIFFERENT trained head than their own name suggests,
@@ -676,6 +685,43 @@ def warm_policy_async(policies: Any, character: str | None) -> None:
             logger.info("run-policy net ready for %s (%.1fs)", character, time.monotonic() - t0)
 
     threading.Thread(target=_load, name=f"warm-{key}", daemon=True).start()
+
+
+def _decline_potion_swap(state: dict[str, Any]) -> dict[str, Any]:
+    """The full-belt swap with the run policy's swap head off: decline it.
+
+    What the engines do with ``STS2_RUNAI_POTION_SWAP`` off (the reward stays
+    on the screen), and what the mod did before it asked at all. Not a
+    ranking, so it says so; Instinct (trained with the swap on) ranks it.
+    """
+    import sts2_realgame
+
+    group = sts2_realgame.potion_swap_group(state.get("options") or [])
+    if not group:
+        return {"note": "no potion swap on this screen"}
+    decline = group[0]
+    label = str(decline.get("label") or "decline")
+    return {
+        "note": "potion swap: the run policy's swap head is off, so the reward stays",
+        "options": [
+            {
+                "label": str(o.get("label") or "?"),
+                "is_best": o is decline,
+                "index": int(o["index"]),
+                "action": "choose",
+            }
+            for o in group
+        ],
+        "best": {"action": "choose", "index": int(decline["index"]), "label": label},
+    }
+
+
+def _advisor_builders() -> dict[str, Any]:
+    """Builders for surfaces only the advisor is asked: not message types the
+    autopilot receives, which `realgame_ppo._PPO_NONCOMBAT_BUILDERS` keys."""
+    import realgame_ppo
+
+    return {"potion_swap": realgame_ppo._build_potion_swap}
 
 
 def _unranked(state: dict[str, Any], why: str) -> dict[str, Any]:
@@ -838,7 +884,9 @@ def compute_screen_advice(
         # surface the PPO driver learns to handle is one the advisor can
         # explain without a second dispatch to keep in sync.
         head, standin_note = _SURFACE_STANDINS.get(advice_for, (advice_for, ""))
-        builder = realgame_ppo._PPO_NONCOMBAT_BUILDERS.get(head)
+        if advice_for == "potion_swap" and not realgame_ppo._live_potion_swap_enabled():
+            return _decline_potion_swap(state)
+        builder = _advisor_builders().get(head) or realgame_ppo._PPO_NONCOMBAT_BUILDERS.get(head)
         if builder is None:
             return _unranked(state, f"no trained head for {advice_for}")
         build_state = state if head == advice_for else {**state, "type": head}
@@ -1240,6 +1288,33 @@ def prune_tree(tree: dict[str, Any], min_visits: int = 2, max_nodes: int = 2000)
     return out
 
 
+class RequestRecorder:
+    """Every raw message from the mod, one JSON line each (``--record-requests``).
+
+    Verbatim and unwrapped, unlike :class:`AdvisorLog`: the point is a corpus
+    a test can feed back into the request handler, or into Instinct's run
+    graft, exactly as the mod sent it. Never raises into the serve loop.
+    """
+
+    def __init__(self, out_dir: Path) -> None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        self.path = out_dir / f"requests-{stamp}.jsonl"
+        self._lock = threading.Lock()
+
+    def write(self, msg: dict[str, Any]) -> None:
+        try:
+            line = json.dumps(msg, ensure_ascii=False, default=str)
+            with self._lock, self.path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception as exc:
+            logger.warning("request recorder: %s", exc)
+
+
+#: ``--record-requests``' recorder, or ``None``.
+RECORDER: RequestRecorder | None = None
+
+
 class AdvisorLog:
     """Append-only JSONL event log (advice + human actions), one file/session.
 
@@ -1388,6 +1463,10 @@ def serve(args: argparse.Namespace) -> None:
     )
     log = AdvisorLog(Path(args.log_dir))
     logger.info("advisor log: %s", log.path)
+    if getattr(args, "record_requests", ""):
+        global RECORDER
+        RECORDER = RequestRecorder(Path(args.record_requests))
+        logger.info("recording raw requests to %s", RECORDER.path)
     wlog = WorkbenchRunLogger(args.workbench_logs)
     if args.workbench == "auto":
         ensure_workbench_running()
@@ -1494,6 +1573,8 @@ def _serve_connected(
     while True:
         msg = client.receive_state()
         mtype = msg.get("type")
+        if RECORDER is not None:
+            RECORDER.write(msg)
         warm_policy_async(policies, (msg.get("run_state") or {}).get("character"))
         control.note_message(msg)
 
@@ -1513,6 +1594,7 @@ def _serve_connected(
             # Follow the world BEFORE logging: the mirror is only a mirror
             # while it is advanced through what actually happened.
             mirror.on_world_action(msg)
+            INSTINCT.on_human_action(msg)
             logger.info("human: %s", msg.get("detail") or msg.get("action"))
             log.write("action", msg)
             wlog.log_human_action(msg)
@@ -1532,6 +1614,7 @@ def _serve_connected(
                 # moving the board backwards, which is the case that would
                 # corrupt it silently.
                 mirror.on_rewind(msg)
+                INSTINCT.reset(mtype)
             control.on_bridge_message(msg)
             if coach is not None and mtype in ("snapshot_restored", "combat_undone"):
                 # AFTER the tree moved its active pointer: grades for nodes
@@ -1554,6 +1637,7 @@ def _serve_connected(
             tree.on_run_end(msg)
             LAST_COMBAT.clear()
             mirror.drop("run over")
+            INSTINCT.reset("run over")
             logger.info("advisor %s", mirror.note())
             session.clear()
             if coach is not None:
@@ -1644,6 +1728,26 @@ def _cache_for_coach(
         logger.warning("coach: caching advice failed: %s", exc)
 
 
+def advisor_capabilities() -> dict[str, Any]:
+    """``capabilities`` on every reply: the coach level, plus what Instinct plays.
+
+    ``instinct`` lists ``{character, game_version}`` pairs (PROTOCOL.md §5,
+    v5.2); the mod shows its Search / Instinct switch only for a run it
+    lists. Empty when no Instinct net loaded.
+    """
+    return {**ADVISOR_CAPABILITIES, "instinct": INSTINCT.capabilities()}
+
+
+def mark_instinct_unavailable(advice: dict[str, Any], reason: str) -> dict[str, Any]:
+    """The search's advice, answered in Instinct's place: say so, and why."""
+    out = dict(advice)
+    out["brain"] = "search"
+    out["instinct_unavailable"] = reason
+    note = out.get("note")
+    out["note"] = f"Search (Instinct: {reason})" + (f" · {note}" if note else "")
+    return out
+
+
 def refusal_advice(exc: UnsupportedGameVersionError) -> dict[str, Any]:
     """The advice for a board from a game build this advisor cannot simulate.
 
@@ -1675,6 +1779,7 @@ def note_game_version(session: dict[str, Any] | None, game_version: str, mirror:
         LAST_COMBAT.clear()
         if mirror is not None:
             mirror.drop(f"game build changed {previous} -> {game_version}")
+        INSTINCT.reset("game build changed")
     session["game_version"] = game_version
 
 
@@ -1718,7 +1823,27 @@ def _handle_advice_request(
         is_boss = (state.get("room_type") or "") == "Boss"
         sims = args.boss_sims if is_boss else args.sims
         fight_cfg = fight_search_cfg(cfg, state)
-        if advice_for in SCREEN_ADVICE_FOR:
+        # The player's brain (PROTOCOL.md §5, v5.2). Instinct answers when it
+        # can read the position; otherwise the search below answers and says
+        # why, so autoplay never stalls on a position Instinct cannot read.
+        instinct_advice: dict[str, Any] | None = None
+        instinct_reason: str | None = None
+        if msg.get("brain") == "instinct":
+            try:
+                instinct_advice = INSTINCT.advise(
+                    state, advice_for, cfg=fight_cfg, mirror=mirror, session=session, sims=sims
+                )
+            except InstinctUnavailable as e:
+                instinct_reason = str(e)
+                logger.info("instinct unavailable (%s): %s", advice_for, e)
+            except Exception as e:
+                instinct_reason = "Instinct hit an error"
+                logger.error("instinct failed: %s", e, exc_info=True)
+        if instinct_advice is not None:
+            advice = instinct_advice
+            if advice_for == "combat_action":
+                advice = apply_ally_wait(state, advice)
+        elif advice_for in SCREEN_ADVICE_FOR:
             advice = compute_screen_advice(
                 state,
                 advice_for,
@@ -1739,6 +1864,8 @@ def _handle_advice_request(
                     logger.warning("search-tree logging failed: %s", exc)
         else:
             raise ValueError(f"unsupported advice_for={advice_for!r}")
+        if instinct_reason is not None:
+            advice = mark_instinct_unavailable(advice, instinct_reason)
     except UnsupportedGameVersionError as e:
         logger.error("advice_request refused: %s", e)
         advice = refusal_advice(e)
@@ -1757,7 +1884,7 @@ def _handle_advice_request(
         "request_id": request_id,
         "state_id": state_id,
         "advice": advice,
-        "capabilities": dict(ADVISOR_CAPABILITIES),
+        "capabilities": advisor_capabilities(),
     }
     try:
         client.send_action(reply)
@@ -1824,6 +1951,10 @@ _SMOKE_STATE: dict[str, Any] = {
         "nodes": [],
     },
 }
+
+
+class _SmokeSkip(Exception):
+    """A smoke step with nothing to check in this build."""
 
 
 def _smoke() -> int:
@@ -1901,6 +2032,29 @@ def _smoke() -> int:
         print(f"run policy FAIL: {e}")
 
     try:
+        # Instinct (the e2e student): the bundled weights, the tokenizer's
+        # baked-in tables and the forward, through 20 real decisions of the
+        # campaign run -- the same path a live request takes past the graft.
+        import sts2_rs
+
+        if not INSTINCT._weights.is_file():
+            # A build without the net (the public export ships none, and the
+            # spec says so loudly at build time): nothing to check here.
+            print(f"instinct SKIP (no net at {INSTINCT._weights})")
+            raise _SmokeSkip
+        if not INSTINCT.available:
+            raise RuntimeError(INSTINCT._error or "not loaded")
+        played = sts2_rs.e2e_selfplay(INSTINCT._student, 170000000, max_decisions=20)
+        if played.get("decisions") != 20 or played.get("error"):
+            raise RuntimeError(f"self-play stopped early: {played}")
+        print(f"instinct OK ({INSTINCT._weights.name}, 20 decisions)")
+    except _SmokeSkip:
+        pass
+    except Exception as e:
+        ok = False
+        print(f"instinct FAIL: {e}")
+
+    try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))
             print(f"socket OK (ephemeral port {s.getsockname()[1]})")
@@ -1969,6 +2123,21 @@ def main(argv: list[str] | None = None) -> int:
         else str(Path(__file__).resolve().parent.parent / "logs"),
         help="Directory for workbench-schema run logs (GameLogger JSONL; "
         "the workbench's /api/runs reads this). Empty string disables.",
+    )
+    parser.add_argument(
+        "--record-requests",
+        default="",
+        metavar="DIR",
+        help="Append every raw message the mod sends (advice requests with "
+        "their full envelope, human actions, rewinds) to DIR/requests-<time>"
+        ".jsonl, verbatim. The corpus Instinct's run graft is checked against "
+        "(realgame_instinct). Empty = off.",
+    )
+    parser.add_argument(
+        "--instinct-weights",
+        default="",
+        metavar="PATH",
+        help="Instinct's .e2ew weights (default: data/e2e/ under the data root).",
     )
     parser.add_argument(
         "--log-search-tree",
@@ -2089,6 +2258,9 @@ def main(argv: list[str] | None = None) -> int:
         cores,
         args.sims // max(1, args.threads),
     )
+    if args.instinct_weights:
+        global INSTINCT
+        INSTINCT = InstinctAdvisor(Path(args.instinct_weights))
     if args.smoke:
         return _smoke()
     try:

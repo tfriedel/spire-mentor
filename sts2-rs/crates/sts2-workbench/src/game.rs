@@ -297,6 +297,34 @@ impl Game {
         Ok(self.serialize())
     }
 
+    /// The e2e student's training run (`sts2_e2e::env::new_run_at`, the
+    /// campaign's `factory.new_run`): Ironclad, v0.111.0, Neow start, the
+    /// agent-decision flags, interactive potion swap ON and a ROLLED Act 1 —
+    /// unlike [`Self::start_faithful`], which pins swap off and Overgrowth.
+    /// The game build is forced to v0.111.0 whatever [`Self::game_version`]
+    /// says (the caller's session must be built in it).
+    #[cfg(feature = "e2e")]
+    pub fn start_e2e(&mut self, seed: i32, ascension: u8) -> Result<Value, GameError> {
+        let seed = i64::from(seed);
+        if !(0..1_i64 << 31).contains(&seed) {
+            return err(format!("e2e seed {seed} outside [0, 2**31)"));
+        }
+        ensure_content_installed();
+        self.character = crate::e2e::CHARACTER.to_string();
+        self.act1 = "roll".to_string();
+        self.rm = Some(sts2_e2e::env::new_run_at(seed, ascension));
+        self.option_actions.clear();
+        self.shop_removal_pick = false;
+        self.pre_action = None;
+        if self.record_card_plays {
+            self.set_record_card_plays(true);
+        }
+        if self.record_combat_log {
+            self.set_record_combat_log(true);
+        }
+        Ok(self.serialize())
+    }
+
     /// `RustGame.start_imported`: rebuild the run behind a state copied out of
     /// the live game. The run identity (seed, character, ascension) is REAL —
     /// constructed the same way — so the act maps, boss and pre-rolled
@@ -437,6 +465,26 @@ impl Game {
         // keeps comparing against the last hand-played action's snapshot.
         rmx::ensure_play_log_flag(rm, rcp, rcl);
         rm.take_action(action)
+    }
+
+    /// [`Self::take_native`] for a recorded native-action dict (which may be
+    /// the multi-pick `combat_resolve_choice_selection`, see
+    /// [`rmx::take_native_value`]).
+    ///
+    /// # Errors
+    ///
+    /// No run, or a dict neither parser accepts.
+    pub fn take_native_value(&mut self, action: &Value) -> Result<&'static str, String> {
+        let (rcp, rcl) = (self.record_card_plays, self.record_combat_log);
+        let rm = self.rm.as_mut().ok_or("no live run")?;
+        rmx::take_native_value(rm, action, rcp, rcl)
+    }
+
+    /// The display-log recording flags (`record_card_plays`,
+    /// `record_combat_log`) a native action re-arms before it applies.
+    #[must_use]
+    pub fn play_log_flags(&self) -> (bool, bool) {
+        (self.record_card_plays, self.record_combat_log)
     }
 
     /// Drop the run.

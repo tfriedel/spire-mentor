@@ -106,6 +106,7 @@ def play_rest(
     (`turn_features`) and the raw playout value of its pre-EndTurn state
     (`rollout_value` with those seeds).
     """
+    import sts2_client
     import sts2_rs
 
     from ppo.combat_bench import agents
@@ -113,7 +114,10 @@ def play_rest(
 
     hp_start = int(sts2_rs.state_to_dict(state)["player"]["hp"])
     rm = sts2_rs.RunManager(
-        seed=seed, character=rec["character"].capitalize(), ascension_level=rec["ascension"] or 0
+        seed=seed,
+        character=rec["character"].capitalize(),
+        ascension_level=rec["ascension"] or 0,
+        game_version=sts2_client.GAME_VERSION,
     )
     rm.debug_enter_combat(state.clone(), room_type(rec["encounter"]))
     rm.set_record_combat_log(True)

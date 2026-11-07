@@ -175,6 +175,46 @@ def rs_engine_call(fn: Any, /, *args: Any, version: str | None = None, **kwargs:
     return fn(*args, game_version=ver, **kwargs)
 
 
+class GameVersionMismatch(AssertionError):
+    """An engine object simulates another game build than the one asked for.
+
+    An ``AssertionError``, not a ``ValueError``: fight builders read a
+    ``ValueError`` as "this row does not build" and skip the row, so a version
+    mix must not look like one.
+    """
+
+
+def require_game_version(version: str) -> str:
+    """:func:`normalize_game_version`, raising :class:`GameVersionMismatch`.
+
+    For a build a caller asks an engine object for: an unsupported one must
+    not surface as the ``ValueError`` fight builders skip a row on.
+    """
+    try:
+        return normalize_game_version(version)
+    except ValueError as exc:
+        raise GameVersionMismatch(str(exc)) from exc
+
+
+def check_game_version(obj: Any, version: str | None = None, *, what: str = "engine object") -> Any:
+    """Return ``obj`` once its ``game_version`` getter reads ``version``.
+
+    ``version`` defaults to the selected :data:`GAME_VERSION`. ``RunManager``
+    and ``CombatState`` both carry the getter. Rust never reads
+    ``STS2_GAME_VERSION``, so an engine call without ``game_version=`` builds
+    v0.107.1 whatever the selection; reading the build back is what catches it.
+
+    Raises:
+        GameVersionMismatch: ``obj`` simulates another build, has no getter,
+            or ``version`` names no supported build.
+    """
+    ver = require_game_version(version) if version else GAME_VERSION
+    got = getattr(obj, "game_version", None)
+    if got != ver:
+        raise GameVersionMismatch(f"{what} simulates {got!r}, expected {ver!r}")
+    return obj
+
+
 # A drained stderr line that means the WORLD threw, not that it logged. The C#
 # side routes swallowed task exceptions through `TaskHelper.LogTaskExceptions`
 # -> `GD.PrintErr`, so the throw only ever appears here — never on the wire, and

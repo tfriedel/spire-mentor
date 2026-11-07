@@ -172,6 +172,47 @@ internal sealed class SimAdvisor
     private static int _advisorCoachCapability;
     public static int AdvisorCoachCapability => Volatile.Read(ref _advisorCoachCapability);
 
+    /// <summary>
+    /// The advisor's <c>capabilities.instinct</c> from its latest reply: the
+    /// characters + game builds its Instinct can play (PROTOCOL.md section 5,
+    /// v5.2). Empty until a reply arrives, whenever no advisor is connected,
+    /// and on an advisor without an Instinct net. Only decides whether the
+    /// brain switch is shown; the advisor itself decides per request who
+    /// answers.
+    /// </summary>
+    private static IReadOnlyList<InstinctTarget> _advisorInstinct = Array.Empty<InstinctTarget>();
+    public static IReadOnlyList<InstinctTarget> AdvisorInstinctCapability => Volatile.Read(ref _advisorInstinct);
+
+    /// <summary>
+    /// The advisor's <c>capabilities.potion_swap</c> from its latest reply
+    /// (v5.2); 0 until one arrives and whenever no advisor is connected. At
+    /// &gt;= 1 a potion reward that only a full belt blocks is asked as
+    /// <c>advice_for: "potion_swap"</c> (PotionSwapAdvice); at 0 the loot
+    /// screen is answered mod-side exactly as before.
+    /// </summary>
+    private static int _advisorPotionSwapCapability;
+    public static int AdvisorPotionSwapCapability => Volatile.Read(ref _advisorPotionSwapCapability);
+
+    /// <summary>The brain the player chose, in wire form ("search" /
+    /// "instinct"): sent as <c>brain</c> on every advice_request.</summary>
+    public static string CurrentBrain =>
+        AdvisorBrainRules.Effective(Volatile.Read(ref _brainOverride), SpireMentorModConfig.AdvisorBrain);
+
+    /// <summary>The brain an advice request asks for: <see cref="CurrentBrain"/>,
+    /// but Instinct only in a run it plays (AdvisorBrainRules.Requested). Every
+    /// request and the stale check use this. Main thread (reads the run).</summary>
+    public static string RequestedBrain =>
+        AdvisorBrainRules.Requested(CurrentBrain, AdvisorInstinctCapability.Count > 0, InstinctPlaysThisRun());
+
+    /// <summary>SpireMentor.conf's <c>advisor_brain</c> (SimConfig.AdvisorBrain):
+    /// overrides the persisted preference for this session, never saved over
+    /// it, and dropped the moment the player switches brain in game.</summary>
+    private static string? _brainOverride = SimConfig.Instance.AdvisorBrain;
+
+    /// <summary>The brain the in-flight request was stamped with: a reply to
+    /// it is dropped once the player has switched (AdvisorBrainRules.IsStale).</summary>
+    private string _inflightBrain = AdvisorBrainRules.Search;
+
     /// <summary>The human pressed End turn (PlayerCmd.EndTurn prefix, see
     /// <c>HumanEndTurnPatch</c>); reported once the enemy side actually
     /// starts, so a backed-out end turn never reports.</summary>
@@ -442,6 +483,9 @@ internal sealed class SimAdvisor
             {
                 SetAutoPlay(false);
                 DropInflight();
+                // The advisor goes with the mode: so does what it could play.
+                Volatile.Write(ref _advisorInstinct, Array.Empty<InstinctTarget>());
+                Volatile.Write(ref _advisorPotionSwapCapability, 0);
                 SimChoiceCapture.Reset();
                 ForgetShownAdvice();
                 HumanEndTurnPending = false;
@@ -816,6 +860,85 @@ internal sealed class SimAdvisor
     }
 
     // ------------------------------------------------------------------
+    // Advisor brain: Search / Instinct (AdvisorBrainRules)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The advisor's Instinct can play the run on screen: its
+    /// <c>capabilities.instinct</c> names this character and game build. What
+    /// shows the brain switch and lets a request ask for Instinct
+    /// (<see cref="RequestedBrain"/>). Main thread
+    /// (reads the run).
+    /// </summary>
+    public static bool InstinctPlaysThisRun()
+    {
+        try
+        {
+            IReadOnlyList<InstinctTarget> targets = AdvisorInstinctCapability;
+            if (targets.Count == 0)
+            {
+                return false;
+            }
+            RunState? runState = RunManager.Instance?.DebugOnlyGetState();
+            Player? me = runState == null ? null : LocalContext.GetMe(runState);
+            return AdvisorBrainRules.Eligible(targets, me?.Character?.Id.Entry, SimGameVersion.Wire);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The brain switch (toolbar button, Shift+F8, the frame):
+    /// Search &lt;-&gt; Instinct.</summary>
+    public void ToggleBrain(string surface) => SetBrain(AdvisorBrainRules.Toggle(CurrentBrain), surface);
+
+    /// <summary>
+    /// Switch the brain the advice comes from, persist it, and re-ask for the
+    /// position on screen at once: the request in flight was asked of the
+    /// other brain, so it is cancelled (its late reply then fails the request
+    /// id check, and <see cref="AdvisorBrainRules.IsStale"/> backs that up)
+    /// and the HUD drops the old brain's advice instead of leaving it up
+    /// under the new name. Everything that reads the advice -- HUD, F6, F7,
+    /// Autobattle, the coach -- follows from there. Any thread.
+    /// </summary>
+    public void SetBrain(string brain, string surface)
+    {
+        string next = AdvisorBrainRules.Normalize(brain);
+        if (next == CurrentBrain)
+        {
+            return;
+        }
+        // An explicit switch in game outranks the conf's session override.
+        Volatile.Write(ref _brainOverride, null);
+        SpireMentorModConfig.AdvisorBrain = next;
+        SpireMentorModConfig.SaveSoon();
+        string label = AdvisorBrainRules.Label(next);
+        Logger.Log($"[SimAdvisor] {surface}: advisor brain -> {label}.");
+        RunOnMainThread(() =>
+        {
+            if (AdvisorBrainRules.IsInstinct(next))
+            {
+                SimActionLog.Note(InstinctPlaysThisRun()
+                    ? "Advisor brain: Instinct -- the end-to-end net plays every decision, no search."
+                    : "Advisor brain: Instinct -- it plays Ironclad on v0.111.0 for now; in other runs the search answers.");
+            }
+            else
+            {
+                SimActionLog.Note("Advisor brain: Search -- the fights are searched again.");
+            }
+            if (SimRuntime.Mode == SimMode.Advisor)
+            {
+                DropInflight();
+                SimHud.Instance.ClearAdvice();
+                ScheduleAdvice();
+            }
+            // The settings tickbox and the toolbar re-read the preference.
+            SimRuntime.NotifyChanged();
+        });
+    }
+
+    // ------------------------------------------------------------------
     // Debounce + request
     // ------------------------------------------------------------------
 
@@ -1111,6 +1234,8 @@ internal sealed class SimAdvisor
                 SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.None);
                 _adviceDeferredNoClient = true;
                 Volatile.Write(ref _advisorCoachCapability, 0);
+                Volatile.Write(ref _advisorInstinct, Array.Empty<InstinctTarget>());
+                Volatile.Write(ref _advisorPotionSwapCapability, 0);
                 return;
             }
 
@@ -1255,6 +1380,8 @@ internal sealed class SimAdvisor
             {
                 state["combat_log"] = combatLog;
                 state["capabilities"] = ModCapabilities();
+                string brain = RequestedBrain;
+                state["brain"] = brain;
 
                 DropInflight();
 
@@ -1282,6 +1409,7 @@ internal sealed class SimAdvisor
                 _inflightStateId = stateId;
                 _inflightEpoch = _positionEpoch;
                 _inflightSignature = "";
+                _inflightBrain = brain;
                 ClearActedFrom();
                 UpdateThinkFps();
                 SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Thinking);
@@ -1358,6 +1486,8 @@ internal sealed class SimAdvisor
             SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.None);
             _adviceDeferredNoClient = true;
             Volatile.Write(ref _advisorCoachCapability, 0);
+            Volatile.Write(ref _advisorInstinct, Array.Empty<InstinctTarget>());
+            Volatile.Write(ref _advisorPotionSwapCapability, 0);
             return;
         }
 
@@ -1365,6 +1495,7 @@ internal sealed class SimAdvisor
         // Given back on every way out but a sent request, as in
         // RequestAdviceNow (GH #989).
         List<Dictionary<string, object?>>? screenLog = SimCombatLog.Drain();
+        string brain = RequestedBrain;
         try
         {
             var payload = new Dictionary<string, object>(screen.State)
@@ -1376,6 +1507,7 @@ internal sealed class SimAdvisor
                 // without this they would sit unsent until the next fight.
                 ["combat_log"] = screenLog,
                 ["capabilities"] = ModCapabilities(),
+                ["brain"] = brain,
             };
 
             DropInflight();
@@ -1405,6 +1537,7 @@ internal sealed class SimAdvisor
             _inflightScreen = screen.Screen;
             _inflightEpoch = _positionEpoch;
             _inflightSignature = screen.SignatureOrDefault;
+            _inflightBrain = brain;
             ClearActedFrom();
             UpdateThinkFps();
             SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Thinking);
@@ -1477,6 +1610,8 @@ internal sealed class SimAdvisor
             // Every reply speaks for the advisor build that sent it, accepted
             // or not: absent = an advisor without coach support.
             Volatile.Write(ref _advisorCoachCapability, CoachCapabilityOf(root));
+            Volatile.Write(ref _advisorInstinct, AdvisorBrainRules.ParseCapability(root));
+            Volatile.Write(ref _advisorPotionSwapCapability, PotionSwapAdvice.CapabilityOf(root));
 
             RunOnMainThread(() =>
             {
@@ -1487,6 +1622,17 @@ internal sealed class SimAdvisor
                 if (requestId != _inflightRequestId || (stateId >= 0 && stateId != _inflightStateId))
                 {
                     Logger.Log($"[SimAdvisor] Dropping stale advice (request {requestId}, state {stateId}).");
+                    return;
+                }
+                // Asked of the other brain: the player switched while it was
+                // in flight. SetBrain already cancels the request, so this is
+                // the backstop for a reply that raced the switch; ask again,
+                // stamped with the brain the player wants now.
+                if (AdvisorBrainRules.IsStale(_inflightBrain, RequestedBrain))
+                {
+                    Logger.Log($"[SimAdvisor] Dropping {_inflightBrain} advice (request {requestId}): the brain is {RequestedBrain} now.");
+                    DropInflight();
+                    ScheduleAdvice();
                     return;
                 }
                 // The correlation fix: the state id is retired WITH the request

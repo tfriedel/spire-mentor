@@ -343,11 +343,15 @@ function Labeled({ label, footer, children }: { label: string; footer?: string; 
  *  DecisionWinChip supersedes it. */
 function SearchChip({ c }: { c: ChoiceRankRow | undefined }) {
   if (!c || c.win_prob == null) return null;
+  // The e2e advisor ranked this choice: its policy probability, not a search.
+  const e2e = c.prob != null;
   return (
     <div
-      title={
-        "Combat-MCTS win probability from one search over this choice — the same " +
-        `search the deployed run-AI uses here (${c.visits} visits; q ${c.q?.toFixed(2) ?? "—"}).`
+      title={e2e
+        ? "Instinct's probability for this option — one forward of the net, " +
+          "a policy probability, not a win chance."
+        : "Combat-MCTS win probability from one search over this choice — the same " +
+          `search the deployed run-AI uses here (${c.visits} visits; q ${c.q?.toFixed(2) ?? "—"}).`
       }
       style={{
         fontFamily: "var(--game-font)",
@@ -357,7 +361,7 @@ function SearchChip({ c }: { c: ChoiceRankRow | undefined }) {
         fontWeight: c.is_best ? 600 : 400,
       }}
     >
-      {c.is_best ? "★ " : ""}search {(c.win_prob * 100).toFixed(1)}%
+      {c.is_best ? "★ " : ""}{e2e ? "Instinct" : "search"} {(c.win_prob * 100).toFixed(1)}%
     </div>
   );
 }

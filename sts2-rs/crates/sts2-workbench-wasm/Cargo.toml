@@ -29,7 +29,7 @@ doc_markdown = "allow"
 assert_is_empty = "allow"
 
 [dependencies]
-sts2-workbench = { path = "../sts2-workbench", version = "0.0.1", features = ["ppo"] }
+sts2-workbench = { path = "../sts2-workbench", version = "0.0.1", features = ["ppo", "e2e"] }
 serde_json = { workspace = true }
 wasm-bindgen = { workspace = true }
 # `js_sys::Function` for the restore-progress callback.

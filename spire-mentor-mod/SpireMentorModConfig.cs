@@ -67,14 +67,54 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     /// <summary>
     /// Whole-game speed (Engine.TimeScale), live. Range copies the game's
     /// own debug clamp. Reading shows the actual current speed; writing
-    /// applies immediately. Never persisted, never auto-applied at boot.
+    /// applies immediately and is remembered (<see cref="LastGameSpeed"/>).
     /// </summary>
     [ConfigIgnore]
     [ConfigSlider(0.1, 4.0, 0.1, Format = "{0:0.0}x")]
     public static double GameSpeed
     {
         get => SimSpeed.Current;
-        set => SimSpeed.Apply(value);
+        set
+        {
+            SimSpeed.Apply(value);
+            RememberSpeed();
+        }
+    }
+
+    /// <summary>The speed the player set last (F9 / F10, the toolbar, this
+    /// page, the console), applied when the game starts
+    /// (<see cref="ApplyLastGameSpeed"/>). Not the speeds the mod sets itself
+    /// (autobattle's 2x, the undo replay's fast-forward), and never applied in
+    /// Autopilot or the advisor_autoplay harness: SpireMentor.conf's
+    /// time_scale is theirs, so a human session's speed cannot leak into a
+    /// sweep.</summary>
+    public static double LastGameSpeed { get; set; } = 1.0;
+
+    /// <summary>Keep the speed the player just set (any thread).</summary>
+    public static void RememberSpeed()
+    {
+        double now = SimSpeed.Desired;
+        if (Math.Abs(now - LastGameSpeed) > 1e-9)
+        {
+            LastGameSpeed = now;
+            SaveSoon();
+        }
+    }
+
+    /// <summary>At startup, after Register (BaseLib has loaded the saved
+    /// value): the speed the player used last, in a human session only.</summary>
+    public static void ApplyLastGameSpeed()
+    {
+        if (SimRuntime.Mode == SimMode.Autopilot || SimConfig.Instance.AdvisorAutoplay)
+        {
+            return;
+        }
+        double speed = Math.Clamp(LastGameSpeed, 0.1, 4.0);
+        if (Math.Abs(speed - 1.0) > 1e-9)
+        {
+            SimSpeed.Apply(speed, showVfx: false);
+            Logger.Log($"Game speed {speed:0.0}x, as last time (settings: Game speed).");
+        }
     }
 
     // ------------------------------------------------------------------
@@ -97,6 +137,27 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     /// debuff flashes) -- see SimReduceEffects. Visual only; takes effect for
     /// the next effect spawned.</summary>
     public static bool ReduceEffects { get; set; } = false;
+
+    /// <summary>The panels sit in their own window, around the game (the
+    /// Spire Mentor frame; Windows): the mod starts it when the game starts
+    /// and whenever this is ticked (SimFrameLauncher). Closing that window
+    /// unticks it. Not on the settings pages directly: they show
+    /// <see cref="PanelsInOwnWindowLive"/>, which opens / closes it now.</summary>
+    public static bool PanelsInOwnWindow { get; set; } = true;
+
+    /// <summary>The settings pages' switch for <see cref="PanelsInOwnWindow"/>:
+    /// shows whether the panels are in their own window right now.</summary>
+    [ConfigIgnore]
+    public static bool PanelsInOwnWindowLive
+    {
+        get => FrameLink.UiOutside;
+        set => SimFrameLauncher.SetWanted(value, "Settings");
+    }
+
+    /// <summary>The page the panels' window shows. Blank = the bundled
+    /// workbench's frame page on the advisor's control plane (:8079); dev:
+    /// the Vite server, e.g. http://127.0.0.1:5199/frame.html.</summary>
+    public static string FrameUrl { get; set; } = "";
 
     public static bool AdvisorAutoLaunch { get; set; } = true;
 
@@ -123,6 +184,29 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     /// <summary>The coach chip also confirms good turns and agreed choices
     /// with a small ✓ (default off: silence on good play).</summary>
     public static bool CoachShowGoodTurns { get; set; } = false;
+
+    /// <summary>
+    /// Which brain answers the advice: <c>"search"</c> (MCTS for the fights,
+    /// the PPO run policy for the screens; the default) or <c>"instinct"</c>
+    /// (the end-to-end net, no search). Sent as <c>brain</c> on every
+    /// advice_request, the AI partners' too (PROTOCOL.md section 5, v5.2);
+    /// the advisor answers with Instinct where it can play the run (today
+    /// Ironclad on v0.111.0) and with the search, saying why, elsewhere. Read
+    /// through <see cref="AdvisorBrainRules.Normalize"/>: anything else is Search.
+    /// </summary>
+    public static string AdvisorBrain { get; set; } = AdvisorBrainRules.Instinct;
+
+    /// <summary>The settings pages' tickbox for <see cref="AdvisorBrain"/>
+    /// (the control kind these pages build); setting it switches the brain
+    /// live, exactly like the toolbar button (SimAdvisor.SetBrain).</summary>
+    [ConfigIgnore]
+    public static bool AdvisorBrainInstinct
+    {
+        // The brain in effect, so a conf override (SimConfig.AdvisorBrain)
+        // shows as what it is.
+        get => AdvisorBrainRules.IsInstinct(SimAdvisor.CurrentBrain);
+        set => SimAdvisor.Instance.SetBrain(value ? AdvisorBrainRules.Instinct : AdvisorBrainRules.Search, "Settings");
+    }
 
     // AI partners (co-op, experimental; docs/plans/2026-11-05-ai-coop-partners.md).
     // Read live by SimAiPartnerBrain, so a change applies from the next decision.
@@ -232,6 +316,8 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         AddRow(optionContainer, "Turn the coach on when the game starts", nameof(CoachOnAtLaunch), CreateRawTickboxControl);
         AddRow(optionContainer, "Start in Coach style (untick: Hints)", nameof(StartInCoachStyle), CreateRawTickboxControl);
         AddRow(optionContainer, "Coach: also mark good turns with ✓", nameof(CoachShowGoodTurns), CreateRawTickboxControl);
+        AddRow(optionContainer, "Advisor brain: Instinct (untick: Search)", nameof(AdvisorBrainInstinct), CreateRawTickboxControl);
+        AddNote(optionContainer, BrainNote);
         AddRow(optionContainer, "Game speed", nameof(GameSpeed), CreateRawSliderControl);
 
         optionContainer.AddChild(CreateSectionHeader("HUD"));
@@ -241,6 +327,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         AddRow(optionContainer, "Show map markers + route", nameof(ShowMapMarkers), CreateRawTickboxControl);
         AddRow(optionContainer, "Show win chance bar", nameof(ShowWinBar), CreateRawTickboxControl);
         AddRow(optionContainer, "Reduce combat effects", nameof(ReduceEffects), CreateRawTickboxControl);
+        AddRow(optionContainer, "Panels in their own window, around the game", nameof(PanelsInOwnWindowLive), CreateRawTickboxControl);
 
         if (AiPartnersShown)
         {
@@ -271,6 +358,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             "Shift+F6   co-op: a waiting AI partner plays its turn now\n" +
             "F7   let the AI keep playing until you stop it\n" +
             "Shift+F7   autobattle: the AI fights, you make the run's decisions\n" +
+            "Shift+F8   advisor brain: Search / Instinct\n" +
             "F4   show / hide the HUD          Ctrl+L action log\n" +
             "F9 / F10   game speed down / up (1x-4x)   F1   help\n" +
             "Ctrl+H   hide / show all the mod's panels\n" +
@@ -306,6 +394,8 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             cfg.AddLiveRow(container, "Coach on when the game starts", nameof(CoachOnAtLaunch), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Start in Coach style (untick: Hints)", nameof(StartInCoachStyle), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Coach: also mark good turns with ✓", nameof(CoachShowGoodTurns), cfg.CreateRawTickboxControl);
+            cfg.AddLiveRow(container, "Advisor brain: Instinct (untick: Search)", nameof(AdvisorBrainInstinct), cfg.CreateRawTickboxControl);
+            cfg.AddLiveNote(container, BrainNote);
             cfg.AddLiveRow(container, "Game speed", nameof(GameSpeed), cfg.CreateRawSliderControl);
             cfg.AddLiveRow(container, "Show HUD", nameof(ShowHud), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show ranked moves", nameof(ShowRankedList), cfg.CreateRawTickboxControl);
@@ -313,6 +403,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             cfg.AddLiveRow(container, "Show map markers + route", nameof(ShowMapMarkers), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show win chance bar", nameof(ShowWinBar), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Reduce combat effects", nameof(ReduceEffects), cfg.CreateRawTickboxControl);
+            cfg.AddLiveRow(container, "Panels in their own window, around the game", nameof(PanelsInOwnWindowLive), cfg.CreateRawTickboxControl);
             if (AiPartnersShown)
             {
                 cfg.AddLiveRow(container, "AI partner waits for your first play", nameof(AiPartnerWaitForFirstPlay), cfg.CreateRawTickboxControl);
@@ -331,6 +422,23 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             Logger.Log($"[SpireMentorModConfig] BuildLiveRowsInto failed: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>What the brain tickbox means, on both settings pages (no .pck,
+    /// so no tooltips: the page carries its own words).</summary>
+    private const string BrainNote =
+        "Search thinks ahead: a search over the fight, the run net for the screens. Instinct is\n" +
+        "the end-to-end net with no search: it plays every decision on gut feel. Instinct plays\n" +
+        "Ironclad on v0.111.0 only for now; anywhere else the search answers and says why.\n" +
+        "The toolbar's Search / Instinct button and Shift+F8 switch it too.";
+
+    /// <summary>A line of explanation under a mid-run row.</summary>
+    private void AddLiveNote(Control container, string text)
+    {
+        MegaRichTextLabel label = CreateRawLabelControl(text, 15);
+        label.FitContent = true;
+        label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        container.AddChild(label);
     }
 
     private void AddLiveRow(Control container, string labelText, string propertyName,

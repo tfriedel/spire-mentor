@@ -30,6 +30,14 @@
  *     `Workbench.load_ppo`, once per character. A failed fetch (offline on
  *     first use, a 404) is recorded with `set_ppo_error` so the panel and the
  *     brain can say why, and is retried on the next start / panel request.
+ *   - The e2e student: its weights (`/e2e/<file>`, `Workbench.e2e_file`,
+ *     ~21 MB) are fetched ON DEMAND only — when a call selects the `e2e`
+ *     brain or advisor (`start-faithful {e2e: true}`, `run-mode
+ *     {off_combat_brain: "e2e"}` / `{advisor: "e2e"}`, `/api/e2e/selfplay`,
+ *     `/api/live/e2e-advice`) or the engine answers 424 (a restored
+ *     or resumed e2e run with no net yet), after which the call is retried
+ *     once. Never at boot, never by "download for offline". A failed fetch
+ *     is recorded with `set_e2e_error` and retried on the next such call.
  *   - Bug reports (M5): the page builds the dump (src/bugreport.ts) and
  *     posts it to the host's Pages Function; the worker only supplies the
  *     two things a report carries that the wasm routes do not expose —
@@ -74,6 +82,11 @@ export interface WorkbenchLike {
   load_ppo(character: string, bytes: Uint8Array): string;
   set_ppo_error(character: string, reason: string): void;
   has_ppo(character: string): boolean;
+  /** The e2e student: load from the fetched `.e2ew` bytes / record why not.
+   *  Absent = no e2e brain in this host (older fakes). */
+  load_e2e?(bytes: Uint8Array): string;
+  set_e2e_error?(reason: string): void;
+  has_e2e?(): boolean;
   /** Run logs (M4): the log the last quit wrote (`{filename, text}` JSON or
    *  `"null"`), and a stored log's text parsed into the replay store. */
   /** The oldest run log not yet collected (`{filename, text}` JSON), or
@@ -103,6 +116,11 @@ export interface EngineDeps {
   /** Fetch a champion file's bytes (`/ppo/<file>` in the worker). Absent =
    *  no PPO in this host (tests). */
   fetchChampion?: (file: string) => Promise<Uint8Array>;
+  /** `Workbench.e2e_file()`: the e2e weights filename; absent / empty = no
+   *  e2e brain in this host. */
+  e2eFile?: string;
+  /** Fetch the e2e weights (`/e2e/<file>` in the worker), on demand only. */
+  fetchE2e?: (file: string) => Promise<Uint8Array>;
   kv: KvStore;
   /** Clock for `saved_at`; defaults to now, second precision, `Z`. */
   now?: () => string;
@@ -150,8 +168,14 @@ const WASM_ROUTES = new Set([
   "POST /api/live/decision-advisor",
   "POST /api/live/wpa-review",
   "POST /api/live/ppo-policy",
+  // The e2e student's evaluation of the live node (the e2e advisor), and
+  // the host's advisor preference.
+  "POST /api/live/e2e-advice",
+  "POST /api/advisor",
   // Run mode / autobattle / WPA verify (M3).
   "POST /api/live/start-faithful",
+  // The e2e student's headless self-play (speed / parity probe).
+  "POST /api/e2e/selfplay",
   "POST /api/live/run-mode",
   "POST /api/live/run-mode-step",
   "POST /api/live/faithful-step",
@@ -218,6 +242,9 @@ const MUTATING = new Set([
   "POST /api/saves/load",
   "POST /api/live/start-faithful",
   "POST /api/live/run-mode",
+  // NOT `POST /api/advisor`: it may come before a lazy resume, when the
+  // engine has no run and a persist would DELETE the stored one. It persists
+  // only when a run is live (below).
   "POST /api/live/run-mode-step",
   "POST /api/live/faithful-step",
   "POST /api/live/play-to-end",
@@ -260,6 +287,20 @@ const REPLACES_RUN = new Set([
   "POST /api/live/from_replay",
 ]);
 
+/** The status the engine answers when the e2e brain has no net yet. */
+export const NO_E2E_NET = 424;
+
+/** Whether a call needs the e2e net now (so it is fetched first). Not
+ *  `POST /api/advisor`: the page re-posts a stored preference at boot, and
+ *  the net is fetched by the first advice call that needs it (its 424). */
+function selectsE2e(key: string, body: unknown): boolean {
+  const b = (body ?? {}) as { e2e?: unknown; off_combat_brain?: unknown; advisor?: unknown };
+  if (key === "POST /api/e2e/selfplay" || key === "POST /api/live/e2e-advice") return true;
+  if (key === "POST /api/live/start-faithful") return b.e2e === true;
+  if (key === "POST /api/live/run-mode") return b.off_combat_brain === "e2e" || b.advisor === "e2e";
+  return false;
+}
+
 function characterOf(body: unknown): string {
   const c = (body as { character?: unknown } | null)?.character;
   return typeof c === "string" && c ? c : "Ironclad";
@@ -297,7 +338,7 @@ function nameOf(body: unknown): string | null {
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { wb, kv, saveHeader, championFile, fetchChampion } = deps;
+  const { wb, kv, saveHeader, championFile, fetchChampion, e2eFile, fetchE2e } = deps;
   const now = deps.now ?? isoNow;
 
   /** Make sure `character`'s champion is loaded; never throws — a failure
@@ -320,6 +361,24 @@ export function createEngine(deps: EngineDeps): Engine {
     } catch (err) {
       wb.set_ppo_error(character, `fetch of /ppo/${named.body} failed: ${String(err)}`);
     }
+  }
+
+  /** Make sure the e2e student is loaded; resolves to whether it is. Never
+   *  throws — a failure is recorded on the engine (the brain's 424 says
+   *  why) and the next e2e call tries again. */
+  async function ensureE2e(): Promise<boolean> {
+    if (!e2eFile || !fetchE2e || !wb.load_e2e || !wb.has_e2e) return false;
+    if (wb.has_e2e()) return true;
+    try {
+      const bytes = await fetchE2e(e2eFile);
+      const r = parseReply(wb.load_e2e(bytes));
+      if (r.status !== 200) {
+        wb.set_e2e_error?.(String((r.body as { detail?: string } | null)?.detail ?? "load failed"));
+      }
+    } catch (err) {
+      wb.set_e2e_error?.(`fetch of /e2e/${e2eFile} failed: ${String(err)}`);
+    }
+    return wb.has_e2e();
   }
 
   async function persist(): Promise<void> {
@@ -590,13 +649,22 @@ export function createEngine(deps: EngineDeps): Engine {
           key === "GET /api/live/state" && !wb.has_live_run()
             ? await resumeIfPersisted(onProgress)
             : null;
+        const triedE2e = selectsE2e(key, body);
+        if (triedE2e) await ensureE2e();
         const sent = REPLACES_RUN.has(key) ? { ...((body as object | null) ?? {}), now: now() } : body;
-        reply = resumed ?? parseReply(wb.call(m, path, sent == null ? "null" : JSON.stringify(sent)));
+        const send = () => parseReply(wb.call(m, path, sent == null ? "null" : JSON.stringify(sent)));
+        reply = resumed ?? send();
+        // An e2e run restored or resumed before its net arrived: fetch it
+        // now and ask again, once (not when this call already tried).
+        if (!resumed && !triedE2e && reply.status === NO_E2E_NET && !wb.has_e2e?.() && (await ensureE2e())) reply = send();
         if (REPLACES_RUN.has(key) && reply.status === 200) await storeRunLogs();
       } else {
         return detail(501, `not available in the browser build: ${key}`);
       }
       if (MUTATING.has(key) && reply.status === 200) await persist();
+      // The live run's advisor, kept so a reload resumes it with the one the
+      // page shows.
+      else if (key === "POST /api/advisor" && reply.status === 200 && wb.has_live_run()) await persist();
       return reply;
     },
     sweepTick,

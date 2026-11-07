@@ -60,6 +60,7 @@ internal sealed class SimToolbar
     private Button? _aiOnce;
     private Button? _aiAuto;
     private Button? _autobattle;
+    private Button? _brain;
     private Button? _partnerGo;
     private Label? _speedLabel;
     private Label? _statusLabel;
@@ -295,6 +296,17 @@ internal sealed class SimToolbar
                 () => SimActions.ToggleAutobattle("The Autobattle button"), SetHint);
             buttons.AddChild(_autobattle);
 
+            // The advice brain, named by what is ON (Search / Instinct), so the
+            // strip always says which brain is talking. Shown only where the
+            // advisor's Instinct can play this run: RefreshBrain.
+            _brain = SimUiKit.MakeButton("Search",
+                "Advisor brain, click to switch (Shift+F8): Search thinks ahead -- a search over the fight, " +
+                "the run net for the screens. Instinct is the end-to-end net, no search: every decision on " +
+                "gut feel (Ironclad on v0.111.0 for now). Hints, AI once / auto and Autobattle all follow it",
+                () => SimActions.ToggleBrain("The brain button"), SetHint);
+            _brain.Visible = false;
+            buttons.AddChild(_brain);
+
             // Co-op with AI partners, in combat only (RefreshLiveLabels).
             _partnerGo = SimUiKit.MakeButton("Partner go",
                 "Your AI partner waits for you (your first play, your end turn, or a setup play " +
@@ -337,11 +349,13 @@ internal sealed class SimToolbar
                     new("Help  (F1)", "What everything does (F1)", SimActions.ToggleHelp),
                     new("Settings", "Mod settings -- works mid-run (the main-menu page is run-locked)", SimSettingsPanel.Instance.Toggle),
                     new("Report a bug  (Ctrl+Shift+B)", "Send this position and the logs to the developers, with a note on what went wrong", SimActions.ReportBug),
-                    // Launched by the Spire Mentor frame with the panels moved
-                    // inside: the way back out (the frame's own menu is hidden).
-                    .. (FrameLink.Framed
-                        ? new SimUiKit.MenuEntry[] { new("Panels outside the game", "Put these panels back around the game, in the Spire Mentor frame", () => FrameLink.SetUiOutside(true)) }
-                        : System.Array.Empty<SimUiKit.MenuEntry>()),
+                    // The panels in their own window around the game (the
+                    // Spire Mentor frame; SimFrameLauncher): starts it, or,
+                    // framed with the panels moved inside, moves them back out
+                    // (this toolbar hides while they are outside, so the way
+                    // back in is the frame's own Panels menu or closing it).
+                    new("Panels in their own window", "Move these panels out of the game into a window around it (closing that window brings them back)",
+                        () => SimFrameLauncher.SetWanted(true, "Toolbar")),
                 ], SetHint));
             buttons.AddChild(SimUiKit.MakeMenuButton("Workbench",
                 "Open the workbench in your browser · Copy state (Ctrl+Shift+C) to paste a position into it",
@@ -645,9 +659,34 @@ internal sealed class SimToolbar
                 _autobattle.Text = label;
             }
         }
+        if (_brain != null && GodotObject.IsInstanceValid(_brain))
+        {
+            RefreshBrain(_brain);
+        }
         if (_partnerGo != null && GodotObject.IsInstanceValid(_partnerGo))
         {
             RefreshPartnerGo(_partnerGo);
+        }
+    }
+
+    /// <summary>The brain switch is shown (only in a run Instinct plays:
+    /// elsewhere the search answers whatever is chosen,
+    /// AdvisorBrainRules.Requested), and what it says. Polled: the advisor's
+    /// capability and the run's character raise no event.</summary>
+    private static (bool Show, string Label) BrainState() =>
+        (SimRuntime.Mode == SimMode.Advisor && SimAdvisor.InstinctPlaysThisRun(),
+         AdvisorBrainRules.Label(SimAdvisor.CurrentBrain));
+
+    private static void RefreshBrain(Button button)
+    {
+        (bool show, string label) = BrainState();
+        if (button.Visible != show)
+        {
+            button.Visible = show;
+        }
+        if (button.Text != label)
+        {
+            button.Text = label;
         }
     }
 
@@ -751,6 +790,7 @@ internal sealed class SimToolbar
         SimAiPartner? waiting = partnerShow
             ? partners.FirstOrDefault(p => p.Brain.Waiting != PartnerWait.None)
             : null;
+        (bool brainShow, string brainLabel) = BrainState();
         return new
         {
             mode = mode.ToString().ToLowerInvariant(),
@@ -762,6 +802,13 @@ internal sealed class SimToolbar
             autoplay_armed = SimRuntime.AdvisorAutoplayArmed,
             autobattle_on = SimAdvisor.Instance.AutobattleOn,
             speed = SpeedSteps.Label(SimSpeed.Desired),
+            // The brain switch; the frame's button sends `toggle_brain`.
+            brain = new
+            {
+                show = brainShow,
+                value = SimAdvisor.CurrentBrain,
+                label = brainLabel,
+            },
             partner_go = new
             {
                 show = partnerShow,

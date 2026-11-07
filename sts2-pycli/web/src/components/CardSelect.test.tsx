@@ -219,6 +219,27 @@ describe("CardSelect choice-ranker chips", () => {
   });
 });
 
+describe("CardSelect under the e2e advisor", () => {
+  it("badges the options with the e2e net's probability, not a search win chance", async () => {
+    stubFetch(() => ({
+      ...RANKING,
+      advisor: "e2e",
+      candidates: [
+        { key: "choice:0", label: "Strike", win_prob: 0.83, prob: 0.83, q: 0.66, visits: 0, is_best: true },
+        { key: "choice:1", label: "Defend", win_prob: 0.17, prob: 0.17, q: -0.66, visits: 0, is_best: false },
+      ],
+    }));
+    render(
+      <HintsFixture on>
+        <CardSelect step={step("add_generated_free_to_hand")} onChoose={() => {}} />
+      </HintsFixture>,
+    );
+    await waitFor(() => expect(screen.getByText("★ Instinct 83.0%")).toBeTruthy());
+    expect(screen.getByText("Instinct 17.0%")).toBeTruthy();
+    expect(screen.queryByText(/search \d/)).toBeNull();
+  });
+});
+
 describe("CardSelect hints gate", () => {
   it("does not fetch the choice ranker while hints are off", async () => {
     const spy = stubFetch(() => RANKING);

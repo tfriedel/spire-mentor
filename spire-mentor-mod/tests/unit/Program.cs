@@ -133,8 +133,8 @@ Check("style label hints", CoachStyle.StyleLabel(AdviceStyle.Hints), "Hints");
 Check("style label coach", CoachStyle.StyleLabel(AdviceStyle.Coach), "Coach");
 Check("mode name coach", CoachStyle.ModeName(SimModeLite.Advisor, AdviceStyle.Coach), "Coach");
 Check("mode name autopilot", CoachStyle.ModeName(SimModeLite.Autopilot, AdviceStyle.Coach), "Autopilot");
-Check("fresh config default is Coach",
-    CoachStyle.FromDefaultFlag(CoachStyle.CoachByDefault).ToString(), "Coach");
+Check("fresh config default is Hints",
+    CoachStyle.FromDefaultFlag(CoachStyle.CoachByDefault).ToString(), "Hints");
 Check("default flag off -> Hints", CoachStyle.FromDefaultFlag(false).ToString(), "Hints");
 Check("parse hints", CoachStyle.Parse(" HINTS ")?.ToString(), "Hints");
 Check("parse coach", CoachStyle.Parse("coach")?.ToString(), "Coach");
@@ -780,6 +780,134 @@ Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, obje
     Check("partner: AI-only hold never above the setting", PartnerCharacters.HoldSeconds(1, false).ToString(), "1");
     Check("partner: 0 never holds, even for an AI", PartnerCharacters.HoldSeconds(0, false).ToString(), "0");
     Check("partner: negative setting never holds", PartnerCharacters.HoldSeconds(-3, true).ToString(), "0");
+}
+
+// Advisor brain (PROTOCOL.md section 5, v5.2): the preference's wire form, the
+// advisor's capabilities.instinct, who sees the switch, which reply is stale
+// after a toggle, and the HUD's source tag.
+{
+    Check("brain: default is search", AdvisorBrainRules.Normalize(null), "search");
+    Check("brain: blank is search", AdvisorBrainRules.Normalize("  "), "search");
+    Check("brain: case/trim", AdvisorBrainRules.Normalize(" Instinct "), "instinct");
+    Check("brain: unknown is search", AdvisorBrainRules.Normalize("e2e"), "search");
+    Check("brain: toggle to instinct", AdvisorBrainRules.Toggle("search"), "instinct");
+    Check("brain: toggle back", AdvisorBrainRules.Toggle("INSTINCT"), "search");
+    Check("brain: label", AdvisorBrainRules.Label("instinct") + "/" + AdvisorBrainRules.Label(""), "Instinct/Search");
+
+    string Caps(string json)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return string.Join(";", AdvisorBrainRules.ParseCapability(doc.RootElement)
+            .Select(t => $"{t.Character}@{t.GameVersion}"));
+    }
+    Check("caps: top level", Caps("""{"capabilities":{"coach":2,"instinct":[{"character":"Ironclad","game_version":"v0.111.0"}]},"advice":{}}"""), "Ironclad@v0.111.0");
+    Check("caps: inside advice", Caps("""{"advice":{"capabilities":{"instinct":[{"character":"Ironclad","game_version":"v0.111.0"}]}}}"""), "Ironclad@v0.111.0");
+    Check("caps: top level without instinct falls through to advice", Caps("""{"capabilities":{"coach":2},"advice":{"capabilities":{"instinct":[{"character":"Silent","game_version":"v0.111.0"}]}}}"""), "Silent@v0.111.0");
+    Check("caps: absent (older advisor)", Caps("""{"capabilities":{"coach":2},"advice":{"note":"x"}}"""), "");
+    Check("caps: empty list (no net)", Caps("""{"capabilities":{"instinct":[]}}"""), "");
+    Check("caps: malformed entries skipped", Caps("""{"capabilities":{"instinct":[1,{"character":"Ironclad"},{"character":"","game_version":"v0.111.0"},{"character":"Defect","game_version":"v0.111.0"}]}}"""), "Defect@v0.111.0");
+    Check("caps: not an array", Caps("""{"capabilities":{"instinct":{"character":"Ironclad","game_version":"v0.111.0"}}}"""), "");
+
+    var ironclad111 = new List<InstinctTarget> { new("Ironclad", "v0.111.0") };
+    string E(string? character, string? version) => AdvisorBrainRules.Eligible(ironclad111, character, version).ToString();
+    Check("eligible: run id is upper case", E("IRONCLAD", "v0.111.0"), "True");
+    Check("eligible: build without v", E("Ironclad", "0.111.0"), "True");
+    Check("eligible: other character", E("SILENT", "v0.111.0"), "False");
+    Check("eligible: other build", E("IRONCLAD", "v0.107.1"), "False");
+    Check("eligible: unknown build is the stable one", E("IRONCLAD", null), "False");
+    Check("eligible: no run", E(null, "v0.111.0"), "False");
+    Check("eligible: no capability", AdvisorBrainRules.Eligible(new List<InstinctTarget>(), "IRONCLAD", "v0.111.0").ToString(), "False");
+
+    Check("requested: Instinct where it plays", AdvisorBrainRules.Requested("instinct", known: true, eligible: true), "instinct");
+    Check("requested: Search, quietly, where it does not", AdvisorBrainRules.Requested("instinct", known: true, eligible: false), "search");
+    Check("requested: the preference before the advisor said where it plays", AdvisorBrainRules.Requested("instinct", known: false, eligible: false), "instinct");
+    Check("requested: Search stays Search where Instinct plays", AdvisorBrainRules.Requested("search", known: true, eligible: true), "search");
+    Check("requested: Search before the capability too", AdvisorBrainRules.Requested(null, known: false, eligible: false), "search");
+
+    Check("stale: asked of search, now instinct", AdvisorBrainRules.IsStale("search", "instinct").ToString(), "True");
+    Check("stale: asked of instinct, now search", AdvisorBrainRules.IsStale("instinct", "search").ToString(), "True");
+    Check("stale: same brain is never stale (a fallback renders)", AdvisorBrainRules.IsStale("instinct", "instinct").ToString(), "False");
+    Check("stale: wire spelling does not matter", AdvisorBrainRules.IsStale("Search", "").ToString(), "False");
+
+    Check("tag: instinct answered", AdvisorBrainRules.SourceTag("instinct", null), "Instinct");
+    Check("tag: fallback names the reason", AdvisorBrainRules.SourceTag("search", " Instinct can't read this event yet "),
+        "Search (Instinct: Instinct can't read this event yet)");
+    Check("tag: fallback with brain absent", AdvisorBrainRules.SourceTag(null, "no net"), "Search (Instinct: no net)");
+    Check("tag: plain search says nothing", AdvisorBrainRules.SourceTag("search", null), null);
+    Check("tag: older advisor says nothing", AdvisorBrainRules.SourceTag(null, null), null);
+
+    Check("note: instinct prefixed", AdvisorBrainRules.NoteWithSource("e2e net", "instinct", null), "Instinct · e2e net");
+    Check("note: instinct without a note", AdvisorBrainRules.NoteWithSource(null, "instinct", null), "Instinct");
+    Check("note: reason already in the note is not repeated",
+        AdvisorBrainRules.NoteWithSource("MCTS 3000 sims · Instinct can't read this event yet", "search", "Instinct can't read this event yet"),
+        "MCTS 3000 sims · Instinct can't read this event yet");
+    Check("note: reason missing from the note is added",
+        AdvisorBrainRules.NoteWithSource("MCTS 3000 sims", "search", "no net"), "Search (Instinct: no net) · MCTS 3000 sims");
+    Check("note: plain search untouched", AdvisorBrainRules.NoteWithSource("MCTS 3000 sims", null, null), "MCTS 3000 sims");
+
+    // SpireMentor.conf advisor_brain: a session override, never a guess.
+    Check("conf: instinct", AdvisorBrainRules.ParseConf(" INSTINCT "), "instinct");
+    Check("conf: search", AdvisorBrainRules.ParseConf("Search"), "search");
+    Check("conf: absent", AdvisorBrainRules.ParseConf(null), null);
+    Check("conf: blank", AdvisorBrainRules.ParseConf(""), null);
+    Check("conf: typo is no override", AdvisorBrainRules.ParseConf("instict"), null);
+    Check("effective: override wins", AdvisorBrainRules.Effective("instinct", "search"), "instinct");
+    Check("effective: override to search wins", AdvisorBrainRules.Effective("search", "instinct"), "search");
+    Check("effective: no override, the preference", AdvisorBrainRules.Effective(null, "instinct"), "instinct");
+    Check("effective: a bad override falls back to the preference", AdvisorBrainRules.Effective("x", "instinct"), "instinct");
+    Check("effective: nothing set is search", AdvisorBrainRules.Effective(null, null), "search");
+}
+
+// Full-belt potion swap as an advice lane (PROTOCOL.md section 5, v5.2).
+{
+    int Cap(string json)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return PotionSwapAdvice.CapabilityOf(doc.RootElement);
+    }
+    Check("swap cap: top level", Cap("""{"capabilities":{"coach":2,"potion_swap":1},"advice":{}}""").ToString(), "1");
+    Check("swap cap: inside advice", Cap("""{"advice":{"capabilities":{"potion_swap":2}}}""").ToString(), "2");
+    Check("swap cap: top level without it falls through", Cap("""{"capabilities":{"coach":2},"advice":{"capabilities":{"potion_swap":1}}}""").ToString(), "1");
+    Check("swap cap: absent (older advisor)", Cap("""{"capabilities":{"coach":2},"advice":{}}""").ToString(), "0");
+    Check("swap cap: not a number", Cap("""{"capabilities":{"potion_swap":true}}""").ToString(), "0");
+    Check("swap cap: negative clamps", Cap("""{"capabilities":{"potion_swap":-3}}""").ToString(), "0");
+
+    Check("swap ask: blocked, nothing claimable, capable", PotionSwapAdvice.ShouldAsk(0, 1, 1).ToString(), "True");
+    Check("swap ask: claim the rest first", PotionSwapAdvice.ShouldAsk(2, 1, 1).ToString(), "False");
+    Check("swap ask: older advisor keeps today's loot screen", PotionSwapAdvice.ShouldAsk(0, 1, 0).ToString(), "False");
+    Check("swap ask: nothing blocked", PotionSwapAdvice.ShouldAsk(0, 0, 1).ToString(), "False");
+
+    var belt = new List<string?> { "FIRE_POTION", "BLOCK_POTION", "FIRE_POTION" };
+    Check("swap labels: decline, then the autopilot's discard labels",
+        string.Join("|", PotionSwapAdvice.Labels(belt)), "decline|discard FIRE_POTION|discard BLOCK_POTION|discard FIRE_POTION");
+    string Slot(int i) => PotionSwapAdvice.DiscardSlotOf(i, belt.Count)?.ToString() ?? "decline";
+    Check("swap slot: 0 declines", Slot(0), "decline");
+    Check("swap slot: 1 is belt slot 0", Slot(1), "0");
+    Check("swap slot: last", Slot(3), "2");
+    Check("swap slot: a skip (index = option count) declines", Slot(4), "decline");
+    Check("swap slot: negative declines", Slot(-1), "decline");
+    // Autobattle holds it for the player: a real run-level choice, not a loot click.
+    Check("swap: autobattle stops", Autobattle.IsStop(PotionSwapAdvice.AdviceFor, local: false, inCombat: false).ToString(), "True");
+}
+
+// FrameLaunchRules: the panels' own window (SimFrameLauncher).
+{
+    Check("frame: opens at startup when wanted", FrameLaunchRules.OpenAtStartup(true, false, true, false).ToString(), "True");
+    Check("frame: not off Windows (no note every start)", FrameLaunchRules.OpenAtStartup(true, false, false, false).ToString(), "False");
+    Check("frame: not in a test lane", FrameLaunchRules.OpenAtStartup(true, false, true, true).ToString(), "False");
+    Check("frame: not when the frame launched the game", FrameLaunchRules.OpenAtStartup(true, true, true, false).ToString(), "False");
+    Check("frame: not when unticked", FrameLaunchRules.OpenAtStartup(false, false, true, false).ToString(), "False");
+    Check("frame: bundled page on the control plane", FrameLaunchRules.PageUrl("", 8079), "http://127.0.0.1:8079/frame.html");
+    Check("frame: a second instance's control port", FrameLaunchRules.PageUrl(null, 8089), "http://127.0.0.1:8089/frame.html");
+    Check("frame: configured page wins (trimmed)", FrameLaunchRules.PageUrl(" http://127.0.0.1:5199/frame.html ", 8079), "http://127.0.0.1:5199/frame.html");
+    Check("frame: exe under the mod folder",
+        FrameLaunchRules.ExePath(System.IO.Path.Combine("m", "SpireMentor")),
+        System.IO.Path.Combine("m", "SpireMentor", "SpireMentorFrame", "SpireMentorFrame.exe"));
+    Check("frame: attach args",
+        string.Join("|", FrameLaunchRules.Args(4242, 131072, 50123, "http://127.0.0.1:8079/frame.html", @"C:\Games\Slay the Spire 2")),
+        @"--attach|4242|--port|50123|--url|http://127.0.0.1:8079/frame.html|--attach-hwnd|131072|--game-dir|C:\Games\Slay the Spire 2");
+    Check("frame: no handle, no game dir",
+        string.Join("|", FrameLaunchRules.Args(1, 0, 2, "u", null)), "--attach|1|--port|2|--url|u");
 }
 
 if (OperatingSystem.IsWindows())

@@ -320,6 +320,18 @@ class Terminal:
 
 
 @dataclass
+class CombatTurn:
+    """`combat="yield"`: the run is in combat and the caller plays it.
+
+    The caller applies combat actions to `env.rm` itself (counting each with
+    `env.combat_step()`) until the phase leaves combat or the run is over, then
+    calls `env.resume()`.
+    """
+
+    step_index: int
+
+
+@dataclass
 class PpoRunEnv:
     """One full run, decision-stepped. Construct fresh per episode."""
 
@@ -344,6 +356,14 @@ class PpoRunEnv:
     # under "surrogate" (there is no search to budget).
     combat: str = "mcts"
     surrogate_path: str | None = None
+    # "policy" plays every fight greedy with the combat-PPO net at
+    # `combat_ckpt` (`ppo.combat_ppo.agent.PolicyAgent`, no search). It is
+    # for measuring run-level play with a learned combat player; no champion
+    # has been trained or gated under it.
+    # "yield" returns a `CombatTurn` whenever the run is in combat and lets the
+    # caller play the fight on `rm` (`combat_ppo`'s hybrid run slots, whose
+    # combat actions come from a batched inference server).
+    combat_ckpt: str | None = None
     # GH #545: which Act-1 model this run walks — "overgrowth" (the single
     # act this engine modelled before the Underdocks port), "underdocks", or
     # "roll" (the real game's seed-driven pick, ~50/50).
@@ -472,8 +492,20 @@ class PpoRunEnv:
             self.agent = sts2_rs.MctsCombatAgent(
                 seed=self.seed, sims=self.sims, boss_sims=self.boss_sims
             )
-        if self.combat not in ("mcts", "surrogate"):
-            raise ValueError(f"combat must be 'mcts' or 'surrogate', got {self.combat!r}")
+        if self.combat not in ("mcts", "surrogate", "policy", "yield"):
+            raise ValueError(
+                f"combat must be 'mcts', 'surrogate', 'policy' or 'yield', got {self.combat!r}"
+            )
+        if self.combat == "yield" and self.expert:
+            raise ValueError("combat='yield' is incompatible with expert=True")
+        if self.combat == "policy":
+            if self.expert:
+                raise ValueError("combat='policy' is incompatible with expert=True")
+            if not self.combat_ckpt:
+                raise ValueError("combat='policy' requires combat_ckpt")
+            from ppo.combat_ppo.agent import PolicyAgent
+
+            self.agent = PolicyAgent(self.seed, self.combat_ckpt)
         self._surrogate = None
         if self.combat == "surrogate":
             if self.expert:
@@ -533,7 +565,7 @@ class PpoRunEnv:
         )
         return mixed & 0xFFFF_FFFF_FFFF_FFFF
 
-    def _advance(self, mode: str) -> Decision | Terminal:
+    def _advance(self, mode: str) -> Decision | CombatTurn | Terminal:
         """Run until the next yielded decision or the end of the run.
 
         `mode` is the resolution class recorded for yielded decisions
@@ -571,6 +603,8 @@ class PpoRunEnv:
                 return self._terminal("no_actions")
             actions = self._mask_rejectable(phase, actions)
             if phase == "combat":
+                if self.combat == "yield":
+                    return CombatTurn(step_index=self.steps)
                 if self._surrogate is not None:
                     # One forward pass resolves the whole fight; see
                     # `_outcome_base` for how the survival draw is seeded. The
@@ -655,11 +689,11 @@ class PpoRunEnv:
                 step_index=self.steps,
             )
 
-    def reset(self) -> Decision | Terminal:
+    def reset(self) -> Decision | CombatTurn | Terminal:
         """Advance to the first yielded decision (policy mode)."""
         return self._advance("net")
 
-    def step(self, idx: int) -> Decision | Terminal:
+    def step(self, idx: int) -> Decision | CombatTurn | Terminal:
         """Apply candidate `idx` of the pending decision, advance (policy mode)."""
         if self._pending_actions is None:
             raise RuntimeError("step() without a pending decision — call reset() first")
@@ -680,6 +714,15 @@ class PpoRunEnv:
             # (workers fault-isolate the run as outcome='error').
             raise RuntimeError(f"engine rejected action {actions[idx]!r}: {result}")
         self.steps += 1
+        return self._advance("net")
+
+    def combat_step(self) -> None:
+        """`combat="yield"`: count one combat action the caller applied."""
+        self.steps += 1
+        self.resolution_log.append((self.steps, "combat", None, "combat-caller"))
+
+    def resume(self) -> Decision | CombatTurn | Terminal:
+        """`combat="yield"`: advance past the caller's combat actions."""
         return self._advance("net")
 
     def expert_run(self) -> Iterator[Decision | Terminal]:

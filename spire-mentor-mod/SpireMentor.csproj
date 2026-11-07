@@ -146,6 +146,23 @@
   </Target>
 
   <!--
+    The panels' own window (SimFrameLauncher): copies the Spire Mentor frame's
+    last Release build (../spire-mentor-frame, `dotnet build -c Release` there)
+    into mods/SpireMentor/SpireMentorFrame/. Skipped, with a note, when it has
+    not been built; package.ps1 always builds it.
+  -->
+  <PropertyGroup>
+    <SpireMentorFrameOut>$(MSBuildProjectDirectory)/../spire-mentor-frame/bin/Release/net48/</SpireMentorFrameOut>
+  </PropertyGroup>
+  <Target Name="DeploySpireMentorFrame" AfterTargets="DeploySpireMentor" Condition="Exists('$(STS2_GAME_DIR)') and '$(SpireMentorSkipDeploy)' != 'true'">
+    <ItemGroup>
+      <FrameFiles Include="$(SpireMentorFrameOut)**/*" Exclude="$(SpireMentorFrameOut)**/*.pdb;$(SpireMentorFrameOut)**/*.xml" />
+    </ItemGroup>
+    <Copy Condition="Exists('$(SpireMentorFrameOut)SpireMentorFrame.exe')" SourceFiles="@(FrameFiles)" DestinationFiles="@(FrameFiles->'$(ModsPath)SpireMentor/SpireMentorFrame/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="WarnAndContinue" />
+    <Message Condition="!Exists('$(SpireMentorFrameOut)SpireMentorFrame.exe')" Text="No Spire Mentor frame build at $(SpireMentorFrameOut) (dotnet build -c Release in spire-mentor-frame/): 'Panels in their own window' will say the frame is missing." Importance="high" />
+  </Target>
+
+  <!--
     Prepares what SimAdvisor.cmd's `uv run` needs, so the game never waits on
     it: the sts2-pycli venv and the sts2_rs extension (a release maturin build,
     minutes the first time; see sts2-pycli/pyproject.toml). Same sync `uv run`

@@ -24,6 +24,8 @@
 //   Shift+F7 autobattle (toggle): the AI plays the fights, I make every
 //       run-level decision (Autobattle.cs)
 //   F8  AI on / off in the current style (from Autopilot: stop the AI and take over)
+//   Shift+F8 advisor brain (toggle): Search <-> Instinct (AdvisorBrainRules).
+//       An F-key chord like Shift+F6 / Shift+F7, not Ctrl: streaming drops those.
 //   F9  game speed down to the next whole speed (1x-4x)
 //   F10 game speed up to the next whole speed (1x-4x)
 //   Ctrl+Shift+B report a bug (SimBugReport): B is unbound in the game's
@@ -64,6 +66,7 @@ public static class SimHotkeys
     private const string ActionAiAuto = "spirementor_ai_auto";
     private const string ActionAutobattle = "spirementor_autobattle";
     private const string ActionToggleAdvisor = "spirementor_toggle_advisor";
+    private const string ActionToggleBrain = "spirementor_toggle_brain";
     private const string ActionSpeedDown = "spirementor_speed_down";
     private const string ActionSpeedUp = "spirementor_speed_up";
     private const string ActionUndoTurn = "spirementor_undo_turn";
@@ -73,9 +76,9 @@ public static class SimHotkeys
     private const string ActionPartnerGo = "spirementor_partner_go";
 
     // The workbench's single-key play shortcuts (its ? help: g play the
-    // recommended move, p peek, h hint, f play on), only when the Spire Mentor
-    // frame launched the game: there the workbench and the game sit side by
-    // side and one set of keys should drive both. Free in the game's own key
+    // recommended move, p peek, h hint, f play on), only while the Spire Mentor
+    // frame is attached: there the workbench and the game sit side by side
+    // and one set of keys should drive both, whichever of them has focus. Free in the game's own key
     // map (NInputManager: E S D X A M, digits, arrows, space) -- which is
     // also why the workbench's "a" is not here.
     private const string ActionWbGo = "spirementor_wb_go";
@@ -119,6 +122,7 @@ public static class SimHotkeys
             RegisterAction(ActionAiAuto, Key.F7);
             RegisterAction(ActionAutobattle, Key.F7, shift: true);
             RegisterAction(ActionToggleAdvisor, Key.F8);
+            RegisterAction(ActionToggleBrain, Key.F8, shift: true);
             RegisterAction(ActionSpeedDown, Key.F9);
             RegisterAction(ActionSpeedUp, Key.F10);
             // Ctrl-chorded, not F-keys: Z alone is a card hotkey surface and
@@ -130,18 +134,17 @@ public static class SimHotkeys
             // fields would be a worse trade than a two-modifier chord.
             RegisterAction(ActionCopyState, Key.C, ctrl: true, shift: true);
             RegisterAction(ActionReportBug, Key.B, ctrl: true, shift: true);
-            if (FrameLink.Framed)
-            {
-                RegisterAction(ActionWbGo, Key.G);
-                RegisterAction(ActionWbPeek, Key.P);
-                RegisterAction(ActionWbHint, Key.H);
-                RegisterAction(ActionWbPlayOn, Key.F);
-            }
+            // Always registered, acted on only while a frame is attached
+            // (WithFrame): the mod opens the frame long after startup.
+            RegisterAction(ActionWbGo, Key.G);
+            RegisterAction(ActionWbPeek, Key.P);
+            RegisterAction(ActionWbHint, Key.H);
+            RegisterAction(ActionWbPlayOn, Key.F);
 
             BindActions(manager);
 
             _installed = true;
-            GD.Print("[SpireMentor] Hotkeys installed: F1=help, F4=HUD, Ctrl+L=log, Ctrl+H=hide all, F5=peek (Coach), F6=AI once, Shift+F6=AI partner go, F7=AI auto, Shift+F7=autobattle, F8=AI on/off, F9/F10=speed -/+, Ctrl+Z=undo turn, Ctrl+Shift+Z=restart room, Ctrl+Shift+C=copy state, Ctrl+Shift+B=report a bug");
+            GD.Print("[SpireMentor] Hotkeys installed: F1=help, F4=HUD, Ctrl+L=log, Ctrl+H=hide all, F5=peek (Coach), F6=AI once, Shift+F6=AI partner go, F7=AI auto, Shift+F7=autobattle, F8=AI on/off, Shift+F8=advisor brain, F9/F10=speed -/+, Ctrl+Z=undo turn, Ctrl+Shift+Z=restart room, Ctrl+Shift+C=copy state, Ctrl+Shift+B=report a bug");
         }
         catch (Exception ex)
         {
@@ -194,21 +197,38 @@ public static class SimHotkeys
         });
         manager.PushHotkeyPressedBinding(ActionAutobattle, () =>
             SimActions.ToggleAutobattle("Shift+F7 (autobattle: the AI fights, you decide the run)"));
-        manager.PushHotkeyPressedBinding(ActionToggleAdvisor, SimActions.ToggleAdvisor);
+        // Shift+F8 also presses plain F8 (non-exact modifiers, as above):
+        // switching the brain must not also turn the AI off.
+        manager.PushHotkeyPressedBinding(ActionToggleAdvisor, () =>
+        {
+            if (!Input.IsKeyPressed(Key.Shift))
+            {
+                SimActions.ToggleAdvisor();
+            }
+        });
+        manager.PushHotkeyPressedBinding(ActionToggleBrain, () =>
+            SimActions.ToggleBrain("Shift+F8 (advisor brain)"));
         manager.PushHotkeyPressedBinding(ActionSpeedDown, () => SimActions.StepSpeed(-1));
         manager.PushHotkeyPressedBinding(ActionSpeedUp, () => SimActions.StepSpeed(1));
         manager.PushHotkeyPressedBinding(ActionUndoTurn, SimActions.UndoTurn);
         manager.PushHotkeyPressedBinding(ActionRestartRoom, SimActions.RestartRoom);
         manager.PushHotkeyPressedBinding(ActionCopyState, SimActions.CopyState);
         manager.PushHotkeyPressedBinding(ActionReportBug, SimActions.ReportBug);
+        // Godot matches an action's modifiers non-exactly: Ctrl+F must stay
+        // the game's / the OS's, not "play on".
+        manager.PushHotkeyPressedBinding(ActionWbGo, () => WithFrame(() => SimActions.AiOnce("G (play the recommended move)")));
+        manager.PushHotkeyPressedBinding(ActionWbPeek, () => WithFrame(SimActions.Peek));
+        manager.PushHotkeyPressedBinding(ActionWbHint, () => WithFrame(SimActions.Peek));
+        manager.PushHotkeyPressedBinding(ActionWbPlayOn, () => WithFrame(() => SimActions.ToggleAutoplay("F (the AI plays on until you press F or F7 again)")));
+    }
+
+    /// <summary>A workbench key: only while a frame is attached (checked at
+    /// the press: the frame comes and goes), and only with no modifier held.</summary>
+    private static void WithFrame(Action action)
+    {
         if (FrameLink.Framed)
         {
-            // Godot matches an action's modifiers non-exactly: Ctrl+F must stay
-            // the game's / the OS's, not "play on".
-            manager.PushHotkeyPressedBinding(ActionWbGo, () => Plain(() => SimActions.AiOnce("G (play the recommended move)")));
-            manager.PushHotkeyPressedBinding(ActionWbPeek, () => Plain(SimActions.Peek));
-            manager.PushHotkeyPressedBinding(ActionWbHint, () => Plain(SimActions.Peek));
-            manager.PushHotkeyPressedBinding(ActionWbPlayOn, () => Plain(() => SimActions.ToggleAutoplay("F (the AI plays on until you press F or F7 again)")));
+            Plain(action);
         }
     }
 

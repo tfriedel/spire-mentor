@@ -1,0 +1,29 @@
+[package]
+name = "sts2-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The e2e Ironclad student without Python: env driver (merged classes), tokenizer and policy forward, for the browser workbench and the mod. Parity-gated against ppo.e2e (sts2-pycli)."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+sts2-core = { workspace = true }
+sts2-content = { workspace = true }
+sts2-wire = { workspace = true }
+sts2-mcts = { workspace = true }
+sts2-vocab = { path = "../sts2-vocab" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+smallvec = { workspace = true }
+half = "2.7"
+
+[build-dependencies]
+sts2-srchash = { path = "../sts2-srchash" }
+
+[dev-dependencies]
+flate2 = "1"

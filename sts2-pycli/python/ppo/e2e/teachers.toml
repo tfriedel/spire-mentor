@@ -1,0 +1,43 @@
+# The e2e campaign's pinned teacher pairs (GH #1097, plan D1, PREREG-0): what
+# `ppo.e2e.teachers.load_pair(<name>)` loads, and the sha256 each file must have.
+#
+# Pinned ON PURPOSE: a champion promotion must not move a teacher. This is not a
+# champion manifest (that is `data/ppo/champions.toml`); never resolve a teacher
+# through it. A new pair is a new table here, or `load_pair(combat=..., run=...)`
+# by paths.
+#
+# `root`: "archive" = ~/projects/sts2/bench-archive/2026-11-02-e2e-inputs (the
+# frozen inputs; its SHA256SUMS records the same sha256), "h2h3" =
+# ~/projects/sts2/bench-archive/2026-11-03-combat-ppo-h2-h3 (the final R3, copied
+# read-only on the laptop and the a4000), "repo" = the monorepo root. `path` is relative to the root. Loading a file whose sha256 differs raises
+# `teachers.TeacherMismatch`.
+
+[R2.combat]  # #1081's R2 combat net, ~600.6M decisions
+root = "archive"
+path = "run/it06000.pt"
+sha256 = "cc925b031cf2c137ffece4bbec4953ec689ea9bdf4ed5959123b9bcebd6e3c3a"
+
+[R2.run]  # the Ironclad run champion R2 was measured with (cont300, iteration 1150)
+root = "repo"
+path = "sts2-pycli/data/ppo/ppo_fullrun_ironclad_cont300_it1150.pt"
+sha256 = "de15f4baa13d5b21d9ec60a54364184d4fb58b8861f457cf9ed2e8b4a115e4af"
+
+[R3m.combat]  # the provisional R3: #1081's hybrid lane
+root = "archive"
+path = "hybrid/it02500.pt"
+sha256 = "4e1b49c96c631ff728135488ec61a88cf406dc8c981e155deb0aefa11896eb09"
+
+[R3m.run]
+root = "archive"
+path = "hybrid/run_ckpt_v00375.pt"
+sha256 = "6b7e87363cb0f804856a31910c7fe7d23f6944459099f081763e4ef8e5d6b687"
+
+[R3.combat]  # the final R3 and the teacher (PREREG-0 amendment 2; BASELINES.md): H2's combat net at it04000, 750.5M decisions
+root = "h2h3"
+path = "hybrid/ckpt/it04000.pt"
+sha256 = "feaae90943eb0eb1d0c030301b8288d89be02674466a97b4584ccf0458ee6b2a"
+
+[R3.run]  # the run net H2 saved with it (`at_it04000.src`: a copy of run/acting/v00602.pt)
+root = "h2h3"
+path = "hybrid/run/ckpt/at_it04000.pt"
+sha256 = "7c05b48228b471e604ec16f127a7886f8ca4ca79209a84971c9f63e4e8332417"

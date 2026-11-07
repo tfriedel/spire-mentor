@@ -17,7 +17,9 @@ test("the shell is precached at install and the app loads offline", async ({ pag
     const r = await fetch("/wb-precache.json", { cache: "no-cache" });
     return (await r.json()) as { build: string; files: string[] };
   });
-  expect(precache.files.some((f) => f.endsWith(".wasm"))).toBe(true);
+  // The engine ships gzipped (vite.config.ts), never as a plain .wasm.
+  expect(precache.files.some((f) => /^wb-assets\/sts2_workbench_wasm_bg\.wasm-[\w-]+\.gz$/.test(f))).toBe(true);
+  expect(precache.files.some((f) => f.endsWith(".wasm"))).toBe(false);
   const shell = `wb-shell-${precache.build}`;
 
   await page.evaluate(() => navigator.serviceWorker.ready);

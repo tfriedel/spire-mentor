@@ -21,12 +21,13 @@ What is dropped, and why:
   token builder never reads it), `move_state`, `fabricator_last_spawned`,
   `curse_of_knowledge_counter`, `intent_history` (always empty on the wire)
   and each intent's `modifiers`;
-* relics: `counter` for any relic outside `static_tables.SHOW_COUNTER_RELICS`
-  (the game shows no counter for them). A ShowCounter relic's counter is
-  replaced by the number C# displays (`RELIC_COUNTER_DISPLAY`): the engine's
-  `Relic.counter` is often packed or cumulative (Pocketwatch packs last
-  turn's count into bits 8-15, Pen Nib counts every attack of the fight)
-  where `DisplayAmount` shows `this turn` or `% 10`.
+* relics: `counter` for any relic outside the active game build's
+  `static_tables.show_counter_relics()` (the game shows no counter for them).
+  A ShowCounter relic's counter is replaced by the number C# displays
+  (`RELIC_COUNTER_DISPLAY`, per build in `RELIC_COUNTER_DISPLAY_BY_VERSION`):
+  the engine's `Relic.counter` is often packed or cumulative (Pocketwatch
+  packs last turn's count into bits 8-15, Pen Nib counts every attack of the
+  fight) where `DisplayAmount` shows `this turn` or `% 10`.
 
 The unknown middle of the draw pile, the discard and the exhaust pile become
 canonical multisets (`[[card, count], ...]`); the hand and the pinned draw
@@ -54,7 +55,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from .static_tables import SHOW_COUNTER_RELICS
+from .static_tables import active_version, show_counter_relics
 
 
 def _mod(n: int) -> Callable[[int], int]:
@@ -119,13 +120,30 @@ RELIC_COUNTER_DISPLAY: dict[str, Callable[[int], int | None] | None] = {
     "WINGED_BOOTS": None,
 }
 
+# v0.111.0 (e2e WP1, diffed against the v0.107.1 decomp): Diamond Diadem
+# shows no counter (its ShowCounter override is gone), and Toy Box offers 5
+# wax relics, so it shows CombatsSeen % 3 while CombatsSeen < 3 * 5. Every
+# other ShowCounter relic keeps its DisplayAmount, and the engine's v0.111
+# counters fit the same rules: Pendulum stores TurnsSeen % 3, Pollinous Core
+# resets at 4, Lasting Candy counts card rewards and still shows them % 2.
+RELIC_COUNTER_DISPLAY_V0111: dict[str, Callable[[int], int | None] | None] = {
+    **{k: v for k, v in RELIC_COUNTER_DISPLAY.items() if k != "DIAMOND_DIADEM"},
+    "TOY_BOX": lambda c: c % 3 if c < 15 else None,
+}
+RELIC_COUNTER_DISPLAY_BY_VERSION: dict[str, dict[str, Callable[[int], int | None] | None]] = {
+    "v0.107.1": RELIC_COUNTER_DISPLAY,
+    "v0.111.0": RELIC_COUNTER_DISPLAY_V0111,
+}
 
-def display_counter(relic_id: str, counter: int | None) -> int | None:
+
+def display_counter(relic_id: str, counter: int | None, version: str | None = None) -> int | None:
     """The counter C# shows on `relic_id` given the engine's `Relic.counter`
-    (None = omitted on the wire = 0), or None when no counter is shown."""
-    if relic_id not in SHOW_COUNTER_RELICS:
+    (None = omitted on the wire = 0), or None when no counter is shown. The
+    rules are `version`'s (default: the active game version)."""
+    ver = active_version(version)
+    if relic_id not in show_counter_relics(ver):
         return None
-    rule = RELIC_COUNTER_DISPLAY[relic_id]
+    rule = RELIC_COUNTER_DISPLAY_BY_VERSION[ver][relic_id]
     return None if rule is None else rule(int(counter or 0))
 
 

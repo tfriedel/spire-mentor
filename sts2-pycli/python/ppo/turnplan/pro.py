@@ -351,10 +351,14 @@ def deployed_spec(env: dict[str, str] | None = None) -> dict[str, Any]:
 
 
 def _rm(state: Any, rec: dict[str, Any]) -> Any:
+    import sts2_client
     import sts2_rs
 
     rm = sts2_rs.RunManager(
-        seed=0, character=rec["character"].capitalize(), ascension_level=rec["ascension"] or 0
+        seed=0,
+        character=rec["character"].capitalize(),
+        ascension_level=rec["ascension"] or 0,
+        game_version=sts2_client.GAME_VERSION,
     )
     rm.debug_enter_combat(state.clone(), room_type(rec["encounter"]))
     return rm

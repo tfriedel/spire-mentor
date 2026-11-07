@@ -229,3 +229,14 @@ describe("AutobattlePanel", () => {
     expect(text.indexOf("Matched the champion")).toBeLessThan(text.indexOf("Since your last stop"));
   });
 });
+
+describe("the brain behind the verdict", () => {
+  it("names the e2e student in the verdict head", () => {
+    render(
+      <AutobattleVerdictCard
+        verdict={{ available: true, agreed: true, band: "matched", brain: "e2e", champion_label: "Strike", your_label: "Strike" }}
+      />,
+    );
+    expect(screen.getByText(/Instinct \(one net, no search\)/)).toBeInTheDocument();
+  });
+});

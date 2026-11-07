@@ -57,10 +57,20 @@ declare module "sts2-workbench-wasm" {
     load_ppo(character: string, bytes: Uint8Array): ReplyJson;
     set_ppo_error(character: string, reason: string): void;
     has_ppo(character: string): boolean;
+    /** The e2e student: the `.e2ew` filename to fetch on demand
+     *  (`/e2e/<file>`), the loader over its bytes, why a load was not
+     *  possible, whether it is loaded. */
+    static e2e_file(): string;
+    load_e2e(bytes: Uint8Array): ReplyJson;
+    set_e2e_error(reason: string): void;
+    has_e2e(): boolean;
     free(): void;
   }
 
+  type InitInput = string | URL | Request | Response | BufferSource | WebAssembly.Module;
+  /** wasm-bindgen's init: the single-object form (a bare argument still
+   *  works but logs a deprecation warning). */
   export default function init(
-    input?: string | URL | Request | Response | BufferSource,
+    input?: { module_or_path: InitInput | Promise<InitInput> },
   ): Promise<InitOutput>;
 }

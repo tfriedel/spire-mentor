@@ -40,7 +40,12 @@ internal static class FrameLink
 
     private const int LogBacklog = 300;
 
-    private static readonly int? _port = SimMp.FramePort;
+    // The frame's relay port: from the command line (the frame launched the
+    // game), or set at runtime when the mod started the frame next to the
+    // running game (Attach, SimFrameLauncher). 0 = not framed.
+    private static volatile int _port = SimMp.FramePort ?? 0;
+    // Cancels the current link's connect / read / write loops (Detach).
+    private static CancellationTokenSource _linkCts = new();
     private static readonly ConcurrentQueue<string> _outbox = new();
     private static readonly SemaphoreSlim _outboxSignal = new(0);
     private static readonly object _lock = new();
@@ -55,9 +60,13 @@ internal static class FrameLink
     private static volatile bool _connected;
     private static bool _started;
 
-    /// <summary>True when the game was launched by the frame: the mod feeds
-    /// the frame's panels (in both UI modes, so a switch shows current state).</summary>
-    public static bool Framed => _port != null;
+    /// <summary>True while the game sits in the frame (launched by it, or
+    /// adopted by the frame the mod started): the mod feeds the frame's
+    /// panels (in both UI modes, so a switch shows current state).</summary>
+    public static bool Framed => _port != 0;
+
+    /// <summary>The frame link is up (the frame's relay accepted us).</summary>
+    public static bool Connected => _connected;
 
     private static volatile bool _uiOutside = true;
 
@@ -77,6 +86,13 @@ internal static class FrameLink
         }
         _uiOutside = outside;
         Logger.Log($"[FrameLink] panels {(outside ? "outside the game (frame)" : "inside the game")}");
+        RefreshSurfaces();
+    }
+
+    /// <summary>Re-render the in-game panels for the current UI mode (main
+    /// thread, deferred).</summary>
+    private static void RefreshSurfaces()
+    {
         Callable.From(() =>
         {
             Guard(SimToolbar.Instance.OnFrameUiModeChanged);
@@ -89,6 +105,8 @@ internal static class FrameLink
 
     public static void ToggleUiOutside() => SetUiOutside(!_uiOutside);
 
+    /// <summary>The frame launched the game (<c>--spire-mentor-frame-port</c>):
+    /// connect to it. A no-op otherwise.</summary>
     public static void Start()
     {
         if (!Framed || _started)
@@ -97,7 +115,60 @@ internal static class FrameLink
         }
         _started = true;
         Logger.Log($"[FrameLink] framed mode: connecting to the frame on 127.0.0.1:{_port}");
-        Task.Run(RunAsync);
+        CancellationToken ct = _linkCts.Token;
+        Task.Run(() => RunAsync(_port, ct));
+    }
+
+    /// <summary>The mod started the frame next to the running game
+    /// (SimFrameLauncher): connect to its relay on <paramref name="port"/>
+    /// and move the panels out. False when already framed.</summary>
+    public static bool Attach(int port)
+    {
+        if (Framed || port <= 0)
+        {
+            return false;
+        }
+        _linkCts = new CancellationTokenSource();
+        _uiOutside = true;
+        _port = port;
+        _started = true;
+        Logger.Log($"[FrameLink] frame started by the mod: connecting on 127.0.0.1:{port}");
+        CancellationToken ct = _linkCts.Token;
+        Task.Run(() => RunAsync(port, ct));
+        RefreshSurfaces();
+        return true;
+    }
+
+    /// <summary>Ask a frame the mod started to give the game its window
+    /// back and close (it ignores this when it launched the game). False
+    /// when there is no link to send it on.</summary>
+    public static bool RequestClose()
+    {
+        if (!Framed || !_connected)
+        {
+            return false;
+        }
+        Enqueue(Serialize(new { type = "close_frame" }));
+        return true;
+    }
+
+    /// <summary>The frame is gone (its window closed, the game got its own
+    /// window back): stop the link and draw the panels in-game again.</summary>
+    public static void Detach()
+    {
+        if (!Framed)
+        {
+            return;
+        }
+        _port = 0;
+        _started = false;
+        _connected = false;
+        _linkCts.Cancel();
+        while (_outbox.TryDequeue(out _))
+        {
+        }
+        Logger.Log("[FrameLink] frame closed: panels back in the game");
+        RefreshSurfaces();
     }
 
     // ------------------------------------------------------------------
@@ -326,6 +397,7 @@ internal static class FrameLink
         ["ai_once"] = () => SimActions.AiOnce("The frame's AI-once button"),
         ["ai_auto"] = () => SimActions.ToggleAutoplay("The frame's AI-auto button"),
         ["autobattle"] = () => SimActions.ToggleAutobattle("The frame's Autobattle button"),
+        ["toggle_brain"] = () => SimActions.ToggleBrain("The frame's brain button"),
         ["partner_go"] = () => SimActions.PartnersGo("The frame's Partner go button"),
         ["speed_down"] = () => SimActions.StepSpeed(-1),
         ["speed_up"] = () => SimActions.StepSpeed(1),
@@ -396,35 +468,46 @@ internal static class FrameLink
     // Transport
     // ------------------------------------------------------------------
 
-    private static async Task RunAsync()
+    private static async Task RunAsync(int port, CancellationToken linkCt)
     {
-        while (true)
+        while (!linkCt.IsCancellationRequested)
         {
             try
             {
                 using var client = new TcpClient { NoDelay = true };
-                await client.ConnectAsync("127.0.0.1", _port!.Value).ConfigureAwait(false);
+                await client.ConnectAsync("127.0.0.1", port, linkCt).ConfigureAwait(false);
                 Logger.Log("[FrameLink] connected to the frame");
                 using NetworkStream stream = client.GetStream();
                 _connected = true;
                 SendWelcome();
-                using var cts = new CancellationTokenSource();
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(linkCt);
                 Task reader = ReadLoopAsync(stream, cts.Token);
                 Task writer = WriteLoopAsync(stream, cts.Token);
                 await Task.WhenAny(reader, writer).ConfigureAwait(false);
                 cts.Cancel();
                 Logger.Log("[FrameLink] frame disconnected; retrying");
             }
-            catch (Exception ex) when (ex is SocketException or IOException or ObjectDisposedException)
+            catch (Exception ex) when (ex is SocketException or IOException or ObjectDisposedException or OperationCanceledException)
             {
-                // The frame is not listening yet (or went away): retry quietly.
+                // The frame is not listening yet (or went away, or Detach):
+                // retry quietly while still framed.
             }
             catch (Exception ex)
             {
                 Logger.Log($"[FrameLink] link error: {ex.Message}");
             }
-            _connected = false;
-            await Task.Delay(1000).ConfigureAwait(false);
+            if (_port == port)
+            {
+                _connected = false;
+            }
+            try
+            {
+                await Task.Delay(1000, linkCt).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
     }
 
@@ -540,6 +623,11 @@ internal static class FrameLink
         pick_reason = a.PickReason,
         pick_gap_hp = a.PickGapHp,
         hand_back = a.HandBack,
+        // Which brain answered (PROTOCOL.md section 5, v5.2), and the tag the
+        // in-game panel shows for it ("Instinct" / "Search (Instinct: ...)").
+        brain = a.Brain,
+        instinct_unavailable = a.InstinctUnavailable,
+        source_tag = AdvisorBrainRules.SourceTag(a.Brain, a.InstinctUnavailable),
         options = a.Options.Select(o => new
         {
             label = o.Label,

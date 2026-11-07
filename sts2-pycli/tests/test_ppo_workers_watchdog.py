@@ -55,11 +55,12 @@ def test_worker_books_engine_panic_as_error_row(monkeypatch):
         raise _FakePanic("Shiv: Enemy-targeted")
 
     monkeypatch.setattr(workers, "play_one", _boom)
-    # 14-tuple, positional order per `_worker`'s unpack: seed, policy,
+    # 15-tuple, positional order per `_worker`'s unpack: seed, policy,
     # ascension, character, record_decisions, ckpt_path, sims, boss_sims,
     # combat, surrogate_path, search, act1, sample_seed (PLR; None is the
-    # default), curse_inject_p (GH #977 — last; 0.0 is the default), so this
-    # test still only exercises watchdog behaviour.
+    # default), curse_inject_p (GH #977; 0.0 is the default), combat_ckpt
+    # (last; None is the default), so this test still only exercises
+    # watchdog behaviour.
     row = workers._worker(
         (
             7,
@@ -76,6 +77,7 @@ def test_worker_books_engine_panic_as_error_row(monkeypatch):
             "overgrowth",
             None,
             0.0,
+            None,
         )
     )
     assert row["seed"] == 7
@@ -109,6 +111,7 @@ def test_worker_still_propagates_interrupts(monkeypatch, exc):
                 "overgrowth",
                 None,
                 0.0,
+                None,
             )
         )
 

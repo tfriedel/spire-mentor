@@ -30,7 +30,7 @@ export type HostMessage =
   | { type: "game_rect"; x: number; y: number; w: number; h: number }
   | { type: "to_mod"; msg: unknown }
   | { type: "focus_game" }
-  | { type: "menu"; id: string; x: number; y: number; items: NativeMenuItem[] }
+  | { type: "menu"; id: string; x: number; y: number; left: number; top: number; right: number; items: NativeMenuItem[] }
   | { type: "log"; text: string };
 
 /** A line in the host's frame.log (the page has no visible console there). */
@@ -72,7 +72,9 @@ export function showNativeMenu(anchor: DOMRect, items: NativeMenuItem[], onPick:
   const id = `m${++menuSeq}`;
   pendingMenus.set(id, onPick);
   const dpr = window.devicePixelRatio || 1;
-  postHost({ type: "menu", id, x: anchor.left * dpr, y: anchor.bottom * dpr, items });
+  // x/y place the menu; left/top/right with y give the button, so the host can
+  // tell a second click on it (close) from a click elsewhere.
+  postHost({ type: "menu", id, x: anchor.left * dpr, y: anchor.bottom * dpr, left: anchor.left * dpr, top: anchor.top * dpr, right: anchor.right * dpr, items });
 }
 
 export function postHost(message: HostMessage): void {
@@ -172,7 +174,7 @@ export function hotkeyAction(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKe
     case "F7":
       return e.shiftKey ? "autobattle" : "ai_auto";
     case "F8":
-      return "toggle_advisor";
+      return e.shiftKey ? "toggle_brain" : "toggle_advisor";
     case "F9":
       return "speed_down";
     case "F10":

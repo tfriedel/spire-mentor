@@ -45,7 +45,7 @@ from typing import Any
 import numpy as np
 
 from . import intent_log
-from .static_tables import CARD_TYPE, CARD_TYPES
+from .static_tables import CARD_TYPES, card_types
 
 ARMS = ("S_ctx", "S_ctx_tok", "S_ctxarch_rl2in")
 
@@ -364,7 +364,8 @@ def f16(cont: np.ndarray) -> np.ndarray:
 
 
 def _card_type(card_id: str) -> str:
-    return CARD_TYPE.get(card_id, "?")
+    # The active game build's table (`static_tables.card_types`).
+    return card_types().get(card_id, "?")
 
 
 def card_feats(

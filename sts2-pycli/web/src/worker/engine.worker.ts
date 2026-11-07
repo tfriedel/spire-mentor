@@ -15,8 +15,11 @@
  * nothing is running. A stop request lands within one trial.
  */
 import init, { Workbench } from "sts2-workbench-wasm";
+// The static build resolves this to the gzipped engine (`.wasm.gz`,
+// vite.config.ts); engineResponse inflates it. `vite dev`: the plain wasm.
 import wasmUrl from "sts2-workbench-wasm/sts2_workbench_wasm_bg.wasm?url";
 import { createEngine, type Engine } from "./engineRoutes";
+import { engineResponse } from "./wasmLoad";
 import { openKv } from "./idb";
 import type { RequestMessage, WorkerInbound, WorkerOutbound } from "../transport/protocol";
 
@@ -27,7 +30,7 @@ let engine: Promise<Engine> | null = null;
 let chain: Promise<void> = Promise.resolve();
 
 async function boot(assetsBase: string): Promise<Engine> {
-  await init(wasmUrl);
+  await init({ module_or_path: engineResponse(wasmUrl) });
   const wb = new Workbench(JSON.stringify({ assets_base: assetsBase.replace(/\/$/, "") }));
   return createEngine({
     wb,
@@ -40,6 +43,14 @@ async function boot(assetsBase: string): Promise<Engine> {
     // character per device.
     fetchChampion: async (file) => {
       const res = await fetch(`/ppo/${file}`);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return new Uint8Array(await res.arrayBuffer());
+    },
+    // The e2e student (~21 MB): fetched only when the e2e brain is chosen,
+    // then kept cache-first by the service worker like the champions.
+    e2eFile: Workbench.e2e_file(),
+    fetchE2e: async (file) => {
+      const res = await fetch(`/e2e/${file}`);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return new Uint8Array(await res.arrayBuffer());
     },

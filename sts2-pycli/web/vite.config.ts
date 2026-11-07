@@ -147,6 +147,61 @@ function ppoChampions(): Plugin {
 }
 
 /**
+ * The e2e student's weights (`../data/e2e/*.e2ew`, ~21 MB). Like the
+ * champions: served at `/e2e` in dev / preview and copied to `<outDir>/e2e/`
+ * at build. Unlike them it is fetched ONLY when the e2e brain is chosen —
+ * no index.json, so "Download for offline" never sees it, and it is not
+ * precached; the service worker keeps it cache-first after the first use and
+ * `_headers` serves `/e2e/*` immutable. The public export ships no
+ * `data/e2e`, so a missing directory just builds without the brain's net
+ * (the brain then answers 424 with the fetch's 404).
+ */
+function e2eWeights(): Plugin {
+  const root = path.resolve(here, "../data/e2e");
+  const files = (): string[] =>
+    fs.existsSync(root) ? fs.readdirSync(root).filter((f) => f.endsWith(".e2ew")) : [];
+  let outDir = "dist";
+  const handler = (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+    let rel: string;
+    try {
+      rel = decodeURIComponent(new URL(req.url ?? "/", "http://localhost").pathname);
+    } catch {
+      return next();
+    }
+    const name = rel.replace(/^\/+/, "");
+    if (!files().includes(name)) return next();
+    const file = path.join(root, name);
+    fs.stat(file, (err, st) => {
+      if (err || !st.isFile()) return next();
+      res.setHeader("content-type", "application/octet-stream");
+      res.setHeader("content-length", st.size);
+      res.setHeader("cache-control", "no-cache");
+      if (req.method === "HEAD") return res.end();
+      fs.createReadStream(file).pipe(res);
+    });
+  };
+  return {
+    name: "sts2-e2e-weights",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    configureServer(server) {
+      server.middlewares.use("/e2e", handler);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/e2e", handler);
+    },
+    closeBundle() {
+      const names = files();
+      if (names.length === 0) return;
+      const dest = path.resolve(here, outDir, "e2e");
+      fs.mkdirSync(dest, { recursive: true });
+      for (const name of names) fs.copyFileSync(path.join(root, name), path.join(dest, name));
+    },
+  };
+}
+
+/**
  * Static-build companion of public/sw.js. Two jobs, both at build time:
  *   1. emit `wb-precache.json` (dist root — NOT under .vite/, which a static
  *      host's dot-file ignore would drop) listing every `wb-assets/*` file the
@@ -190,7 +245,7 @@ function swPrecache(buildId: string, assetsBase: string): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   // VITE_* from the shell (the npm scripts set VITE_WORKBENCH_MODE) or a .env.
   const env = { ...loadEnv(mode, here, "VITE_"), ...process.env };
   // Static = the browser-only workbench: /api/* is answered by the Rust engine
@@ -204,6 +259,18 @@ export default defineConfig(({ mode }) => {
   // (Vite resolves `new Worker(new URL(...))` whether or not it ever runs).
   const wasmDir = path.resolve(here, isStatic ? "src/wasm/pkg" : "src/wasm/stub");
   const wasmEntry = path.join(wasmDir, isStatic ? "sts2_workbench_wasm.js" : "sts2_workbench_wasm.ts");
+  // The static BUILD ships the engine gzipped: `just wasm-build` writes
+  // `sts2_workbench_wasm_bg.wasm.gz` next to the wasm, and the worker's
+  // `?url` import of the wasm is pointed at it here, so dist carries only the
+  // .gz (the plain wasm is over Cloudflare Pages' 25 MiB per-file cap;
+  // scripts/workbench_static.py gates dist on it). The worker inflates it
+  // with DecompressionStream (src/worker/wasmLoad.ts). `vite dev` keeps the
+  // plain wasm.
+  const wasmGz = path.join(wasmDir, "sts2_workbench_wasm_bg.wasm.gz");
+  const shipGz = isStatic && command === "build";
+  if (shipGz && !fs.existsSync(wasmGz)) {
+    throw new Error(`${wasmGz} is missing: run \`just wasm-build\` (it writes the gzipped engine the static build ships)`);
+  }
   // What the service worker's shell cache is named after (see swPrecache);
   // `just workbench-static` passes `git describe`, a bare `npm run build` gets "dev".
   const buildId = env.VITE_BUILD_ID || "dev";
@@ -213,10 +280,13 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       ...(isStatic && !env.VITE_ASSETS_BASE ? [artMount()] : []),
-      ...(isStatic ? [ppoChampions(), swPrecache(buildId, assetsBase)] : []),
+      ...(isStatic ? [ppoChampions(), e2eWeights(), swPrecache(buildId, assetsBase)] : []),
     ],
     resolve: {
       alias: [
+        ...(shipGz
+          ? [{ find: /^sts2-workbench-wasm\/sts2_workbench_wasm_bg\.wasm\?url$/, replacement: `${wasmGz}?url` }]
+          : []),
         { find: /^sts2-workbench-wasm\/(.+)$/, replacement: `${wasmDir}/$1` },
         { find: /^sts2-workbench-wasm$/, replacement: wasmEntry },
       ],

@@ -159,4 +159,30 @@ describe("PpoPolicyPanel space controls", () => {
     fireEvent.click(screen.getByRole("button", { name: /collapse the PPO panel/ }));
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
   });
+
+  it("under the e2e advisor it is the e2e net's panel: its classes, no V(s), no backend toggle", async () => {
+    stubFetch(() => ({
+      ...PAYLOAD, policy: "e2e", impl: "e2e", value: null,
+      options: [
+        { action: "select_card_reward", args: { card_index: 1 }, label: "Take Inflame", prob: 0.71, is_best: true },
+        { action: "skip_card_reward", args: {}, label: "Skip", prob: 0.29, is_best: false },
+      ],
+    }));
+    renderPanel(<PpoPolicyPanel live={{ decision: "card_reward", meta: { floor: 2 } }} />);
+    await waitFor(() => expect(screen.getByText("Take Inflame")).toBeInTheDocument());
+    expect(screen.getByText("Instinct")).toBeInTheDocument();
+    expect(screen.getByText("71.0%")).toBeInTheDocument();
+    expect(screen.queryByText("PPO backend")).toBeNull();
+    expect(screen.queryByText(/V\(s\)/)).toBeNull();
+    expect(screen.queryByText("rust")).toBeNull();
+  });
+
+  it("says why the e2e net has no pick", async () => {
+    stubFetch(() => ({
+      ...PAYLOAD, policy: "e2e", impl: "e2e", value: null, ppo_available: false, options: [],
+      error: "Instinct cannot read this position: unencodable action kind",
+    }));
+    renderPanel(<PpoPolicyPanel live={{ decision: "event", meta: { floor: 2 } }} />);
+    await waitFor(() => expect(screen.getByText(/Instinct has no pick here: Instinct cannot read/)).toBeInTheDocument());
+  });
 });

@@ -24,6 +24,14 @@ use crate::statediff::diff_states;
 /// (the arm is bounded by its step cap only).
 pub type Clock<'a> = Option<&'a dyn Fn() -> f64>;
 
+/// The brains `set_run_mode` accepts: `e2e` (the e2e Ironclad student
+/// playing every decision, combat included) only in builds with the `e2e`
+/// feature.
+#[cfg(feature = "e2e")]
+const BRAINS: &[&str] = &["heuristic", "ppo", "e2e"];
+#[cfg(not(feature = "e2e"))]
+const BRAINS: &[&str] = &["heuristic", "ppo"];
+
 /// `"no faithful run; call start_faithful() first"`.
 fn no_faithful_run() -> SessionError {
     SessionError::new(400, "no faithful run; call start_faithful() first")
@@ -40,14 +48,21 @@ impl Session {
     /// The resolved two-axis run mode (`POST /api/live/run-mode`'s reply).
     #[must_use]
     pub fn run_mode_config(&self) -> Value {
-        json!({
+        let mut out = json!({
             "off_combat_brain": self.off_combat_brain,
             "ppo_impl": self.ppo_impl,
             "combat_sims": self.combat_sims,
             "combat_boss_sims": self.combat_boss_sims,
             "combat_threads": self.combat_threads,
             "reward_sims": self.reward_sims,
-        })
+        });
+        // Named only when not the default, so every search-advised reply and
+        // persist keeps its bytes (the golden parity hashes them); a reader
+        // treats absence as `search`.
+        if self.advisor_is_e2e() {
+            out["advisor"] = json!(self.advisor);
+        }
+        out
     }
 
     /// `set_run_mode`: update any subset of the two-axis run mode. 400
@@ -64,10 +79,10 @@ impl Session {
         reward_sims: Option<i64>,
     ) -> Result<(), SessionError> {
         if let Some(b) = off_combat_brain {
-            if b != "heuristic" && b != "ppo" {
+            if !BRAINS.contains(&b) {
                 return Err(SessionError::new(
                     400,
-                    format!("off_combat_brain must be heuristic|ppo, got '{b}'"),
+                    format!("off_combat_brain must be {}, got '{b}'", BRAINS.join("|")),
                 ));
             }
             self.off_combat_brain = b.to_string();
@@ -149,10 +164,15 @@ impl Session {
         self.seed = seed.to_string();
         self.ascension = ascension;
         self.act1 = "overgrowth".to_string();
-        let raw = self
-            .spawn_game()
-            .start_faithful(character, seed, ascension)
-            .map_err(|e| SessionError::new(400, e.0))?;
+        let raw = if self.e2e_setup {
+            // The e2e student's training run (`Game::start_e2e`).
+            self.act1 = "roll".to_string();
+            self.start_e2e_raw(seed, ascension)?
+        } else {
+            self.spawn_game()
+                .start_faithful(character, seed, ascension)
+                .map_err(|e| SessionError::new(400, e.0))?
+        };
         let state = self.map_state(raw);
         let label = format!("Started {character} (seed {seed}, A{ascension}, {off_combat_brain})");
         let root = self.add_node(None, state.clone(), None, json!({}), label, vec![], vec![]);
@@ -162,7 +182,26 @@ impl Session {
         self.autobattle_autoplayed = 0;
         self.agent = Some(RunAgent::new(seed, combat_sims, combat_boss_sims));
         self.faithful_steps = 0;
+        #[cfg(feature = "e2e")]
+        if self.is_e2e_brain() {
+            self.e2e_seed_root();
+        }
         Ok(state)
+    }
+
+    /// `Game::start_e2e` on a fresh game (400 in a build without `e2e`).
+    fn start_e2e_raw(&mut self, seed: i32, ascension: u8) -> Result<Value, SessionError> {
+        #[cfg(feature = "e2e")]
+        {
+            self.spawn_game()
+                .start_e2e(seed, ascension)
+                .map_err(|e| SessionError::new(400, e.0))
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            let _ = (seed, ascension);
+            Err(SessionError::new(400, "this build has no e2e feature"))
+        }
     }
 
     /// `_apply_native`: replay one recorded native-agent action, appending
@@ -187,8 +226,13 @@ impl Session {
             }
         };
         let marks = self.mark_display_logs();
-        let ra = match rmx::action_from_value(args) {
-            Ok(a) => a,
+        if self.game.as_ref().and_then(|g| g.native_run()).is_none() {
+            return Err(SessionError::new(400, "no live run"));
+        }
+        #[cfg(feature = "e2e")]
+        let e2e_pre = self.e2e_pre_external();
+        let result = match self.require_game()?.take_native_value(args) {
+            Ok(r) => r,
             Err(e) => {
                 let state = self.state()?;
                 return Ok(ApplyResult {
@@ -198,13 +242,6 @@ impl Session {
                     details: Vec::new(),
                 });
             }
-        };
-        let result = {
-            let game = self.require_game()?;
-            if game.native_run().is_none() {
-                return Err(SessionError::new(400, "no live run"));
-            }
-            rmx::result_str(&game.take_native(ra))
         };
         if result != "advanced" && result != "run_over" {
             let state = self.state()?;
@@ -236,6 +273,8 @@ impl Session {
             combat_rows,
         );
         self.active_id = Some(node);
+        #[cfg(feature = "e2e")]
+        self.e2e_post_external(e2e_pre, node);
         Ok(ApplyResult {
             state,
             error: None,
@@ -375,6 +414,12 @@ impl Session {
     /// `_brain_recommend`: the `ppo` brain's off-combat pick, degrading to
     /// the heuristic when the net can't decide.
     fn brain_recommend(&mut self) -> Option<Value> {
+        #[cfg(feature = "e2e")]
+        if self.is_e2e_brain() {
+            if let Some(ev) = self.e2e_evaluate() {
+                return Some(ev.pick);
+            }
+        }
         self.ppo_recommend().or_else(|| self.heuristic_recommend())
     }
 
@@ -394,6 +439,10 @@ impl Session {
             // the session's budget so autoplay works on ANY live run.
             let seed = runmode::hash_seed(&self.seed);
             self.agent = Some(RunAgent::new(seed, self.combat_sims, self.combat_boss_sims));
+        }
+        #[cfg(feature = "e2e")]
+        if self.e2e_drives() {
+            return self.e2e_step();
         }
         if self.off_combat_brain == "heuristic" || self.native_phase_is_combat() {
             return self.agent_step();
@@ -570,6 +619,25 @@ impl Session {
     /// node, with a display label and the option probabilities.
     fn capture_champion_pick(&mut self) -> Option<Value> {
         let node_id = self.active_id?;
+        #[cfg(feature = "e2e")]
+        if self.e2e_drives() {
+            if let Some(ev) = self.e2e_evaluate() {
+                let options: Vec<Value> = ev
+                    .options
+                    .iter()
+                    .map(|o| {
+                        json!({"action": o["action"], "args": o["args"], "label": o["label"], "prob": o["prob"]})
+                    })
+                    .collect();
+                return Some(json!({
+                    "node_id": node_id,
+                    "action": ev.pick["action"],
+                    "args": ev.pick["args"],
+                    "label": ev.pick["label"],
+                    "options": options,
+                }));
+            }
+        }
         let rec = self.brain_recommend()?;
         let named = resolve_state_names(Some(&self.nodes[&node_id].state), self.loc);
         let action = rec["action"].as_str().unwrap_or("").to_string();
@@ -666,7 +734,7 @@ impl Session {
             "your_prob": your_prob,
             "champion_label": pending["label"],
             "your_label": your_label,
-            "brain": self.off_combat_brain,
+            "brain": if self.e2e_drives() { "e2e" } else { self.off_combat_brain.as_str() },
         }))
     }
 
@@ -724,6 +792,13 @@ impl Session {
     /// heuristic answered for it) or the heuristic.
     pub fn recommended_action(&mut self) -> Option<Value> {
         self.active_id?;
+        // The e2e student answers every decision, combat included.
+        #[cfg(feature = "e2e")]
+        if self.is_e2e_brain() {
+            if let Some(ev) = self.e2e_evaluate() {
+                return Some(ev.pick);
+            }
+        }
         if let Some(rec) = self.combat_choice_recommend() {
             return Some(rec);
         }
@@ -745,6 +820,17 @@ impl Session {
     /// the map overlay's route so the pencil line continues the move that
     /// will happen instead of the heuristic planner's own opinion.
     pub(crate) fn driving_first_col(&mut self, state: Option<&Value>) -> Option<i32> {
+        // Under the e2e advisor the student seeds the route — but only where
+        // the active node IS the live position (`map`); a new node's state is
+        // re-seeded once it is active (`e2e_reseed_map`).
+        #[cfg(feature = "e2e")]
+        if self.advisor_is_e2e() && !self.is_e2e_brain() {
+            return if state.is_none() {
+                self.e2e_map_col()
+            } else {
+                None
+            };
+        }
         if self.off_combat_brain != "ppo" {
             return None;
         }

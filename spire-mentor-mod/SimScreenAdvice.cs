@@ -1792,6 +1792,17 @@ internal static class SimScreenAdvice
     private static SimScreenDecision? DescribeRewards(NRewardsScreen screen)
     {
         List<NRewardButton> buttons = ClaimableRewards(screen);
+        // Everything claimable is taken: a potion the full belt blocks is the
+        // one real question left on this screen -- for an advisor that can
+        // answer it (PotionSwapAdvice). Otherwise, as before, proceed past it.
+        if (buttons.Count == 0)
+        {
+            SimScreenDecision? swap = DescribePotionSwap(screen);
+            if (swap != null)
+            {
+                return swap;
+            }
+        }
         NProceedButton? proceed = UiHelper.FindFirst<NProceedButton>(screen);
         if (buttons.Count == 0 && (proceed == null || !proceed.IsEnabled))
         {
@@ -1830,6 +1841,144 @@ internal static class SimScreenAdvice
             LocalAdvice = advice,
             Choose = index => ChooseReward(screen, index),
         };
+    }
+
+    /// <summary>
+    /// The first full-belt potion reward still on the loot screen, as a
+    /// <c>potion_swap</c> decision (v5.2, PotionSwapAdvice): option 0 leaves
+    /// it, option k+1 discards belt slot k and claims it -- the option objects
+    /// of the autopilot's group on <c>reward_screen</c> (GH #1069), reindexed
+    /// from 0. Null when the advisor does not advertise
+    /// <c>capabilities.potion_swap</c>, or no such potion is left.
+    /// </summary>
+    private static SimScreenDecision? DescribePotionSwap(NRewardsScreen screen)
+    {
+        int capability = SimAdvisor.AdvisorPotionSwapCapability;
+        RunState? runState = RunManager.Instance.DebugOnlyGetState();
+        Player? me = LocalContext.GetMe(runState);
+        if (me == null)
+        {
+            return null;
+        }
+        List<NRewardButton> blocked = FullBeltPotionRewards(screen, me);
+        if (!PotionSwapAdvice.ShouldAsk(0, blocked.Count, capability))
+        {
+            return null;
+        }
+        NRewardButton button = blocked[0];
+        List<string?> belt = me.PotionSlots.Select(p => p?.Id.Entry).ToList();
+        List<string> labels = PotionSwapAdvice.Labels(belt);
+        object? reward = button.Reward is PotionReward { Potion: not null } pr
+            ? SimStateExtractor.SerializePotionSlot(pr.Potion, -1)
+            : null;
+        string description = "";
+        try
+        {
+            description = button.Reward?.Description.GetFormattedText() ?? "";
+        }
+        catch (Exception)
+        {
+            // Display only.
+        }
+        var options = new List<Dictionary<string, object?>>();
+        for (int i = 0; i < labels.Count; i++)
+        {
+            options.Add(new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = RewardLabel(button),
+                ["action"] = NonCombatBridgeProtocol.PotionSwapAction,
+                ["label"] = labels[i],
+                ["description"] = description,
+                ["enabled"] = true,
+                ["reward"] = reward,
+                // One group per request: the first blocked reward on screen.
+                ["reward_button"] = 0,
+                ["discard_slot"] = PotionSwapAdvice.DiscardSlotOf(i, belt.Count),
+            });
+        }
+        var state = new Dictionary<string, object>
+        {
+            [NonCombatBridgeProtocol.TypeField] = PotionSwapAdvice.AdviceFor,
+            ["options"] = options,
+        };
+        SimStateExtractor.ApplyEnvelope(state, runState, me);
+        return new SimScreenDecision
+        {
+            AdviceFor = PotionSwapAdvice.AdviceFor,
+            State = state,
+            OptionCount = labels.Count,
+            OptionLabels = labels,
+            Screen = screen,
+            ScreenName = nameof(NRewardsScreen) + " (potion swap)",
+            // The reward and the belt: a discard by hand, or the next blocked
+            // potion, is a new question on the same node.
+            Signature = $"potion_swap:{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(button.Reward)}:" +
+                        string.Join(",", belt),
+            Choose = index => ChoosePotionSwap(screen, button, index, belt.Count),
+        };
+    }
+
+    /// <summary>Full-belt potion rewards still on the screen that we have not
+    /// declined (SimPotionRules.BlockedOnlyByFullBelt: Sozu-refused ones stay
+    /// hidden, no discard helps there).</summary>
+    private static List<NRewardButton> FullBeltPotionRewards(NRewardsScreen screen, Player me) =>
+        UiHelper.FindAll<NRewardButton>(screen)
+            .Where(b => GodotObject.IsInstanceValid(b) && b.IsEnabled)
+            .Where(b => b.Reward is PotionReward pr && SimPotionRules.BlockedOnlyByFullBelt(me, pr.Potion))
+            .Where(b => !DeclinedSwapRewards.Contains(b.Reward!))
+            .ToList();
+
+    /// <summary>
+    /// Potion rewards whose swap was declined: left on the screen and never
+    /// asked again there, as the autopilot's decline does. Without it the
+    /// loot screen would re-ask the same question forever instead of
+    /// proceeding. Reference identity, never cleared (rewards are built fresh
+    /// per screen, as for SkippedCardRewards).
+    /// </summary>
+    private static readonly HashSet<object> DeclinedSwapRewards = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Execute option <paramref name="index"/> of a potion_swap decision: a
+    /// decline is remembered (the next describe moves on to proceed or the
+    /// next blocked potion); a discard frees that belt slot with the game's
+    /// own discard (PotionCmd.Discard, the potion popup's) and then claims the
+    /// reward into it, as the autopilot's SimRewardsScreenHandler does.
+    /// </summary>
+    private static bool ChoosePotionSwap(NRewardsScreen screen, NRewardButton button, int index, int beltCount)
+    {
+        if (!GodotObject.IsInstanceValid(screen) || !GodotObject.IsInstanceValid(button) || !button.IsEnabled)
+        {
+            return false;
+        }
+        int? slot = PotionSwapAdvice.DiscardSlotOf(index, beltCount);
+        if (slot == null)
+        {
+            if (button.Reward != null)
+            {
+                DeclinedSwapRewards.Add(button.Reward);
+            }
+            Logger.Log("[SimScreenAdvice] Potion swap: leaving the potion reward (belt full).");
+            return true;
+        }
+        Player? me = LocalContext.GetMe(RunManager.Instance.DebugOnlyGetState());
+        if (me == null)
+        {
+            return false;
+        }
+        int discard = slot.Value;
+        TaskHelper.RunSafely(SwapAsync(me, button, discard));
+        return true;
+    }
+
+    private static async System.Threading.Tasks.Task SwapAsync(Player me, NRewardButton button, int slot)
+    {
+        Logger.Log($"[SimScreenAdvice] Potion swap: discarding belt slot {slot} to take the reward.");
+        await SimCombatHandler.DiscardPotionAndWaitAsync(me, slot, CancellationToken.None);
+        if (GodotObject.IsInstanceValid(button) && button.IsEnabled)
+        {
+            await UiHelper.Click(button);
+        }
     }
 
     /// <summary>

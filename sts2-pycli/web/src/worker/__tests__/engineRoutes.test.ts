@@ -645,3 +645,135 @@ describe("engine routes — SimLab sweeps (GH #707)", () => {
     expect(e.hasRunningSweep()).toBe(false);
   });
 });
+
+/** The e2e student on top of the double: the brain answers 424 until the
+ *  net is loaded. */
+class E2eWorkbench extends FakeWorkbench {
+  e2e = 0;
+  e2eError: string | null = null;
+  call(method: string, route: string, body_json: string): string {
+    if (
+      ((route === "/api/live/run-mode-step" && this.live?.e2e) || route === "/api/live/e2e-advice")
+      && !this.e2e
+    ) {
+      this.calls.push(`${method} ${route} ${body_json}`);
+      return reply(424, { detail: `no e2e net loaded: ${this.e2eError ?? "not fetched"}` });
+    }
+    const r = super.call(method, route, body_json);
+    if (route === "/api/live/start-faithful" && JSON.parse(body_json).e2e) this.live = { ...this.live, e2e: true };
+    return r;
+  }
+  load_e2e(bytes: Uint8Array): string {
+    if (bytes.length === 0) return reply(400, { detail: "not a weights file" });
+    this.e2e = bytes.length;
+    this.e2eError = null;
+    return reply(200, { ok: true });
+  }
+  set_e2e_error(reason: string): void {
+    this.e2eError = reason;
+  }
+  has_e2e(): boolean {
+    return this.e2e > 0;
+  }
+}
+
+function setupE2e(fetchE2e: (file: string) => Promise<Uint8Array>) {
+  const wb = new E2eWorkbench();
+  const kv = memoryKv();
+  const engine = createEngine({ wb, kv, saveHeader, e2eFile: "student.e2ew", fetchE2e });
+  return { wb, kv, engine };
+}
+
+describe("engine routes — the e2e student, fetched on demand", () => {
+  it("fetches nothing until a call selects the e2e brain", async () => {
+    const fetchE2e = vi.fn(async () => new Uint8Array([1, 2]));
+    const { wb, engine } = setupE2e(fetchE2e);
+    await engine.handle("POST", "/api/live/start-faithful", { seed: "run_1" });
+    await engine.handle("POST", "/api/live/run-mode", { off_combat_brain: "ppo" });
+    await engine.handle("POST", "/api/live/run-mode-step", {});
+    expect(fetchE2e).not.toHaveBeenCalled();
+    await engine.handle("POST", "/api/live/run-mode", { off_combat_brain: "e2e" });
+    expect(fetchE2e).toHaveBeenCalledWith("student.e2ew");
+    expect(wb.has_e2e()).toBe(true);
+    // Loaded once.
+    await engine.handle("POST", "/api/e2e/selfplay", { seed: 1 });
+    await engine.handle("POST", "/api/live/start-faithful", { e2e: true, seed: "run_2" });
+    expect(fetchE2e).toHaveBeenCalledTimes(1);
+    expect(wb.calls.some((c) => c.startsWith("POST /api/e2e/selfplay"))).toBe(true);
+  });
+
+  it("choosing the e2e advisor, or asking for its advice, fetches the net first", async () => {
+    const fetchE2e = vi.fn(async () => new Uint8Array([5]));
+    const { wb, engine } = setupE2e(fetchE2e);
+    await engine.handle("POST", "/api/live/start", { character: "Ironclad", seed: "X" });
+    await engine.handle("POST", "/api/live/run-mode", { advisor: "search" });
+    expect(fetchE2e).not.toHaveBeenCalled();
+    await engine.handle("POST", "/api/live/run-mode", { advisor: "e2e" });
+    expect(fetchE2e).toHaveBeenCalledTimes(1);
+    expect(wb.has_e2e()).toBe(true);
+
+    // The host's preference does NOT: the page re-posts it at every boot.
+    const pref = setupE2e(fetchE2e);
+    await pref.engine.handle("POST", "/api/advisor", { advisor: "e2e" });
+    expect(fetchE2e).toHaveBeenCalledTimes(1);
+
+    const fresh = setupE2e(fetchE2e);
+    await fresh.engine.handle("POST", "/api/live/start", { character: "Ironclad", seed: "X" });
+    await fresh.engine.handle("POST", "/api/live/e2e-advice", {});
+    expect(fetchE2e).toHaveBeenCalledTimes(2);
+    expect(fresh.wb.calls.some((c) => c.startsWith("POST /api/live/e2e-advice"))).toBe(true);
+  });
+
+  it("an e2e run with no net yet (a resumed one) fetches on the 424 and retries once", async () => {
+    const fetchE2e = vi.fn(async () => new Uint8Array([7]));
+    const { wb, kv, engine } = setupE2e(fetchE2e);
+    await kv.put("live", LIVE_KEY, JSON.stringify({ steps: 2, character: "Ironclad", e2e: true }));
+    await engine.handle("GET", "/api/live/state");
+    expect(fetchE2e).not.toHaveBeenCalled();
+    const r = await engine.handle("POST", "/api/live/run-mode-step", {});
+    expect(r.status).toBe(200);
+    expect(fetchE2e).toHaveBeenCalledTimes(1);
+    expect(wb.calls.filter((c) => c.startsWith("POST /api/live/run-mode-step")).length).toBe(2);
+  });
+
+  it("a call that already tried the fetch does not fetch again on its 424", async () => {
+    const fetchE2e = vi.fn(async (): Promise<Uint8Array> => {
+      throw new Error("404 Not Found");
+    });
+    const { engine } = setupE2e(fetchE2e);
+    await engine.handle("POST", "/api/live/start", { character: "Ironclad", seed: "X" });
+    const r = await engine.handle("POST", "/api/live/e2e-advice", {});
+    expect(r.status).toBe(424);
+    expect(fetchE2e).toHaveBeenCalledTimes(1);
+  });
+
+  it("the advisor preference persists the live run, and only a live one", async () => {
+    const { wb, kv, engine } = setupE2e(vi.fn(async () => new Uint8Array([1])));
+    await kv.put("live", LIVE_KEY, JSON.stringify({ steps: 2, character: "Ironclad" }));
+    // No live run yet (a lazy resume is pending): the stored run stays.
+    await engine.handle("POST", "/api/advisor", { advisor: "search" });
+    expect(await kv.get("live", LIVE_KEY)).not.toBeNull();
+    await engine.handle("POST", "/api/live/start", { character: "Ironclad", seed: "X" });
+    const before = wb.calls.length;
+    await engine.handle("POST", "/api/advisor", { advisor: "search" });
+    expect(wb.calls.length).toBeGreaterThan(before);
+    expect(await kv.get("live", LIVE_KEY)).toBe(wb.export_persist());
+  });
+
+  it("a failed fetch is recorded, the 424 passes through, and the next call tries again", async () => {
+    let fail = true;
+    const fetchE2e = vi.fn(async () => {
+      if (fail) throw new Error("404 Not Found");
+      return new Uint8Array([3]);
+    });
+    const { wb, engine } = setupE2e(fetchE2e);
+    await engine.handle("POST", "/api/live/start-faithful", { e2e: true, seed: "run_1" });
+    expect(wb.e2eError).toMatch(/fetch of \/e2e\/student.e2ew failed: Error: 404 Not Found/);
+    const r = await engine.handle("POST", "/api/live/run-mode-step", {});
+    expect(r.status).toBe(424);
+    expect((r.body as { detail: string }).detail).toMatch(/404 Not Found/);
+    fail = false;
+    expect((await engine.handle("POST", "/api/live/run-mode-step", {})).status).toBe(200);
+    expect(fetchE2e).toHaveBeenCalledTimes(3);
+  });
+});

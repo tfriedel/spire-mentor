@@ -26,7 +26,6 @@ use crate::localization::{resolve_name, resolve_state_names, Loc};
 use crate::playlog::format_play_log;
 use crate::ppo::{self, Net};
 use crate::render::{describe_action, NATIVE_ACTION};
-use crate::rmx;
 use crate::runmode::RunAgent;
 use crate::statediff::diff_states;
 
@@ -50,6 +49,12 @@ pub const ALLOWED_ACTIONS: &[&str] = &[
     "leave_room",
     "proceed",
 ];
+
+/// The default advisor of a hand-played run: the combat MCTS + the run
+/// PPO / heuristic ([`Session::advisor`]).
+pub const ADVISOR_SEARCH: &str = "search";
+/// The e2e Ironclad student as the advisor (`session_e2e.rs`).
+pub const ADVISOR_E2E: &str = "e2e";
 
 /// Combat-log kinds kept in a node's tape for the VFX stream only
 /// (`_VFX_ONLY_LOG_KINDS`).
@@ -177,6 +182,17 @@ pub struct Session {
     /// integer-seed run that `seek` / a restore must rebuild through
     /// `start_faithful` (`_run_mode`).
     pub(crate) run_mode_run: bool,
+    /// True iff this run-mode run was built as the e2e student's training run
+    /// (`Game::start_e2e`: Ironclad v0.111.0, act 1 rolled, potion swap on).
+    /// Part of the run's identity: `seek`, a restore and a save rebuild
+    /// through that constructor.
+    pub(crate) e2e_setup: bool,
+    /// The e2e brain's net and per-node student state (`session_e2e.rs`).
+    #[cfg(feature = "e2e")]
+    pub(crate) e2e: crate::session_e2e::E2eSlot,
+    /// A millisecond clock for the e2e brain's per-decision timing
+    /// (`performance.now()` in the browser); `None` = the crate's fallback.
+    pub(crate) perf_clock: Option<fn() -> f64>,
     /// The native combat-MCTS agent (`_faithful_agent`); built by
     /// `start_run_mode`, or lazily by the first `run_mode_step` on a
     /// hand-played run.
@@ -185,6 +201,11 @@ pub struct Session {
     pub(crate) faithful_steps: u64,
     // Two-axis run mode: who resolves off-combat decisions × combat budget.
     pub off_combat_brain: String,
+    /// Who advises a hand-played move (`hint`, `auto-action`, the policy
+    /// panel, the choice ranker, the choice coach, the map route): `search`
+    /// (the combat MCTS + the run PPO / heuristic, the default) or `e2e`
+    /// (the e2e Ironclad student, `session_e2e.rs`).
+    pub advisor: String,
     pub ppo_impl: String,
     pub combat_sims: u32,
     pub combat_boss_sims: u32,
@@ -236,9 +257,14 @@ impl Session {
             active_id: None,
             loc,
             run_mode_run: false,
+            e2e_setup: false,
+            #[cfg(feature = "e2e")]
+            e2e: crate::session_e2e::E2eSlot::default(),
+            perf_clock: None,
             agent: None,
             faithful_steps: 0,
             off_combat_brain: "ppo".to_string(),
+            advisor: ADVISOR_SEARCH.to_string(),
             ppo_impl: "rust".to_string(),
             // Benchmark (1000 / 4000) — the SPA's default preset, the offline
             // win-rate sweep's budget and `RunAgent`'s own default. It used to
@@ -305,6 +331,53 @@ impl Session {
     #[must_use]
     pub fn run_mode(&self) -> bool {
         self.run_mode_run
+    }
+
+    /// Whether the e2e student advises this run's hand-played moves.
+    #[must_use]
+    pub fn advisor_is_e2e(&self) -> bool {
+        self.advisor == ADVISOR_E2E
+    }
+
+    /// Pick who advises: [`ADVISOR_SEARCH`] or [`ADVISOR_E2E`]. 400 for an
+    /// unknown name, a build without the e2e feature, or a run the student
+    /// cannot read (it plays Ironclad on v0.111.0 only).
+    pub fn set_advisor(&mut self, advisor: &str) -> Result<(), SessionError> {
+        match advisor {
+            ADVISOR_SEARCH => {}
+            ADVISOR_E2E if !cfg!(feature = "e2e") => {
+                return Err(SessionError::new(400, "this build has no e2e feature"));
+            }
+            ADVISOR_E2E => {
+                #[cfg(feature = "e2e")]
+                self.e2e_check_run()?;
+            }
+            other => {
+                return Err(SessionError::new(
+                    400,
+                    format!("advisor must be {ADVISOR_SEARCH}|{ADVISOR_E2E}, got '{other}'"),
+                ));
+            }
+        }
+        self.advisor = advisor.to_string();
+        Ok(())
+    }
+
+    /// Whether this run was built as the e2e student's training run.
+    #[must_use]
+    pub fn e2e_setup(&self) -> bool {
+        self.e2e_setup
+    }
+
+    /// Mark the run identity as the e2e start (set before `start_run_mode` /
+    /// a restore, which then build through `Game::start_e2e`).
+    pub fn set_e2e_setup(&mut self, on: bool) {
+        self.e2e_setup = on;
+    }
+
+    /// The clock the e2e brain times its decisions with.
+    pub fn set_perf_clock(&mut self, clock: Option<fn() -> f64>) {
+        self.perf_clock = clock;
     }
 
     /// The live `Game`, if a run is active.
@@ -520,6 +593,17 @@ impl Session {
         self.loc
     }
 
+    /// `map_state` for a state about to become the active node's, which
+    /// `e2e_reseed_map` finishes: under the e2e advisor that builds the map
+    /// on the student's column, so building it here too would be wasted.
+    fn map_state_live(&mut self, state: Value) -> Value {
+        #[cfg(feature = "e2e")]
+        if self.advisor_is_e2e() && !self.is_e2e_brain() {
+            return state;
+        }
+        self.map_state(state)
+    }
+
     /// `_attach_full_map`: at a `map_select` decision, attach the connected
     /// graph under `state["full_map"]` (best-effort), its route seeded on
     /// the driving brain.
@@ -634,6 +718,8 @@ impl Session {
             Some(&json!({"cmd": "action", "action": action, "args": args})),
         );
         let marks = self.mark_display_logs();
+        #[cfg(feature = "e2e")]
+        let e2e_pre = self.e2e_pre_external();
         let resp = self.require_game()?.act(action, args);
         let resp = match resp {
             Ok(v) => v,
@@ -656,7 +742,7 @@ impl Session {
         let resp_named = resolve_state_names(Some(&resp), self.loc);
         let mut details = play_lines;
         details.extend(diff_states(&parent_named, &resp_named));
-        let state = self.map_state(resp);
+        let state = self.map_state_live(resp);
         let node = self.add_node(
             Some(parent_id),
             state.clone(),
@@ -667,6 +753,14 @@ impl Session {
             combat_rows,
         );
         self.active_id = Some(node);
+        #[cfg(feature = "e2e")]
+        self.e2e_post_external(e2e_pre, node);
+        #[cfg(feature = "e2e")]
+        let state = {
+            let mut state = state;
+            self.e2e_reseed_map(&mut state);
+            state
+        };
         Ok(ApplyResult {
             state,
             error: None,
@@ -706,8 +800,14 @@ impl Session {
         }
         self.active_id = Some(node_id);
         let state = match last_resp {
-            Some(v) => self.map_state(v),
+            Some(v) => self.map_state_live(v),
             None => self.nodes[&path[0]].state.clone(),
+        };
+        #[cfg(feature = "e2e")]
+        let state = {
+            let mut state = state;
+            self.e2e_reseed_map(&mut state);
+            state
         };
         self.nodes.get_mut(&node_id).expect("node").state = state.clone();
         Ok(state)
@@ -720,13 +820,12 @@ impl Session {
     fn replay_node(&mut self, id: u64, action: &str, args: &Value) -> Result<Value, SessionError> {
         let game = self.require_game()?;
         if action == NATIVE_ACTION {
-            let ra = rmx::action_from_value(args).map_err(|e| {
-                SessionError::new(409, format!("replay diverged at node {id}: {e}"))
-            })?;
             if game.native_run().is_none() {
                 return Err(SessionError::new(409, "no native run"));
             }
-            let result = rmx::result_str(&game.take_native(ra));
+            let result = game.take_native_value(args).map_err(|e| {
+                SessionError::new(409, format!("replay diverged at node {id}: {e}"))
+            })?;
             if result != "advanced" && result != "run_over" {
                 return Err(SessionError::new(
                     409,
@@ -742,8 +841,9 @@ impl Session {
     }
 
     /// `seek`'s constructor dispatch: a run-mode run is rebuilt through the
-    /// faithful (integer-seed) constructor, an interactive one through
-    /// `start` — the two hash the seed differently.
+    /// faithful (integer-seed) constructor — or the e2e one for an e2e
+    /// start — an interactive one through `start` — the two hash the seed
+    /// differently.
     fn rebuild_game(
         &mut self,
         character: &str,
@@ -751,11 +851,45 @@ impl Session {
         ascension: u8,
         act1: &str,
     ) -> Result<(), SessionError> {
-        if let Some(snapshot) = self.imported.clone() {
+        let mut game = self.spawn_game_detached();
+        self.start_identity(&mut game, character, seed, ascension, act1)?;
+        self.game = Some(game);
+        Ok(())
+    }
+
+    /// A fresh driver opted into both display logs, not installed.
+    fn spawn_game_detached(&self) -> Game {
+        let mut game = Game::new();
+        game.game_version = self.game_version;
+        game.set_record_card_plays(true);
+        game.set_record_combat_log(true);
+        game
+    }
+
+    /// The run as this session constructed it, in a NEW game without display
+    /// logs (the e2e brain's shadow replay).
+    #[cfg(feature = "e2e")]
+    pub(crate) fn construct_game(&self) -> Result<Game, SessionError> {
+        let mut game = Game::new();
+        game.game_version = self.game_version;
+        let (character, seed, act1) =
+            (self.character.clone(), self.seed.clone(), self.act1.clone());
+        self.start_identity(&mut game, &character, &seed, self.ascension, &act1)?;
+        Ok(game)
+    }
+
+    fn start_identity(
+        &self,
+        game: &mut Game,
+        character: &str,
+        seed: &str,
+        ascension: u8,
+        act1: &str,
+    ) -> Result<(), SessionError> {
+        if let Some(snapshot) = self.imported.as_ref() {
             // An imported run is grafted, not seed-derived: rebuild it the same
             // way it was first constructed, or the deck / cursors diverge.
-            self.spawn_game()
-                .start_imported(&snapshot)
+            game.start_imported(snapshot)
                 .map_err(|e| SessionError::new(409, e.0))?;
         } else if self.run_mode_run {
             let seed_int = seed.parse::<i32>().map_err(|_| {
@@ -764,12 +898,14 @@ impl Session {
                     format!("run-mode run carries a non-numeric seed {seed:?}; cannot rebuild it"),
                 )
             })?;
-            self.spawn_game()
-                .start_faithful(character, seed_int, ascension)
-                .map_err(|e| SessionError::new(409, e.0))?;
+            if self.e2e_setup {
+                start_e2e_game(game, seed_int, ascension)?;
+            } else {
+                game.start_faithful(character, seed_int, ascension)
+                    .map_err(|e| SessionError::new(409, e.0))?;
+            }
         } else {
-            self.spawn_game()
-                .start(character, seed, ascension, act1)
+            game.start(character, seed, ascension, act1)
                 .map_err(|e| SessionError::new(409, e.0))?;
         }
         Ok(())
@@ -781,7 +917,13 @@ impl Session {
             .require_game()?
             .get_state()
             .map_err(|e| SessionError::new(400, e.0))?;
-        let state = self.map_state(raw);
+        let state = self.map_state_live(raw);
+        #[cfg(feature = "e2e")]
+        let state = {
+            let mut state = state;
+            self.e2e_reseed_map(&mut state);
+            state
+        };
         let id = self.active()?.id;
         self.nodes.get_mut(&id).expect("node").state = state.clone();
         Ok(state)
@@ -943,8 +1085,9 @@ impl Session {
             // Benchmark, matching `Session::new`'s defaults — a restored
             // run-mode line must not resume at a fifth of the budget it was
             // recorded at just because the restore path hard-coded Quick.
+            let brain = if self.e2e_setup { "e2e" } else { "ppo" };
             self.start_run_mode(
-                character, seed_int, ascension, "ppo", "rust", 1000, 4000, 1, None,
+                character, seed_int, ascension, brain, "rust", 1000, 4000, 1, None,
             )?
         } else {
             self.start(character, seed, ascension, act1)?
@@ -1058,6 +1201,10 @@ impl Session {
         if !self.game_version.is_default() {
             out["game_version"] = json!(self.game_version.as_str());
         }
+        // Named only for an e2e start (every other persist keeps its bytes).
+        if self.e2e_setup {
+            out["e2e_setup"] = json!(true);
+        }
         out
     }
 
@@ -1111,6 +1258,11 @@ impl Session {
             .get("run_mode")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        self.e2e_setup = run_mode
+            && payload
+                .get("e2e_setup")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
         // Re-create every node cold, in id order, so ids and parents match the
         // persisted tree. Node 0 is the root `start` creates.
         let mut order: Vec<&Value> = nodes.iter().collect();
@@ -1215,6 +1367,16 @@ impl Session {
             }
         }
         self.restore_values = None;
+        // The advisor rides the run-mode config of every run (absent = search);
+        // a run the student cannot read falls back to search.
+        if let Some(a) = payload
+            .pointer("/run_mode_config/advisor")
+            .and_then(Value::as_str)
+        {
+            if self.set_advisor(a).is_err() {
+                self.advisor = ADVISOR_SEARCH.to_string();
+            }
+        }
         self.faithful_steps = payload
             .get("faithful_steps")
             .and_then(Value::as_u64)
@@ -1305,4 +1467,21 @@ pub fn line_entry(action: &str, args: Value) -> Value {
     m.insert("action".into(), json!(action));
     m.insert("args".into(), args);
     Value::Object(m)
+}
+
+/// [`Game::start_e2e`], or a 409 when this build has no e2e feature.
+fn start_e2e_game(game: &mut Game, seed: i32, ascension: u8) -> Result<Value, SessionError> {
+    #[cfg(feature = "e2e")]
+    {
+        game.start_e2e(seed, ascension)
+            .map_err(|e| SessionError::new(409, e.0))
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        let _ = (game, seed, ascension);
+        Err(SessionError::new(
+            409,
+            "this build has no e2e feature; cannot build an e2e run",
+        ))
+    }
 }

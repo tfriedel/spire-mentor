@@ -371,7 +371,12 @@ class TestCoachCapability:
         client, _ = self._serve(_request())
         reply = client.sent[0]
         assert reply["action"] == "advice"
-        assert reply["capabilities"] == {"coach": 2}
+        caps = reply["capabilities"]
+        assert caps["coach"] == 2
+        # v5.2: the potion-swap lane, and what Instinct plays (empty without
+        # its net -- the public export ships none).
+        assert caps["potion_swap"] == 1
+        assert isinstance(caps["instinct"], list)
 
     def test_combat_ended_routes_to_coach(self) -> None:
         msgs = iter([{"type": "combat_ended", "victory": True, "hp": 60, "round": 4}])

@@ -74,6 +74,7 @@ pub mod allocator;
 // removed is the artifact and the code that applied it, not the mechanism.
 
 pub mod combat_surrogate;
+pub mod e2e;
 pub mod heuristic_agent;
 pub mod mcts_combat_agent;
 pub mod ppo_agent;
@@ -3629,6 +3630,7 @@ fn src_hash() -> String {
         sts2_wire::SRC_HASH,
         sts2_cli::SRC_HASH,
         sts2_vocab::SRC_HASH,
+        sts2_e2e::SRC_HASH,
         env!("STS2_WORKSPACE_HASH"),
     ])
 }
@@ -4598,6 +4600,12 @@ pub fn sts2_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // The `OnnxPolicy.distribution` twin: same contract, `tract` instead of
     // `onnxruntime`, so the advisor bundle needs neither it nor `numpy`.
     m.add_class::<crate::ppo_policy::PyPpoNetPolicy>()?;
+    // Instinct, the e2e Ironclad student, for the mod's advisor.
+    m.add_class::<crate::e2e::PyE2eStudent>()?;
+    m.add_class::<crate::e2e::PyE2eDriver>()?;
+    m.add_class::<crate::e2e::PyE2ePeek>()?;
+    m.add_function(wrap_pyfunction!(crate::e2e::e2e_new_run, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::e2e::e2e_selfplay, m)?)?;
     m.add(
         "PpoBudgetExceeded",
         py.get_type::<ppo_policy::PpoBudgetExceeded>(),

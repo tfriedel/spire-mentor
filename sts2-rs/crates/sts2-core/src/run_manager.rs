@@ -1249,12 +1249,25 @@ impl RunManager {
                 .current_act_map
                 .as_ref()
                 .ok_or_else(|| format!("act {act}'s map could not be generated"))?;
-            let idx = *map.grid.get(&coord).ok_or_else(|| {
-                format!(
-                    "({}, {}) is not a live node on act {act}'s map",
-                    coord.col, coord.row
-                )
-            })?;
+            // The start, boss and A10 second-boss points sit outside the room
+            // grid (`ActMap.boss` / `second_boss`), and a boss fight is a
+            // position the live game can be in.
+            let idx = map
+                .grid
+                .get(&coord)
+                .copied()
+                .or_else(|| {
+                    [map.start, map.boss, map.second_boss]
+                        .into_iter()
+                        .flatten()
+                        .find(|&i| map.point(i).coord == coord)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "({}, {}) is not a live node on act {act}'s map",
+                        coord.col, coord.row
+                    )
+                })?;
             map.point(idx).point_type
         };
         self.run_state.visited_map_coords = visited;
@@ -1294,6 +1307,254 @@ impl RunManager {
         }
         self.combat = Some(combat);
         self.phase = Phase::Combat;
+    }
+
+    // -----------------------------------------------------------------------
+    // Graft setters: park a rebuilt run AT a decision the live game shows.
+    //
+    // Every one is a reconstruction surface like `debug_place_on_map` /
+    // `debug_open_shop`: never call it on a recorded or parity-pinned run.
+    // None of them reads an RNG stream or fires an on-obtain / room-entered
+    // hook — the live game already did that work, and the cursors restored
+    // from its snapshot already count it.
+    // -----------------------------------------------------------------------
+
+    /// Replace the master deck with `deck` verbatim — no `after_obtained`,
+    /// no `ModifyCardBeingAddedToDeck`, no deck-add listeners. The cards are
+    /// the caller's: build them for the run's game version
+    /// ([`crate::build_card_for_version`]) and stamp their enchantments first.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_set_master_deck(&mut self, deck: Vec<crate::cards::Card>) {
+        self.run_state.master_deck = deck;
+    }
+
+    /// Set the current room's [`crate::runstate::RoomType`], keeping its map
+    /// coordinate and point type (a coord-less room is created when the run
+    /// stands in none). The reward chain reads it: a card reward after a `?`
+    /// node's fight must know the fight was a Monster / Elite room.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_set_room_type(&mut self, room_type: crate::runstate::RoomType) {
+        self.run_state.current_room = Some(match self.run_state.current_room {
+            Some(mut room) => {
+                room.room_type = room_type;
+                room
+            }
+            None => crate::runstate::Room::new(room_type),
+        });
+    }
+
+    /// Open [`Phase::CardReward`] offering `cards` (each built with its
+    /// upgrade flag and enchantment, which the pick keeps).
+    ///
+    /// `choose_screen` marks a run-effect choose-a-card screen (C#
+    /// `FromChooseACardScreen`, `card_offer_choose_screen()`), `can_skip`
+    /// whether the offer may be skipped (a forced grid offers neither the skip
+    /// nor Pael's Wing's sacrifice). With `bundles` the offering is a Scroll
+    /// Boxes pack pick instead (pick one pack, every card of it is added, no
+    /// skip) and `cards` is ignored.
+    ///
+    /// Any open offer, choose-screen tail (HeftyTablet's Injury) and
+    /// "return to the event / shop / rest site" marker is dropped, so the pick
+    /// settles to the map like a plain combat reward; a queued relic reward
+    /// is kept.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_open_card_offer(
+        &mut self,
+        cards: &[crate::cards::Card],
+        can_skip: bool,
+        choose_screen: bool,
+        bundles: Option<Vec<Vec<crate::cards::CardId>>>,
+    ) {
+        self.pending_choose_screen_post_add.clear();
+        self.resume_event_after_rewards = false;
+        self.resume_shop_after_rewards = None;
+        self.resume_rest_site_after_rewards = false;
+        if let Some(bundles) = bundles {
+            self.card_reward_options = bundles.iter().filter_map(|b| b.first().copied()).collect();
+            self.card_reward_upgraded.clear();
+            self.card_reward_enchantments.clear();
+            self.card_reward_bundles = Some(bundles);
+            self.card_offer_choose_screen = false;
+            self.card_offer_can_skip = true;
+        } else {
+            self.card_reward_options = cards.iter().map(|c| c.card_id).collect();
+            self.card_reward_upgraded = cards.iter().map(|c| c.upgraded).collect();
+            self.card_reward_enchantments = cards.iter().map(|c| c.enchantments).collect();
+            self.card_reward_bundles = None;
+            self.card_offer_choose_screen = choose_screen;
+            self.card_offer_can_skip = can_skip;
+        }
+        self.phase = Phase::CardReward;
+    }
+
+    /// Stand in an Event room bound to `event_id` at its first page, phase
+    /// [`Phase::Event`] — the state real room entry leaves behind.
+    ///
+    /// The room keeps its map coordinate (its type becomes Event); any live
+    /// combat and any bound event are dropped. `begin` binds the event: pass
+    /// `sts2_content::events::dispatch::begin_event_in_entered_room` (which
+    /// also runs FakeMerchant's `BeforeEventStarted`), or
+    /// [`RunState::bind_event`] where content is not wired. The event's own
+    /// RNG is derived from the run seed and the event id, so page 0
+    /// reproduces; later pages are reached by replaying
+    /// [`RunAction::EventChoice`] from here.
+    ///
+    /// Does NOT advance the act's `events_visited` cursor (this is not a pool
+    /// draw) and fires no `AfterRoomEntered`. Every run-level RNG stream is
+    /// restored after `begin`: binding re-runs entry work the live game
+    /// already did (a Combat-layout event's `Rng.Niche` HP rolls), and the
+    /// snapshot's cursors already count it. A FakeMerchant inventory rolled
+    /// here therefore reads the post-roll cursor and need not match the game's.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_enter_event(
+        &mut self,
+        event_id: crate::events::EventId,
+        begin: impl FnOnce(&mut RunState, crate::events::EventId),
+    ) {
+        self.debug_set_room_type(crate::runstate::RoomType::Event);
+        let _ = self.run_state.exit_event_room();
+        self.run_state.event_combat = None;
+        let rng = self.run_state.rng.clone();
+        begin(&mut self.run_state, event_id);
+        self.run_state.rng = rng;
+        self.combat = None;
+        self.phase = Phase::Event;
+    }
+
+    /// Stand at a rest site ([`Phase::RestSite`]) and return the options it
+    /// offers, in [`RunAction::RestOption`] index order. `taken` are options
+    /// already used this visit (a `MiniatureTent` second pick), which the
+    /// offer then omits and which also make leaving legal.
+    ///
+    /// The room keeps its map coordinate (its type becomes RestSite); any open
+    /// Smith pick and any live combat are dropped. Smith then works through
+    /// `take_action(RestOption)` → `SmithCard` as on a real visit.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_enter_rest_site(
+        &mut self,
+        taken: Vec<crate::runstate::RestSiteOption>,
+    ) -> Vec<crate::runstate::RestSiteOption> {
+        self.debug_set_room_type(crate::runstate::RoomType::RestSite);
+        self.run_state.pending_choice = None;
+        self.run_state.rest_site_taken = taken;
+        self.resume_rest_site_after_rewards = false;
+        self.combat = None;
+        self.enter_rest_site()
+    }
+
+    /// Queue `n` interactive deck removals (Precise Scissors, Empty Cage,
+    /// an event's "remove a card"): `RemoveDeckCard` picks preempt the phase.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_queue_deck_removals(&mut self, n: u32) {
+        self.run_state.pending_deck_removals += n;
+    }
+
+    /// Queue `n` interactive deck upgrades (Pomander, an event's "upgrade a
+    /// card"): `UpgradeDeckCard` picks over the upgradable subset.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_queue_deck_upgrades(&mut self, n: u32) {
+        self.run_state.pending_deck_upgrades += n;
+    }
+
+    /// Queue `n` interactive deck transforms of the NewLeaf shape: the
+    /// replacement is rolled off `Rng.Niche` AFTER the pick, as in C#
+    /// (`TransformToRandom`), so no roll happens here. `basic_only`
+    /// restricts the pool to Basic-rarity cards (Wood Carvings' select), but
+    /// its fixed replacement (Peck / Toric Toughness) is not modelled — the
+    /// pick choice is what this surface reproduces.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_queue_deck_transforms(&mut self, n: u32, basic_only: bool) {
+        for _ in 0..n {
+            self.run_state
+                .pending_deck_transforms
+                .push(crate::runstate::PendingDeckTransform {
+                    basic_only,
+                    ..Default::default()
+                });
+        }
+    }
+
+    /// Queue `n` interactive deck enchants stamping `amount` of
+    /// `enchantment`, optionally restricted to one card type (Self-Help Book).
+    /// `optional` marks an "up to N" screen (Kifuda / Gnarled Hammer).
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_queue_deck_enchants(
+        &mut self,
+        n: u32,
+        enchantment: crate::cards::EnchantmentId,
+        amount: i32,
+        optional: bool,
+        type_restriction: Option<crate::cards::CardType>,
+    ) {
+        for _ in 0..n {
+            self.run_state
+                .pending_deck_enchants
+                .push(crate::runstate::PendingDeckEnchant {
+                    enchantment,
+                    amount,
+                    type_restriction,
+                    secondary_type: None,
+                    optional,
+                });
+        }
+    }
+
+    /// Queue a multi-pick card grant (Room Full of Cheese's Gorge, Sea Glass):
+    /// pick up to `pick` of `options`, at least `min_pick` of them.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_queue_card_grant(
+        &mut self,
+        options: Vec<crate::cards::Card>,
+        pick: usize,
+        min_pick: usize,
+    ) {
+        self.run_state
+            .pending_card_grants
+            .push(crate::runstate::PendingCardGrant {
+                options,
+                pick,
+                min_pick: min_pick.min(pick),
+            });
+    }
+
+    /// Queue a full-belt potion reward of `kind`: the `PotionSwap` decision
+    /// (decline first, then one per belt slot) preempts the phase. Surfaced
+    /// only on a run with `interactive_potion_swap` set.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_queue_potion_swap(&mut self, kind: crate::potions::PotionKind) {
+        self.run_state.pending_potion_swaps.push(kind);
+    }
+
+    /// Open [`Phase::BossRelic`] offering `relics` — the post-boss relic pick,
+    /// which is also how this engine models the Act 2/3 Ancient's choice.
+    ///
+    /// The player is taken as already healed (the Ancient heals on entry,
+    /// before its options; the live HP includes it), so the Ancient's
+    /// `BeforeEventStarted` heal, its option setup (DustyTome's `Rewards`
+    /// read) and its `AfterRoomEntered` (MawBank) are all skipped. The pick
+    /// itself runs the real path: the act advances first iff the run stands
+    /// in a Boss room below act 3 (a graft of the previous act's boss node);
+    /// a run already placed on the NEW act's map keeps its act, gains the
+    /// relic (with its on-obtain effect) and returns to the map.
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_open_boss_relic(&mut self, relics: Vec<crate::RelicId>) {
+        self.boss_relic_options = relics;
+        self.ancient_heal_done = true;
+        self.pending_boss_act_advance = false;
+        self.combat = None;
+        self.phase = Phase::BossRelic;
     }
 
     /// Actions legal in the current phase. Empty `Vec` when the run

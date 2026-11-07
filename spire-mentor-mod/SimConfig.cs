@@ -228,6 +228,19 @@ public sealed class SimConfig
     /// </summary>
     public int RunTimeoutMinutes { get; init; } = 360;
 
+    /// <summary>
+    /// The advisor brain for this session, <c>"search"</c> or
+    /// <c>"instinct"</c> (PROTOCOL.md section 5, v5.2); null = absent, the
+    /// player's own setting applies. Precedence: when present it overrides
+    /// the BaseLib preference (SpireMentorModConfig.AdvisorBrain) for the
+    /// whole session WITHOUT being saved over it, until a player switches
+    /// brain in game (toolbar, Shift+F8, settings) -- that explicit choice
+    /// then wins and persists as usual. This is how an unattended climb picks
+    /// Instinct (tools/ascension_climb.py --advisor-brain). Any other value is
+    /// ignored with a log line (AdvisorBrainRules.ParseConf), never guessed.
+    /// </summary>
+    public string? AdvisorBrain { get; init; } = null;
+
     public static readonly SimConfig Instance = ApplyCommandLine(Load());
 
     /// <summary>
@@ -341,6 +354,7 @@ public sealed class SimConfig
                 ThinkFps = ReadInt(root, "think_fps", defaults.ThinkFps),
                 RunTimeoutMinutes = ReadInt(
                     root, "run_timeout_minutes", defaults.RunTimeoutMinutes),
+                AdvisorBrain = ReadAdvisorBrain(root),
             };
         }
         catch (Exception ex)
@@ -373,6 +387,22 @@ public sealed class SimConfig
         {
             GD.Print($"[SpireMentor] No config found at {configPath}; using built-in defaults ({ex.Message})");
         }
+    }
+
+    /// <summary>`advisor_brain`, or null when absent / null / not a brain.</summary>
+    private static string? ReadAdvisorBrain(JsonElement root)
+    {
+        string? raw = ReadNullableString(root, "advisor_brain", null);
+        string? brain = AdvisorBrainRules.ParseConf(raw);
+        if (brain == null && !string.IsNullOrWhiteSpace(raw))
+        {
+            GD.PrintErr($"[SpireMentor] advisor_brain \"{raw}\" is not \"search\" or \"instinct\"; ignored (the player's setting applies).");
+        }
+        else if (brain != null)
+        {
+            GD.Print($"[SpireMentor] advisor_brain \"{brain}\" from the conf overrides the player's setting for this session.");
+        }
+        return brain;
     }
 
     private static int ReadInt(JsonElement root, string name, int fallback) =>

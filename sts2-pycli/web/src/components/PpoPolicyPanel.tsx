@@ -72,6 +72,9 @@ export default function PpoPolicyPanel({
     setPayload(await api.live.ppoPolicy().catch(() => null));
   }
   if (inactive || !payload) return null;
+  // The e2e advisor answers this panel too: its classes, no V(s), no backend.
+  const e2e = payload.policy === "e2e";
+  const who = e2e ? "Instinct" : "PPO";
   // Folded, the header still carries the one line the panel exists to say —
   // the net's pick — so collapsing costs reach, not the answer.
   const best = payload.options.find((o) => o.is_best);
@@ -98,7 +101,7 @@ export default function PpoPolicyPanel({
       {!collapsed && (
         <PanelGrip
           grow="up"
-          label="drag to resize the PPO panel"
+          label={`drag to resize the ${who} panel`}
           min={MIN_H}
           max={MAX_H}
           measure={() => bodyRef.current?.offsetHeight ?? height}
@@ -109,8 +112,11 @@ export default function PpoPolicyPanel({
         gap: 8, padding: collapsed ? "6px 8px" : "2px 8px 6px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
           <CollapseButton collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)}
-            label="the PPO panel" />
-          <span style={{ color: "var(--muted)", flex: "0 0 auto" }}>PPO backend</span>
+            label={`the ${who} panel`} />
+          <span style={{ color: "var(--muted)", flex: "0 0 auto" }}
+            title={e2e ? "Instinct's probabilities over this decision's options — a policy's, not win chances" : undefined}>
+            {e2e ? "Instinct" : "PPO backend"}
+          </span>
           {collapsed && best && (
             <span title={best.label} style={{ minWidth: 0, overflow: "hidden",
               textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -125,7 +131,7 @@ export default function PpoPolicyPanel({
         <div style={{ display: "flex", gap: 6, flex: "0 0 auto" }}>
           {/* The browser build has one backend (tract in the worker); the
               toggle would only relabel it. */}
-          {!isStaticMode() && (
+          {!isStaticMode() && !e2e && (
             <button onClick={toggleImpl} title="PPO inference backend">
               {impl}
             </button>
@@ -141,7 +147,7 @@ export default function PpoPolicyPanel({
           padding: "0 8px 8px" }}>
           {!payload.ppo_available && (
             <div style={{ color: "var(--muted)" }}>
-              PPO net unavailable{payload.error ? `: ${payload.error}` : ""}
+              {who} {e2e ? "has no pick here" : "net unavailable"}{payload.error ? `: ${payload.error}` : ""}
             </div>
           )}
           {payload.ppo_available && (

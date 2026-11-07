@@ -1,6 +1,7 @@
 import { Fragment, type CSSProperties } from "react";
 import { UNRESOLVED_TOP2_Q_GAP, type Enemy, type Score, type StepAdvice } from "../api";
 import { enemyLabeller } from "../enemyLabels";
+import { isE2eScores } from "../advisor";
 
 // q ∈ [-1,1] → red (loss) ⟶ amber ⟶ green (win). Matches the search-tree view.
 function qColor(q: number): string {
@@ -72,6 +73,9 @@ export default function Reasoning({ scores, pv, advice, enemies, heading = true 
   // is the move alone with zero visits. There is no Q, share or W/L/T to show,
   // and a "+0.00" would read as an even fight.
   const unsearched = scores.length > 0 && totalVisits === 0;
+  // The e2e advisor's rows: one per merged class, its softmax probability —
+  // no Q, no visits, no rollouts to show.
+  const e2e = isE2eScores(scores);
 
   // Is the top row actually separated from the runner-up? Sort by Q here
   // rather than trusting row order: rows arrive sorted by win_prob, which is
@@ -79,7 +83,7 @@ export default function Reasoning({ scores, pv, advice, enemies, heading = true 
   // carries no information in exactly the positions this check exists for.
   const byQ = scores.map((s) => s.q).sort((a, b) => b - a);
   const top2Gap = byQ.length > 1 ? byQ[0] - byQ[1] : Infinity;
-  const unresolved = scores.length > 1 && top2Gap < UNRESOLVED_TOP2_Q_GAP;
+  const unresolved = !e2e && scores.length > 1 && top2Gap < UNRESOLVED_TOP2_Q_GAP;
 
   // The engine's own tie band (GH #1022): the moves it cannot tell from its
   // pick, and the rule's reason for the ★. Read off the rows, never a
@@ -144,8 +148,33 @@ export default function Reasoning({ scores, pv, advice, enemies, heading = true 
         </div>
       )}
       {advice?.note && <div className="mono" style={{ fontSize: 10, color: "var(--muted)", marginTop: 7 }}>{advice.note}</div>}
+      {e2e && (
+        <div className="mono" data-testid="e2e-rows" style={{ ...ADVICE_GRID, fontSize: 11 }}>
+          {scores.map((s) => {
+            const pct = (s.prob ?? 0) * 100;
+            const label = `${s.is_best ? "★ " : ""}${rowLabel(s)}`;
+            const tip = `${rowLabel(s)} — Instinct gives this move ${pct.toFixed(1)}% `
+              + "(a policy probability, not a win chance)";
+            return (
+              <Fragment key={`${s.stable_idx}:${s.target_index}`}>
+                <span title={tip} style={{ ...LABEL_CELL, fontWeight: s.is_best ? 700 : 400 }}>{label}</span>
+                <span title={tip} style={{ width: 40, height: 7, background: "var(--hp-track)",
+                  borderRadius: 4, overflow: "hidden" }}>
+                  <span style={{ display: "block", height: "100%", width: `${pct}%`, background: "var(--accent-strong)" }} />
+                </span>
+                <span title={tip} style={NUM_CELL}>{pct.toFixed(1)}%</span>
+              </Fragment>
+            );
+          })}
+        </div>
+      )}
+      {e2e && (
+        <div className="mono" style={{ fontSize: 10, color: "var(--muted)", marginTop: 7 }}>
+          Instinct · one forward, no search · policy probabilities, not win chances
+        </div>
+      )}
       <div className="mono" style={{ ...SCORE_GRID, fontSize: 11 }}>
-        {scores.map((s) => {
+        {!e2e && scores.map((s) => {
           const share = totalVisits > 0 ? Math.round((s.visits / totalVisits) * 100) : 0;
           const label = rowLabel(s);
           if (unsearched) {

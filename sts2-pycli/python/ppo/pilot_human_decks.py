@@ -853,6 +853,7 @@ def _resolution(search: dict[str, Any], rule: str) -> float:
 
 def play_fight(job: tuple[Any, ...]) -> dict[str, Any]:
     fight, reps, tags, seed, pilot, arms_sel = job
+    import sts2_client
     import sts2_rs
 
     # `pilot`: (sims, boss_sims, clairvoyant, escalate). Clairvoyance is read
@@ -883,11 +884,13 @@ def play_fight(job: tuple[Any, ...]) -> dict[str, Any]:
                     fight["encounter"],
                     ascension=int(fight["ascension"]),
                     potions=fight["potions"][:3],
+                    game_version=sts2_client.GAME_VERSION,
                 )
                 rm = sts2_rs.RunManager(
                     seed=s,
                     character=fight_character(fight),
                     ascension_level=int(fight["ascension"]),
+                    game_version=sts2_client.GAME_VERSION,
                 )
                 rm.debug_enter_combat(state, fight["room_type"])
                 # Display-side log only: search never sees it (`MctsTree::new`

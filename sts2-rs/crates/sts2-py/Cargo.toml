@@ -90,6 +90,9 @@ sts2-runai = { workspace = true }
 # Linked through sts2-runai / sts2-wire anyway; named here only so `src_hash()`
 # can fold in its `SRC_HASH`.
 sts2-vocab = { workspace = true }
+# Instinct: the e2e Ironclad student (env driver, tokenizer, forward) for the
+# mod's advisor (`src/e2e.rs`, `realgame_instinct.py`). Plain Rust, no ML crate.
+sts2-e2e = { path = "../sts2-e2e" }
 pyo3 = { version = "0.24", features = ["abi3-py311"] }
 # `pythonize` 0.24 matches the pyo3 0.24 minor — required for converting
 # the `serde_json::Value` returned by `sts2_core::parity::combat_state_to_bridge_state`

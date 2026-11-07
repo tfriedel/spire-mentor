@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type CSSProperties } from "react";
-import { assetUrl } from "../api";
+import { assetUrl, type Advisor } from "../api";
+import { e2eAdvisable } from "../advisor";
 import { characterKey } from "../characters";
 import { ASCENSION_LEVELS, ascensionLevel, ascensionModifiers } from "../ascension";
 import { canonicalizeSeed, generateSeed } from "../seed";
@@ -14,7 +15,10 @@ export const CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinde
 
 const ENGINE_LABELS: Record<string, string> = { rust: "Rust", csharp: "C#" };
 
-export type OffCombatBrain = "heuristic" | "ppo";
+export type OffCombatBrain = "heuristic" | "ppo" | "e2e";
+
+/** The e2e student plays only the run it was trained on. */
+export { E2E_CHARACTER, E2E_GAME_VERSION } from "../advisor";
 
 /**
  * The start screen: pick a character, seed and ascension, then choose HOW the
@@ -38,7 +42,8 @@ export default function RunLauncher({
   backend, onBackend, backends,
   gameVersion = DEFAULT_GAME_VERSION, onGameVersion, gameVersions = [],
   onPlay, onWatch, busy, error,
-  offCombatBrain, onOffCombatBrain,
+  offCombatBrain, onOffCombatBrain, e2eAvailable = false,
+  advisor = "search", onAdvisor,
   combat,
 }: {
   character: string;
@@ -68,6 +73,12 @@ export default function RunLauncher({
   error: string | null;
   offCombatBrain: OffCombatBrain;
   onOffCombatBrain: (b: OffCombatBrain) => void;
+  /** The engine has the e2e student brain (`features.e2e`). */
+  e2eAvailable?: boolean;
+  /** Who advises the hand-played run ("Play yourself"). The picker shows
+   *  only where the e2e student can advise (Ironclad, v0.111.0, Rust). */
+  advisor?: Advisor;
+  onAdvisor?: (a: Advisor) => void;
   combat: {
     preset: CombatPreset;
     monsterSims: number;
@@ -213,6 +224,21 @@ export default function RunLauncher({
             <p className="gs-launch-actiondesc" id={`${ids}-play`}>
               You make every decision — map, cards, fights, shops. AI hints stay off unless you switch them on.
             </p>
+            {onAdvisor && e2eAdvisable(e2eAvailable, character, gameVersion, backend) && (
+              <div className="gs-launch-knobs">
+                <label title={"Who the AI hints, the policy panel, the choice coach and \"play best\" ask. "
+                  + "Search: the combat MCTS in fights, the PPO run policy elsewhere. "
+                  + "Instinct: one transformer, no search — for every decision "
+                  + "(its ~21 MB net downloads the first time you pick it)."}>
+                  advisor{" "}
+                  <select aria-label="advisor" value={advisor} disabled={busy}
+                    onChange={(e) => onAdvisor(e.target.value as Advisor)}>
+                    <option value="search">Search (MCTS + PPO)</option>
+                    <option value="e2e">Instinct (PPO only)</option>
+                  </select>
+                </label>
+              </div>
+            )}
             <button type="button" className="gs-runend-btn gs-runend-btn--primary gs-launch-go"
               onClick={onPlay} disabled={busy} aria-describedby={`${ids}-play`}>
               <span className="gs-runend-btnface">Play yourself</span>
@@ -226,7 +252,9 @@ export default function RunLauncher({
                 The run AI plays the whole run out while you watch. Stop it any time and take over from there.
               </p>
               <div className="gs-launch-knobs">
-                <label title="Off-combat brain: which policy drives card rewards / shops / events / map / rest. Combat itself is always searched by the combat MCTS agent, regardless of this choice.">
+                <label title={e2eAvailable
+                  ? "Brain: Heuristic and PPO drive card rewards / shops / events / map / rest while the combat MCTS agent searches every fight. Instinct is one transformer that makes EVERY decision, fights included, with no search (Ironclad, v0.111.0 only; its ~21 MB net downloads the first time you pick it)."
+                  : "Off-combat brain: which policy drives card rewards / shops / events / map / rest. Combat itself is always searched by the combat MCTS agent, regardless of this choice."}>
                   brain{" "}
                   <select
                     aria-label="brain"
@@ -236,19 +264,30 @@ export default function RunLauncher({
                   >
                     <option value="heuristic">Heuristic</option>
                     <option value="ppo">PPO</option>
+                    {e2eAvailable && <option value="e2e">Instinct (PPO only)</option>}
                   </select>
                 </label>
-                <CombatBudget
-                  preset={combat.preset} monsterSims={combat.monsterSims} bossSims={combat.bossSims}
-                  threads={combat.threads} disabled={busy}
-                  onPreset={combat.onPreset} onMonsterSims={combat.onMonsterSims} onBossSims={combat.onBossSims}
-                />
+                {offCombatBrain === "e2e" ? (
+                  <span className="gs-launch-hint" data-testid="e2e-note">
+                    Ironclad · v0.111.0 · act 1 rolled · no combat search
+                  </span>
+                ) : (
+                  <CombatBudget
+                    preset={combat.preset} monsterSims={combat.monsterSims} bossSims={combat.bossSims}
+                    threads={combat.threads} disabled={busy}
+                    onPreset={combat.onPreset} onMonsterSims={combat.onMonsterSims} onBossSims={combat.onBossSims}
+                  />
+                )}
               </div>
               <button type="button" className="gs-runend-btn gs-runend-btn--secondary gs-launch-go"
                 onClick={onWatch} disabled={busy} aria-describedby={`${ids}-watch`}>
                 <span className="gs-runend-btnface">{busy ? "Running…" : "Watch the AI play"}</span>
               </button>
-              <p className="gs-launch-footnote">AI runs always use the Rust engine and the Overgrowth act 1.</p>
+              <p className="gs-launch-footnote">
+                {offCombatBrain === "e2e"
+                  ? "Instinct plays the run it was trained on: Rust engine, Ironclad, v0.111.0, the rolled act 1."
+                  : "AI runs always use the Rust engine and the Overgrowth act 1."}
+              </p>
             </section>
           )}
         </div>

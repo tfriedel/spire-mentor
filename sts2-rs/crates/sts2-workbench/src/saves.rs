@@ -122,6 +122,9 @@ pub struct RunIdentity {
     /// carries no `game_version` (GH #801). An unknown value also reads as
     /// the default here — `Workbench::restore_save` rejects it first.
     pub game_version: GameVersion,
+    /// The run was built as the e2e student's training run (run-mode only;
+    /// absent = false).
+    pub e2e_setup: bool,
 }
 
 impl RunIdentity {
@@ -148,6 +151,10 @@ impl RunIdentity {
             act1: s("act1", DEFAULT_ACT1),
             run_mode: payload.get("run_mode").and_then(Value::as_bool),
             game_version: crate::session::game_version_of(payload).unwrap_or_default(),
+            e2e_setup: payload
+                .get("e2e_setup")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }
     }
 

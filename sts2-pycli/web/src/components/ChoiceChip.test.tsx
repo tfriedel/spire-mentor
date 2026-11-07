@@ -37,6 +37,16 @@ describe("ChoiceChip", () => {
     expect(t).not.toMatch(/%|cost/);
   });
 
+  it("graded against the e2e advisor, it names the e2e net and offers no rollout check", () => {
+    const { container } = render(
+      <ChoiceChip grade={grade({ policy: "e2e", checkable: false })} onDismiss={() => {}} />,
+    );
+    const t = container.textContent ?? "";
+    expect(t).toContain("Instinct would take: Inflame (strong preference)");
+    expect(t).not.toContain("AI would take");
+    expect(screen.queryByRole("button", { name: /check/ })).toBeNull();
+  });
+
   it("toss-up names both options", () => {
     const { container } = render(<ChoiceChip grade={grade({ verdict: "tossup", alternatives: [{ label: "Inflame", prob: 0.3 }, { label: "Anger", prob: 0.25 }] })} onDismiss={() => {}} />);
     const t = container.textContent ?? "";

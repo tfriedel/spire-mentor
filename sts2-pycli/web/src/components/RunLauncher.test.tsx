@@ -131,4 +131,32 @@ describe("RunLauncher", () => {
     fireEvent.change(screen.getByLabelText("act 1"), { target: { value: "underdocks" } });
     expect(props.onAct1).toHaveBeenCalledWith("underdocks");
   });
+
+  it("offers the e2e net as the advisor of a hand-played Ironclad v0.111.0 run only", () => {
+    const { unmount } = renderLauncher({ e2eAvailable: true, onAdvisor: vi.fn(), gameVersion: "v0.107.1" });
+    expect(screen.queryByRole("combobox", { name: "advisor" })).toBeNull();
+    unmount();
+    const silent = renderLauncher({ e2eAvailable: true, onAdvisor: vi.fn(), character: "Silent", gameVersion: "v0.111.0" });
+    expect(screen.queryByRole("combobox", { name: "advisor" })).toBeNull();
+    silent.unmount();
+    const { props } = renderLauncher({ e2eAvailable: true, onAdvisor: vi.fn(), gameVersion: "v0.111.0" });
+    const pick = screen.getByRole("combobox", { name: "advisor" });
+    expect(pick).toHaveValue("search");
+    fireEvent.change(pick, { target: { value: "e2e" } });
+    expect(props.onAdvisor).toHaveBeenCalledWith("e2e");
+  });
+
+  it("offers the e2e student only where the engine has it, and drops the sim knobs for it", () => {
+    const { unmount } = renderLauncher();
+    expect(screen.queryByRole("option", { name: /e2e/ })).toBeNull();
+    unmount();
+    const { props, unmount: un2 } = renderLauncher({ e2eAvailable: true });
+    fireEvent.change(screen.getByRole("combobox", { name: "brain" }), { target: { value: "e2e" } });
+    expect(props.onOffCombatBrain).toHaveBeenCalledWith("e2e");
+    un2();
+    renderLauncher({ e2eAvailable: true, offCombatBrain: "e2e" });
+    expect(screen.getByRole("option", { name: "Instinct (PPO only)" })).toBeInTheDocument();
+    expect(screen.getByTestId("e2e-note")).toHaveTextContent("Ironclad · v0.111.0");
+    expect(screen.queryByTitle(/Combat search budget/)).toBeNull();
+  });
 });

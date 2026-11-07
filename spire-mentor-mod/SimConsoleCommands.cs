@@ -51,6 +51,7 @@ public class SpireMentorConsoleCmd : AbstractConsoleCmd
                     return new CmdResult(success: false, "usage: spirementor speed <0.1-4.0>");
                 }
                 SimSpeed.Apply(speed);
+                SpireMentorModConfig.RememberSpeed();
                 return new CmdResult(success: true, $"speed -> {SimSpeed.Current:0.0}x");
             case "hud":
                 if (value is not ("on" or "off"))

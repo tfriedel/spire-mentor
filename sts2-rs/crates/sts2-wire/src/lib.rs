@@ -30,6 +30,7 @@ pub const SRC_HASH: &str = env!("STS2_WIRE_SRC_HASH");
 
 pub mod emit;
 pub mod error;
+pub mod graft;
 pub mod scenario;
 pub mod state_dict;
 pub mod value;

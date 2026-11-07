@@ -1,4 +1,4 @@
-# Spire Mentor wire protocol (v5.1 / coach 2; v5 / coach; v3 = advisor mode; v2 = phase 1b)
+# Spire Mentor wire protocol (v5.2 / brain; v5.1 / coach 2; v5 / coach; v3 = advisor mode; v2 = phase 1b)
 
 Newline-delimited JSON over a single-client TCP socket on `127.0.0.1:<port>`
 (default `9002`, see `SpireMentor.conf`). One JSON object per line.
@@ -665,6 +665,7 @@ carry, plus:
 |---|---|---|
 | `advice_for` | string | The v2 message type this request wraps (`combat_action`, `card_reward`, `map_select`, ...). The payload fields are those of that message type. |
 | `capabilities` | object | **New in v5 / coach.** What this mod build understands from the advisor: `{"coach": 1}` = it renders `coach` messages (section 5, "`coach`") and sends the v5 `human_action` kinds; `{"coach": 2}` (v5.1) = also renders `recap` / `autopsy` records and sends `combat_ended` / Advisor-mode `game_over`. Absent on older builds: treat as `{}` (no coach). |
+| `brain` | string | **New in v5.2.** The player's advisor brain: `"search"` (the default: MCTS for `combat_action`, the PPO run policy for screens) or `"instinct"` (the end-to-end net, no search, plays every decision). Always sent, on the player's requests and the AI partners' alike (`SpireMentorModConfig.AdvisorBrain`, toggled by the toolbar's Search / Instinct button, Shift+F8, the settings pages or the frame's `toggle_brain`). The mod does not filter: the advisor decides per request whether Instinct can answer (character, game build) and falls back to the search otherwise -- see "Advisor brain (v5.2)" below. Absent on older mods: treat as `"search"`. |
 | `combat_log` | array | The game's own combat-log entries recorded SINCE THE PREVIOUS request (`SimCombatLog.Drain()`): one row per `CombatHistoryEntry`, in the same shape the Rust engine emits (`sts2_core::event_log`), so the workbench renders a live game through the identical formatter it uses for a simulated one. Display only — the advisor never reads it. Empty outside combat. |
 
 Each `combat_log` row carries `kind` (`damage` / `block` / `power` /
@@ -736,6 +737,7 @@ Implemented `advice_for` values:
 | `boss_relic` | `options[]` from `NChooseARelicSelection`'s relic holders | same |
 | `treasure` | `options[]` from the chest's relic holders, `surface: "treasure"` | the **boss-relic** head — the same question, cheaper; the note says so |
 | `card_bundle` | `options[]`, each with its `cards[]`, from `NChooseABundleSelectionScreen` | the **card-pick** head, applied card-by-card; a composition, not a trained surface, and the note says so |
+| `potion_swap` | **v5.2.** `options[]`: one full-belt potion reward's swap group off `NRewardsScreen` -- see "Full-belt potion swap (v5.2)" below. Sent only to an advisor with `capabilities.potion_swap >= 1` | the advisor's potion-swap decision |
 
 `card_reward` also carries `surface: "choose_a_card"` when it comes from the
 in-combat generator (`NChooseACardSelectionScreen` — Skill Potion and friends).
@@ -761,7 +763,8 @@ than consumed there.
 
 The post-combat loot screen (`NRewardsScreen`) is answered **mod-side** without
 a round trip — "claim everything, then proceed" is not a judgement call — so it
-never appears as an `advice_request`.
+never appears as an `advice_request`, except for a potion only a full belt
+blocks, which is asked as `potion_swap` (v5.2, below).
 
 ### `advice` -- inbound, new; rendered, never executed
 
@@ -800,11 +803,96 @@ never appears as an `advice_request`.
 | `advice.pv` | array of string | Principal variation, rendered as the "line:" row. |
 | `advice.hand_back` | string | **New (GH #874).** Present when the answer is not really the AI deciding: an unranked surface (`best` is the first option, "NOT a recommendation"), a borrowed head (`treasure`, `card_bundle` — GH #379), no run-policy net, an inference failure, an advisor error. The value is a short player-facing reason. Under the mod's `pause_on: "unsupported"` (the default) F7 autoplay stops on it and hands the decision to the player; everything else (HUD, `best`, F6) is unchanged. Absent on a real recommendation and on older advisors. The mod applies the same verdict itself to what it answers without a round trip (the crystal sphere's reveals did, until they got a policy in GH #872). |
 | `capabilities` | object | **New in v5 / coach.** Top level of the `advice` message, next to `advice` (not inside it). What this advisor build understands: `{"coach": 1}` = it accepts the v5 `human_action` kinds (`end_turn`, non-combat choices) and grades them; `{"coach": 2}` (v5.1) = also accepts `combat_ended` / Advisor-mode `game_over` and answers them with `recap` / `autopsy` records. Absent on older advisors: treat as `{}`. The mod reads it from every reply (`SimAdvisor.AdvisorCoachCapability`) and also accepts `advice.capabilities`. |
+| `capabilities.instinct` | array | **New in v5.2.** Top level, next to `capabilities.coach`: `[{"character": "Ironclad", "game_version": "v0.111.0"}, ...]`, the characters and game builds this advisor's Instinct can play. Absent or empty on older advisors and on an advisor with no Instinct net. The mod reads it from every reply (also from `advice.capabilities`) and uses it only to show the brain switch, matching the run's character and envelope `game_version` case-insensitively (`AdvisorBrainRules.Eligible`). |
+| `capabilities.potion_swap` | int | **New in v5.2.** Top level (also accepted in `advice.capabilities`): `1` = this advisor answers `advice_for: "potion_swap"`. Absent / `0` on older advisors: the mod never sends that request and answers the loot screen mod-side exactly as before (`PotionSwapAdvice.CapabilityOf`). |
+| `advice.brain` | string | **New in v5.2.** `"instinct"` when the end-to-end net answered; `"search"` or absent otherwise. |
+| `advice.instinct_unavailable` | string | **New in v5.2.** Present when the request asked for `"instinct"` but the search answered instead: a short player-facing reason (e.g. `"Instinct can't read this event yet"`, another character, another build). The advisor also puts it into `advice.note`. |
 | `advice.unsupported_game_version` | string \| any | **New (GH #800).** Present only on a **refusal**: the request's envelope `game_version` (section 1) names a build the advisor has no engine for. The value is that `game_version` as sent; `advice.note` is the player-facing explanation (the build, the supported builds, what to do), and there is no `best` / `options` / `p_win` -- nothing to render or execute. A missing or `"v0.107.1"` `game_version` is never refused. |
 
 An `advice` message is **never executed** -- it only feeds the HUD and the
 action log. Phase 7's takeover hotkey executes the recommendation through
 the normal game-side paths, not through this message.
+
+### Advisor brain (v5.2) -- additive
+
+Instinct is the e2e PPO net (today the Ironclad one, v0.111.0) answering
+every decision with no search; Search is everything above. The player picks
+one; the default stays Search.
+
+- **Mod -> advisor:** every `advice_request` carries `brain`. The mod never
+  withholds `"instinct"` for a run Instinct cannot play: the advisor decides.
+- **Advisor -> mod:** every reply carries `capabilities.instinct`; an Instinct
+  answer sets `advice.brain: "instinct"`; a request for Instinct that the
+  search answered sets `advice.instinct_unavailable` (and says the same in
+  `advice.note`) -- the fallback is never silent.
+- **Instinct's options** carry the net's probability in `visit_share` (and
+  also `prob`), and no `p_win` / `q` / `visits` / `wins` / `losses` / `ties`.
+  `best` is shaped as for Search, so F6 / F7 / Autobattle execute it
+  unchanged. With no `q` / `p_win` the HUD draws no eval bar and bars the rows
+  by share, as for screen advice.
+- **Switching** cancels the request in flight and re-asks for the position at
+  once. The mod stamps each request with its `brain` and drops a reply whose
+  request was stamped with the other brain (`AdvisorBrainRules.IsStale`); it
+  does not key on `advice.brain`, which legitimately differs on a fallback.
+- **HUD:** an Instinct answer is tagged "Instinct" (advice panel, status line,
+  F5 peek); a fallback is tagged "Search (Instinct: <reason>)". The toolbar's
+  Search / Instinct button shows the current brain; it is shown where
+  `capabilities.instinct` names the run's character and build, and also while
+  Instinct is chosen anywhere else, so it can be switched back.
+
+Degrade: an older advisor ignores `brain` and answers with the search, sends
+no `capabilities.instinct` (no switch shown) and no `advice.brain`; an older
+mod sends no `brain`, which the advisor reads as `"search"`.
+
+Unattended runs pick the brain in `SpireMentor.conf`: `"advisor_brain":
+"search" | "instinct"` overrides the player's setting for that session (not
+saved over it) until someone switches brain in game; absent / `null` = the
+player's setting (`SimConfig.AdvisorBrain`; `tools/ascension_climb.py
+--advisor-brain`).
+
+### Full-belt potion swap (v5.2) -- additive
+
+The loot screen (`NRewardsScreen`) is still answered mod-side -- claim every
+claimable reward, then proceed -- with one exception. Once nothing claimable
+is left and a potion reward is still on the screen that only a full belt
+blocks (no free slot, but no hook such as Sozu refuses it:
+`SimPotionRules.BlockedOnlyByFullBelt`), and the advisor advertised
+`capabilities.potion_swap >= 1`, the mod sends:
+
+```json
+{"type":"advice_request", "advice_for":"potion_swap", "state_id":..., "request_id":"a91",
+ "brain":"search", "capabilities":{"coach":2}, "run_state":{...}, "map":{...},
+ "options":[
+   {"index":0, "id":"PotionReward", "action":"potion_swap", "label":"decline",
+    "description":"...", "enabled":true, "reward":{<Potion object>},
+    "reward_button":0, "discard_slot":null},
+   {"index":1, "id":"PotionReward", "action":"potion_swap", "label":"discard FIRE_POTION",
+    "description":"...", "enabled":true, "reward":{<Potion object>},
+    "reward_button":0, "discard_slot":0},
+   ...one per belt slot]}
+```
+
+The options are the autopilot's `potion_swap` group on `reward_screen` (GH
+#1069; section 3), reindexed from 0 and for ONE blocked reward at a time (the
+first on screen; `reward_button` is always 0): `discard_slot: null` leaves the
+potion on the screen, `discard_slot: k` discards the held potion in belt slot
+`k` (`PotionCmd.Discard`, the game's own potion-popup discard) and claims the
+reward into the freed slot. The advisor answers as for any screen:
+`best: {"action": "choose", "index": i, "label": <the option's label>}`;
+`skip` means decline. F6 / F7 execute it (`SimScreenAdvice.ChoosePotionSwap`);
+a declined reward is never asked again on that screen, so the next describe
+moves on to the next blocked potion or to proceed. A second blocked potion is
+a second request, asked once the first is settled. Discarding by hand changes
+the belt, which re-describes: the reward is then claimable and the loot
+screen claims it mod-side.
+
+**Autobattle stops on it** (it is not local and not in combat:
+`Autobattle.IsStop`). Giving up a held potion for another is a run-level
+choice like a card reward, not a loot click, so the player makes it.
+
+Not reported as a `human_action` in v5.2 (no grade); the coach's capture
+ignores this `decision_type`. Without the capability nothing changes: the
+blocked potion is not claimable, so the mod-side loot answer proceeds past it.
 
 ### `human_action` -- outbound, new
 
@@ -1169,6 +1257,7 @@ The payload is a **normal outbound message**, not an export format:
 |---|---|
 | A fight is in progress | `SimCombatHandler.BuildCombatState` stamped `type: advice_request`, `advice_for: combat_action` -- byte-identical to what the advisor lane sends for that board |
 | A screen is open | `SimScreenAdvice.Describe().State` stamped `type: advice_request` and that screen's `advice_for` |
+| (both of the above) | also the player's `brain` (section 5, v5.2), so a pasted state reproduces the request -- Instinct or Search |
 | A run with neither | `{"type": "run_snapshot"}` + the section-1 envelope |
 
 Reusing the wire dialect is the point: the consumer has ONE parser, and a

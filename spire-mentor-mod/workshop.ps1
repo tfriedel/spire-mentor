@@ -20,6 +20,10 @@
 #
 #   ./workshop.ps1                          # assemble only, inspect the workspace
 #   ./workshop.ps1 -Upload -ChangeNote "…"  # assemble + upload
+#   ./workshop.ps1 -Beta -Upload …          # the separate beta item
+#                                             (packaging/workshop-beta/: its own
+#                                             title, description and mod_id.txt,
+#                                             the regular image)
 #
 # -Upload needs Steam running, logged in as the item's owner, and the uploader:
 # -Uploader <path to ModUploader.exe> or $env:STS2_MOD_UPLOADER.
@@ -34,12 +38,15 @@ param(
     # Omitted: a first upload is private, later uploads keep what the item has
     # (set on the Workshop page or here), so a re-upload never hides a public item.
     [ValidateSet("private", "unlisted", "friends_only", "public")]
-    [string]$Visibility
+    [string]$Visibility,
+    # The beta item (packaging/workshop-beta/) instead of the regular one.
+    [switch]$Beta
 )
 $ErrorActionPreference = "Stop"
 $bridge = $PSScriptRoot
 $repo = Split-Path -Parent $bridge
-$source = Join-Path $bridge "packaging/workshop"
+$regular = Join-Path $bridge "packaging/workshop"
+$source = if ($Beta) { Join-Path $bridge "packaging/workshop-beta" } else { $regular }
 $workspace = Join-Path $bridge "workshop-workspace"
 $modIdFile = Join-Path $source "mod_id.txt"
 
@@ -64,6 +71,7 @@ $content = New-Item -ItemType Directory -Path (Join-Path $workspace "content") -
 Copy-Item -Recurse (Join-Path $staged "*") $content
 
 $image = Join-Path $source "image.png"
+if (-not (Test-Path $image)) { $image = Join-Path $regular "image.png" }
 if (-not (Test-Path $image)) {
     $image = Join-Path $repo "sts2-pycli/web/public/icons/icon-512.png"
     Write-Warning "no packaging/workshop/image.png -- using the web app icon as the Workshop preview"
@@ -72,7 +80,14 @@ if ((Get-Item $image).Length -ge 1MB) { throw "$image is 1 MB or more; Steam rej
 Copy-Item $image (Join-Path $workspace "image.png")
 
 $config = Get-Content (Join-Path $source "workshop.json") -Raw | ConvertFrom-Json
-$config | Add-Member description (Get-Content (Join-Path $source "description.bbcode") -Raw).TrimEnd()
+$description = (Get-Content (Join-Path $source "description.bbcode") -Raw).TrimEnd()
+# Steam rejects a longer one at the very end of the upload (k_EResultInvalidParam),
+# after the item is created and the content is sent.
+$descriptionBytes = [Text.Encoding]::UTF8.GetByteCount($description)
+if ($descriptionBytes -gt 8000) {
+    throw "$source\description.bbcode is $descriptionBytes bytes; Steam caps a description at 8000"
+}
+$config | Add-Member description $description
 $version = (Get-Content (Join-Path $bridge "SpireMentor.json") | ConvertFrom-Json).version
 $config | Add-Member changeNote $(if ($ChangeNote) { "v${version}: $ChangeNote" } else { "v$version" })
 if ($Visibility) {

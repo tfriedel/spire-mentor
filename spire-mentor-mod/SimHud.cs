@@ -153,6 +153,18 @@ internal sealed class SimAdvice
     /// </summary>
     public string? HandBack;
 
+    /// <summary>`advice.brain` (v5.2): "instinct" when the end-to-end net
+    /// answered, "search" or null otherwise (AdvisorBrainRules).</summary>
+    public string? Brain;
+
+    /// <summary>`advice.instinct_unavailable` (v5.2): Instinct was asked for
+    /// and the search answered instead, with the player-facing reason.</summary>
+    public string? InstinctUnavailable;
+
+    /// <summary>The source tag the HUD shows ("Instinct" / "Search
+    /// (Instinct: ...)"), null for a plain search reply.</summary>
+    public string? SourceTag => AdvisorBrainRules.SourceTag(Brain, InstinctUnavailable);
+
     /// <summary>
     /// `advice.wait_for_ally.max_ms` (co-op): a teammate who has not ended
     /// their turn holds a card that would change this move (Vulnerable before
@@ -199,6 +211,8 @@ internal sealed class SimAdvice
         advice.PWin = ReadDouble(el, "p_win");
         advice.LowConfidence = ReadBool(el, "low_confidence") ?? false;
         advice.HandBack = ReadString(el, "hand_back");
+        advice.Brain = ReadString(el, "brain");
+        advice.InstinctUnavailable = ReadString(el, "instinct_unavailable");
         if (el.TryGetProperty("wait_for_ally", out JsonElement waitEl) && waitEl.ValueKind == JsonValueKind.Object)
         {
             advice.WaitForAllyMs = Math.Max(0, ReadInt(waitEl, "max_ms") ?? 0);
@@ -587,7 +601,7 @@ internal sealed class SimHud
             }
             return;
         }
-        RefreshStatusAndVisibility(advice.Note);
+        RefreshStatusAndVisibility(AdvisorBrainRules.NoteWithSource(advice.Note, advice.Brain, advice.InstinctUnavailable));
         RenderAdvicePanel(advice);
         RenderCardLabels(advice, player);
         RenderMapMarkers(advice);
@@ -620,6 +634,11 @@ internal sealed class SimHud
         if (label.Length == 0)
         {
             return false;
+        }
+        // The peek names its brain too, when it is the net.
+        if (AdvisorBrainRules.IsInstinct(advice.Brain))
+        {
+            label += "  (Instinct)";
         }
         // No "no advice" to the frame first: the peek replaces it.
         ClearPreActionSurfaces(publish: false);
@@ -797,6 +816,19 @@ internal sealed class SimHud
         }
 
         _advicePanel!.Visible = true;
+
+        // Which brain is talking, when it is not the plain search: the net
+        // ("Instinct"), or the search standing in for it with the reason --
+        // never a silent fallback (PROTOCOL.md section 5, v5.2). Instinct
+        // sends no q / p_win, so hasEval is false and its rows bar by share.
+        if (advice.SourceTag is { } source)
+        {
+            bool instinct = AdvisorBrainRules.IsInstinct(advice.Brain);
+            Label tag = SmallLabel(source, instinct ? new Color(0.75f, 0.85f, 1f) : new Color(0.6f, 0.6f, 0.65f));
+            tag.CustomMinimumSize = new Vector2(320, 0);
+            tag.ClipText = true;
+            _adviceRows.AddChildSafely(tag);
+        }
 
         if (SpireMentorModConfig.ShowWinBar && hasEval)
         {

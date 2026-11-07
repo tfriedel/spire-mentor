@@ -10,6 +10,7 @@ members = [
     "crates/sts2-mcts",
     "crates/sts2-runai",
     "crates/sts2-vocab",
+    "crates/sts2-e2e",
     "crates/sts2-workbench",
     "crates/sts2-workbench-wasm",
     "crates/sts2-srchash",
@@ -228,3 +229,7 @@ opt-level = 1
 opt-level = 1
 [profile.dev.package.sts2-runai]
 opt-level = 1
+# The e2e student forward is ~100x slower unoptimised; its parity gate runs
+# every fixture decision only at opt-level 3 (sts2-e2e/tests/net_parity.rs).
+[profile.dev.package.sts2-e2e]
+opt-level = 3

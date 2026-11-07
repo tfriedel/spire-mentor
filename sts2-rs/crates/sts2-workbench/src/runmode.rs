@@ -161,6 +161,20 @@ pub fn to_workbench_verb(rm: &RunManager, action: &Value) -> (String, Value) {
             "use_potion".into(),
             json!({"potion_index": field("potion_slot"), "target_index": field("target_index")}),
         ),
+        // The e2e brain's multi-pick in-combat selection (no `RunAction`).
+        "combat_resolve_choice_selection" => {
+            let picks: Vec<String> = action
+                .get("selection")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(ToString::to_string)
+                .collect();
+            (
+                "select_cards".into(),
+                json!({"indices": format!("[{}]", picks.join(", "))}),
+            )
+        }
         "combat_resolve_choice" => match action.get("option") {
             None | Some(Value::Null) => ("skip_select".into(), json!({})),
             Some(_) => ("select_cards".into(), json!({"indices": indices("option")})),

@@ -20,11 +20,22 @@ anything about the position:
   carries 1 from the start of a fight).
 
 `tests/test_combat_ctx.py` re-derives both from the decomp (skipped when the
-decomp is absent). Engine ids absent from v0.107.1 (cards added for v0.111)
-have no entry and read as an unknown type.
+decomp is absent).
+
+The two tables in this module are v0.107.1's, unchanged. v0.111.0's live in
+`static_tables_v0111`, generated from its decomp by `static_tables_gen` (e2e
+WP1). Readers select by game build: `card_types()` and
+`show_counter_relics()` follow the active game version
+(`sts2_client.GAME_VERSION`, from `STS2_GAME_VERSION`), so a run with it unset
+reads exactly these tables. On v0.107.1, engine ids absent from v0.107.1
+(cards added for v0.111) have no entry and read as an unknown type.
 """
 
 from __future__ import annotations
+
+import sts2_client
+
+from . import static_tables_v0111
 
 CARD_TYPE: dict[str, str] = {
     "ABRASIVE": "Power",
@@ -651,3 +662,29 @@ CARD_TYPES: tuple[str, ...] = ("Attack", "Skill", "Power", "Status", "Curse", "Q
 CLASS_ALIASES: dict[str, str] = {"Sloth": "SLOTH_STATUS"}
 # Decomp card classes with no engine id.
 SKIPPED_CLASSES: frozenset[str] = frozenset({"DeprecatedCard"})
+
+# ── per game build (e2e WP1) ─────────────────────────────────────────────
+
+CARD_TYPE_BY_VERSION: dict[str, dict[str, str]] = {
+    "v0.107.1": CARD_TYPE,
+    "v0.111.0": static_tables_v0111.CARD_TYPE,
+}
+SHOW_COUNTER_RELICS_BY_VERSION: dict[str, frozenset[str]] = {
+    "v0.107.1": SHOW_COUNTER_RELICS,
+    "v0.111.0": static_tables_v0111.SHOW_COUNTER_RELICS,
+}
+
+
+def active_version(version: str | None = None) -> str:
+    """`version`, normalized, or else the active game version."""
+    return sts2_client.normalize_game_version(version) if version else sts2_client.GAME_VERSION
+
+
+def card_types(version: str | None = None) -> dict[str, str]:
+    """`CARD_TYPE` of `version` (default: the active game version)."""
+    return CARD_TYPE_BY_VERSION[active_version(version)]
+
+
+def show_counter_relics(version: str | None = None) -> frozenset[str]:
+    """`SHOW_COUNTER_RELICS` of `version` (default: the active game version)."""
+    return SHOW_COUNTER_RELICS_BY_VERSION[active_version(version)]

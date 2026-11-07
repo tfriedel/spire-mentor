@@ -113,6 +113,14 @@ function pct(p: number | null | undefined): string | null {
   return p == null ? null : `${Math.round(p * 100)}%`;
 }
 
+/** The brain that graded the pick, as the verdict names it. */
+function brainName(brain: string): string {
+  if (brain === "e2e") return "Instinct (one net, no search)";
+  if (brain === "ppo") return "PPO champion";
+  if (brain === "heuristic") return "heuristic";
+  return brain;
+}
+
 export function AutobattleVerdictCard({ verdict }: { verdict: AutobattleVerdict }) {
   if (!verdict.available) {
     return <div className="autobattle-verdict autobattle-muted">{verdict.reason ?? "Not graded."}</div>;
@@ -123,7 +131,10 @@ export function AutobattleVerdictCard({ verdict }: { verdict: AutobattleVerdict 
   const champs = pct(verdict.champion_prob);
   return (
     <div className={`autobattle-verdict ${style.cls}`}>
-      <div className="autobattle-verdict-head">{style.head}</div>
+      <div className="autobattle-verdict-head">
+        {style.head}
+        {verdict.brain && <span className="autobattle-muted"> · {brainName(verdict.brain)}</span>}
+      </div>
       {band !== "matched" && (
         <div className="autobattle-verdict-body">
           <div>
@@ -142,7 +153,7 @@ export function AutobattleVerdictCard({ verdict }: { verdict: AutobattleVerdict 
             // indifferent, which is NOT evidence the options are equally good —
             // an uncertain or undertrained surface looks identical here.
             "Percentages are how much the policy preferred each option, not win rates. A close call means it was nearly indifferent — not that the picks are equally good."
-          : `Agreement with the ${verdict.brain ?? "run"} policy — not a win-rate judgement.`}
+          : `Agreement with the ${verdict.brain === "e2e" ? "Instinct" : (verdict.brain ?? "run")} policy — not a win-rate judgement.`}
       </div>
     </div>
   );
@@ -158,6 +169,7 @@ export default function AutobattlePanel({
   onWatchChange,
   onAdvance,
   onStop,
+  timing,
 }: {
   diff: AutobattleDiff | null;
   verdict: AutobattleVerdict | null;
@@ -168,6 +180,8 @@ export default function AutobattlePanel({
   onWatchChange: (v: boolean) => void;
   onAdvance: () => void;
   onStop: () => void;
+  /** The e2e student's per-decision timing while it plays the fights. */
+  timing?: string | null;
 }) {
   return (
     <div className="autobattle-panel">
@@ -193,6 +207,7 @@ export default function AutobattlePanel({
           {diff ? <AutobattleDiffCard diff={diff} /> : <div className="autobattle-muted">Not started.</div>}
         </>
       )}
+      {timing && <div className="autobattle-muted mono" data-testid="e2e-timing">{timing}</div>}
       <div className="autobattle-actions">
         <button type="button" onClick={onAdvance} disabled={busy || over}>
           {busy

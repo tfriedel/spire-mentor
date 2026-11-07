@@ -227,6 +227,10 @@ exclude_lines = [
 # are lazy function-level imports, so the modules load fine without them
 # and the deps stay dev-only rather than bloating the deployed image.
 DEP004 = ["networkx", "onnx"]
+# `ppo/e2e/actionlog.py` imports `zstandard` inside try/except ImportError and
+# falls back to stdlib LZMA (the codec byte records which), so it is optional:
+# the campaign venv has no zstd binding and must not need one.
+DEP001 = ["zstandard"]
 
 [tool.deptry]
 # Script-style sibling modules under python/ (added to sys.path, not installed

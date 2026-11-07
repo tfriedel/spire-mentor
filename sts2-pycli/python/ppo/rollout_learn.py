@@ -162,6 +162,7 @@ def record_decisions(
 
 def gen_fight(job: tuple[Any, ...]) -> dict[str, Any]:
     fight, fight_idx, reps, rep0, sims, boss_sims, clair, version, timeout_s = job
+    import sts2_client
     import sts2_rs
 
     if clair:
@@ -184,9 +185,13 @@ def gen_fight(job: tuple[Any, ...]) -> dict[str, Any]:
                 fight["encounter"],
                 ascension=int(fight["ascension"]),
                 potions=fight["potions"][:3],
+                game_version=sts2_client.GAME_VERSION,
             )
             rm = sts2_rs.RunManager(
-                seed=s, character=fight_character(fight), ascension_level=int(fight["ascension"])
+                seed=s,
+                character=fight_character(fight),
+                ascension_level=int(fight["ascension"]),
+                game_version=sts2_client.GAME_VERSION,
             )
             rm.debug_enter_combat(state, fight["room_type"])
             agent = sts2_rs.MctsCombatAgent(seed=s, sims=sims, boss_sims=boss_sims)
@@ -389,6 +394,7 @@ def gen_replay_fight(job: tuple[Any, ...]) -> dict[str, Any]:
     path, combat_id, starts, sims, boss_sims, version, env = job
     import zlib
 
+    import sts2_client
     import sts2_rs
 
     from ppo.bc_human import replay
@@ -416,6 +422,7 @@ def gen_replay_fight(job: tuple[Any, ...]) -> dict[str, Any]:
                 seed=seed,
                 character=rec["character"].capitalize(),
                 ascension_level=rec["ascension"] or 0,
+                game_version=sts2_client.GAME_VERSION,
             )
             rm.debug_enter_combat(state.clone(), room)
             if mode == "human":

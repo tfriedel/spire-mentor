@@ -103,6 +103,7 @@ class CombatCtxNet(nn.Module):
         pad: torch.Tensor,
         act_pos: torch.Tensor,
         act_mask: torch.Tensor,
+        run_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Logits `[B, A]` (-inf off `act_mask`) and value `[B]`.
 
@@ -110,6 +111,9 @@ class CombatCtxNet(nn.Module):
             cat: `[B, T, N_CAT]` long. cont: `[B, T, N_CONT]`. sec: `[B, T]` long.
             pad: `[B, T]` True = padding. act_pos: `[B, A]` token position of
             each action. act_mask: `[B, A]` True = a real action.
+            run_mask: `[B]` True = read the value from `value_head_run`, a
+            second head a combat-PPO critic gets for a second reward scale
+            (`combat_ppo.nets.add_run_head`). Ignored by a net without it.
         """
         x = self.emb_sec(sec) + self.cont_proj(cont.float())
         for i, e in enumerate(self.emb):
@@ -121,7 +125,11 @@ class CombatCtxNet(nn.Module):
         a = torch.gather(x, 1, act_pos.unsqueeze(-1).expand(-1, -1, x.size(-1)))
         logits = self.policy_head(a).squeeze(-1).float()
         logits = logits.masked_fill(~act_mask, float("-inf"))
-        value = self.value_head(self.value_norm(x[:, 0])).squeeze(-1).float()
+        h0 = self.value_norm(x[:, 0])
+        value = self.value_head(h0).squeeze(-1).float()
+        head_run = getattr(self, "value_head_run", None)
+        if run_mask is not None and head_run is not None:
+            value = torch.where(run_mask, head_run(h0).squeeze(-1).float(), value)
         return logits, value
 
 

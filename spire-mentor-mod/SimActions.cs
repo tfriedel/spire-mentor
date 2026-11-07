@@ -23,7 +23,11 @@ internal static class SimActions
 
     /// <summary>F9 / F10 and the toolbar -/+: one whole speed down / up
     /// (SpeedSteps).</summary>
-    public static void StepSpeed(int direction) => SimSpeed.Step(direction);
+    public static void StepSpeed(int direction)
+    {
+        SimSpeed.Step(direction);
+        SpireMentorModConfig.RememberSpeed();
+    }
 
     /// <summary>Copy this position to the clipboard for the workbench's
     /// live-state import (SimStateCopy).</summary>
@@ -82,6 +86,12 @@ internal static class SimActions
     /// fights, you make every run-level decision (Autobattle.cs).</summary>
     public static void ToggleAutobattle(string surface) =>
         RequireAdvisor(surface, () => SimAdvisor.Instance.ToggleAutobattle());
+
+    /// <summary>Advisor brain (Shift+F8 / toolbar / frame), toggled: Search
+    /// &lt;-&gt; Instinct (SimAdvisor.SetBrain). A preference, not a takeover,
+    /// so it needs no Advisor mode: set with the AI off, it applies from the
+    /// next advice.</summary>
+    public static void ToggleBrain(string surface) => SimAdvisor.Instance.ToggleBrain(surface);
 
     /// <summary>"Partner: go" (Shift+F6 / toolbar), co-op with AI partners:
     /// every partner that is waiting for you this turn (your first play, your
@@ -151,6 +161,9 @@ internal static class SimActions
         (SimModeLite mode, AdviceStyle nextStyle) =
             CoachStyle.SwitchStyle((SimModeLite)(int)SimRuntime.Mode, SimRuntime.Style);
         SimRuntime.SetModeAndStyle((SimMode)(int)mode, nextStyle);
+        // The style switched last is the one the coach starts in next time.
+        SpireMentorModConfig.StartInCoachStyle = nextStyle == AdviceStyle.Coach;
+        SpireMentorModConfig.SaveSoon();
         GD.Print($"[SpireMentor] Style -> {CoachStyle.StyleLabel(nextStyle)}");
         SimActionLog.Note(nextStyle == AdviceStyle.Coach
             ? "Coach: nothing shows before you act -- F5 peeks at the AI's next pick."

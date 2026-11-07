@@ -80,7 +80,7 @@ fn faithful_start_and_run_mode_settings() {
     for (body, detail) in [
         (
             json!({"off_combat_brain": "oracle"}),
-            "off_combat_brain must be heuristic|ppo, got 'oracle'",
+            "off_combat_brain must be heuristic|ppo|e2e, got 'oracle'",
         ),
         (
             json!({"ppo_impl": "jax"}),

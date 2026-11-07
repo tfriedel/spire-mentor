@@ -42,6 +42,7 @@ cache-keys = [
     { file = "../*/src/**/*" },
     { file = "../../data/runai/heuristic_v.toml" },
     { file = "../../data/prior_nets/*.json" },
+    { file = "../sts2-e2e/data/**/*" },
     { file = "../../Cargo.toml" },
     { file = "../../Cargo.lock" },
     { file = "../../rust-toolchain.toml" },
