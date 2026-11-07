@@ -21,7 +21,9 @@
 //! By default the output is the GAME's log: hits, block, powers, moves,
 //! potions and orbs. Card plays, draws, discards, exhausts and energy are
 //! recorded by the engine but hidden — the game does not show them, and the
-//! card that mattered already rides along as each row's `source`. Pass
+//! card that mattered already rides along as each row's `source` — except for
+//! an AUTO-played card (Stampede, Havoc, Mayhem, …), whose start is shown as a
+//! `card_auto_played` row (see [`AUTO_PLAYED_KIND`], GH #1155). Pass
 //! `verbose=true` for the full tape, or `keep=[...]` to un-hide named kinds
 //! and nothing else — which is what the workbench's timeline slices do for
 //! `power_flash`, a VFX signal the board needs on the wire but no reader
@@ -49,6 +51,22 @@ const VERBOSE_ONLY: &[&str] = &[
     // everything the log exists to show.
     "power_flash",
 ];
+
+/// The display kind an auto-played `card_play_started` row is rendered as.
+///
+/// The game shows an auto-played card: it flies out of the hand (or pile) to
+/// the play area and resolves on screen. The workbench's step label names only
+/// the card the PLAYER chose (or "End turn"), so an auto-play — Stampede at end
+/// of turn, Havoc / Cascade / Mayhem / Hellraiser / Howl from Beyond /
+/// Distilled Chaos … — had no visible trace except its consequences (GH #1155).
+/// Unlike every other card-play row this one is never hidden.
+///
+/// Every display row produced INSIDE an auto-play's frame (this row, the
+/// damage / block / powers it causes, a nested auto-play) also carries
+/// `"auto_played": true`, so the history ledger's compact mode — which
+/// otherwise keeps only the enemy's rows — can keep them too. The key is
+/// absent, not `false`, on every other row.
+pub const AUTO_PLAYED_KIND: &str = "card_auto_played";
 
 /// `str.capitalize()`: first char upper, the rest lower.
 fn capitalize(w: &str) -> String {
@@ -268,14 +286,44 @@ pub fn format_combat_log(
     let default_names = LogNames::default();
     let names = names.unwrap_or(&default_names);
     let mut out = Vec::new();
+    // One flag per open card-play frame: is this play (or a play that
+    // spawned it) an auto-play? Mirrors the engine's own open-source stack
+    // (`event_log.rs` `track_source`): a play opens a frame, its finish closes
+    // it, a monster move clears it.
+    let mut frames: Vec<bool> = Vec::new();
     for row in rows {
         let kind = py::get(row, "kind")
             .filter(|v| py::truthy(v))
             .map_or_else(String::new, py::to_str);
-        if VERBOSE_ONLY.contains(&kind.as_str()) && !verbose && !keep.contains(&kind.as_str()) {
+        let auto_start =
+            kind == "card_play_started" && py::truthy_opt(py::get_raw(row, "auto_played"));
+        match kind.as_str() {
+            "monster_move" => frames.clear(),
+            "card_play_started" => {
+                let parent = frames.last().copied().unwrap_or(false);
+                frames.push(parent || auto_start);
+            }
+            _ => {}
+        }
+        let in_auto = frames.last().copied().unwrap_or(false);
+        if kind == "card_play_finished" {
+            frames.pop();
+        }
+        // An AUTO-played card's start is not hidden: the step label names the
+        // card the player chose, never the one Stampede / Havoc / Mayhem pulled
+        // (GH #1155), so without this row the play is invisible.
+        let shown = if auto_start {
+            AUTO_PLAYED_KIND
+        } else {
+            kind.as_str()
+        };
+        if VERBOSE_ONLY.contains(&shown) && !verbose && !keep.contains(&shown) {
             continue;
         }
-        if let Some(display) = format_row(row, &kind, names, player_id) {
+        if let Some(mut display) = format_row(row, shown, names, player_id) {
+            if in_auto {
+                display.insert("auto_played".to_string(), Value::Bool(true));
+            }
             out.push(Value::Object(display));
         }
     }
@@ -527,6 +575,28 @@ fn format_row(
             base.put("text", text_str(format!("{player} {verb} {orb}.")));
         }
 
+        "card_auto_played" => {
+            let name = card_name();
+            base.put_actor(Some(player.clone()), Some("player"), None);
+            base.put("noun", verb_str(&name));
+            base.put("verb", verb_str("auto-played"));
+            // The raw card identity, for the board's auto-play card flash
+            // (the `source_*` fields name the PARENT play, e.g. Havoc).
+            base.put("card_id", Value::String(id_or_q(row, "card")));
+            base.put(
+                "card_upgraded",
+                Value::Bool(py::truthy_opt(py::get(row, "upgraded"))),
+            );
+            let via = match &source {
+                Some(s) if !s.is_empty() => format!(" via {s}"),
+                _ => String::new(),
+            };
+            base.put(
+                "text",
+                text_str(format!("{player} auto-played {name}{via}.")),
+            );
+        }
+
         // ── verbose-only kinds ──────────────────────────────────────────────
         "card_play_started" | "card_play_finished" => {
             let name = card_name();
@@ -598,6 +668,8 @@ mod tests {
                 ("STRIKE_IRONCLAD", "Strike"),
                 ("DEFEND_IRONCLAD", "Defend"),
                 ("SLIMED", "Slimed"),
+                ("BASH", "Bash"),
+                ("HAVOC", "Havoc"),
             ]),
             monster: Box::new(|i: &str| i.to_string()),
             power: lookup(&[("HELLRAISER", "Hellraiser")]),
@@ -794,6 +866,100 @@ mod tests {
             vec![json!("damage")],
             "the game's panel shows the hit, not the bookkeeping"
         );
+    }
+
+    /// GH #1155: Stampede auto-plays Bash at end of turn. The step is labelled
+    /// "End turn", so the auto-play row is the only place the card shows.
+    #[test]
+    fn test_an_auto_played_card_is_shown_and_its_rows_are_tagged() {
+        let bash = json!({"kind": "card", "id": "BASH", "upgraded": false});
+        let rows = [
+            row(
+                "card_play_started",
+                json!({"card": "BASH", "upgraded": false, "auto_played": true, "energy_spent": 0}),
+            ),
+            damage(json!({"source": bash.clone()})),
+            row(
+                "power",
+                json!({"applier": null, "receiver": nibbit(), "power": "VULNERABLE",
+                       "amount": 2, "source": bash.clone()}),
+            ),
+            row(
+                "card_play_finished",
+                json!({"card": "BASH", "upgraded": false, "source": bash}),
+            ),
+            row(
+                "monster_move",
+                json!({"side": "enemy", "monster": nibbit(), "move_id": "BUTT"}),
+            ),
+        ];
+        let out = fmt(&rows);
+        let kinds: Vec<Value> = out.iter().map(|r| r["kind"].clone()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                json!("card_auto_played"),
+                json!("damage"),
+                json!("power"),
+                json!("monster_move")
+            ]
+        );
+        assert_eq!(out[0]["text"], "The Ironclad auto-played Bash.");
+        assert_eq!(out[0]["verb"], "auto-played");
+        assert_eq!(out[0]["noun"], "Bash");
+        assert_eq!(out[0]["card_id"], "BASH");
+        assert_eq!(out[0]["card_upgraded"], false);
+        for r in &out[..3] {
+            assert_eq!(r["auto_played"], true, "{r}");
+        }
+        // Absent, not false, outside an auto-play: the enemy's turn is not
+        // part of it.
+        assert!(out[3].get("auto_played").is_none(), "{}", out[3]);
+    }
+
+    /// A manual Havoc auto-plays the top card: the parent's rows are the
+    /// player's own play (untagged), the child's are tagged, and the child's
+    /// line names what pulled it.
+    #[test]
+    fn test_a_nested_auto_play_names_its_parent_and_only_it_is_tagged() {
+        let havoc = json!({"kind": "card", "id": "HAVOC", "upgraded": false});
+        let rows = [
+            row(
+                "card_play_started",
+                json!({"card": "HAVOC", "upgraded": false, "auto_played": false}),
+            ),
+            row(
+                "card_play_started",
+                json!({"card": "STRIKE_IRONCLAD", "upgraded": true, "auto_played": true,
+                       "source": havoc.clone()}),
+            ),
+            damage(json!({})),
+            row(
+                "card_play_finished",
+                json!({"card": "STRIKE_IRONCLAD", "upgraded": true, "source": strike_source()}),
+            ),
+            row(
+                "block",
+                json!({"receiver": player(), "amount": 3, "source": havoc.clone()}),
+            ),
+            row(
+                "card_play_finished",
+                json!({"card": "HAVOC", "upgraded": false, "source": havoc}),
+            ),
+        ];
+        let out = fmt(&rows);
+        let kinds: Vec<Value> = out.iter().map(|r| r["kind"].clone()).collect();
+        assert_eq!(
+            kinds,
+            vec![json!("card_auto_played"), json!("damage"), json!("block")]
+        );
+        assert_eq!(
+            out[0]["text"],
+            "The Ironclad auto-played Strike+ via Havoc."
+        );
+        assert_eq!(out[0]["auto_played"], true);
+        assert_eq!(out[1]["auto_played"], true);
+        assert!(out[2].get("auto_played").is_none(), "{}", out[2]);
     }
 
     #[test]

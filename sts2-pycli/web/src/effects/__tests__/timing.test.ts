@@ -70,7 +70,7 @@ describe("EVENT_ADVANCE_MS", () => {
   // its clock by `undefined` and NaN every later offset in silence.
   const ALL_KINDS: EffectEvent["kind"][] = [
     "attack", "hurt", "fullyBlocked", "death", "blockGain", "blockBreak",
-    "powerAdd", "powerRemove", "powerFlash", "heal",
+    "powerAdd", "powerRemove", "powerFlash", "heal", "cardPlay",
   ];
 
   it("has an entry for every event kind", () => {

@@ -1085,6 +1085,16 @@ export interface CombatLogRow {
    *  `EventLogEntry` enum has no death entry. */
   blocked?: number | null;
   hp_after?: number | null;
+  /** Present (and `true`) only on rows produced inside an AUTO-played card's
+   *  play — Stampede, Havoc, Mayhem, Cascade, … — including that play's own
+   *  `card_auto_played` row (GH #1155). The step label never names an
+   *  auto-played card, so the ledger's compact mode keeps these rows. */
+  auto_played?: boolean;
+  /** `card_auto_played` rows only: the auto-played card's raw engine id
+   *  (`"BASH"`) and upgrade, for the board's card flash. `source_*` on that
+   *  row names the PARENT play (e.g. Havoc), not this card. */
+  card_id?: string | null;
+  card_upgraded?: boolean | null;
 }
 
 export interface LiveNode {

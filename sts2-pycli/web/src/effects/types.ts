@@ -1,3 +1,5 @@
+import type { Card } from "../api";
+
 // The combatant an effect targets. Enemies are addressed by their stable index
 // (CombatState.enemies[].index), which survives across snapshots.
 export type TargetRef =
@@ -76,7 +78,15 @@ export type EffectEvent =
   // still falls back to that guess (synthesizing this same event kind) for a
   // recording with no combat log at all, or a log row that can't resolve to
   // a board slot.
-  | { kind: "attack"; target: TargetRef; source?: EffectSource };
+  | { kind: "attack"; target: TargetRef; source?: EffectSource }
+  /** A card the ENGINE played on its own — Stampede at end of turn, Havoc,
+   *  Mayhem, Cascade, … (a `card_auto_played` log row). The game shows such a
+   *  card fly to the play area and resolve; the board flashes it the same way,
+   *  since nothing else on screen would say it was played (GH #1155). `target`
+   *  is always the player: the card is theirs. `card` is the hand card as it
+   *  was drawn before the play, or a stub built from the log row when the card
+   *  was not in hand (a draw-pile Havoc / Mayhem pull). */
+  | { kind: "cardPlay"; target: TargetRef; card: Card };
 
 export function sameTarget(a: TargetRef, b: TargetRef): boolean {
   if (a.side !== b.side) return false;

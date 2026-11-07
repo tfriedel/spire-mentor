@@ -166,9 +166,9 @@
 {"i": 165, "method": "GET", "route": "/api/runs", "body": null, "status": 200, "sha256": "253b6f3b224da05bacfee5eb52a33bf3f317b715889752a604d08fd750e6637d", "decision": null}
 {"i": 166, "method": "GET", "route": "/api/runs/stat?path=<work>/logs/20260101_000000_Ironclad_G0LDEN0001_2.jsonl", "body": null, "status": 200, "sha256": "3ce3ea688064300ef8204f8cc860c3eb72e6f580a93bb6b4dd3052b99932961d", "decision": null}
 {"i": 167, "method": "POST", "route": "/api/load", "body": {"path": "<work>/logs/20260101_000000_Ironclad_G0LDEN0001_2.jsonl"}, "status": 200, "sha256": "ef45822c7eeeeb3e29a90a022312997dfca667720d15e85617ad78961e60fa42", "decision": null}
-{"i": 168, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "167044640706b5ca276fe2ef012edcc1760fb93a4284c76a0999251bfa3ef959", "decision": null}
+{"i": 168, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "7c8f1ca0e4b74020c9354159d8bd976f08be0790fd1feddc2195338ede22d495", "decision": null}
 {"i": 169, "method": "GET", "route": "/api/map", "body": null, "status": 200, "sha256": "572d93c9d49e8f6361cdd15956f9b67f1e86939e22d674aa06e8a801f3ad1a7c", "decision": null}
-{"i": 170, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "167044640706b5ca276fe2ef012edcc1760fb93a4284c76a0999251bfa3ef959", "decision": null}
+{"i": 170, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "7c8f1ca0e4b74020c9354159d8bd976f08be0790fd1feddc2195338ede22d495", "decision": null}
 {"i": 171, "method": "GET", "route": "/api/step/0", "body": null, "status": 200, "sha256": "530c76254a4c91744236b268aa52e5a99fe270c91fd8c9a2aa4dff686d911355", "decision": null}
 {"i": 172, "method": "GET", "route": "/api/step/3", "body": null, "status": 200, "sha256": "ac2cbc91b09359c60c72ea440f4afd5d09c9936ed25c466d5e2f555a346bacbc", "decision": null}
 {"i": 173, "method": "GET", "route": "/api/step/61", "body": null, "status": 200, "sha256": "674281d9eb9ac9a11e8498d86cb30a9c3938be326966b51bfdae179ffdbbe249", "decision": null}

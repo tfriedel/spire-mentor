@@ -6,7 +6,7 @@ import { EffectsProvider } from "../../effects/EffectsContext";
 import type { Clock } from "../../effects/scheduler";
 import type { EffectSink, PlayedEffect } from "../../effects/sink";
 import type { CombatLogRow, CombatState, Step } from "../../api";
-import { HIT_SPACING_MS } from "../../effects/timing";
+import { EVENT_ADVANCE_MS, HIT_SPACING_MS } from "../../effects/timing";
 import * as sfxMapModule from "../../sound/sfxMap";
 import type { SfxMap } from "../../sound/sfxMap";
 import * as manifestModule from "../../effects/manifest";
@@ -416,6 +416,40 @@ describe("Board — per-hit playback from the combat log", () => {
     expect(rig?.getAttribute("data-action-anim")).toBe("attack");
     // The fallback did NOT also fire: no synthesized player flinch.
     expect(container.querySelector('[data-combatant="player"] .gs-hit-punch')).toBeNull();
+  });
+});
+
+describe("Board — an auto-played card is shown (GH #1155)", () => {
+  it("flashes the card Stampede played at end of turn, before its hit lands", () => {
+    const { clock, advance } = fakeClock();
+    const onPlayCard = () => {};
+    const bash = { index: 0, id: "BASH", name: "Bash", cost: 2, type: "Attack",
+      description: "Deal 8 damage.", upgraded: false, image: null };
+    const before = loggedStep(50);
+    before.state = { ...before.state, hand: [bash] } as typeof before.state;
+    const { rerender, container, queryByTestId } = render(
+      <Board step={before} actionNode={actionNodeAt(1, [])}
+        onPlayCard={onPlayCard} onEndTurn={() => {}} clock={clock} />,
+    );
+    expect(queryByTestId("autoplay-card")).toBeNull();
+    const auto: CombatLogRow = {
+      kind: "card_auto_played", round: 1, side: "player", text: "The Ironclad auto-played Bash.",
+      verb: "auto-played", actor: "The Ironclad", actor_side: "player", actor_uid: null,
+      target: null, target_side: null, target_uid: null, amount: null, noun: "Bash", source: null,
+      auto_played: true, card_id: "BASH", card_upgraded: false,
+    };
+    act(() => {
+      rerender(
+        <Board step={loggedStep(42)}
+          actionNode={actionNodeAt(2, [auto, { ...hitRow(8, 42), auto_played: true }])}
+          onPlayCard={onPlayCard} onEndTurn={() => {}} clock={clock} />,
+      );
+    });
+    // The card is up first; the hit it causes waits its beat.
+    expect(queryByTestId("autoplay-card")).toHaveAttribute("aria-label", "auto-played Bash");
+    expect(container.querySelectorAll(".gs-dmg")).toHaveLength(0);
+    act(() => { advance(EVENT_ADVANCE_MS.cardPlay); });
+    expect(container.querySelectorAll(".gs-dmg")).toHaveLength(1);
   });
 });
 

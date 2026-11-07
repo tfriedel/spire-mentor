@@ -12,7 +12,8 @@ import type { DetailMode } from "./turnLedgerState";
  * own colouring). A `net / full` toggle (persisted) decides how much of the
  * tape is inlined: `net` keeps only what the enemies did — the turn chips already
  * summarize the player's side, and the step label says what was played —
- * while `full` shows every row.
+ * plus anything an AUTO-played card did (the step label never names those:
+ * Stampede's attack resolves under "End turn"), while `full` shows every row.
  */
 
 export function DetailToggle({ mode, onChange }: {
@@ -81,8 +82,8 @@ export function ColoredDetail({ line }: { line: string }) {
  * The detail block under one history step.
  *
  * With a combat-log slice: the coloured sentences (net mode keeps only the
- * enemy turn's rows — the red-guttered "what happened to you" — plus any
- * defeat lines from the diff details). Without one: the diff detail lines,
+ * enemy turn's rows — the red-guttered "what happened to you" — and the rows
+ * of any auto-played card, plus any defeat lines from the diff details). Without one: the diff detail lines,
  * coloured. `dim` de-emphasizes steps ahead of the current position.
  */
 export function StepEvents({ rows: allRows, details, mode, dim }: {
@@ -119,7 +120,10 @@ export function StepEvents({ rows: allRows, details, mode, dim }: {
       </>
     );
   }
-  const kept = mode === "full" ? rows : rows.filter((r) => r.side === "enemy");
+  // `net` keeps the enemy's turn and every auto-played card's rows: the step
+  // label says what the PLAYER played, never what Stampede / Havoc / Mayhem
+  // played for them, so dropping those would hide the play entirely (GH #1155).
+  const kept = mode === "full" ? rows : rows.filter((r) => r.side === "enemy" || r.auto_played === true);
   const deaths = details.filter((d) => d.includes("☠"));
   return (
     <>

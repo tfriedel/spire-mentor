@@ -7,6 +7,7 @@ import DecimillipedeGroup, { SEGMENT_SCALE } from "./DecimillipedeGroup";
 import { decimillipedeSpan } from "./decimillipedeLayout";
 import MctsControls from "./MctsControls";
 import Hand from "./Hand";
+import CardFrame from "./CardFrame";
 import PileViewer from "./PileViewer";
 import PotionTray from "./PotionTray";
 import { isBrowserChord, isTextInput } from "../keys";
@@ -25,7 +26,7 @@ import { combatDiff } from "../effects/combatDiff";
 import { attackingEnemies } from "../effects/enemyTurn";
 import { actionStream } from "../effects/actionStream";
 import { EffectScheduler, rafClock, type Clock } from "../effects/scheduler";
-import { HIT_SPACING_MS, TOTAL_SETTLE_MS } from "../effects/timing";
+import { AUTO_CARD_SHOW_MS, HIT_SPACING_MS, TOTAL_SETTLE_MS } from "../effects/timing";
 import { loadManifest, type DissolveEffect, type VfxManifest } from "../effects/manifest";
 import {
   loadBindings, effectsForEvent, reportSubstitution, deathFadeFor, shouldFadeAfterDeath,
@@ -402,6 +403,9 @@ export default function Board({
   const playedNodeRef = useRef<number | null>(null);
   const [fx, setFx] = useState<Record<string, Fx>>({});
   const fxNonce = useRef(0);
+  // The card the engine just auto-played (Stampede, Havoc, Mayhem, …), shown
+  // over the stage for a moment — see `applyEvent`'s `cardPlay` arm.
+  const [autoCard, setAutoCard] = useState<{ card: Card; nonce: number } | null>(null);
   // Enemies drawn as corpses: killed by the action being played, so already
   // gone from `s.enemies`. `fading` is the second half of a death — see the
   // render-phase mount below and `applyEvent`'s `death` arm.
@@ -724,6 +728,21 @@ export default function Board({
   // turns a 3-hit attack into three separately-timed damage numbers instead
   // of one net total landing all at once.
   const applyEvent = useCallback((e: EffectEvent) => {
+    if (e.kind === "cardPlay") {
+      // An auto-played card (GH #1155). The game flies it to the play area and
+      // resolves it there; without this the board showed only its
+      // consequences, and under "End turn" nothing said a card was played at
+      // all. Not an `fx` entry: bumping the player's nonce would make them
+      // flinch, and the card is not something that happened TO them.
+      const an = ++fxNonce.current;
+      setAutoCard({ card: e.card, nonce: an });
+      const t = window.setTimeout(() => {
+        setAutoCard((cur) => (cur?.nonce === an ? null : cur));
+        dyingTimers.current = dyingTimers.current.filter((id) => id !== t);
+      }, AUTO_CARD_SHOW_MS);
+      dyingTimers.current.push(t);
+      return;
+    }
     if (e.kind === "attack") {
       // The `attack` variant is the actor's lunge (types.ts). The state
       // effect below only ever produces one for an enemy — either from a
@@ -2075,6 +2094,16 @@ export default function Board({
               <MctsControls config={hintConfig} onChange={onHintConfig} disabled={hintBusy} />
             </span>
           )}
+        </div>
+      )}
+
+      {autoCard && (
+        // Keyed by nonce so a second auto-play in the same action (Stampede 2,
+        // a Havoc chain) restarts the animation instead of being swallowed.
+        <div key={autoCard.nonce} className="gs-autoplay-card" data-testid="autoplay-card"
+          aria-live="polite" aria-label={`auto-played ${autoCard.card.name}`}>
+          <CardFrame card={autoCard.card} width={150} />
+          <span className="gs-autoplay-tag">auto-played</span>
         </div>
       )}
 

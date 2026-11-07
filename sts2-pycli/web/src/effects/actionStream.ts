@@ -1,4 +1,4 @@
-import type { CombatLogRow, CombatState } from "../api";
+import type { Card, CombatLogRow, CombatState } from "../api";
 import { combatDiff } from "./combatDiff";
 import type { EffectEvent, EffectSource, TargetRef } from "./types";
 import { targetForUid } from "./uidTargets";
@@ -48,6 +48,37 @@ function sourceOf(r: CombatLogRow): EffectSource | undefined {
     return { kind: "move", monster: r.source_monster, id: r.source_move_id };
   }
   return undefined;
+}
+
+/**
+ * The card an auto-play row names, as the board should draw it: the matching
+ * card from the snapshot BEFORE the action (it has its art, cost and text) —
+ * the hand first (Stampede), then the piles an auto-play can pull from
+ * (Havoc / Mayhem take the draw pile's top, Howl from Beyond the exhaust
+ * pile) — else a stub from the row itself.
+ */
+function autoPlayedCard(r: CombatLogRow, prev: CombatState | null): Card {
+  const id = r.card_id ?? "";
+  const upgraded = r.card_upgraded === true;
+  const piles = [prev?.hand, prev?.draw_pile, prev?.discard_pile, prev?.exhaust_pile];
+  for (const exact of [true, false]) {
+    for (const pile of piles) {
+      const hit = (pile ?? []).find(
+        (c) => c.id === id && (!exact || (c.upgraded ?? false) === upgraded),
+      );
+      if (hit) return hit;
+    }
+  }
+  return {
+    index: -1,
+    id,
+    name: r.noun ?? id,
+    cost: 0,
+    type: "Attack",
+    description: "",
+    upgraded,
+    image: null,
+  };
 }
 
 /**
@@ -118,6 +149,12 @@ export function actionStream(
       // NOT `described.add`: a flash says nothing about damage or stacks, so
       // it must not suppress the diff's reconciliation for this target.
       out.push({ kind: "powerFlash", target, power: r.noun ?? "" });
+      continue;
+    }
+    if (r.kind === "card_auto_played") {
+      // NOT `described.add`: showing the card says nothing about the player's
+      // HP or block, so the diff must still reconcile the player.
+      out.push({ kind: "cardPlay", target: { side: "player" }, card: autoPlayedCard(r, prev) });
       continue;
     }
     if (r.kind === "monster_move" && actor) {

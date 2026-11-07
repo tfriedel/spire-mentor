@@ -19,7 +19,9 @@ Two things it deliberately does NOT do:
 By default the output is the GAME's log: hits, block, powers, moves, potions
 and orbs. Card plays, draws, discards, exhausts and energy are recorded by the
 engine but hidden — the game does not show them, and the card that mattered
-already rides along as each row's ``source``. Pass ``verbose=True`` for the
+already rides along as each row's ``source`` — except for an AUTO-played card
+(Stampede, Havoc, Mayhem, …), whose start is shown as a ``card_auto_played`` row
+(see :data:`AUTO_PLAYED_KIND`, GH #1155). Pass ``verbose=True`` for the
 full tape, or ``keep={...}`` to un-hide named kinds and nothing else — which is
 what the workbench's timeline slices do for ``power_flash``, a VFX signal the
 board needs on the wire but no reader should ever see.
@@ -49,6 +51,17 @@ _VERBOSE_ONLY = frozenset(
         "power_flash",
     }
 )
+
+
+#: The display kind an auto-played ``card_play_started`` row is rendered as.
+#: The workbench's step label names only the card the PLAYER chose (or "End
+#: turn"), so an auto-play — Stampede at end of turn, Havoc / Cascade / Mayhem
+#: / Hellraiser / Howl from Beyond / Distilled Chaos … — had no visible trace
+#: except its consequences (GH #1155). Unlike every other card-play row this one
+#: is never hidden. Every display row produced INSIDE an auto-play's frame also
+#: carries ``"auto_played": True`` (absent, not False, elsewhere) so the history
+#: ledger's compact mode can keep it. Mirrors ``combatlog.rs``.
+AUTO_PLAYED_KIND = "card_auto_played"
 
 
 def _prettify(raw: str) -> str:
@@ -185,12 +198,26 @@ def format_combat_log(
     """
     names = names or LogNames()
     out: list[dict[str, Any]] = []
+    # One flag per open card-play frame: is this play (or a play that spawned
+    # it) an auto-play? Mirrors the engine's own open-source stack.
+    frames: list[bool] = []
     for row in rows:
         kind = str(row.get("kind") or "")
-        if kind in _VERBOSE_ONLY and not verbose and kind not in keep:
+        auto_start = kind == "card_play_started" and bool(row.get("auto_played"))
+        if kind == "monster_move":
+            frames.clear()
+        elif kind == "card_play_started":
+            frames.append((frames[-1] if frames else False) or auto_start)
+        in_auto = frames[-1] if frames else False
+        if kind == "card_play_finished" and frames:
+            frames.pop()
+        shown = AUTO_PLAYED_KIND if auto_start else kind
+        if shown in _VERBOSE_ONLY and not verbose and shown not in keep:
             continue
-        display = _format_row(row, kind, names, player_id)
+        display = _format_row(row, shown, names, player_id)
         if display is not None:
+            if in_auto:
+                display["auto_played"] = True
             out.append(display)
     return out
 
@@ -339,6 +366,22 @@ def _format_row(
         verb = "channeled" if kind == "orb_channeled" else "evoked"
         base |= {"actor": player, "actor_side": "player", "noun": orb, "verb": verb}
         base["text"] = f"{player} {verb} {orb}."
+        return base
+
+    if kind == AUTO_PLAYED_KIND:
+        name = card_name()
+        via = f" via {base['source']}" if base["source"] else ""
+        base |= {
+            "actor": player,
+            "actor_side": "player",
+            "noun": name,
+            "verb": "auto-played",
+            # The raw card identity, for the board's auto-play card flash (the
+            # ``source_*`` fields name the PARENT play, e.g. Havoc).
+            "card_id": str(row.get("card") or "?"),
+            "card_upgraded": bool(row.get("upgraded")),
+        }
+        base["text"] = f"{player} auto-played {name}{via}."
         return base
 
     # ── verbose-only kinds ───────────────────────────────────────────────

@@ -128,4 +128,29 @@ describe("EventLog", () => {
     expect(container.querySelectorAll("[data-detail]").length).toBe(2);
     expect(screen.getByText("Strike")).toBeInTheDocument();
   });
+
+  it("net mode keeps an auto-played card's rows (GH #1155)", () => {
+    // Stampede plays Bash at end of turn. The step is labelled "End turn", so
+    // dropping the player-side rows here hid the play entirely.
+    const entries = [
+      entry({ idx: 0, label: "End turn", turn: 1, combat_log: [
+        damageRow({ kind: "card_auto_played", verb: "auto-played", noun: "Bash",
+          target: null, target_side: null, amount: null, source: null,
+          text: "The Ironclad auto-played Bash.", auto_played: true,
+          card_id: "BASH", card_upgraded: false }),
+        damageRow({ amount: 8, source: "Bash", auto_played: true,
+          text: "The Ironclad dealt 8 damage to Nibbit using Bash." }),
+        damageRow({ side: "enemy", actor: "Nibbit", actor_side: "enemy",
+          target: "The Ironclad", target_side: "player", amount: 5, source: null,
+          text: "Nibbit dealt 5 damage to The Ironclad." }),
+      ] }),
+    ];
+    const { container } = render(<EventLog entries={entries} current={0} onPick={() => {}} />);
+    const lines = [...container.querySelectorAll("[data-detail]")].map((d) => d.textContent);
+    expect(lines).toEqual([
+      "The Ironclad auto-played Bash.",
+      "The Ironclad dealt 8 damage to Nibbit using Bash.",
+      "Nibbit dealt 5 damage to The Ironclad.",
+    ]);
+  });
 });

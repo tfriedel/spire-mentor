@@ -144,9 +144,9 @@
 {"i": 147, "method": "GET", "route": "/api/runs", "body": null, "status": 200, "sha256": "c6f3e40d2c24d67b34552234a8eca6654e527e0be05b305fbacb2a85004ac6a5", "decision": null}
 {"i": 148, "method": "GET", "route": "/api/runs/stat?path=<work>/logs/20260101_000000_Silent_G0LDEN0002_2.jsonl", "body": null, "status": 200, "sha256": "dddb1372960cee656590b0558ccc78ce86a8a66cb04ed94737e2ffb98cd0d895", "decision": null}
 {"i": 149, "method": "POST", "route": "/api/load", "body": {"path": "<work>/logs/20260101_000000_Silent_G0LDEN0002_2.jsonl"}, "status": 200, "sha256": "dabf467eb0273ec2fd64f90796afb5fad6dd73b1ba49b88a7e312249c427d81a", "decision": null}
-{"i": 150, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "f3a2ed42f157359cf28784459c151992c7b6af2fb176c08d37c33bf2bcb65a8b", "decision": null}
+{"i": 150, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "ab4a9757685d4c64f3a1cc1b504d377cb75153564a9434bb8b6e519c43795d85", "decision": null}
 {"i": 151, "method": "GET", "route": "/api/map", "body": null, "status": 200, "sha256": "4dde9a1af6b3bd554f0c8ea812744e7ba329c99fcd1d7e2511424d71e45cc6f5", "decision": null}
-{"i": 152, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "f3a2ed42f157359cf28784459c151992c7b6af2fb176c08d37c33bf2bcb65a8b", "decision": null}
+{"i": 152, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "ab4a9757685d4c64f3a1cc1b504d377cb75153564a9434bb8b6e519c43795d85", "decision": null}
 {"i": 153, "method": "GET", "route": "/api/step/0", "body": null, "status": 200, "sha256": "a65baef36d4c44ba34d1b032f83ecdab383b700550fae5d5b2e89f500a223fa4", "decision": null}
 {"i": 154, "method": "GET", "route": "/api/step/2", "body": null, "status": 200, "sha256": "0dc957aff3b61e0ff896ffe80ba296b4dc161a44e15e163fc79135785f1295bd", "decision": null}
 {"i": 155, "method": "GET", "route": "/api/step/51", "body": null, "status": 200, "sha256": "f762f64d30b18b987327ae5f8dd370a9e73258801024070f3ea20eef3b5a4891", "decision": null}

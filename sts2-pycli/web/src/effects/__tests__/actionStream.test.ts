@@ -254,3 +254,38 @@ describe("actionStream — reconciliation", () => {
     expect(out).toContainEqual({ kind: "hurt", target: { side: "osty" }, amount: 8 });
   });
 });
+
+describe("actionStream — auto-played cards (GH #1155)", () => {
+  function autoRow(over: Partial<CombatLogRow> = {}): CombatLogRow {
+    return row({
+      kind: "card_auto_played", verb: "auto-played", noun: "Bash",
+      target: null, target_side: null, target_uid: null,
+      amount: null, blocked: null, hp_after: null, source: null,
+      auto_played: true, card_id: "BASH", card_upgraded: false,
+      ...over,
+    });
+  }
+
+  it("shows the auto-played card BEFORE the hit it causes, using the hand card", () => {
+    const bash = { index: 0, id: "BASH", name: "Bash", cost: 2, type: "Attack",
+      description: "Deal 8 damage.", upgraded: false, image: "bash.png" };
+    const prev = state({ hand: [bash], enemies: [enemy({ hp: 20 })] } as Partial<CombatState>);
+    const next = state({ enemies: [enemy({ hp: 12 })] });
+    const out = actionStream(
+      [autoRow(), row({ amount: 8, hp_after: 12, source: "Bash", auto_played: true })],
+      prev, next,
+    );
+    expect(out.map((e) => e.kind)).toEqual(["cardPlay", "hurt"]);
+    expect(out[0]).toEqual({ kind: "cardPlay", target: { side: "player" }, card: bash });
+  });
+
+  it("falls back to a stub card named by the row when no pile holds it", () => {
+    const out = actionStream([autoRow({ noun: "Strike+", card_id: "STRIKE_IRONCLAD", card_upgraded: true })],
+      state(), state());
+    expect(out).toHaveLength(1);
+    const e = out[0];
+    expect(e.kind).toBe("cardPlay");
+    if (e.kind !== "cardPlay") return;
+    expect(e.card).toMatchObject({ id: "STRIKE_IRONCLAD", name: "Strike+", upgraded: true, image: null });
+  });
+});

@@ -12,6 +12,8 @@ _NAMES = LogNames(
         "STRIKE_IRONCLAD": "Strike",
         "DEFEND_IRONCLAD": "Defend",
         "SLIMED": "Slimed",
+        "BASH": "Bash",
+        "HAVOC": "Havoc",
     }.get(i, i),
     monster=lambda i: i,
     power=lambda i: {"HELLRAISER": "Hellraiser"}.get(i, i),
@@ -233,3 +235,50 @@ def test_an_absent_source_leaves_the_raw_id_fields_none():
     assert line["source_upgraded"] is None
     assert line["source_move_id"] is None
     assert line["source_monster"] is None
+
+
+def test_an_auto_played_card_is_shown_and_its_rows_are_tagged():
+    # GH #1155: Stampede auto-plays Bash at end of turn. The step is labelled
+    # "End turn", so the auto-play row is the only place the card shows.
+    bash = {"kind": "card", "id": "BASH", "upgraded": False}
+    rows = [
+        _row("card_play_started", card="BASH", upgraded=False, auto_played=True, energy_spent=0),
+        _damage(source=bash),
+        _row("power", applier=None, receiver=_NIBBIT, power="VULNERABLE", amount=2, source=bash),
+        _row("card_play_finished", card="BASH", upgraded=False, source=bash),
+        _row("monster_move", side="enemy", monster=_NIBBIT, move_id="BUTT"),
+    ]
+    out = format_combat_log(rows, _NAMES)
+    assert [r["kind"] for r in out] == ["card_auto_played", "damage", "power", "monster_move"]
+    assert out[0]["text"] == "The Ironclad auto-played Bash."
+    assert (out[0]["verb"], out[0]["noun"]) == ("auto-played", "Bash")
+    assert (out[0]["card_id"], out[0]["card_upgraded"]) == ("BASH", False)
+    assert all(r["auto_played"] is True for r in out[:3])
+    # Absent, not False, outside an auto-play: the enemy's turn is not part of it.
+    assert "auto_played" not in out[3]
+
+
+def test_a_nested_auto_play_names_its_parent_and_only_it_is_tagged():
+    # A manual Havoc auto-plays the top card: the parent's rows are the player's
+    # own play (untagged), the child's are tagged, and the child names its parent.
+    havoc = {"kind": "card", "id": "HAVOC", "upgraded": False}
+    rows = [
+        _row("card_play_started", card="HAVOC", upgraded=False, auto_played=False),
+        _row(
+            "card_play_started",
+            card="STRIKE_IRONCLAD",
+            upgraded=True,
+            auto_played=True,
+            source=havoc,
+        ),
+        _damage(),
+        _row("card_play_finished", card="STRIKE_IRONCLAD", upgraded=True, source=_STRIKE_SOURCE),
+        _row("block", receiver=_PLAYER, amount=3, source=havoc),
+        _row("card_play_finished", card="HAVOC", upgraded=False, source=havoc),
+    ]
+    out = format_combat_log(rows, _NAMES)
+    assert [r["kind"] for r in out] == ["card_auto_played", "damage", "block"]
+    assert out[0]["text"] == "The Ironclad auto-played Strike+ via Havoc."
+    assert out[0]["auto_played"] is True
+    assert out[1]["auto_played"] is True
+    assert "auto_played" not in out[2]

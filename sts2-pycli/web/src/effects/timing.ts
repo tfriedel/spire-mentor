@@ -10,6 +10,10 @@ import type { EffectEvent } from "./types";
  */
 export const HIT_SPACING_MS = 180;
 
+/** How long an auto-played card (`cardPlay`) stays on screen. Matches the
+ *  `gs-autoplay-in-out` keyframes' duration in `game-skin.css`. */
+export const AUTO_CARD_SHOW_MS = 1100;
+
 /** How long the board keeps playing after the last event fires. */
 export const TOTAL_SETTLE_MS = 1200;
 
@@ -39,6 +43,11 @@ export const EVENT_ADVANCE_MS: Record<EffectEvent["kind"], number> = {
   // this stays tunable without a test lying about how settled it is.
   powerFlash: 0,
   heal: 120,
+  // The auto-played card is shown BEFORE the hits it causes land, so they read
+  // as its consequences rather than arriving out of nowhere. Not measured from
+  // the game; long enough for the card to register, short enough not to stall
+  // an end-of-turn with several Stampede plays.
+  cardPlay: 450,
 };
 
 /** Offsets in ms at which each event fires, parallel to *events*. */
