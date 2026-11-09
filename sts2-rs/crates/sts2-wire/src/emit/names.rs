@@ -198,8 +198,9 @@ pub const fn map_point_type_ui_str(t: MapPointType) -> &'static str {
 
 /// The C# id of an event's fight (`ModelId.Entry`, the slugged class name of
 /// the `EncounterModel` the event passes to `EnterCombatWithoutExitingEvent`),
-/// as `CombatState.encounter_id` reports it during that fight (GH #1097).
-/// The three `BattlewornDummy` settings share one encounter class.
+/// as `CombatState.encounter_id` reports it during that fight (GH #1097), in
+/// game build v0.107.1, where the three `BattlewornDummy` settings share one
+/// encounter class. [`event_encounter_id_for`] takes the build.
 #[must_use]
 pub const fn event_encounter_id(e: EventEncounter) -> &'static str {
     match e {
@@ -210,9 +211,51 @@ pub const fn event_encounter_id(e: EventEncounter) -> &'static str {
     }
 }
 
+/// [`event_encounter_id`] in game build `version` (#1181). v0.111.0 gives
+/// each `BattlewornDummy` setting its own encounter class
+/// (`BattlewornDummyEventV1Encounter` … `V3`, `BattlewornDummy.cs:54-66`),
+/// slugged like `BattleFriendV1` → `BATTLE_FRIEND_V1`. The other event
+/// fights keep one id in both builds.
+#[must_use]
+pub fn event_encounter_id_for(e: EventEncounter, version: sts2_core::GameVersion) -> &'static str {
+    use sts2_core::events::BattlewornDummySetting as S;
+    match e {
+        EventEncounter::BattlewornDummy(setting) if version >= sts2_core::GameVersion::V0_111_0 => {
+            match setting {
+                S::Setting1 => "BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER",
+                S::Setting2 => "BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER",
+                S::Setting3 => "BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER",
+            }
+        }
+        other => event_encounter_id(other),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn battleworn_dummy_has_one_encounter_per_setting_from_v0111() {
+        use sts2_core::events::BattlewornDummySetting as S;
+        use sts2_core::GameVersion;
+        for (setting, id) in [
+            (S::Setting1, "BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"),
+            (S::Setting2, "BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER"),
+            (S::Setting3, "BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER"),
+        ] {
+            let e = EventEncounter::BattlewornDummy(setting);
+            assert_eq!(event_encounter_id_for(e, GameVersion::V0_111_0), id);
+            assert_eq!(
+                event_encounter_id_for(e, GameVersion::V0_107_1),
+                "BATTLEWORN_DUMMY_EVENT_ENCOUNTER"
+            );
+        }
+        assert_eq!(
+            event_encounter_id_for(EventEncounter::FakeMerchant, GameVersion::V0_111_0),
+            "FAKE_MERCHANT_EVENT_ENCOUNTER"
+        );
+    }
 
     #[test]
     fn ui_type_strings_are_pascalcase_for_ui_node_table() {

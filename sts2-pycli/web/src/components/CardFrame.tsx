@@ -270,7 +270,7 @@ function renderDesc(
   return <>{out}</>;
 }
 
-export default function CardFrame({ card, width = 112, height, dim = false, unaffordable = false, blocked = false, played = false, onClick, clickable = false, hotkey, winProb, best, previewDamage }: {
+export default function CardFrame({ card, width = 112, height, dim = false, unaffordable = false, blocked = false, played = false, onClick, clickable = false, hotkey, winProb, best, mark, step, previewDamage }: {
   card: Card; width?: number; height?: number; dim?: boolean;
   /** In hand, and you cannot pay for it right now. The game does NOT fade the
    *  card for this: `NCard.UpdateEnergyCostVisuals` paints the cost numeral
@@ -289,6 +289,11 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
    *  are short on energy when you are not. */
   blocked?: boolean;
   played?: boolean; onClick?: () => void; hotkey?: number; winProb?: number; best?: boolean;
+  /** The advice's mark on this card (advice/marks.ts): a gold glow around its
+   *  silhouette, breathing on the move to make. */
+  mark?: "best" | "good" | "alt" | null;
+  /** The mark's step number (1 = play now). */
+  step?: number | null;
   /** Reads as clickable (cursor, rim) although the click is handled by an
    *  ancestor. The hand needs this: its cards sit under a hitbox that stays
    *  put while the card itself rises, so the hand's slot — not the card —
@@ -331,6 +336,7 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
   if (blocked) cls.push("gs-blocked");
   if (played) cls.push("gs-played");
   if (best) cls.push("gs-best");
+  if (mark) cls.push(`gs-mark-${mark}`);
 
   return (
     <div
@@ -410,6 +416,9 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
       {/* Workbench affordances — not part of the game's card. */}
       {played && <span className="gs-badge gs-played-tag">played</span>}
       {hotkey != null && <span aria-hidden="true" className="gs-badge gs-hotkey-tag">{hotkey}</span>}
+      {step != null && (
+        <span className={`gs-badge gs-step-tag gs-step-${mark ?? "best"}`} aria-label={`step ${step}`}>{step}</span>
+      )}
       {winProb != null && (
         <span aria-hidden="true" className={`gs-badge gs-win${best ? " gs-best" : ""}`}>
           {Math.round(winProb * 100)}%

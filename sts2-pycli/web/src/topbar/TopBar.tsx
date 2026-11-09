@@ -4,16 +4,19 @@ import Menu, { type MenuItemSpec } from "./Menu";
 import CommandPalette from "./CommandPalette";
 import type { PaletteEntry } from "./paletteEntries";
 import type { Command } from "./commands";
+import MentorBar, { type MentorBarProps, type MentorMode } from "./MentorBar";
 
 /**
  * The workbench's top bar, rebuilt around three questions a user actually
  * asks — "what am I looking at", "what is the AI doing for me", "what can I
  * do to this run" — instead of one row of every button.
  *
- *   [Live | Replay | MCTS]  [🎓 coach | 💡 hints] [🔎 search | 🧠 e2e net] [⚔️ autobattle]  …context…  [Run ▾] [Analyze ▾] [Tools ▾]  act · floor  ▤
+ *   [Live | Replay | MCTS]  Mode [Off · Coach · Hints · AI plays] [Search · Instinct]
+ *   Peek · Let AI pick · Autobattle  ● status  …context…  [Run ▾] [Analyze ▾] [Tools ▾]  act · floor  ▤
  *
- *  - The VIEW switch and the three PERSISTENT AI CHIPS are always on the
- *    bar: their state matters at a glance, and there are at most four.
+ *  - The VIEW switch and the AI's controls (MentorBar: the mod's badge
+ *    popover laid flat) are always on the bar: their state matters at a
+ *    glance. While the AI plays, the bar turns amber and leads with Stop.
  *  - CONTEXT controls are the one or two things the current view is about:
  *    replay's run picker, follow and "Play from here".
  *  - Everything else is a one-shot verb and lives in a menu, grouped by
@@ -26,12 +29,6 @@ import type { Command } from "./commands";
  * there are the tests for the bar's behaviour.
  */
 
-export interface Chip {
-  on: boolean;
-  toggle: () => void;
-  title: string;
-}
-
 export interface TopBarProps {
   mode: "play" | "replay" | "mcts";
   setMode: (m: "play" | "replay" | "mcts") => void;
@@ -40,11 +37,9 @@ export interface TopBarProps {
 
   commands: Command[];
 
-  /** `undefined` ⇒ not offered in this mode / build. */
-  /** `hints` is the advice-style switch: on = Hints, off = Coach.
-   *  `advisor`: on = the e2e student advises, off = the search (offered
-   *  only on a run the student can read). */
-  chips: { hints?: Chip; autobattle?: Chip; advisor?: Chip };
+  /** The AI's controls (Mode, Brain, this decision's verbs, status);
+   *  `undefined` ⇒ not offered in this mode / build. */
+  mentor?: MentorBarProps;
 
   /** Replay's context controls; only rendered in replay mode. */
   replay?: {
@@ -66,6 +61,8 @@ export interface TopBarProps {
      *  that build's card text. Absent / the default = the default build. */
     gameVersion?: string | null;
     debug: { on: boolean; toggle: () => void };
+    /** The engine's own numbers (win %, Q, shares) beside the marks and rows. */
+    engineNumbers: { on: boolean; toggle: () => void };
     onHelp: () => void;
     /** Browser build only: the "Live game…" connection dialog (GH #709). */
     onBridge?: () => void;
@@ -119,7 +116,9 @@ export default function TopBar(p: TopBarProps) {
   const toolItems: (MenuItemSpec | null)[] = [
     ...(p.tools.simlabLink
       ? [{ id: "simlab", label: "🧪 SimLab ↗", href: "/simlab.html",
-          title: "SimLab — batch combat statistics (opens in a new tab so your run isn't disturbed)" }]
+          title: "SimLab — batch combat statistics (opens in a new tab so your run isn't disturbed)" },
+        { id: "seedcheck", label: "🎲 Seed check ↗", href: "/seedcheck.html",
+          title: "Seed check — can Instinct win a posted seed? (Ironclad A10, v0.111.0; opens in a new tab)" }]
       : []),
     { id: "synergies", label: "⚡ Synergies ↗", href: catalogHref(p.tools.gameVersion),
       title: "Card Synergy Catalog — pair synergies per character (opens in a new tab so your run isn't disturbed)" },
@@ -130,6 +129,9 @@ export default function TopBar(p: TopBarProps) {
           title: "connect this page to the running game's advisor (game tree, live search, rewind)" }]
       : []),
     null,
+    { id: "engine-numbers", label: "🔢 engine numbers", checked: p.tools.engineNumbers.on,
+      onSelect: p.tools.engineNumbers.toggle,
+      title: "show the engine's own numbers beside the advice: win %, Q, search shares, W/L/T (off: the advice in words)" },
     { id: "debug", label: "🐞 debug log", checked: p.tools.debug.on, onSelect: p.tools.debug.toggle,
       title: "the debug log drawer — records run settings, per-decision MCTS sims, and the play-to-end trace (can be turned on any time)" },
     ...p.tools.controls.filter(Boolean).map((node, i) => ({ id: `control-${i}`, label: "", render: node })),
@@ -150,12 +152,31 @@ export default function TopBar(p: TopBarProps) {
         run: () => p.setMode("replay") });
     }
     out.push({ id: "view-mcts", group: "View", label: "📊 MCTS Runs", disabledReason: p.mode === "mcts" ? "already here" : undefined, run: () => p.setMode("mcts") });
-    for (const [id, chip, label] of [
-      ["hints", p.chips.hints, "💡 hints style (off = 🎓 coach)"],
-      ["autobattle", p.chips.autobattle, "⚔️ autobattle"],
-      ["advisor", p.chips.advisor, "🧠 Instinct advises (off = 🔎 search)"],
-    ] as const) {
-      if (chip) out.push({ id, group: "AI", label, title: chip.title, checked: chip.on, run: chip.toggle });
+    const m = p.mentor;
+    if (m) {
+      for (const [key, label] of [["off", "Mode: Off"], ["coach", "Mode: Coach"], ["hints", "Mode: Hints"],
+        ["aiplays", "Mode: AI plays"]] as [MentorMode, string][]) {
+        out.push({ id: `mode-${key}`, group: "AI", label, checked: m.mode === key,
+          disabledReason: key === "aiplays" && m.mode !== "aiplays" ? m.aiPlaysDisabled : undefined,
+          run: () => m.setMode(key) });
+      }
+      if (m.brain) {
+        const b = m.brain;
+        out.push({ id: "brain-search", group: "AI", label: "Brain: Search", checked: b.value === "search",
+          run: () => b.set("search") });
+        out.push({ id: "brain-instinct", group: "AI", label: "Brain: Instinct", checked: b.value === "instinct",
+          run: () => b.set("instinct") });
+      }
+      if (m.onPeek) out.push({ id: "peek", group: "AI", label: "Peek at the AI's pick", shortcut: "P", run: m.onPeek });
+      if (m.letAiPick) {
+        out.push({ id: "let-ai-pick", group: "AI", label: "Let AI pick", shortcut: "G",
+          disabledReason: m.letAiPick.disabledReason, run: m.letAiPick.run });
+      }
+      if (m.autobattle) {
+        out.push({ id: "autobattle", group: "AI", label: "⚔️ autobattle", checked: m.autobattle.on,
+          run: m.autobattle.toggle });
+      }
+      if (m.aiPlaying) out.push({ id: "stop-ai", group: "AI", label: "■ Stop AI", shortcut: "Esc", run: m.onStop });
     }
     for (const c of p.commands) {
       out.push({ id: c.id, group: GROUP_TITLES[c.group] ?? c.group, label: c.label, title: c.title,
@@ -163,19 +184,16 @@ export default function TopBar(p: TopBarProps) {
         disabledReason: c.busy ? "in progress" : c.disabledReason, run: c.run });
     }
     if (p.tools.simlabLink) out.push({ id: "simlab", group: "Tools", label: "🧪 SimLab ↗", run: () => window.open("/simlab.html", "_blank", "noopener") });
+    if (p.tools.simlabLink) out.push({ id: "seedcheck", group: "Tools", label: "🎲 Seed check ↗", run: () => window.open("/seedcheck.html", "_blank", "noopener") });
     out.push({ id: "synergies", group: "Tools", label: "⚡ Synergies ↗", run: () => window.open(catalogHref(p.tools.gameVersion), "_blank", "noopener") });
+    out.push({ id: "engine-numbers", group: "Tools", label: "🔢 engine numbers", checked: p.tools.engineNumbers.on,
+      run: p.tools.engineNumbers.toggle });
     out.push({ id: "debug", group: "Tools", label: "🐞 debug log", checked: p.tools.debug.on, run: p.tools.debug.toggle });
     out.push({ id: "help", group: "Tools", label: "keyboard shortcuts", shortcut: "?", run: p.tools.onHelp });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.mode, p.showViewToggle, p.replayCount, p.chips.hints, p.chips.autobattle, p.chips.advisor, p.commands, p.tools.simlabLink, p.tools.debug.on, p.tools.gameVersion]);
-
-  const chip = (id: string, c: Chip | undefined, off: string, on: string) => c && (
-    <button key={id} onClick={c.toggle} aria-pressed={c.on} title={c.title}
-      className={`wb-chip${c.on ? " wb-chip--on" : ""}`}>
-      {c.on ? on : off}
-    </button>
-  );
+  }, [p.mode, p.showViewToggle, p.replayCount, p.mentor, p.commands, p.tools.simlabLink, p.tools.debug.on,
+    p.tools.engineNumbers.on, p.tools.gameVersion]);
 
   return (
     <>
@@ -195,14 +213,8 @@ export default function TopBar(p: TopBarProps) {
             title="aggregate dashboard + recorded MCTS runs">📊 MCTS Runs</button>
         </span>
 
-        {/* Persistent AI switches */}
-        {(p.chips.hints || p.chips.autobattle || p.chips.advisor) && (
-          <span className="wb-chips">
-            {chip("hints", p.chips.hints, "🎓 coach", "💡 hints")}
-            {chip("advisor", p.chips.advisor, "🔎 search", "🧠 Instinct")}
-            {chip("autobattle", p.chips.autobattle, "⚔️ autobattle", "⚔️ autobattle ✓")}
-          </span>
-        )}
+        {/* The AI's controls: Mode, Brain, this decision, status */}
+        {p.mentor && <MentorBar {...p.mentor} />}
 
         {/* Context controls */}
         {p.mode === "replay" && p.replay && (

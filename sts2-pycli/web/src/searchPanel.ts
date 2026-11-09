@@ -1,4 +1,4 @@
-// What the "Machine reasoning" sidebar shows, as a pure function of the run
+// What the "Advice" sidebar (formerly "Machine reasoning") shows, as a pure function of the run
 // state. Kept out of App.tsx so the precedence rules below are unit-testable
 // without standing up the whole network-driven app.
 import type { Enemy, LastSearch, Score } from "./api";

@@ -284,6 +284,25 @@ def test_a_teammate_relic_the_engine_lacks_is_dropped_not_fatal() -> None:
     assert [r["id"] for r in ally["relics"]] == ["RING_OF_THE_SNAKE"]
 
 
+def test_a_teammate_potion_the_engine_lacks_is_an_empty_slot() -> None:
+    """A teammate's potion the engine does not model is an empty belt slot,
+    not an error for the whole board (#1207, the potion half of the relic
+    case above). The other slots keep their positions, and the drop is
+    counted like every other soft drop."""
+    from sts2_hint import adapter
+
+    board = _board()
+    board["allies"][0]["potions"] = [
+        {"slot": 0, "empty": False, "id": "NOT_A_POTION", "name": "Not A Potion"},
+        {"slot": 1, "empty": False, "id": "BLOCK_POTION", "name": "Block Potion"},
+        {"slot": 2, "empty": True},
+    ]
+    adapter.reset_drop_counts()
+    ally = translate(to_headless_combat_play(board))["allies"][0]
+    assert ally["potions"] == [None, "BLOCK_POTION", None]
+    assert adapter.drop_counts()["potion"] == 1
+
+
 def _whole_seat_board(*, seat_index: int | None = None) -> dict[str, Any]:
     """``_board`` with the rest of the teammate's seat, as a current mod sends it."""
     board = _board()

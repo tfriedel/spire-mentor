@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 import realgame_coach as rc
+from display_names import display_name
 
 
 @dataclass
@@ -195,7 +196,9 @@ class TestCombatTurns:
         assert turn["verdict"] == "blunder"
         assert turn["hp_drop"] == 12
         assert turn["you"][-1] == "end turn"
-        assert turn["you"][:2] == ["Bash", "Defend Ironclad"]
+        # An id the fight never named is shown by its display name
+        # (`Defend` from the localization tables; prettified without them).
+        assert turn["you"][:2] == ["Bash", display_name("DEFEND_IRONCLAD")]
         assert turn["ai"] == ["Bash", "Defend", "end turn"]
         assert turn["id"] == "turn:10" and turn["node_id"] == 10
         assert turn["turn"] == 3 and turn["floor"] == 5

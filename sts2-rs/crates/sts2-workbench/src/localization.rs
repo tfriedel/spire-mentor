@@ -928,6 +928,16 @@ pub fn build_loc(d: &Data) -> Loc {
     for (key, value) in &d.loc_events {
         card_loc.setdefault(key.clone(), value.clone());
     }
+    // Encounter titles only (`VANTOM_BOSS.title`): the seed checker names
+    // bosses with them; their `.loss` lines are not display names.
+    for (key, value) in &d.loc_encounters {
+        if key
+            .rsplit_once('.')
+            .is_some_and(|(_, field)| field == "title")
+        {
+            card_loc.setdefault(key.clone(), value.clone());
+        }
+    }
     card_loc
 }
 

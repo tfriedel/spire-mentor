@@ -318,7 +318,7 @@ internal sealed class SimAiPartnerBrain
         int hostSlot = state.GetPlayerSlotIndex(host);
         int mySlot = state.GetPlayerSlotIndex(me);
         if (hostSlot >= ready.Count || mySlot >= ready.Count || !ready[hostSlot] || ready[mySlot] ||
-            !Once($"act:{state.CurrentActIndex}"))
+            !Once(PartnerVotes.ActChange(state.CurrentActIndex, state.ActFloor)))
         {
             return;
         }

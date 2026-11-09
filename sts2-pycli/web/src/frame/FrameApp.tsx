@@ -21,7 +21,7 @@ import {
   type Layout,
   type PanelId,
 } from "./layout";
-import { AdvicePanel, CoachPanel, LogPanel, ToolbarPanel, WorkbenchPanel } from "./panels";
+import { AdvicePanel, CoachPanel, LogPanel, ToolbarPanel } from "./panels";
 import { INITIAL_STATE, reduce, type Incoming } from "./store";
 
 const DRAG_MIME = "application/x-spirementor-panel";
@@ -198,8 +198,6 @@ export default function FrameApp() {
         return <CoachPanel state={state} dispatch={dispatch} />;
       case "log":
         return <LogPanel state={state} />;
-      case "workbench":
-        return <WorkbenchPanel />;
     }
   };
 

@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import logging
+import select
 import socket
 import threading
 import time
@@ -319,9 +320,68 @@ class RealGameBridgeClient:
             }
         )
 
+    def newer_advice_request_pending(self, advice_for: Any) -> bool:
+        """Whether a complete ``advice_request`` for the same ``advice_for``
+        is already queued behind the message just received.
+
+        Reads what the socket already holds without blocking. The queued
+        messages stay buffered, in order, for :meth:`receive_state`.
+
+        The mod asks for advice again on every board change, and each side
+        keeps only its newest request in flight (``SimAdvisor``'s request id,
+        an AI partner's board signature), dropping replies to older ones. In
+        co-op a teammate's turn queues one request per card they play, so
+        answering each in turn ran the advice far behind the board (#1208, 7
+        requests and ~15 s behind with the search). A request with a newer
+        one of the same kind behind it is for a board that no longer exists.
+
+        Same ``advice_for`` only: an AI partner asks its combat and its
+        screen questions on one socket, each waiting for its own answer.
+        """
+        if self._sock is None:
+            return False
+        self._drain_ready()
+        for raw in self._buffer.split(b"\n")[:-1]:
+            if b'"advice_request"' not in raw:
+                continue
+            try:
+                queued = json.loads(raw)
+            except ValueError:
+                continue
+            if (
+                isinstance(queued, dict)
+                and queued.get("type") == "advice_request"
+                and queued.get("advice_for") == advice_for
+            ):
+                return True
+        return False
+
     # ----------------------------------------------------------------
     # Internal helpers
     # ----------------------------------------------------------------
+
+    def _drain_ready(self) -> None:
+        """Move what the socket already holds into the line buffer, without
+        waiting for more. A closed or failed socket is left for the next
+        :meth:`receive_state` to report."""
+        sock = self._sock
+        if sock is None:
+            return
+        while True:
+            try:
+                readable, _, _ = select.select([sock], [], [], 0)
+            except (OSError, ValueError):
+                return
+            if not readable:
+                return
+            try:
+                chunk = sock.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                # Peer closed: receive_state sees the same EOF next.
+                return
+            self._buffer += chunk
 
     def _receive_line(self) -> str | None:
         """Read one newline-terminated line, buffering partial reads.

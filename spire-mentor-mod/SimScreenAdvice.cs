@@ -142,6 +142,17 @@ internal sealed class SimScreenDecision
     /// for every other screen.
     /// </summary>
     public List<object?> OptionRefs = new();
+
+    /// <summary>
+    /// The node the player clicks for each option, in option order, for the
+    /// HUD's highlight ring (SimHighlights): a reward card's holder, a shop
+    /// slot, a campfire or event button. A null entry (or a short list) is an
+    /// option with nothing on screen to ring; the advice panel still names it.
+    /// </summary>
+    public List<Control?> OptionNodes = new();
+
+    /// <summary>The node that skips this screen, when it has one to ring.</summary>
+    public Control? SkipNode;
 }
 
 internal static class SimScreenAdvice
@@ -423,6 +434,7 @@ internal static class SimScreenAdvice
             OptionLabels = labels,
             Screen = screen,
             ScreenName = nameof(NChooseARelicSelection),
+            OptionNodes = holders.Select(h => (Control?)h).ToList(),
             Choose = index => ClickHolder(holders, index),
         };
     }
@@ -536,6 +548,7 @@ internal static class SimScreenAdvice
             Signature = "treasure:" + string.Join("|", labels),
             Screen = room,
             ScreenName = nameof(NTreasureRoom),
+            OptionNodes = holders.Select(h => (Control?)h).ToList(),
             Choose = index => ClickHolder(holders, index),
         };
     }
@@ -652,6 +665,7 @@ internal static class SimScreenAdvice
             Screen = room,
             ScreenName = nameof(NRestSiteRoom),
             OptionRefs = buttons.Select(b => (object?)b.Option).ToList(),
+            OptionNodes = buttons.Select(b => (Control?)b).ToList(),
             Choose = index => ClickHolder(buttons, index),
         };
     }
@@ -702,6 +716,7 @@ internal static class SimScreenAdvice
             OptionLabels = labels,
             Screen = screen,
             ScreenName = nameof(NChooseABundleSelectionScreen),
+            OptionNodes = bundles.Select(b => (Control?)b).ToList(),
             Choose = index => ChooseBundle(screen, bundles, index),
         };
     }
@@ -960,6 +975,7 @@ internal static class SimScreenAdvice
             Screen = room,
             ScreenName = "NEventRoom",
             OptionRefs = options.Select(o => (object?)o.Option).ToList(),
+            OptionNodes = options.Select(o => (Control?)o).ToList(),
             Choose = index => ChooseEventOption(room, index),
         };
     }
@@ -1314,6 +1330,8 @@ internal static class SimScreenAdvice
                         string.Join("|", options.Select(o => o.TryGetValue("id", out object? id) ? id : "?")),
             Screen = room,
             ScreenName = nameof(NMerchantRoom),
+            // Option 0 is "leave" (no slot); the slots follow in option order.
+            OptionNodes = new List<Control?> { null }.Concat(slots.Select(s => (Control?)s)).ToList(),
             Choose = index => ChooseShopOption(room, slots, index),
         };
     }
@@ -1556,6 +1574,10 @@ internal static class SimScreenAdvice
             OptionLabels = labels,
             Screen = screen,
             ScreenName = nameof(NCardRewardSelectionScreen),
+            OptionNodes = holders.Select(h => (Control?)h).ToList(),
+            // The Skip button itself: always the first alternative
+            // (CardRewardAlternative.Generate adds Skip before any other).
+            SkipNode = RewardSkipButton(screen),
             Choose = index => ChooseCardReward(screen, index),
         };
     }
@@ -1651,6 +1673,14 @@ internal static class SimScreenAdvice
         bool canSkip = SkipButton(screen) != null;
         RunState? runState = RunManager.Instance.DebugOnlyGetState();
         Player? me = LocalContext.GetMe(runState);
+        // What opened the screen (CardSelectContextNoPrefsPatch captured it
+        // on `FromChooseACardScreen`: Discovery, a Skill/Attack/Power Potion,
+        // Lead Paperweight). In a fight the advisor's mirror needs it to
+        // replay the opening play and stand on the same choice; without it
+        // every such offer fell back from Instinct to the search's deck-pick
+        // head (73 of 289 answers in one live run, 2026-11-08).
+        (string? source, string? promptKey, string? sourceModel, _) = SimCardSelectContext.Peek();
+        bool fromThisScreen = source == "FromChooseACardScreen";
         Dictionary<string, object> state = new()
         {
             // The card-pick head is the closest trained surface, so it rides
@@ -1663,6 +1693,15 @@ internal static class SimScreenAdvice
             ["can_skip"] = canSkip,
             ["combat"] = (object?)SimCombatHandler.BuildEmbeddedCombatState(me)!,
         };
+        if (fromThisScreen)
+        {
+            state["source"] = source!;
+            state["prompt_key"] = (object?)promptKey!;
+            state["source_model"] = (object?)sourceModel!;
+            state["source_kind"] = (object?)SimCardSelectContext.SourceKind!;
+            state["source_target_index"] = (object?)SimCardSelectContext.SourceTargetIndex!;
+            state["source_upgraded"] = (object?)SimCardSelectContext.SourceUpgraded!;
+        }
         SimStateExtractor.ApplyEnvelope(state, runState, me);
 
         return new SimScreenDecision
@@ -1673,6 +1712,8 @@ internal static class SimScreenAdvice
             OptionLabels = labels,
             Screen = screen,
             ScreenName = nameof(NChooseACardSelectionScreen),
+            OptionNodes = holders.Select(h => (Control?)h).ToList(),
+            SkipNode = SkipButton(screen),
             Choose = index => ChooseGeneratedCard(screen, index),
         };
     }
@@ -1757,6 +1798,19 @@ internal static class SimScreenAdvice
     /// result as end-selection-without-reward). There is no skip button to
     /// click.
     /// </summary>
+    /// <summary>The reward screen's Skip button (for the highlight ring), or
+    /// the alternatives row when the button cannot be found.</summary>
+    private static Control? RewardSkipButton(NCardRewardSelectionScreen screen)
+    {
+        Control? row = screen.GetNodeOrNull<Control>("UI/RewardAlternatives");
+        if (row == null)
+        {
+            return null;
+        }
+        return UiHelper.FindAll<NCardRewardAlternativeButton>(row)
+            .FirstOrDefault(b => GodotObject.IsInstanceValid(b) && b.IsVisibleInTree()) ?? row;
+    }
+
     private static bool TrySkipCardReward(NCardRewardSelectionScreen screen)
     {
         try
@@ -1843,6 +1897,20 @@ internal static class SimScreenAdvice
         };
     }
 
+    /// <summary>A potion's display name, or its id if the loc lookup throws.</summary>
+    private static string SafePotionTitle(PotionModel potion)
+    {
+        try
+        {
+            string title = potion.Title.GetFormattedText();
+            return string.IsNullOrWhiteSpace(title) ? potion.Id.Entry : title;
+        }
+        catch (Exception)
+        {
+            return potion.Id.Entry;
+        }
+    }
+
     /// <summary>
     /// The first full-belt potion reward still on the loot screen, as a
     /// <c>potion_swap</c> decision (v5.2, PotionSwapAdvice): option 0 leaves
@@ -1866,7 +1934,9 @@ internal static class SimScreenAdvice
             return null;
         }
         NRewardButton button = blocked[0];
-        List<string?> belt = me.PotionSlots.Select(p => p?.Id.Entry).ToList();
+        // Names, not ids: the label is what the player reads ("discard Fire
+        // Potion") and what the takeover cross-checks `best.label` against.
+        List<string?> belt = me.PotionSlots.Select(p => p == null ? null : SafePotionTitle(p)).ToList();
         List<string> labels = PotionSwapAdvice.Labels(belt);
         object? reward = button.Reward is PotionReward { Potion: not null } pr
             ? SimStateExtractor.SerializePotionSlot(pr.Potion, -1)
@@ -2492,9 +2562,15 @@ internal static class SimScreenAdvice
         // autoplay pick a second, third, ... card on a screen that was only
         // ever waiting to be confirmed (59 straight `Takeover executed on
         // NDeckEnchantSelectScreen: Defend` in godot.log, 2026-08-06).
+        // Except an "up to N" combat pile pick (Neow's Fury), which keeps
+        // offering the rest: see CardGridRules.OffersMorePicks.
         int selected = SelectedCount(screen);
         (int minSelect, int maxSelect) = ReadSelectionBounds(screen);
-        if (selected > 0)
+        // Already-selected cards are excluded: `_selectedCards` is a HashSet,
+        // so re-picking one DE-selects it, and an autoplay loop that keeps
+        // being offered its own last pick can toggle a card on and off forever.
+        List<NGridCardHolder> holders = SelectableHolders(screen);
+        if (!CardGridRules.OffersMorePicks(screen.GetType().Name, selected, maxSelect, holders.Count))
         {
             NConfirmButton? confirm = PendingConfirm(screen);
             if (confirm != null)
@@ -2531,10 +2607,6 @@ internal static class SimScreenAdvice
             // through and offer what is still pickable.
         }
 
-        // Already-selected cards are excluded: `_selectedCards` is a HashSet,
-        // so re-picking one DE-selects it, and an autoplay loop that keeps
-        // being offered its own last pick can toggle a card on and off forever.
-        List<NGridCardHolder> holders = SelectableHolders(screen);
         if (holders.Count == 0)
         {
             return null;
@@ -2582,6 +2654,10 @@ internal static class SimScreenAdvice
             ["source_target_index"] = (object?)SimCardSelectContext.SourceTargetIndex!,
             ["source_upgraded"] = (object?)SimCardSelectContext.SourceUpgraded!,
             ["screen"] = screen.GetType().Name,
+            // Cards already taken on this screen (an "up to N" combat pile
+            // pick asks again after each one): the advisor continues its
+            // planned picks, or confirms.
+            ["selected_count"] = Math.Max(0, selected),
             ["combat"] = (object?)SimCombatHandler.BuildEmbeddedCombatState(me)!,
         };
         SimStateExtractor.ApplyEnvelope(state, runState, me);
@@ -2595,6 +2671,7 @@ internal static class SimScreenAdvice
             Screen = screen,
             ScreenName = screen.GetType().Name,
             OptionRefs = holders.Select(h => (object?)h.CardModel).ToList(),
+            OptionNodes = holders.Select(h => (Control?)h).ToList(),
             // `index == OptionCount` is the takeover's SKIP leg (SimAdvisor).
             Choose = index =>
                 index >= holders.Count

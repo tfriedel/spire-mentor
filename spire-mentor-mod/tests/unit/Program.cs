@@ -140,6 +140,106 @@ Check("parse hints", CoachStyle.Parse(" HINTS ")?.ToString(), "Hints");
 Check("parse coach", CoachStyle.Parse("coach")?.ToString(), "Coach");
 Check("parse junk", CoachStyle.Parse("advisor")?.ToString(), null);
 
+// MentorModes: the badge's Mode switch over SimMode x style x F7 autoplay.
+string Cur(SimModeLite m, AdviceStyle s, bool armed = false, bool battle = false) =>
+    MentorModes.Current(m, s, armed, battle).ToString();
+Check("current off", Cur(SimModeLite.Off, AdviceStyle.Coach), "Off");
+Check("current off ignores a stale armed flag", Cur(SimModeLite.Off, AdviceStyle.Hints, armed: true), "Off");
+Check("current coach", Cur(SimModeLite.Advisor, AdviceStyle.Coach), "Coach");
+Check("current hints", Cur(SimModeLite.Advisor, AdviceStyle.Hints), "Hints");
+Check("current F7 is AI plays", Cur(SimModeLite.Advisor, AdviceStyle.Coach, armed: true), "AiPlays");
+Check("current autobattle keeps its style lit", Cur(SimModeLite.Advisor, AdviceStyle.Hints, armed: true, battle: true), "Hints");
+Check("current autopilot is AI plays", Cur(SimModeLite.Autopilot, AdviceStyle.Coach), "AiPlays");
+string Pl(MentorMode t, SimModeLite m, AdviceStyle s, bool armed = false, bool battle = false) =>
+    MentorModes.Plan(t, m, s, armed, battle)?.ToString() ?? "no-op";
+Check("plan: the lit segment does nothing", Pl(MentorMode.Coach, SimModeLite.Advisor, AdviceStyle.Coach), "no-op");
+Check("plan: AI plays under autopilot does nothing", Pl(MentorMode.AiPlays, SimModeLite.Autopilot, AdviceStyle.Coach), "no-op");
+Check("plan: coach under autobattle does nothing", Pl(MentorMode.Coach, SimModeLite.Advisor, AdviceStyle.Coach, armed: true, battle: true), "no-op");
+Check("plan: off -> coach turns the coach on",
+    Pl(MentorMode.Coach, SimModeLite.Off, AdviceStyle.Hints),
+    "MentorModePlan { Mode = Advisor, Style = Coach, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = False }");
+Check("plan: coach -> hints only switches style",
+    Pl(MentorMode.Hints, SimModeLite.Advisor, AdviceStyle.Coach),
+    "MentorModePlan { Mode = Advisor, Style = Hints, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = False }");
+Check("plan: hints -> off keeps the style for next time",
+    Pl(MentorMode.Off, SimModeLite.Advisor, AdviceStyle.Hints),
+    "MentorModePlan { Mode = Off, Style = Hints, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = False }");
+Check("plan: off -> AI plays turns on in the set style and arms F7",
+    Pl(MentorMode.AiPlays, SimModeLite.Off, AdviceStyle.Coach),
+    "MentorModePlan { Mode = Advisor, Style = Coach, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = True, DisarmAutoplay = False }");
+Check("plan: coach -> AI plays arms F7",
+    Pl(MentorMode.AiPlays, SimModeLite.Advisor, AdviceStyle.Coach),
+    "MentorModePlan { Mode = Advisor, Style = Coach, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = True, DisarmAutoplay = False }");
+Check("plan: AI plays -> hints disarms F7",
+    Pl(MentorMode.Hints, SimModeLite.Advisor, AdviceStyle.Coach, armed: true),
+    "MentorModePlan { Mode = Advisor, Style = Hints, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = True }");
+Check("plan: AI plays -> coach (same style) disarms F7",
+    Pl(MentorMode.Coach, SimModeLite.Advisor, AdviceStyle.Coach, armed: true),
+    "MentorModePlan { Mode = Advisor, Style = Coach, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = True }");
+Check("plan: autobattle -> hints keeps the autobattle",
+    Pl(MentorMode.Hints, SimModeLite.Advisor, AdviceStyle.Coach, armed: true, battle: true),
+    "MentorModePlan { Mode = Advisor, Style = Hints, StopAutopilot = False, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = False }");
+Check("plan: autobattle -> AI plays trades it for F7",
+    Pl(MentorMode.AiPlays, SimModeLite.Advisor, AdviceStyle.Coach, armed: true, battle: true),
+    "MentorModePlan { Mode = Advisor, Style = Coach, StopAutopilot = False, StopAutobattle = True, ArmAutoplay = True, DisarmAutoplay = False }");
+Check("plan: autopilot -> coach takes over, like F8",
+    Pl(MentorMode.Coach, SimModeLite.Autopilot, AdviceStyle.Hints),
+    "MentorModePlan { Mode = Advisor, Style = Coach, StopAutopilot = True, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = False }");
+Check("plan: autopilot -> off stops it",
+    Pl(MentorMode.Off, SimModeLite.Autopilot, AdviceStyle.Coach),
+    "MentorModePlan { Mode = Off, Style = Coach, StopAutopilot = True, StopAutobattle = False, ArmAutoplay = False, DisarmAutoplay = False }");
+Check("segment label AI plays", MentorModes.Label(MentorMode.AiPlays, autopilot: false), "AI plays");
+Check("segment label under autopilot", MentorModes.Label(MentorMode.AiPlays, autopilot: true), "Autopilot");
+Check("segment label coach under autopilot", MentorModes.Label(MentorMode.Coach, autopilot: true), "Coach");
+Check("segments left to right", string.Join(",", MentorModes.All), "Off,Coach,Hints,AiPlays");
+
+// MentorBadge: the badge's words and the popover header, in player language.
+BadgeState Badge(MentorMode mode, AdvisorStatusLite advisor = AdvisorStatusLite.Connected,
+    bool autopilot = false, bool engaged = false, bool battle = false, bool hidden = false, string build = "0:00") =>
+    new(mode, autopilot, engaged, battle, advisor, build, hidden);
+Check("badge off", MentorBadge.Text(Badge(MentorMode.Off, AdvisorStatusLite.None), 0, false), "Spire Mentor · Off");
+Check("badge coach ready", MentorBadge.Text(Badge(MentorMode.Coach), 0, false), "Spire Mentor · Coach");
+Check("badge hints thinking", MentorBadge.Text(Badge(MentorMode.Hints, AdvisorStatusLite.Thinking), 0, false), "Spire Mentor · Hints · thinking ●○○");
+Check("badge thinking dots move", MentorBadge.Text(Badge(MentorMode.Hints, AdvisorStatusLite.Thinking), 4, false), "Spire Mentor · Hints · thinking ○●○");
+Check("badge thinking still with reduced effects", MentorBadge.Text(Badge(MentorMode.Hints, AdvisorStatusLite.Thinking), 4, true), "Spire Mentor · Hints · thinking …");
+Check("badge building outranks the mode", MentorBadge.Text(Badge(MentorMode.Coach, AdvisorStatusLite.Building, build: "0:42"), 0, false), "Spire Mentor · Building the engine 0:42");
+Check("badge hidden", MentorBadge.Text(Badge(MentorMode.Coach, hidden: true), 0, false), "Spire Mentor · hidden (click to show)");
+Check("badge crashed", MentorBadge.Text(Badge(MentorMode.Coach, AdvisorStatusLite.Crashed), 0, false), "Spire Mentor · Coach · offline");
+Check("badge waiting for the advisor", MentorBadge.Text(Badge(MentorMode.Coach, AdvisorStatusLite.None), 0, false), "Spire Mentor · Coach · starting");
+Check("badge AI playing", MentorBadge.Text(Badge(MentorMode.AiPlays), 0, false), "Spire Mentor · AI playing");
+Check("badge autobattle", MentorBadge.Text(Badge(MentorMode.Hints, battle: true), 0, false), "Spire Mentor · Autobattle");
+Check("badge autopilot", MentorBadge.Text(Badge(MentorMode.AiPlays, autopilot: true, engaged: true), 0, false), "Spire Mentor · Autopilot");
+Check("badge autopilot idle", MentorBadge.Text(Badge(MentorMode.AiPlays, autopilot: true), 0, false), "Spire Mentor · Autopilot (waiting)");
+// The sentence stays put while the advisor thinks (the popover must not jump
+// under the mouse); the activity word carries the thinking.
+Check("status steady while thinking", MentorBadge.Status(Badge(MentorMode.Coach, AdvisorStatusLite.Thinking)),
+    MentorBadge.Status(Badge(MentorMode.Coach)));
+Check("status coach", MentorBadge.Status(Badge(MentorMode.Coach)),
+    "Coach: nothing shows before you act. Peek (F5) shows the next pick.");
+Check("status autobattle steady while thinking", MentorBadge.Status(Badge(MentorMode.Hints, AdvisorStatusLite.Thinking, battle: true)),
+    "Autobattle: the AI plays the fights, you make the run's decisions.");
+Check("activity thinking", MentorBadge.Activity(Badge(MentorMode.Coach, AdvisorStatusLite.Thinking), 2, false), "thinking ○○●");
+Check("activity ready", MentorBadge.Activity(Badge(MentorMode.Coach), 0, false), null);
+Check("activity off says nothing", MentorBadge.Activity(Badge(MentorMode.Off, AdvisorStatusLite.Thinking), 0, false), null);
+Check("activity building", MentorBadge.Activity(Badge(MentorMode.Off, AdvisorStatusLite.Building, build: "1:00"), 0, false), "building the engine 1:00");
+Check("status waiting for the advisor", MentorBadge.Status(Badge(MentorMode.Hints, AdvisorStatusLite.None)), "Starting the advisor…");
+Check("status crashed says how to restart", MentorBadge.Status(Badge(MentorMode.Coach, AdvisorStatusLite.Crashed)),
+    "Advisor offline. Switch the AI Off and back on to restart it.");
+Check("status off", MentorBadge.Status(Badge(MentorMode.Off, AdvisorStatusLite.None)), "The AI is off. Pick Coach or Hints for advice while you play.");
+Check("status building", MentorBadge.Status(Badge(MentorMode.Hints, AdvisorStatusLite.Building, build: "3:05")),
+    "The first start after an update builds the engine, which takes minutes. Leave the game running: quitting starts it over.");
+Check("status autopilot idle", MentorBadge.Status(Badge(MentorMode.AiPlays, AdvisorStatusLite.None, autopilot: true)),
+    "Autopilot is waiting for its AI client. Pick Coach or Hints to play yourself (F8).");
+Check("status F7", MentorBadge.Status(Badge(MentorMode.AiPlays)), "The AI is playing until you stop it (F7).");
+Check("no stop button for the coach", MentorBadge.StopLabel(Badge(MentorMode.Coach)), null);
+Check("stop button for F7", MentorBadge.StopLabel(Badge(MentorMode.AiPlays)), "AI is playing — Stop (F7)");
+Check("stop button for autobattle", MentorBadge.StopLabel(Badge(MentorMode.Coach, battle: true)), "AI fights — Stop (F7)");
+Check("stop button for autopilot is a takeover", MentorBadge.StopLabel(Badge(MentorMode.AiPlays, autopilot: true, engaged: true)),
+    "Autopilot is playing — Take over (F8)");
+Check("elapsed m:ss", MentorBadge.Elapsed(TimeSpan.FromSeconds(42)), "0:42");
+Check("elapsed past an hour", MentorBadge.Elapsed(TimeSpan.FromSeconds(3725)), "62:05");
+Check("elapsed clock stepped back", MentorBadge.Elapsed(TimeSpan.FromSeconds(-5)), "0:00");
+
 // CoachChipText.Format: one fixture per row of the plan's copy table.
 string Chip(string json, bool showGood = false)
 {
@@ -722,7 +822,13 @@ Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, obje
     string Down(double s) => SpeedSteps.Label(SpeedSteps.Step(s, -1));
     Check("speed: up from 1x", Up(1.0), "2x");
     Check("speed: up from 3x", Up(3.0), "4x");
-    Check("speed: up stops at 4x", Up(4.0), "4x");
+    Check("speed: up from 4x goes to 6x", Up(4.0), "6x");
+    Check("speed: up from 6x goes to 8x", Up(6.0), "8x");
+    Check("speed: up stops at 8x", Up(8.0), "8x");
+    Check("speed: down from 8x", Down(8.0), "6x");
+    Check("speed: down from 6x", Down(6.0), "4x");
+    Check("speed: 5x from the slider goes up to 6x", Up(5.0), "6x");
+    Check("speed: 5x from the slider goes down to 4x", Down(5.0), "4x");
     Check("speed: down from 4x", Down(4.0), "3x");
     Check("speed: down stops at 1x", Down(1.0), "1x");
     Check("speed: between steps goes up to the next whole speed", Up(1.5), "2x");
@@ -890,6 +996,77 @@ Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, obje
     Check("swap: autobattle stops", Autobattle.IsStop(PotionSwapAdvice.AdviceFor, local: false, inCombat: false).ToString(), "True");
 }
 
+// AdviceMarks: what the HUD rings and numbers.
+{
+    MarkOption Play(int card, int? target, double share, bool best = false, double? q = null, string label = "") =>
+        new(label, "play", card, target, null, null, null, best, false, share, q, null);
+    string Show(List<Mark> ms) => string.Join(" ", ms.Select(m =>
+        $"{m.Kind}{m.Key}:{m.Tier}{(m.Order is int o ? "#" + o : "")}{(m.TargetIndex is int t ? ">" + t : "")}"));
+
+    // A targeted card has one option per target: one mark, the best target's.
+    var twoTargets = new List<MarkOption>
+    {
+        Play(0, 1, 0.70, best: true), Play(0, 0, 0.20), Play(1, null, 0.10),
+    };
+    Check("marks: one mark per card, the pick's target",
+        Show(AdviceMarks.Build(twoTargets, null)), "Card0:Best#1>1");
+
+    // 0% moves are not shown; a real alternative gets a thin ring.
+    var spread = new List<MarkOption>
+    {
+        Play(0, null, 0.60, best: true), Play(1, null, 0.30), Play(2, null, 0.004),
+        new("End turn", "end_turn", null, null, null, null, null, false, false, 0.06, null, null),
+    };
+    Check("marks: hidden 0%, alt ring from 15%", Show(AdviceMarks.Build(spread, null)), "Card0:Best#1 Card1:Alt");
+
+    // The plan numbers the turn; its target wins over the option's.
+    var plan = new List<MarkPlanStep>
+    {
+        new("play", 2, 0, null, null, "Bash"), new("play", 0, 1, null, null, "Strike"),
+        new("end_turn", null, null, null, null, "end turn"),
+    };
+    var withPlan = new List<MarkOption> { Play(2, 0, 0.8, best: true), Play(0, 0, 0.1), Play(1, null, 0.1) };
+    Check("marks: plan order 1,2 + end turn",
+        Show(AdviceMarks.Build(withPlan, plan)), "Card2:Best#1>0 Card0:Good#2>1 EndTurn0:Good#3");
+
+    // Potions and screen picks.
+    var potion = new List<MarkOption>
+    {
+        new("Fire Potion", "potion", null, 0, null, 2, null, true, false, 0.9, null, null),
+    };
+    Check("marks: potion slot", Show(AdviceMarks.Build(potion, null)), "Potion2:Best#1>0");
+    var rewardMarks = new List<MarkOption>
+    {
+        new("Inflame", "choose", null, null, null, null, 1, true, false, 0.7, null, null),
+        new("Skip", "skip", null, null, null, null, -1, false, false, 0.2, null, null),
+        new("Clash", "choose", null, null, null, null, 0, false, false, 0.1, null, null),
+    };
+    Check("marks: card reward pick + skip alt", Show(AdviceMarks.Build(rewardMarks, null)), "ScreenOption1:Best#1 Skip0:Alt");
+
+    // Search: a Q within the band is as good as the pick.
+    var qs = new List<MarkOption>
+    {
+        Play(0, null, 0.5, best: true, q: 0.80), Play(1, null, 0.05, q: 0.797), Play(2, null, 0.05, q: 0.70),
+    };
+    Check("marks: q-tie is Good", Show(AdviceMarks.Build(qs, null)), "Card0:Best#1 Card1:Good");
+    Check("verdict: best", AdviceMarks.Verdict(qs[0], 0.80), "Best");
+    Check("verdict: tie", AdviceMarks.Verdict(qs[1], 0.80), "Also good");
+    Check("verdict: big loss", AdviceMarks.Verdict(qs[2], 0.80), "Mistake");
+    Check("verdict: instinct share", AdviceMarks.Verdict(Play(1, null, 0.1), null), "Okay");
+    Check("verdict: instinct unlikely", AdviceMarks.Verdict(Play(1, null, 0.01), null), "Unlikely");
+    Check("row verdict: a later plan step reads Then", AdviceMarks.RowVerdict(Play(1, null, 0.08), null, 2), "Then");
+    Check("row verdict: the pick stays Best", AdviceMarks.RowVerdict(Play(0, null, 0.9, best: true), null, 1), "Best");
+
+    // No raw ids on screen.
+    Check("humanize: shop id", AdviceMarks.Humanize("SHRUG_IT_OFF"), "Shrug It Off");
+    Check("humanize: inside text", AdviceMarks.Humanize("discard FIRE_POTION"), "discard Fire Potion");
+    Check("humanize: dotted", AdviceMarks.Humanize("buy CARD.PERFECTED_STRIKE"), "buy Perfected Strike");
+    Check("humanize: small words", AdviceMarks.Humanize("HAND_OF_GREED"), "Hand of Greed");
+    Check("humanize: lookup wins", AdviceMarks.Humanize("STRIKE_IRONCLAD", id => id == "STRIKE_IRONCLAD" ? "Strike" : null), "Strike");
+    Check("humanize: plain names untouched", AdviceMarks.Humanize("Strike → Sludge Spinner #2"), "Strike → Sludge Spinner #2");
+    Check("humanize: lone caps untouched", AdviceMarks.Humanize("AI would: Bash"), "AI would: Bash");
+}
+
 // FrameLaunchRules: the panels' own window (SimFrameLauncher).
 {
     Check("frame: opens at startup when wanted", FrameLaunchRules.OpenAtStartup(true, false, true, false).ToString(), "True");
@@ -908,6 +1085,29 @@ Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, obje
         @"--attach|4242|--port|50123|--url|http://127.0.0.1:8079/frame.html|--attach-hwnd|131072|--game-dir|C:\Games\Slay the Spire 2");
     Check("frame: no handle, no game dir",
         string.Join("|", FrameLaunchRules.Args(1, 0, 2, "u", null)), "--attach|1|--port|2|--url|u");
+}
+
+// AI partner votes to move on (#47): the last act has two rounds in the same
+// act (boss -> The Architect, The Architect -> win), told apart by ActFloor.
+{
+    Check("partner vote: the Architect round has its own key",
+        (PartnerVotes.ActChange(2, 17) != PartnerVotes.ActChange(2, 18)).ToString(), "True");
+    Check("partner vote: one round is one key",
+        (PartnerVotes.ActChange(2, 17) == PartnerVotes.ActChange(2, 17)).ToString(), "True");
+    Check("partner vote: acts differ", (PartnerVotes.ActChange(0, 17) != PartnerVotes.ActChange(1, 17)).ToString(), "True");
+}
+
+// Card grids once a card is selected (#1206): an "up to N" combat pile pick
+// keeps offering the rest; every other grid only asks to confirm.
+{
+    const string pile = CardGridRules.CombatPileScreen;
+    Check("grid: nothing selected offers the cards", CardGridRules.OffersMorePicks("NDeckEnchantSelectScreen", 0, 1, 5).ToString(), "True");
+    Check("grid: unreadable selection offers the cards", CardGridRules.OffersMorePicks(pile, -1, 2, 5).ToString(), "True");
+    Check("grid: combat pile 1 of 2 offers the rest", CardGridRules.OffersMorePicks(pile, 1, 2, 3).ToString(), "True");
+    Check("grid: combat pile 2 of 2 confirms", CardGridRules.OffersMorePicks(pile, 2, 2, 3).ToString(), "False");
+    Check("grid: combat pile with nothing left confirms", CardGridRules.OffersMorePicks(pile, 1, 2, 0).ToString(), "False");
+    Check("grid: enchant 1 of 2 confirms", CardGridRules.OffersMorePicks("NDeckEnchantSelectScreen", 1, 2, 3).ToString(), "False");
+    Check("grid: deck select 1 of 2 confirms", CardGridRules.OffersMorePicks("NDeckCardSelectScreen", 1, 2, 3).ToString(), "False");
 }
 
 if (OperatingSystem.IsWindows())

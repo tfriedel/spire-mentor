@@ -74,6 +74,7 @@ _LOC_FILES = (
     "card_keywords.json",
     "cards.json",
     "characters.json",
+    "encounters.json",
     "events.json",
     "monsters.json",
     "orbs.json",

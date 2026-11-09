@@ -1,34 +1,59 @@
-// SimToolbar.cs -- the clickable mod strip (discoverability layer).
+// SimToolbar.cs -- the Spire Mentor badge and its popover (the mod's controls).
 //
-// Everything the F-keys do, as buttons: mode toggle, AI once/auto, speed,
-// then three dropdowns -- Rewind, Panels, Workbench -- so nobody has to
-// memorise a key list to use the mod. The live controls (coach state, AI
-// once/auto, speed) stay flat because their state is read at a glance;
-// the one-shot verbs are grouped by job so the strip fits a 1280-wide
-// window. Hotkeys stay as shortcuts; every entry routes through the same
-// SimActions verbs.
+// One compact badge, docked under the RIGHT end of the game's top bar
+// (SimTopBarLayout.SafeTopYRight): the top-left belongs to the game -- the
+// relic tray, and in co-op the player list under it -- and the old 14-button
+// strip there covered both and clipped at narrow windows. The badge says the
+// state at a glance: the mode's colour and word (Off / Coach / Hints / AI
+// playing / Autobattle / Autopilot), a "thinking" indicator (cycling dots,
+// still with "Reduce combat effects"), and the engine-build counter.
 //
-// Input-safety contract (see SimUiKit): only the buttons are
-// MouseFilter.Stop; every container, gap and label is Ignore, so clicks
-// anywhere but a visible button land in the game. Collapse is CLICK-driven
-// via an always-visible pill -- hover-collapse would put a moving Stop
-// region over combat. The strip sits at CanvasLayer 98 (below HUD 99 / log
-// 100 / help 101) at the top-left, pushed below the game's top bar by
-// SimTopBarLayout.
+// Clicking it opens a popover, grouped by job, every entry with its hotkey:
+//   Mode           Off · Coach · Hints · AI plays   (MentorModes, CoachStyle.cs)
+//   Brain          Search · Instinct                (only where it is offered)
+//   This decision  Peek (F5) · Let AI pick (F6)
+//   Autoplay       Autobattle (Shift+F7) · AI plays until stopped (F7)
+//   Speed          - Nx +  (F9 / F10)
+//   More           Rewind ▾ · Panels ▾ · Workbench ▾ (+ extension buttons)
+// with a header saying, in the player's words, what the advisor is doing
+// (MentorBadge.cs). Contextual controls live next to the badge, not in the
+// popover, and only while they apply: "Partner go" (a combat with AI
+// partners) and, while the AI plays (F7, autobattle, Autopilot), an amber
+// "AI is playing — Stop (F7)" button plus an amber frame round the screen
+// edge, so nobody can miss who is playing.
 //
-// Placement: docked under the game's top bar by default; the grip at the
-// row's left end drags it anywhere (the strip can cover something the player
-// needs to see), and double-clicking the grip docks it again. The dragged
-// position lasts for the session, like the action log's. The advice panel and
-// the coach chips follow a dragged strip (UndockedRect, AdviceColumn).
+// Input-safety contract (see SimUiKit): containers, labels and the AI frame
+// are MouseFilter.Ignore; buttons and the grip are Stop with FocusMode.None;
+// no native tooltips (hover hints go to an owned label). The popover's own
+// panel is Stop while it is open, as SimCoachPanel's body is: it is opaque, so
+// a click on its background must not land on a card the player cannot see.
+// It opens and closes on CLICKS only (the badge; hover regions over combat eat
+// clicks). It also closes on a click outside it or on Esc, read by a 40 ms
+// poll of Input while it is open -- never by consuming the event, so that
+// click or Esc still reaches the game. The open / closed state is remembered
+// within a session; every launch starts closed. CanvasLayer 98, below HUD 99 /
+// log 100 / help 101.
 //
-// Refresh model: SimRuntime.Changed handles mode flips from any surface;
-// a 150 ms Godot.Timer handles the state that raises no event (SimSpeed,
-// AdvisorAutoplayArmed, top-bar drift). No source generators -> no _Process
-// (see SpireMentor.csproj header).
+// Placement: the grip left of the badge drags it anywhere (session-only);
+// double-clicking the grip docks it again. The badge's top-RIGHT corner is
+// the anchor, so the contextual buttons grow to the left of it. What the
+// other panels follow:
+//   * BottomY -- docked: the line the LEFT column (advice panel, chips,
+//     settings, bug report) parks under, i.e. the game's top-bar clearance on
+//     the left; the badge is not over that column (unless the window is so
+//     narrow that it is, then it clears the badge too).
+//   * UndockedRect -- dragged: the badge, plus the popover while open, which
+//     the advice column follows (AdviceColumn).
+//   * RightColumnTop -- the line SimCoachPanel (right-aligned) parks under.
+//
+// Refresh model: SimRuntime.Changed handles mode flips from any surface; a
+// 150 ms Godot.Timer handles the state that raises no event (speed, autoplay,
+// partners, the build counter, the thinking dots, top-bar drift). No source
+// generators -> no _Process (see SpireMentor.csproj header).
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -49,42 +74,84 @@ internal sealed class SimToolbar
         SimRuntime.Changed += () => RunOnMainThread(Refresh);
     }
 
+    // Mode colours (the help panel's palette): grey off, cyan Coach, green
+    // Hints, amber whenever the AI itself is playing.
+    private static readonly Color OffColor = new(0.60f, 0.64f, 0.72f);
+    private static readonly Color CoachColor = new(0.50f, 0.83f, 0.91f);
+    private static readonly Color HintsColor = new(0.55f, 0.85f, 0.45f);
+    private static readonly Color AiColor = new(1.00f, 0.62f, 0.36f);
+    private static readonly Color BrainColor = new(0.72f, 0.62f, 0.95f);
+
+    /// <summary>Right screen edge to the docked badge.</summary>
+    private const float EdgeMargin = 16f;
+    /// <summary>Badge row to popover / note.</summary>
+    private const float PopGap = 4f;
+    private const float PopoverMinWidth = 400f;
+    /// <summary>The note / hint under the closed badge wraps at this width.</summary>
+    private const float UnderWidth = 320f;
+    /// <summary>Right edge of the left column (advice panel 430, settings and
+    /// coach panels up to 460, at x 16): a toolbar left of this is over it.</summary>
+    private const float LeftColumnRight = 16f + 460f + 8f;
+
     private CanvasLayer? _layer;
-    private VBoxContainer? _container;
-    private Button? _pill;
-    private PanelContainer? _strip;
-    private HBoxContainer? _buttons;
-    private Button? _coach;
-    private Button? _style;
+    private HBoxContainer? _row;
+    private Button? _badge;
+    private Button? _partnerGo;
+    private Button? _stop;
+    private Panel? _aiFrame;
+
+    private PanelContainer? _popover;
+    private VBoxContainer? _popoverBody;
+    private Label? _headerTitle;
+    private Label? _headerStatus;
+    private VBoxContainer? _footer;
+    private Label? _headerNote;
+    private Label? _footerInfo;
+    private Label? _popHint;
+    private readonly Dictionary<MentorMode, Button> _modeButtons = new();
+    private Label? _brainCaption;
+    private HBoxContainer? _brainControls;
+    private Button? _brainSearch;
+    private Button? _brainInstinct;
     private Button? _peek;
     private Button? _aiOnce;
-    private Button? _aiAuto;
     private Button? _autobattle;
-    private Button? _brain;
-    private Button? _partnerGo;
+    private Button? _aiAuto;
     private Label? _speedLabel;
-    private Label? _statusLabel;
-    private Label? _hintLabel;
+    private HBoxContainer? _moreRow;
+    private readonly List<MenuButton> _menus = new();
     private readonly Dictionary<string, Button> _extensions = new();
 
-    private bool _expanded = true;
-    private SimMode _lastMode = SimMode.Off;
-    private bool _modeSeen;
+    private VBoxContainer? _under;
+    private Label? _underNote;
+    private Label? _underHint;
+
+    private Godot.Timer? _closeWatch;
+    private bool _mouseWasDown;
+    private bool _escWasDown;
+
+    private bool _expanded;
+    private Color? _badgeAccent;
+    private readonly Dictionary<Button, Color?> _lit = new();
+    private string _hint = "";
 
     private SimAdvisorStatus _advisorStatus = SimAdvisorStatus.None;
-    /// <summary>When the current engine build started, for the pill's counter.</summary>
+    /// <summary>When the current engine build started, for the badge's counter.</summary>
     private DateTime? _buildStartedUtc;
     private string _lastActionSummary = "";
     private string? _note;
+    private int _ticks;
+    private int _dotFrame;
 
     // Grip drag state (same click-vs-drag threshold idiom as SimActionLog's
-    // header). _undockedPosition is null while docked under the top bar.
+    // header). _undockedAnchor -- the badge row's top-RIGHT corner -- is null
+    // while docked.
     private const float DragThreshold = 4f;
     private bool _gripPressed;
     private bool _dragging;
     private Vector2 _grabOffset;
     private Vector2 _pressPosition;
-    private Vector2? _undockedPosition;
+    private Vector2? _undockedAnchor;
 
     // ------------------------------------------------------------------
     // Public entry points (any thread)
@@ -111,7 +178,7 @@ internal sealed class SimToolbar
     {
         RunOnMainThread(() =>
         {
-            // Stamp the start so the pill can count the wait up. A build this
+            // Stamp the start so the badge can count the wait up. A build this
             // long has to prove it is still alive; a static label does not.
             if (status == SimAdvisorStatus.Building && _advisorStatus != SimAdvisorStatus.Building)
             {
@@ -145,48 +212,80 @@ internal sealed class SimToolbar
     }
 
     /// <summary>
-    /// Extension point for later features (e.g. the rewind cluster): appends
-    /// a button to the strip, once per id. Safe from any thread.
+    /// Extension point for later features: appends a button to the popover's
+    /// "More" row, once per id. Safe from any thread.
     /// </summary>
     public void AddExtensionButton(string id, string label, string hint, Action onPressed)
     {
         RunOnMainThread(() =>
         {
-            if (!EnsureBuilt() || _buttons == null || _extensions.ContainsKey(id))
+            if (!EnsureBuilt() || _moreRow == null || _extensions.ContainsKey(id))
             {
                 return;
             }
             Button button = SimUiKit.MakeButton(label, hint, onPressed, SetHint);
-            _buttons.AddChild(button);
+            _moreRow.AddChild(button);
             _extensions[id] = button;
         });
     }
 
-    /// <summary>Bottom edge (global Y) of the visible strip, or null when not
-    /// built or dragged off its dock -- the docked panels park below this.
-    /// A dragged strip is <see cref="UndockedRect"/>.</summary>
+    /// <summary>
+    /// Docked: the global Y the LEFT column's panels (advice panel, coach
+    /// chips, settings, bug report) park below -- they add their own gap.
+    /// The badge docks on the right, so that is the game's top-bar clearance
+    /// on the left (SafeTopY, less the gap the callers add back), unless the
+    /// window is narrow enough that the badge or its popover reaches over the
+    /// column, then their bottom too. Null when not built, hidden (panels
+    /// outside the game), or dragged off its dock (see <see cref="UndockedRect"/>).
+    /// </summary>
     public float? BottomY()
     {
-        if (_container == null || !GodotObject.IsInstanceValid(_container) ||
-            !_container.IsVisibleInTree() || _undockedPosition != null)
+        if (!Valid(_row) || !_row!.IsVisibleInTree() || _undockedAnchor != null)
         {
             return null;
         }
-        Rect2 rect = _container.GetGlobalRect();
-        return rect.Position.Y + rect.Size.Y;
+        float bottom = SimTopBarLayout.SafeTopY(_row) - AdviceColumn.Gap;
+        Rect2 occupied = OccupiedRect();
+        if (occupied.Position.X < LeftColumnRight)
+        {
+            bottom = Math.Max(bottom, occupied.End.Y);
+        }
+        return bottom;
     }
 
-    /// <summary>The visible strip's global rect and the viewport size while
-    /// the player has dragged it off its dock, else null (docked: BottomY).
+    /// <summary>The dragged badge's global rect -- with the popover while it
+    /// is open, so nothing parks under that -- and the viewport size, while
+    /// the player has dragged it off its dock; else null (docked: BottomY).
     /// SimHud moves the advice panel and the coach chips along with it.</summary>
     public (Rect2 Rect, Vector2 Viewport)? UndockedRect()
     {
-        if (_undockedPosition == null || _container == null ||
-            !GodotObject.IsInstanceValid(_container) || !_container.IsVisibleInTree())
+        if (_undockedAnchor == null || !Valid(_row) || !_row!.IsVisibleInTree())
         {
             return null;
         }
-        return (_container.GetGlobalRect(), _container.GetViewportRect().Size);
+        return (OccupiedRect(), _row.GetViewportRect().Size);
+    }
+
+    /// <summary>The global Y a right-aligned panel (SimCoachPanel) parks
+    /// below: under the docked badge, its popover and its note; under the
+    /// game's top bar on the right when the badge was dragged away. Null when
+    /// not built or hidden.</summary>
+    public float? RightColumnTop()
+    {
+        if (!Valid(_row) || !_row!.IsVisibleInTree())
+        {
+            return null;
+        }
+        if (_undockedAnchor != null)
+        {
+            return SimTopBarLayout.SafeTopYRight(_row);
+        }
+        float bottom = OccupiedRect().End.Y;
+        if (Valid(_under) && _under!.Visible)
+        {
+            bottom = Math.Max(bottom, _under.GetGlobalRect().End.Y);
+        }
+        return bottom;
     }
 
     // ------------------------------------------------------------------
@@ -206,7 +305,9 @@ internal sealed class SimToolbar
                 return false;
             }
 
-            _expanded = SpireMentorModConfig.ToolbarExpanded && SimRuntime.Mode != SimMode.Off;
+            // Closed at every launch: an open popover covered the map legend
+            // and event text until the first click elsewhere (live, 2026-11-07).
+            _expanded = false;
 
             var layer = new CanvasLayer
             {
@@ -217,167 +318,30 @@ internal sealed class SimToolbar
                 Visible = !FrameLink.UiOutside,
             };
 
-            var container = new VBoxContainer
+            // The "AI is playing" frame round the screen edge: first, so it
+            // draws under everything else here; never takes a click.
+            var frameStyle = new StyleBoxFlat
             {
-                Name = "SpireMentorToolbar",
-                Position = _undockedPosition ?? new Vector2(PanelLeft, SimTopBarLayout.FallbackTop),
-                MouseFilter = Control.MouseFilterEnum.Ignore,
+                DrawCenter = false,
+                BorderColor = AiColor,
+                BorderWidthLeft = 5,
+                BorderWidthRight = 5,
+                BorderWidthTop = 5,
+                BorderWidthBottom = 5,
             };
-            container.AddThemeConstantOverride("separation", 2);
-
-            // Row 1: the pill + the button strip.
-            var row = new HBoxContainer
+            var aiFrame = new Panel
             {
-                Name = "ToolbarRow",
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-            };
-            row.AddThemeConstantOverride("separation", 6);
-
-            // The drag handle: a Stop region of its own, so the pill and the
-            // buttons keep plain click semantics.
-            Label grip = SimUiKit.SmallLabel("⠿", new Color(0.85f, 0.88f, 0.95f), 18);
-            grip.MouseFilter = Control.MouseFilterEnum.Stop;
-            grip.MouseDefaultCursorShape = Control.CursorShape.Move;
-            grip.VerticalAlignment = VerticalAlignment.Center;
-            grip.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(OnGripGuiInput));
-            grip.Connect(Control.SignalName.MouseEntered, Callable.From(() =>
-                SetHint("Drag to move the toolbar · double-click to put it back")));
-            grip.Connect(Control.SignalName.MouseExited, Callable.From(() => SetHint(null)));
-            row.AddChild(grip);
-
-            _pill = SimUiKit.MakeButton("Spire Mentor", "Show / hide the Spire Mentor toolbar", TogglePill, SetHint);
-            row.AddChild(_pill);
-
-            var strip = new PanelContainer
-            {
-                Name = "ToolbarStrip",
+                Name = "SpireMentorAiFrame",
                 MouseFilter = Control.MouseFilterEnum.Ignore,
                 Visible = false,
             };
-            strip.AddThemeStyleboxOverride("panel", SimUiKit.PanelStyle());
+            aiFrame.AddThemeStyleboxOverride("panel", frameStyle);
+            aiFrame.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            layer.AddChild(aiFrame);
 
-            var buttons = new HBoxContainer
-            {
-                Name = "ToolbarButtons",
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-            };
-            buttons.AddThemeConstantOverride("separation", 4);
-
-            _coach = SimUiKit.MakeButton("AI off",
-                "Turn the AI coach on / off (F8)",
-                SimActions.ToggleAdvisor, SetHint);
-            buttons.AddChild(_coach);
-
-            _style = SimUiKit.MakeButton("Coach",
-                "Switch style: Hints (the AI's opinion while you decide) <-> Coach (nothing " +
-                "until you act; F5 peeks, a note afterwards says where you differed)",
-                SimActions.SwitchStyle, SetHint);
-            buttons.AddChild(_style);
-
-            // Only shown in the Coach style (Hints already shows the pick).
-            _peek = SimUiKit.MakeButton("Peek",
-                "Show the AI's pick for just this decision; it hides again once you act (F5)",
-                SimActions.Peek, SetHint);
-            buttons.AddChild(_peek);
-
-            _aiOnce = SimUiKit.MakeButton("AI once",
-                "Let the AI take just this one decision (F6) -- needs the coach on",
-                () => SimActions.AiOnce("The AI-once button"), SetHint);
-            buttons.AddChild(_aiOnce);
-
-            _aiAuto = SimUiKit.MakeButton("AI auto",
-                "Let the AI keep playing until you stop it (F7) -- needs the coach on",
-                () => SimActions.ToggleAutoplay("The AI-auto button"), SetHint);
-            buttons.AddChild(_aiAuto);
-
-            _autobattle = SimUiKit.MakeButton("Autobattle",
-                "The AI plays the fights, you make every run-level decision -- card rewards, map, " +
-                "shops, rest sites, events -- with a note on what changed since your last one (Shift+F7)",
-                () => SimActions.ToggleAutobattle("The Autobattle button"), SetHint);
-            buttons.AddChild(_autobattle);
-
-            // The advice brain, named by what is ON (Search / Instinct), so the
-            // strip always says which brain is talking. Shown only where the
-            // advisor's Instinct can play this run: RefreshBrain.
-            _brain = SimUiKit.MakeButton("Search",
-                "Advisor brain, click to switch (Shift+F8): Search thinks ahead -- a search over the fight, " +
-                "the run net for the screens. Instinct is the end-to-end net, no search: every decision on " +
-                "gut feel (Ironclad on v0.111.0 for now). Hints, AI once / auto and Autobattle all follow it",
-                () => SimActions.ToggleBrain("The brain button"), SetHint);
-            _brain.Visible = false;
-            buttons.AddChild(_brain);
-
-            // Co-op with AI partners, in combat only (RefreshLiveLabels).
-            _partnerGo = SimUiKit.MakeButton("Partner go",
-                "Your AI partner waits for you (your first play, your end turn, or a setup play " +
-                "of yours it wants first): let it play the rest of its turn now (Shift+F6)",
-                () => SimActions.PartnersGo("The Partner go button"), SetHint);
-            _partnerGo.Visible = false;
-            buttons.AddChild(_partnerGo);
-
-            buttons.AddChild(SimUiKit.MakeButton("-", "Game speed down: 4x, 3x, 2x, 1x (F9)",
-                () => SimActions.StepSpeed(-1), SetHint));
-            _speedLabel = SimUiKit.SmallLabel("1.0x", Colors.White);
-            _speedLabel.VerticalAlignment = VerticalAlignment.Center;
-            buttons.AddChild(_speedLabel);
-            buttons.AddChild(SimUiKit.MakeButton("+", "Game speed up: 1x, 2x, 3x, 4x (F10)",
-                () => SimActions.StepSpeed(1), SetHint));
-
-            // Everything past the live controls is a one-shot verb, grouped
-            // by job into three dropdowns (same shape as the workbench's top
-            // bar): 16 flat buttons used to run off a 1280-wide window.
-            //
-            // Rewind cluster: the game saves at room entry and post-combat,
-            // so those are the room-level rewind targets (see SimSnapshots);
-            // the turn undo replays the game's own combat tape on top of the
-            // room-entry save (SimCombatUndo).
-            buttons.AddChild(SimUiKit.MakeMenuButton("Rewind",
-                "⟲ Turn: undo to the start of this combat turn · ⟲ Room: restart this room (same seed) · ⟲⟲ Back: one room further back",
-                new SimUiKit.MenuEntry[]
-                {
-                    new("⟲ Turn", "Undo to the start of the current combat turn (replays the game's combat tape)", SimActions.UndoTurn),
-                    new("⟲ Room", "Rewind to the start of the current room (same seed, exact state)", SimActions.RestartRoom),
-                    new("⟲⟲ Back", "Rewind one room further back", SimActions.BackOneRoom),
-                }, SetHint));
-            buttons.AddChild(SimUiKit.MakeMenuButton("Panels",
-                "Hide all (Ctrl+H) · Log (Ctrl+L) · HUD (F4) · Help (F1) · Settings (works mid-run) · Report a bug (Ctrl+Shift+B)",
-                (SimUiKit.MenuEntry[])
-                [
-                    new("Hide all  (Ctrl+H)", "Hide everything but the pill for a quick look -- click the pill or Ctrl+H to bring it back", SimActions.ToggleHideAll),
-                    new("Log  (Ctrl+L)", "Show / hide the action log (Ctrl+L)", SimActions.ToggleLog),
-                    new("HUD  (F4)", "Show / hide the advice HUD (F4)", SimActions.ToggleHud),
-                    new("Help  (F1)", "What everything does (F1)", SimActions.ToggleHelp),
-                    new("Settings", "Mod settings -- works mid-run (the main-menu page is run-locked)", SimSettingsPanel.Instance.Toggle),
-                    new("Report a bug  (Ctrl+Shift+B)", "Send this position and the logs to the developers, with a note on what went wrong", SimActions.ReportBug),
-                    // The panels in their own window around the game (the
-                    // Spire Mentor frame; SimFrameLauncher): starts it, or,
-                    // framed with the panels moved inside, moves them back out
-                    // (this toolbar hides while they are outside, so the way
-                    // back in is the frame's own Panels menu or closing it).
-                    new("Panels in their own window", "Move these panels out of the game into a window around it (closing that window brings them back)",
-                        () => SimFrameLauncher.SetWanted(true, "Toolbar")),
-                ], SetHint));
-            buttons.AddChild(SimUiKit.MakeMenuButton("Workbench",
-                "Open the workbench in your browser · Copy state (Ctrl+Shift+C) to paste a position into it",
-                new SimUiKit.MenuEntry[]
-                {
-                    new("Open workbench", "Open the workbench in your browser: logs, search tree, run tree", () => SimWorkbenchLink.Open()),
-                    new("Copy state  (Ctrl+Shift+C)", "Copy this position to the clipboard -- paste it into the workbench to replay it, branch it, or sweep it in SimLab", SimActions.CopyState),
-                }, SetHint));
-
-            strip.AddChild(buttons);
-            row.AddChild(strip);
-            container.AddChild(row);
-
-            // Row 2: status line (mode / advisor / last action / note).
-            _statusLabel = SimUiKit.SmallLabel("", Colors.White, 15);
-            _statusLabel.Visible = false;
-            container.AddChild(_statusLabel);
-
-            // Row 3: hover hint -- the owned replacement for native tooltips.
-            _hintLabel = SimUiKit.SmallLabel("", new Color(0.85f, 0.88f, 0.95f));
-            _hintLabel.Visible = false;
-            container.AddChild(_hintLabel);
+            layer.AddChild(BuildRow());
+            layer.AddChild(BuildPopover());
+            layer.AddChild(BuildUnder());
 
             var ticker = new Godot.Timer
             {
@@ -389,50 +353,408 @@ internal sealed class SimToolbar
             ticker.Connect(Godot.Timer.SignalName.Timeout, Callable.From(OnTick));
             layer.AddChild(ticker);
 
-            layer.AddChild(container);
+            // Outside-click / Esc watcher: runs only while the popover is open.
+            var closeWatch = new Godot.Timer
+            {
+                Name = "SpireMentorPopoverWatch",
+                WaitTime = 0.04,
+                Autostart = false,
+                OneShot = false,
+            };
+            closeWatch.Connect(Godot.Timer.SignalName.Timeout, Callable.From(OnCloseWatch));
+            layer.AddChild(closeWatch);
+
             tree.Root.AddChildSafely(layer);
 
             _layer = layer;
-            _container = container;
-            _strip = strip;
-            _buttons = buttons;
-            Logger.Log("[SimToolbar] Toolbar created");
+            _aiFrame = aiFrame;
+            _closeWatch = closeWatch;
+            Logger.Log("[SimToolbar] Badge created");
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Log($"[SimToolbar] Failed to create toolbar: {ex.Message}");
+            Logger.Log($"[SimToolbar] Failed to create the badge: {ex.Message}");
             _layer = null;
-            _container = null;
             return false;
         }
     }
 
-    private const float PanelLeft = 16f;
+    /// <summary>[Partner go] [AI is playing — Stop] [grip] [badge].</summary>
+    private HBoxContainer BuildRow()
+    {
+        var row = new HBoxContainer
+        {
+            Name = "SpireMentorBadgeRow",
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Position = new Vector2(EdgeMargin, SimTopBarLayout.FallbackTop),
+        };
+        row.AddThemeConstantOverride("separation", 6);
+
+        // Co-op with AI partners, in combat only (RefreshPartnerGo).
+        _partnerGo = SimUiKit.MakeButton("Partner go",
+            "Your AI partner waits for you (your first play, your end turn, or a setup play " +
+            "of yours it wants first): let it play the rest of its turn now (Shift+F6)",
+            () => SimActions.PartnersGo("The Partner go button"), SetHint);
+        _partnerGo.Visible = false;
+        row.AddChild(_partnerGo);
+
+        _stop = SimUiKit.MakeButton("AI is playing — Stop (F7)",
+            "The AI is playing: stop it and take the controls back (F7 stops F7 and autobattle, " +
+            "Shift+F7 autobattle; F8 takes over from Autopilot)",
+            () => SimActions.StopAi("The Stop button"), SetHint);
+        SimUiKit.SetLit(_stop, AiColor);
+        _stop.Visible = false;
+        row.AddChild(_stop);
+
+        // The drag handle: a Stop region of its own, so the badge keeps plain
+        // click semantics.
+        Label grip = SimUiKit.SmallLabel("⠿", new Color(0.85f, 0.88f, 0.95f), 18);
+        grip.MouseFilter = Control.MouseFilterEnum.Stop;
+        grip.MouseDefaultCursorShape = Control.CursorShape.Move;
+        grip.VerticalAlignment = VerticalAlignment.Center;
+        grip.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(OnGripGuiInput));
+        grip.Connect(Control.SignalName.MouseEntered, Callable.From(() =>
+            SetHint("Drag to move the badge · double-click to put it back")));
+        grip.Connect(Control.SignalName.MouseExited, Callable.From(() => SetHint(null)));
+        row.AddChild(grip);
+
+        _badge = SimUiKit.MakeButton(MentorBadge.Name,
+            "Spire Mentor: click for the controls (mode, brain, autoplay, speed, rewind, panels)",
+            OnBadgePressed, SetHint);
+        _badge.AddThemeFontSizeOverride("font_size", 15);
+        row.AddChild(_badge);
+
+        _row = row;
+        return row;
+    }
+
+    private PanelContainer BuildPopover()
+    {
+        var popover = new PanelContainer
+        {
+            Name = "SpireMentorPopover",
+            // Opaque while open, like SimCoachPanel's body: a click on its
+            // background must not reach a card hidden under it.
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            CustomMinimumSize = new Vector2(PopoverMinWidth, 0f),
+            Visible = false,
+        };
+        StyleBoxFlat style = SimUiKit.PanelStyle();
+        style.BgColor = new Color(0.05f, 0.06f, 0.08f, 0.94f);
+        style.ContentMarginLeft = 12f;
+        style.ContentMarginRight = 12f;
+        style.ContentMarginTop = 10f;
+        style.ContentMarginBottom = 10f;
+        popover.AddThemeStyleboxOverride("panel", style);
+
+        var body = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        body.AddThemeConstantOverride("separation", 8);
+
+        // Header: name + version + what the advisor is doing (one line), then
+        // the mode in a sentence, which stays put while the advisor thinks.
+        _headerTitle = SimUiKit.SmallLabel(MentorBadge.Name, Colors.White, 16);
+        body.AddChild(_headerTitle);
+        _headerStatus = WrapLabel(new Color(0.85f, 0.88f, 0.95f), 14);
+        body.AddChild(_headerStatus);
+
+        // The lines that come and go -- the note, the last advice, the hover
+        // hint -- sit on the far side of the controls from the badge
+        // (LayoutFooter), so they never push a button out from under the
+        // mouse.
+        _footer = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _footer.AddThemeConstantOverride("separation", 4);
+        _headerNote = WrapLabel(new Color(1.0f, 0.86f, 0.55f), 13);
+        _headerNote.Visible = false;
+        _footer.AddChild(_headerNote);
+        _footerInfo = WrapLabel(new Color(0.62f, 0.66f, 0.74f), 13);
+        _footerInfo.Visible = false;
+        _footer.AddChild(_footerInfo);
+
+        var grid = new GridContainer { Columns = 2, MouseFilter = Control.MouseFilterEnum.Ignore };
+        grid.AddThemeConstantOverride("h_separation", 12);
+        grid.AddThemeConstantOverride("v_separation", 6);
+
+        // Mode: one switch instead of "AI on/off" + "Coach/Hints".
+        HBoxContainer mode = Cell(2);
+        foreach (MentorMode m in MentorModes.All)
+        {
+            MentorMode target = m;
+            Button segment = SimUiKit.MakeButton(MentorModes.Label(m, autopilot: false), ModeHint(m),
+                () => SimActions.SetMentorMode(target, "The Mode switch"), SetHint);
+            _modeButtons[m] = segment;
+            mode.AddChild(segment);
+        }
+        AddSection(grid, "Mode  F8", mode);
+
+        // Brain: only where it is offered today (RefreshBrain).
+        _brainControls = Cell(2);
+        _brainSearch = SimUiKit.MakeButton("Search",
+            "Search thinks ahead: a search over the fight, the run net for the screens (Shift+F8 switches)",
+            () => SetBrain(AdvisorBrainRules.Search), SetHint);
+        _brainInstinct = SimUiKit.MakeButton("Instinct",
+            "Instinct is the end-to-end net, no search: every decision on gut feel (Ironclad on v0.111.0 " +
+            "for now). Hints, Let AI pick, autoplay and Autobattle all follow it (Shift+F8 switches)",
+            () => SetBrain(AdvisorBrainRules.Instinct), SetHint);
+        _brainControls.AddChild(_brainSearch);
+        _brainControls.AddChild(_brainInstinct);
+        _brainCaption = AddSection(grid, "Brain  Shift+F8", _brainControls);
+        _brainCaption.Visible = false;
+        _brainControls.Visible = false;
+
+        HBoxContainer decision = Cell(4);
+        _peek = SimUiKit.MakeButton("Peek  F5",
+            "Coach: show the AI's pick for just this decision; it hides again once you act (F5)",
+            SimActions.Peek, SetHint);
+        _aiOnce = SimUiKit.MakeButton("Let AI pick  F6",
+            "Let the AI take just this one decision (F6) -- needs Coach or Hints",
+            () => SimActions.AiOnce("The Let AI pick button"), SetHint);
+        decision.AddChild(_peek);
+        decision.AddChild(_aiOnce);
+        AddSection(grid, "This decision", decision);
+
+        HBoxContainer autoplay = Cell(4);
+        _autobattle = SimUiKit.MakeButton("Autobattle  Shift+F7",
+            "The AI plays the fights, you make every run-level decision -- card rewards, map, shops, " +
+            "rest sites, events -- with a note on what changed since your last one (Shift+F7)",
+            () => SimActions.ToggleAutobattle("The Autobattle button"), SetHint);
+        _aiAuto = SimUiKit.MakeButton("AI plays until stopped  F7",
+            "Let the AI keep playing until you stop it (F7) -- needs Coach or Hints",
+            () => SimActions.ToggleAutoplay("The AI plays button"), SetHint);
+        autoplay.AddChild(_autobattle);
+        autoplay.AddChild(_aiAuto);
+        AddSection(grid, "Autoplay", autoplay);
+
+        HBoxContainer speed = Cell(4);
+        speed.AddChild(SimUiKit.MakeButton("−", "Game speed down: 8x, 6x, 4x, 3x, 2x, 1x (F9)",
+            () => SimActions.StepSpeed(-1), SetHint));
+        _speedLabel = SimUiKit.SmallLabel("1x", Colors.White, 15);
+        _speedLabel.VerticalAlignment = VerticalAlignment.Center;
+        _speedLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        _speedLabel.CustomMinimumSize = new Vector2(34f, 0f);
+        speed.AddChild(_speedLabel);
+        speed.AddChild(SimUiKit.MakeButton("+", "Game speed up: 1x, 2x, 3x, 4x, 6x, 8x (F10)",
+            () => SimActions.StepSpeed(1), SetHint));
+        Label speedKeys = SimUiKit.Caption("F9 / F10");
+        speedKeys.VerticalAlignment = VerticalAlignment.Center;
+        speed.AddChild(speedKeys);
+        AddSection(grid, "Speed", speed);
+
+        // The one-shot verbs, grouped by job into three dropdowns (the
+        // workbench's top bar shape). Rewind: the game saves at room entry
+        // and post-combat, so those are the room-level targets (SimSnapshots);
+        // the turn undo replays the game's own combat tape on top of the
+        // room-entry save (SimCombatUndo).
+        _moreRow = Cell(4);
+        AddMenu(SimUiKit.MakeMenuButton("Rewind",
+            "⟲ Turn (Ctrl+Z): undo to the start of this combat turn · ⟲ Room (Ctrl+Shift+Z): restart this room (same seed) · ⟲⟲ Back: one room further back",
+            new SimUiKit.MenuEntry[]
+            {
+                new("⟲ Turn  (Ctrl+Z)", "Undo to the start of the current combat turn (replays the game's combat tape)", SimActions.UndoTurn),
+                new("⟲ Room  (Ctrl+Shift+Z)", "Rewind to the start of the current room (same seed, exact state)", SimActions.RestartRoom),
+                new("⟲⟲ Back one room", "Rewind one room further back", SimActions.BackOneRoom),
+            }, SetHint));
+        AddMenu(SimUiKit.MakeMenuButton("Panels",
+            "Hide all (Ctrl+H) · Log (Ctrl+L) · HUD (F4) · Help (F1) · Settings (works mid-run) · Report a bug (Ctrl+Shift+B)",
+            (SimUiKit.MenuEntry[])
+            [
+                new("Hide all  (Ctrl+H)", "Hide everything but the badge for a quick look -- click the badge or Ctrl+H to bring it back", SimActions.ToggleHideAll),
+                new("Log  (Ctrl+L)", "Show / hide the action log (Ctrl+L)", SimActions.ToggleLog),
+                new("HUD  (F4)", "Show / hide the advice HUD (F4)", SimActions.ToggleHud),
+                new("Help  (F1)", "What everything does (F1)", SimActions.ToggleHelp),
+                new("Settings", "Mod settings -- works mid-run (the main-menu page is run-locked)", SimSettingsPanel.Instance.Toggle),
+                new("Report a bug  (Ctrl+Shift+B)", "Send this position and the logs to the developers, with a note on what went wrong", SimActions.ReportBug),
+                // The panels in their own window around the game (the
+                // Spire Mentor frame; SimFrameLauncher): starts it, or,
+                // framed with the panels moved inside, moves them back out
+                // (this toolbar hides while they are outside, so the way
+                // back in is the frame's own Panels menu or closing it).
+                new("Panels in their own window", "Move these panels out of the game into a window around it (closing that window brings them back)",
+                    () => SimFrameLauncher.SetWanted(true, "Toolbar")),
+            ], SetHint));
+        AddMenu(SimUiKit.MakeMenuButton("Workbench",
+            "Open the workbench in your browser · Copy state (Ctrl+Shift+C) to paste a position into it",
+            new SimUiKit.MenuEntry[]
+            {
+                new("Open workbench", "Open the workbench in your browser: logs, search tree, run tree", () => SimWorkbenchLink.Open()),
+                new("Copy state  (Ctrl+Shift+C)", "Copy this position to the clipboard -- paste it into the workbench to replay it, branch it, or sweep it in SimLab", SimActions.CopyState),
+            }, SetHint));
+        AddSection(grid, "More", _moreRow);
+
+        body.AddChild(grid);
+
+        // Hover hint: the owned replacement for native tooltips.
+        _popHint = WrapLabel(new Color(0.85f, 0.88f, 0.95f), 13);
+        _popHint.Visible = false;
+        _footer.AddChild(_popHint);
+        body.AddChild(_footer);
+
+        popover.AddChild(body);
+        _popover = popover;
+        _popoverBody = body;
+        return popover;
+    }
+
+    /// <summary>Under the badge while the popover is closed: the advisor's
+    /// note (an autobattle stop, a hand-back) and the hover hint.</summary>
+    private VBoxContainer BuildUnder()
+    {
+        var under = new VBoxContainer
+        {
+            Name = "SpireMentorBadgeNote",
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false,
+        };
+        under.AddThemeConstantOverride("separation", 2);
+        _underNote = WrapLabel(new Color(1.0f, 0.86f, 0.55f), 13);
+        _underNote.HorizontalAlignment = HorizontalAlignment.Right;
+        _underNote.CustomMinimumSize = new Vector2(UnderWidth, 0f);
+        under.AddChild(_underNote);
+        _underHint = WrapLabel(new Color(0.85f, 0.88f, 0.95f), 13);
+        _underHint.HorizontalAlignment = HorizontalAlignment.Right;
+        _underHint.CustomMinimumSize = new Vector2(UnderWidth, 0f);
+        under.AddChild(_underHint);
+        _under = under;
+        return under;
+    }
+
+    /// <summary>A wrapping label. Its minimum width is the popover's inner
+    /// width, so it wraps at a sane width from its first frame (an autowrap
+    /// label measured at width 0 reports one word per line).</summary>
+    private static Label WrapLabel(Color color, int size)
+    {
+        Label label = SimUiKit.SmallLabel("", color, size);
+        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        label.CustomMinimumSize = new Vector2(PopoverMinWidth - 24f, 0f);
+        return label;
+    }
+
+    private static HBoxContainer Cell(int separation)
+    {
+        var cell = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        cell.AddThemeConstantOverride("separation", separation);
+        return cell;
+    }
+
+    /// <summary>One grid row: a grey caption and its controls. Returns the
+    /// caption (to hide the row with its controls).</summary>
+    private static Label AddSection(GridContainer grid, string caption, Control controls)
+    {
+        Label label = SimUiKit.Caption(caption);
+        label.VerticalAlignment = VerticalAlignment.Center;
+        grid.AddChild(label);
+        grid.AddChild(controls);
+        return label;
+    }
+
+    private void AddMenu(MenuButton menu)
+    {
+        _menus.Add(menu);
+        _moreRow!.AddChild(menu);
+    }
+
+    private static string ModeHint(MentorMode mode) =>
+        mode switch
+        {
+            MentorMode.Off => "Turn the AI off: the game plays exactly as without the mod (F8 toggles)",
+            MentorMode.Coach => "Coach: nothing shows before you act; Peek (F5) shows the next pick, and a note " +
+                                "afterwards says where you differed from the AI",
+            MentorMode.Hints => "Hints: the AI's opinion shows while you decide -- card scores, ranked moves, " +
+                                "win chance, the route it likes",
+            _ => "AI plays: the AI plays this run until you stop it, handing back what it cannot play " +
+                 "(same as F7; a config-armed Autopilot shows here too)",
+        };
 
     // ------------------------------------------------------------------
     // Behavior (main thread only below this line)
     // ------------------------------------------------------------------
 
-    private void TogglePill()
+    private void OnBadgePressed()
     {
-        // While everything is hidden the pill is the "show it again" button.
+        // While everything is hidden the badge is the "show it again" button.
         if (SimUiHide.Hidden)
         {
             SimUiHide.Toggle();
             return;
         }
-        _expanded = !_expanded;
-        SpireMentorModConfig.ToolbarExpanded = _expanded;
+        SetExpanded(!_expanded);
+    }
+
+    private void SetExpanded(bool open)
+    {
+        if (_expanded == open)
+        {
+            return;
+        }
+        _expanded = open;
+        SpireMentorModConfig.ToolbarExpanded = open;
         SpireMentorModConfig.SaveSoon();
+        if (!open)
+        {
+            SetHint(null);
+        }
         Refresh();
+    }
+
+    private void SetBrain(string brain)
+    {
+        if (AdvisorBrainRules.Normalize(brain) != SimAdvisor.CurrentBrain)
+        {
+            SimActions.ToggleBrain("The Brain switch");
+        }
+    }
+
+    /// <summary>
+    /// The popover's outside-click / Esc close, polled every 40 ms while it is
+    /// open. Reads Input and never consumes anything: the click or the Esc
+    /// still reaches the game (a card played, the pause menu opened). A press
+    /// that was already down when the popover opened (the badge click itself)
+    /// does not count, nor does anything while one of its dropdowns is open
+    /// (those close themselves).
+    /// </summary>
+    private void OnCloseWatch()
+    {
+        try
+        {
+            if (!_expanded || !Valid(_popover) || !_popover!.IsVisibleInTree())
+            {
+                _closeWatch?.Stop();
+                return;
+            }
+            bool down = Input.IsMouseButtonPressed(MouseButton.Left) || Input.IsMouseButtonPressed(MouseButton.Right);
+            bool esc = Input.IsKeyPressed(Key.Escape);
+            bool menuOpen = _menus.Any(m => GodotObject.IsInstanceValid(m) && m.GetPopup().Visible);
+            if (!menuOpen)
+            {
+                if (down && !_mouseWasDown)
+                {
+                    Vector2 mouse = _popover.GetViewport().GetMousePosition();
+                    if (!_popover.GetGlobalRect().HasPoint(mouse) &&
+                        !(Valid(_row) && _row!.GetGlobalRect().HasPoint(mouse)))
+                    {
+                        SetExpanded(false);
+                    }
+                }
+                else if (esc && !_escWasDown)
+                {
+                    SetExpanded(false);
+                }
+            }
+            _mouseWasDown = down;
+            _escWasDown = esc;
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[SimToolbar] Popover watch failed: {ex.Message}");
+        }
     }
 
     private void OnGripGuiInput(InputEvent ev)
     {
         try
         {
-            if (_container == null || !GodotObject.IsInstanceValid(_container))
+            if (!Valid(_row))
             {
                 return;
             }
@@ -442,14 +764,15 @@ internal sealed class SimToolbar
                 {
                     _gripPressed = false;
                     _dragging = false;
-                    _undockedPosition = null; // OnTick re-docks it
+                    _undockedAnchor = null;
+                    Layout();
                 }
                 else if (mb.Pressed)
                 {
                     _gripPressed = true;
                     _dragging = false;
                     _pressPosition = mb.GlobalPosition;
-                    _grabOffset = mb.GlobalPosition - _container.Position;
+                    _grabOffset = mb.GlobalPosition - CurrentAnchor();
                 }
                 else
                 {
@@ -466,8 +789,8 @@ internal sealed class SimToolbar
                     return;
                 }
                 _dragging = true;
-                _undockedPosition = ClampToViewport(mm.GlobalPosition - _grabOffset);
-                _container.Position = _undockedPosition.Value;
+                _undockedAnchor = mm.GlobalPosition - _grabOffset;
+                Layout();
             }
         }
         catch (Exception ex)
@@ -476,44 +799,33 @@ internal sealed class SimToolbar
         }
     }
 
-    /// <summary>Keep the grip on screen so the strip can always be grabbed
-    /// again (the grip is the row's first child, at the container's origin).</summary>
-    private Vector2 ClampToViewport(Vector2 position)
-    {
-        Vector2 view = _container!.GetViewportRect().Size;
-        return new Vector2(Math.Clamp(position.X, 0f, Math.Max(0f, view.X - 30f)),
-                           Math.Clamp(position.Y, 0f, Math.Max(0f, view.Y - 30f)));
-    }
+    /// <summary>The badge row's top-right corner now (the anchor).</summary>
+    private Vector2 CurrentAnchor() =>
+        new(_row!.Position.X + _row.Size.X, _row.Position.Y);
 
     private void SetHint(string? hint)
     {
-        if (_hintLabel == null || !GodotObject.IsInstanceValid(_hintLabel))
-        {
-            return;
-        }
-        _hintLabel.Text = hint ?? "";
-        _hintLabel.Visible = !string.IsNullOrEmpty(hint);
+        _hint = hint ?? "";
+        RefreshNotes();
+        Layout();
     }
 
     private void OnTick()
     {
         try
         {
-            if (_container == null || !GodotObject.IsInstanceValid(_container))
+            if (!Valid(_row))
             {
                 return;
             }
-            // Docked: follow the game's top bar. Undocked: stay where the
-            // player put it, but come back on screen if the window shrank.
-            Vector2 want = _undockedPosition is { } moved
-                ? ClampToViewport(moved)
-                : new Vector2(PanelLeft, SimTopBarLayout.SafeTopY(_container));
-            if (_container.Position.DistanceTo(want) > 0.5f)
+            // The thinking dots step every ~0.45 s.
+            if (++_ticks % 3 == 0)
             {
-                _container.Position = want;
+                _dotFrame++;
             }
-            // Speed and autoplay-armed raise no Changed event; poll them.
-            RefreshLiveLabels();
+            // Speed, autoplay, partners and the build counter raise no
+            // Changed event; poll them.
+            Refresh();
             // Framed: feed the frame's toolbar in both UI modes (FrameLink
             // dedups unchanged snapshots).
             if (FrameLink.Framed)
@@ -527,147 +839,289 @@ internal sealed class SimToolbar
         }
     }
 
+    private BadgeState State()
+    {
+        SimMode mode = SimRuntime.Mode;
+        bool autobattle = mode == SimMode.Advisor && SimAdvisor.Instance.AutobattleOn;
+        return new BadgeState(
+            MentorModes.Current((SimModeLite)(int)mode, SimRuntime.Style,
+                mode == SimMode.Advisor && SimRuntime.AdvisorAutoplayArmed, autobattle),
+            Autopilot: mode == SimMode.Autopilot,
+            AutopilotEngaged: SimRuntime.AutopilotEngaged,
+            Autobattle: autobattle,
+            Advisor: (AdvisorStatusLite)(int)_advisorStatus,
+            BuildElapsed: BuildElapsed(),
+            Hidden: SimUiHide.Hidden);
+    }
+
+    /// <summary>The AI itself is playing: F7, autobattle, or an engaged Autopilot.</summary>
+    private static bool AiPlaying(in BadgeState s) =>
+        s.AutopilotEngaged || (!s.Autopilot && (s.Mode == MentorMode.AiPlays || s.Autobattle));
+
+    private static Color ModeColor(MentorMode mode) =>
+        mode switch
+        {
+            MentorMode.Coach => CoachColor,
+            MentorMode.Hints => HintsColor,
+            MentorMode.AiPlays => AiColor,
+            _ => OffColor,
+        };
+
     private void Refresh()
     {
         if (!EnsureBuilt())
         {
             return;
         }
+        BadgeState s = State();
+        bool hidden = SimUiHide.Hidden;
+        bool aiPlaying = AiPlaying(s);
 
-        SimMode mode = SimRuntime.Mode;
-        if (!_modeSeen || mode != _lastMode)
+        if (Valid(_badge))
         {
-            // Off auto-collapses to the pill (the mod should take no space
-            // while it is doing nothing); turning it on from ANY surface
-            // expands the strip so the new state is visible.
-            if (_modeSeen)
+            string arrow = hidden ? "" : _expanded ? "▾ " : "▸ ";
+            SetText(_badge!, arrow + MentorBadge.Text(s, _dotFrame, SpireMentorModConfig.ReduceEffects));
+            Color accent = aiPlaying || s.Autopilot ? AiColor : ModeColor(s.Mode);
+            if (_badgeAccent != accent)
             {
-                _expanded = mode != SimMode.Off;
+                _badgeAccent = accent;
+                _badge!.AddThemeStyleboxOverride("normal", SimUiKit.BadgeStyle(accent, hover: false));
+                _badge.AddThemeStyleboxOverride("hover", SimUiKit.BadgeStyle(accent, hover: true));
+                _badge.AddThemeStyleboxOverride("pressed", SimUiKit.BadgeStyle(accent, hover: true));
             }
-            _lastMode = mode;
-            _modeSeen = true;
         }
 
-        if (_strip != null && GodotObject.IsInstanceValid(_strip))
+        string? stop = MentorBadge.StopLabel(s);
+        if (Valid(_stop))
         {
-            _strip.Visible = _expanded && !SimUiHide.Hidden;
+            SetVisible(_stop!, stop != null);
+            if (stop != null)
+            {
+                SetText(_stop!, stop);
+            }
+        }
+        if (Valid(_aiFrame))
+        {
+            SetVisible(_aiFrame!, aiPlaying);
+        }
+        if (Valid(_partnerGo))
+        {
+            RefreshPartnerGo(_partnerGo!);
         }
 
-        if (_pill != null && GodotObject.IsInstanceValid(_pill))
+        bool open = _expanded && !hidden;
+        if (Valid(_popover))
         {
-            _pill.Text = PillText(mode);
+            SetVisible(_popover!, open);
+            if (open)
+            {
+                RefreshPopover(s);
+            }
+        }
+        if (open && _closeWatch != null && GodotObject.IsInstanceValid(_closeWatch) && _closeWatch.IsStopped())
+        {
+            _mouseWasDown = Input.IsMouseButtonPressed(MouseButton.Left) || Input.IsMouseButtonPressed(MouseButton.Right);
+            _escWasDown = Input.IsKeyPressed(Key.Escape);
+            _closeWatch.Start();
+        }
+        RefreshNotes();
+        Layout();
+    }
+
+    private void RefreshPopover(in BadgeState s)
+    {
+        SimMode mode = SimRuntime.Mode;
+        string? activity = MentorBadge.Activity(s, _dotFrame, SpireMentorModConfig.ReduceEffects);
+        SetText(_headerTitle, $"{MentorBadge.Name} {MainFile.ModVersion}" + (activity == null ? "" : $" · {activity}"));
+        SetText(_headerStatus, MentorBadge.Status(s));
+
+        foreach ((MentorMode m, Button button) in _modeButtons)
+        {
+            if (!GodotObject.IsInstanceValid(button))
+            {
+                continue;
+            }
+            SetText(button, MentorModes.Label(m, s.Autopilot));
+            Lit(button, m == s.Mode ? ModeColor(m) : null);
         }
 
-        if (_coach != null && GodotObject.IsInstanceValid(_coach))
+        (bool brainShow, _) = BrainState();
+        SetVisible(_brainCaption, brainShow);
+        SetVisible(_brainControls, brainShow);
+        if (brainShow)
         {
-            _coach.Text = CoachStyle.PowerLabel((SimModeLite)(int)mode);
+            bool instinct = AdvisorBrainRules.IsInstinct(SimAdvisor.CurrentBrain);
+            Lit(_brainSearch, instinct ? null : BrainColor);
+            Lit(_brainInstinct, instinct ? BrainColor : null);
         }
 
-        if (_style != null && GodotObject.IsInstanceValid(_style))
-        {
-            _style.Text = CoachStyle.StyleLabel(SimRuntime.Style);
-        }
+        bool advisor = mode == SimMode.Advisor;
+        SetDisabled(_peek, !SimRuntime.CoachStyleActive);
+        SetDisabled(_aiOnce, !advisor);
+        SetDisabled(_autobattle, !advisor);
+        SetDisabled(_aiAuto, !advisor);
+        bool plainAuto = advisor && SimRuntime.AdvisorAutoplayArmed && !s.Autobattle;
+        SetText(_autobattle, s.Autobattle ? "Stop autobattle  Shift+F7" : "Autobattle  Shift+F7");
+        Lit(_autobattle, s.Autobattle ? AiColor : null);
+        SetText(_aiAuto, plainAuto ? "Stop the AI  F7" : "AI plays until stopped  F7");
+        Lit(_aiAuto, plainAuto ? AiColor : null);
+        SetText(_speedLabel, SpeedSteps.Label(SimSpeed.Desired));
+    }
 
-        if (_peek != null && GodotObject.IsInstanceValid(_peek))
+    /// <summary>What is worth knowing beyond the mode: a hidden HUD, the last
+    /// advice. Empty when there is nothing.</summary>
+    private string FooterInfo()
+    {
+        if (SimRuntime.Mode == SimMode.Off)
         {
-            _peek.Visible = SimRuntime.CoachStyleActive;
+            return "";
         }
+        var lines = new List<string>(2);
+        // The HUD toggle persists across launches; a hidden HUD with a
+        // connected advisor otherwise reads as "the coach does nothing"
+        // (2026-10-17, a v0.5.0 player with ShowHud saved off).
+        if (!SpireMentorModConfig.ShowHud)
+        {
+            lines.Add("The advice display is hidden: More › Panels › HUD (F4) shows it.");
+        }
+        if (!string.IsNullOrEmpty(_lastActionSummary))
+        {
+            lines.Add($"Last advice: {_lastActionSummary}");
+        }
+        return string.Join("\n", lines);
+    }
 
-        bool takeoverEnabled = mode == SimMode.Advisor;
-        if (_aiOnce != null && GodotObject.IsInstanceValid(_aiOnce))
-        {
-            _aiOnce.Disabled = !takeoverEnabled;
-        }
-        if (_aiAuto != null && GodotObject.IsInstanceValid(_aiAuto))
-        {
-            _aiAuto.Disabled = !takeoverEnabled;
-        }
-        if (_autobattle != null && GodotObject.IsInstanceValid(_autobattle))
-        {
-            _autobattle.Disabled = !takeoverEnabled;
-        }
+    /// <summary>The note, the footer and the hover hint: in the popover while
+    /// it is open, the note and the hint under the badge while it is closed.</summary>
+    private void RefreshNotes()
+    {
+        bool hidden = SimUiHide.Hidden;
+        bool open = _expanded && !hidden;
+        string note = SimRuntime.Mode != SimMode.Off ? _note ?? "" : "";
+        SetText(_headerNote, note);
+        SetVisible(_headerNote, open && note.Length > 0);
+        string info = open ? FooterInfo() : "";
+        SetText(_footerInfo, info);
+        SetVisible(_footerInfo, info.Length > 0);
+        SetText(_popHint, _hint);
+        SetVisible(_popHint, open && _hint.Length > 0);
+        SetVisible(_footer, open && (note.Length > 0 || info.Length > 0 || _hint.Length > 0));
 
-        RefreshLiveLabels();
-        RefreshStatusLine();
+        // The advice note is engine detail ("Instinct (e2e net, no search) ·
+        // combat turn · 100% · 31 ms"): in the popover only. Under a closed
+        // badge it sat on the game's own watermark (live, 2026-11-07).
+        bool underNote = false;
+        bool underHint = !open && _hint.Length > 0;
+        SetText(_underNote, note);
+        SetVisible(_underNote, underNote);
+        SetText(_underHint, _hint);
+        SetVisible(_underHint, underHint);
+        SetVisible(_under, underNote || underHint);
     }
 
     /// <summary>
-    /// The collapsed pill's label. An engine build outranks the mode here: it
-    /// is the one state where nothing works yet and the only correct action is
-    /// to wait, and the pill shows collapsed — which the status line does not.
+    /// Place the badge row (docked under the top bar's right end, or where it
+    /// was dragged), the popover under it -- above it when the badge is in
+    /// the lower half of the screen -- and the note under it, right-aligned to
+    /// the badge, all clamped on screen. Called on every refresh and tick;
+    /// cheap.
     /// </summary>
-    private string PillText(SimMode mode) =>
-        _advisorStatus == SimAdvisorStatus.Building
-            ? $"▸ Spire Mentor — building engine… {BuildElapsed()} (leave running)"
-            : SimUiHide.Hidden
-                ? "▸ Spire Mentor — hidden (click or Ctrl+H)"
-            : _expanded
-                ? "▾ Spire Mentor"
-                : mode == SimMode.Off
-                    ? "▸ Spire Mentor — AI off (click)"
-                    : $"▸ Spire Mentor · {CoachStyle.ModeName((SimModeLite)(int)mode, SimRuntime.Style)}";
+    private void Layout()
+    {
+        if (!Valid(_row))
+        {
+            return;
+        }
+        Vector2 view = _row.GetViewportRect().Size;
+        Vector2 rowSize = FitSize(_row);
+        Vector2 anchor = _undockedAnchor is { } moved
+            ? ClampAnchor(moved, rowSize, view)
+            : new Vector2(view.X - EdgeMargin, SimTopBarLayout.SafeTopYRight(_row));
+        if (_undockedAnchor != null)
+        {
+            _undockedAnchor = anchor; // came back on screen if the window shrank
+        }
+        float rowX = Math.Clamp(anchor.X - rowSize.X, 0f, Math.Max(0f, view.X - rowSize.X));
+        Place(_row, new Vector2(rowX, anchor.Y));
+        float right = rowX + rowSize.X;
+        float below = anchor.Y + rowSize.Y + PopGap;
+
+        if (Valid(_popover) && _popover.Visible)
+        {
+            // Decided by where the badge is, not by the popover's height, so
+            // it cannot flip back and forth as the popover's lines change.
+            bool up = anchor.Y > view.Y * 0.5f;
+            LayoutFooter(up);
+            Vector2 size = FitSize(_popover);
+            float y = up ? anchor.Y - PopGap - size.Y : below;
+            Place(_popover, new Vector2(
+                Math.Clamp(right - size.X, 0f, Math.Max(0f, view.X - size.X)),
+                Math.Clamp(y, 0f, Math.Max(0f, view.Y - size.Y))));
+        }
+        if (Valid(_under) && _under.Visible)
+        {
+            Vector2 size = FitSize(_under);
+            Place(_under, new Vector2(Math.Clamp(right - size.X, 0f, Math.Max(0f, view.X - size.X)), below));
+        }
+    }
+
+    /// <summary>The footer (note, last advice, hover hint) goes on the far
+    /// side of the controls from the badge: under them when the popover hangs
+    /// down, between the header and them when it opens upwards (its bottom
+    /// edge is then the fixed one). Either way a footer that grows or shrinks
+    /// moves nothing the mouse is on.</summary>
+    private void LayoutFooter(bool up)
+    {
+        if (!Valid(_popoverBody) || !Valid(_footer) || !Valid(_headerStatus))
+        {
+            return;
+        }
+        int want = up ? _headerStatus.GetIndex() + 1 : _popoverBody.GetChildCount() - 1;
+        if (_footer.GetIndex() != want)
+        {
+            _popoverBody.MoveChild(_footer, want);
+        }
+    }
+
+    /// <summary>Keep the badge grabbable: the whole row on screen.</summary>
+    private static Vector2 ClampAnchor(Vector2 anchor, Vector2 rowSize, Vector2 view) =>
+        new(Math.Clamp(anchor.X, Math.Min(rowSize.X, view.X), Math.Max(rowSize.X, view.X)),
+            Math.Clamp(anchor.Y, 0f, Math.Max(0f, view.Y - rowSize.Y)));
+
+    /// <summary>A free-standing container keeps its largest size; shrink it
+    /// back to its content (a button hid, a label got shorter).</summary>
+    private static Vector2 FitSize(Control control)
+    {
+        Vector2 min = control.GetCombinedMinimumSize();
+        if (control.Size != min)
+        {
+            control.Size = min;
+        }
+        return min;
+    }
+
+    private static void Place(Control control, Vector2 position)
+    {
+        if (control.Position.DistanceTo(position) > 0.5f)
+        {
+            control.Position = position;
+        }
+    }
+
+    /// <summary>The badge row, with the popover while it is open (global).</summary>
+    private Rect2 OccupiedRect()
+    {
+        Rect2 rect = _row!.GetGlobalRect();
+        if (Valid(_popover) && _popover!.Visible)
+        {
+            rect = rect.Merge(_popover.GetGlobalRect());
+        }
+        return rect;
+    }
 
     /// <summary>Wall-clock since the engine build started, as "m:ss".</summary>
-    private string BuildElapsed()
-    {
-        if (_buildStartedUtc is not { } started)
-        {
-            return "0:00";
-        }
-        TimeSpan d = DateTime.UtcNow - started;
-        if (d < TimeSpan.Zero)
-        {
-            d = TimeSpan.Zero; // clock stepped back mid-build; never render "-1:59"
-        }
-        return $"{(int)d.TotalMinutes}:{d.Seconds:00}";
-    }
-
-    private void RefreshLiveLabels()
-    {
-        // The build counter has no event to fire on -- it is pure elapsed time,
-        // so the 150 ms ticker is what advances it.
-        if (_advisorStatus == SimAdvisorStatus.Building
-            && _pill != null && GodotObject.IsInstanceValid(_pill))
-        {
-            string text = PillText(SimRuntime.Mode);
-            if (_pill.Text != text)
-            {
-                _pill.Text = text;
-            }
-        }
-        if (_speedLabel != null && GodotObject.IsInstanceValid(_speedLabel))
-        {
-            string speed = SpeedSteps.Label(SimSpeed.Desired);
-            if (_speedLabel.Text != speed)
-            {
-                _speedLabel.Text = speed;
-            }
-        }
-        if (_aiAuto != null && GodotObject.IsInstanceValid(_aiAuto))
-        {
-            string label = SimRuntime.AdvisorAutoplayArmed ? "Stop auto" : "AI auto";
-            if (_aiAuto.Text != label)
-            {
-                _aiAuto.Text = label;
-            }
-        }
-        if (_autobattle != null && GodotObject.IsInstanceValid(_autobattle))
-        {
-            string label = SimAdvisor.Instance.AutobattleOn ? "Stop battle" : "Autobattle";
-            if (_autobattle.Text != label)
-            {
-                _autobattle.Text = label;
-            }
-        }
-        if (_brain != null && GodotObject.IsInstanceValid(_brain))
-        {
-            RefreshBrain(_brain);
-        }
-        if (_partnerGo != null && GodotObject.IsInstanceValid(_partnerGo))
-        {
-            RefreshPartnerGo(_partnerGo);
-        }
-    }
+    private string BuildElapsed() =>
+        _buildStartedUtc is { } started ? MentorBadge.Elapsed(DateTime.UtcNow - started) : "0:00";
 
     /// <summary>The brain switch is shown (only in a run Instinct plays:
     /// elsewhere the search answers whatever is chosen,
@@ -677,97 +1131,69 @@ internal sealed class SimToolbar
         (SimRuntime.Mode == SimMode.Advisor && SimAdvisor.InstinctPlaysThisRun(),
          AdvisorBrainRules.Label(SimAdvisor.CurrentBrain));
 
-    private static void RefreshBrain(Button button)
-    {
-        (bool show, string label) = BrainState();
-        if (button.Visible != show)
-        {
-            button.Visible = show;
-        }
-        if (button.Text != label)
-        {
-            button.Text = label;
-        }
-    }
-
     /// <summary>"Partner go": shown in a combat with AI partners, live while
     /// one waits for you ("▶ Partner go", with the setup hold's seconds).</summary>
     private static void RefreshPartnerGo(Button button)
     {
         IReadOnlyList<SimAiPartner> partners = SimAiPartner.All;
         bool show = partners.Count > 0 && CombatManager.Instance.IsInProgress;
-        if (button.Visible != show)
-        {
-            button.Visible = show;
-        }
+        SetVisible(button, show);
         if (!show)
         {
             return;
         }
         SimAiPartner? waiting = partners.FirstOrDefault(p => p.Brain.Waiting != PartnerWait.None);
         int seconds = waiting?.Brain.HoldSecondsLeft ?? 0;
-        string text = waiting == null ? "Partner go" : seconds > 0 ? $"▶ Partner go {seconds}s" : "▶ Partner go";
-        if (button.Text != text)
-        {
-            button.Text = text;
-        }
-        if (button.Disabled != (waiting == null))
-        {
-            button.Disabled = waiting == null;
-        }
+        SetText(button, waiting == null ? "Partner go" : seconds > 0 ? $"▶ Partner go {seconds}s" : "▶ Partner go");
+        SetDisabled(button, waiting == null);
     }
 
-    private void RefreshStatusLine()
+    private void Lit(Button? button, Color? accent)
     {
-        if (_statusLabel == null || !GodotObject.IsInstanceValid(_statusLabel))
+        if (button == null || !GodotObject.IsInstanceValid(button))
         {
             return;
         }
-        string status = StatusText();
-        bool interesting = _expanded ||
-            (SimRuntime.Mode == SimMode.Autopilot && !SimRuntime.AutopilotEngaged);
-        _statusLabel.Text = status;
-        _statusLabel.Visible = interesting && SimRuntime.Mode != SimMode.Off && !SimUiHide.Hidden;
+        if (_lit.TryGetValue(button, out Color? was) && was == accent)
+        {
+            return;
+        }
+        _lit[button] = accent;
+        SimUiKit.SetLit(button, accent);
     }
 
-    /// <summary>The status line: mode, advisor state, last action, note.</summary>
-    private string StatusText()
+    private static bool Valid([NotNullWhen(true)] GodotObject? node) => node != null && GodotObject.IsInstanceValid(node);
+
+    private static void SetText(Button? button, string text)
     {
-        string status = $"Spire Mentor · {SimRuntime.Mode}";
-        // Autopilot armed by the config file but with nobody driving it: say
-        // so, and say how to get out. Silence here is what let a human play a
-        // whole run with the AI's modifiers on (2026-08-05).
-        if (SimRuntime.Mode == SimMode.Autopilot && !SimRuntime.AutopilotEngaged)
+        if (Valid(button) && button!.Text != text)
         {
-            status += " (idle — waiting for the AI client; F8 or 'Take over')";
+            button.Text = text;
         }
-        if (_advisorStatus != SimAdvisorStatus.None)
+    }
+
+    private static void SetText(Label? label, string text)
+    {
+        if (Valid(label) && label!.Text != text)
         {
-            status += $" · advisor: {_advisorStatus.ToString().ToLowerInvariant()}";
+            label.Text = text;
         }
-        // The HUD toggle persists across launches; a hidden HUD with a
-        // connected advisor otherwise reads as "the coach does nothing"
-        // (2026-10-17, a v0.5.0 player with ShowHud saved off).
-        if (SimRuntime.Mode != SimMode.Off && !SpireMentorModConfig.ShowHud)
+    }
+
+    private static void SetVisible(CanvasItem? item, bool visible)
+    {
+        if (Valid(item) && item!.Visible != visible)
         {
-            status += " · HUD hidden (F4 shows it)";
+            item.Visible = visible;
         }
-        if (_advisorStatus == SimAdvisorStatus.Building)
+    }
+
+    private static void SetDisabled(BaseButton? button, bool disabled)
+    {
+        if (Valid(button) && button!.Disabled != disabled)
         {
-            // Say how long and why, or the wait reads as a hang and gets killed.
-            status += $"\nbuilding the Rust engine ({BuildElapsed()}) — first launch after an " +
-                      "engine change, usually MINUTES. Quitting kills it and the next launch " +
-                      "starts over; pre-build with `just advisor-warm` in sts2-pycli.";
+            button.Disabled = disabled;
         }
-        if (!string.IsNullOrEmpty(_lastActionSummary))
-        {
-            status += $"\nlast: {_lastActionSummary}";
-        }
-        if (!string.IsNullOrEmpty(_note))
-        {
-            status += $"\n{_note}";
-        }
-        return status;
     }
 
     /// <summary>The panels moved into or out of the game (FrameLink). Main thread.</summary>
@@ -785,16 +1211,33 @@ internal sealed class SimToolbar
     private object FrameSnapshot()
     {
         SimMode mode = SimRuntime.Mode;
+        BadgeState s = State();
         IReadOnlyList<SimAiPartner> partners = SimAiPartner.All;
         bool partnerShow = partners.Count > 0 && CombatManager.Instance.IsInProgress;
         SimAiPartner? waiting = partnerShow
             ? partners.FirstOrDefault(p => p.Brain.Waiting != PartnerWait.None)
             : null;
         (bool brainShow, string brainLabel) = BrainState();
+        // The badge's words first (dots still: the frame dedups snapshots and
+        // moving dots would resend one every half second), then the sentence,
+        // the footer and the note.
+        var statusLines = new List<string>
+        {
+            MentorBadge.Text(s, 0, still: true),
+            MentorBadge.Status(s),
+            FooterInfo(),
+        };
+        if (SimRuntime.Mode != SimMode.Off && !string.IsNullOrEmpty(_note))
+        {
+            statusLines.Add(_note);
+        }
+        string status = string.Join("\n", statusLines.Where(line => line.Length > 0));
         return new
         {
             mode = mode.ToString().ToLowerInvariant(),
             mode_name = mode == SimMode.Off ? "AI off" : CoachStyle.ModeName((SimModeLite)(int)mode, SimRuntime.Style),
+            // The badge's Mode switch: off / coach / hints / aiplays.
+            mentor_mode = s.Mode.ToString().ToLowerInvariant(),
             power_label = CoachStyle.PowerLabel((SimModeLite)(int)mode),
             style_label = CoachStyle.StyleLabel(SimRuntime.Style),
             coach_style = SimRuntime.CoachStyleActive,
@@ -821,7 +1264,8 @@ internal sealed class SimToolbar
             hidden = SimUiHide.Hidden,
             last_action = _lastActionSummary,
             note = _note,
-            status = StatusText(),
+            // In the player's words (MentorBadge.Status), multi-line.
+            status,
             ui_outside = FrameLink.UiOutside,
         };
     }

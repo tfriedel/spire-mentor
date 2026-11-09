@@ -2,7 +2,10 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import type { ReactElement } from "react";
 import Board from "../Board";
+import GameHud from "../GameHud";
 import { HintsFixture } from "../../hints/HintsContext";
+import { MarksFixture } from "../../advice/AdviceContext";
+import { buildMarks, scoreOptions } from "../../advice/marks";
 import type { Step } from "../../api";
 
 function combatStep(): Step {
@@ -28,6 +31,11 @@ function combatStep(): Step {
  *  the global hints switch, which defaults OFF. Tests about that advice opt in. */
 function withHints(ui: ReactElement) {
   return render(<HintsFixture on>{ui}</HintsFixture>);
+}
+
+/** The engine's own numbers ("engine numbers" on), no marks. */
+function withNumbers(ui: ReactElement) {
+  return <MarksFixture marks={[]} showNumbers>{ui}</MarksFixture>;
 }
 
 describe("Board (interactive)", () => {
@@ -68,9 +76,10 @@ describe("Board (interactive)", () => {
     return s;
   }
 
+  // The belt is the HUD band's, as in the game (the scene carries no copy).
   it("renders a tile per potion and fires onUsePotion with the slot", () => {
     const onUsePotion = vi.fn();
-    render(<Board step={potionStep()} onPlayCard={() => {}} onEndTurn={() => {}} onUsePotion={onUsePotion} />);
+    render(<GameHud state={potionStep().state} onUsePotion={onUsePotion} />);
     // One "use" button per potion tile, in slot order [Weak, Fire].
     const useButtons = screen.getAllByRole("button", { name: /^use$/i });
     fireEvent.click(useButtons[1]); // Fire Potion = slot 1
@@ -79,16 +88,27 @@ describe("Board (interactive)", () => {
 
   it("fires onDiscardPotion with the slot from the discard button", () => {
     const onDiscardPotion = vi.fn();
-    render(<Board step={potionStep()} onPlayCard={() => {}} onEndTurn={() => {}}
-      onUsePotion={() => {}} onDiscardPotion={onDiscardPotion} />);
+    render(<GameHud state={potionStep().state} onUsePotion={() => {}} onDiscardPotion={onDiscardPotion} />);
     fireEvent.click(screen.getByRole("button", { name: /discard Fire Potion/i }));
     expect(onDiscardPotion).toHaveBeenCalledWith(1);
   });
 
   it("shows potions read-only when no handlers (no use/discard buttons)", () => {
-    render(<Board step={potionStep()} />);
+    render(<GameHud state={potionStep().state} />);
     expect(screen.getByText("Fire Potion")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^use$/i })).toBeNull();
+  });
+
+  it("rings and numbers the potion the AI would drink, on the band's belt", () => {
+    const marks = buildMarks([
+      { key: "potion:1", label: "Fire Potion", isBest: true, inBand: true, share: 0.7, q: 0.6, pickRank: 0, targetIndex: null },
+      { key: "end_turn", label: "end turn", isBest: false, inBand: false, share: 0.3, q: 0.4, pickRank: 1, targetIndex: null },
+    ]);
+    render(<MarksFixture marks={marks}><GameHud state={potionStep().state} onUsePotion={() => {}} /></MarksFixture>);
+    const ringed = screen.getByTestId("potion-mark");
+    expect(ringed).toHaveClass("gs-mark-best");
+    expect(ringed).toHaveTextContent("Fire Potion");
+    expect(ringed.querySelector(".gs-step-tag")).toHaveTextContent("1");
   });
 
   function press(key: string) {
@@ -174,9 +194,34 @@ describe("Board (interactive)", () => {
 
   it("shows per-card win-prob badges and the end-turn score", () => {
     const scores = [withScores({ stable_idx: 0, win_prob: 0.62, is_best: true }), withScores({ stable_idx: -1, win_prob: 0.4 })];
-    withHints(<Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}} scores={scores} />);
+    withHints(withNumbers(<Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}} scores={scores} />));
     expect(screen.getByText("62%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /end turn/i })).toHaveTextContent("0.40");
+  });
+
+  it("keeps the engine's numbers off the board unless engine numbers is on", () => {
+    const scores = [withScores({ stable_idx: 0, win_prob: 0.62, is_best: true }), withScores({ stable_idx: -1, win_prob: 0.4 })];
+    withHints(<Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}} scores={scores} />);
+    expect(screen.queryByText("62%")).toBeNull();
+    expect(screen.getByRole("button", { name: /end turn/i })).not.toHaveTextContent("0.40");
+  });
+
+  it("rings and numbers the move to make, and puts the reticle on its target", () => {
+    const scores = [
+      withScores({ stable_idx: 0, win_prob: 0.62, is_best: true, visits: 80, target_index: 0, q: 0.3 }),
+      withScores({ stable_idx: -1, win_prob: 0.4, visits: 20, q: -0.2 }),
+    ];
+    const { container } = withHints(
+      <MarksFixture marks={buildMarks(scoreOptions(scores))}>
+        <Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}} scores={scores} />
+      </MarksFixture>);
+    const card = container.querySelector('[data-card-index="0"] .gs-card');
+    expect(card).toHaveClass("gs-mark-best");
+    expect(container.querySelector('[data-card-index="0"]')).toHaveTextContent("1");
+    expect(container.querySelector(".gs-handslot.gs-pulled")).not.toBeNull();
+    // End turn at 20% of the search is a real alternative: ringed, unnumbered.
+    expect(screen.getByRole("button", { name: /end turn/i })).toHaveClass("gs-mark-alt");
+    expect(screen.getByTestId("advice-reticle")).toBeInTheDocument();
   });
 
   it("shows no end-turn score for a forced, unsearched move", () => {
@@ -201,10 +246,9 @@ describe("Board (interactive)", () => {
     // Nothing below reveals anything until it is clicked, so all of it stays.
     render(<Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}}
       onHint={() => {}} onPlayRecommended={() => {}} onAutoplay={() => {}}
-      onAutoplayToEnd={() => {}} onSearch={() => {}} onToggleHints={() => {}} />);
+      onAutoplayToEnd={() => {}} onSearch={() => {}} />);
     expect(screen.getByRole("button", { name: /play best/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^search/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "🎓 coach" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /autoplay/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /play to end/i })).toBeInTheDocument();
   });
@@ -238,15 +282,15 @@ describe("Board (interactive)", () => {
 
   it("shows the badges with hints off once a hint was asked for at this position", () => {
     const scores = [withScores({ stable_idx: 0, win_prob: 0.62, is_best: true }), withScores({ stable_idx: -1, win_prob: 0.4 })];
-    render(<Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}}
-      scores={scores} showScores />);
+    render(withNumbers(<Board step={combatStep()} onPlayCard={() => {}} onEndTurn={() => {}}
+      scores={scores} showScores />));
     expect(screen.getByText("62%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /end turn/i })).toHaveTextContent("0.40");
   });
 
   it("still shows recorded scores in replay, which is review rather than play", () => {
     const scores = [withScores({ stable_idx: 0, win_prob: 0.62, is_best: true })];
-    render(<Board step={combatStep()} scores={scores} />);
+    render(withNumbers(<Board step={combatStep()} scores={scores} />));
     expect(screen.getByText("62%")).toBeInTheDocument();
   });
 });

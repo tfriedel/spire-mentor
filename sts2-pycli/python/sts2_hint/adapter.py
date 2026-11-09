@@ -1093,6 +1093,11 @@ def _translate_enemy(
     curse_counter = raw.get("curse_of_knowledge_counter")
     if isinstance(curse_counter, int) and not isinstance(curse_counter, bool):
         out["curse_of_knowledge_counter"] = curse_counter
+    # The move machine's state (#1181): ``log`` / ``performed_first_move`` /
+    # ``performed``, which ``state_from_dict`` restores into the AI.
+    ai = raw.get("ai")
+    if isinstance(ai, dict):
+        out["ai"] = ai
     return out
 
 

@@ -1890,6 +1890,12 @@ pub struct RunState {
     /// (the per-run mutable mirror of `ALL_ACTS`).
     pub acts: Vec<crate::acts::ActConfig>,
 
+    /// The act maps are co-op sized (one room fewer per act):
+    /// `RunManager::debug_use_coop_maps` shortened `acts`. Reconstruction
+    /// only (the live advisor rebuilding a co-op run); `false` everywhere
+    /// else.
+    pub coop_maps: bool,
+
     /// Card-reward rarity roller with rolling pity offset. Mirrors
     /// Python `RunState.card_rarity_odds` (`run_state.py:1410`). Reset
     /// rare-threshold offset on rare roll, growth-capped on non-rare;
@@ -2198,6 +2204,7 @@ impl Default for RunState {
             // per-run mutable Vec so the future events-visited counter
             // can increment per act.
             acts: crate::acts::all_acts().to_vec(),
+            coop_maps: false,
             // Bead `sts2-rs-jyfvu`: pity-counter rarity roller defaults
             // to ascension 0 (identity at the current pin). Tests /
             // future ascension wiring construct via

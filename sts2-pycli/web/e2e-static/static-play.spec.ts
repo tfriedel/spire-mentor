@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { closeMenu, menuItem } from "../e2e/topbarMenu";
+import { closeMenu, menuItem, openMenu } from "../e2e/topbarMenu";
 
 /**
  * The browser-only workbench, end to end: the Rust engine in the Web Worker
@@ -132,9 +132,9 @@ test("no server: start, play a few decisions, reload, seek, save and load", asyn
 
 test("advisors run in the worker: hint chips, play best, the EV stream", async ({ page }) => {
   await startRun(page, "E2E2");
-  // Static capabilities now advertise the advisors: the advice-style switch is
-  // offered, in Coach style by default.
-  await expect(page.locator(".wb-chips").getByRole("button", { name: "🎓 coach" })).toBeVisible();
+  // Static capabilities now advertise the advisors: the Mode switch is
+  // offered, in Hints by default (the mod's default).
+  await expect(page.getByRole("radio", { name: "Hints" })).toHaveAttribute("aria-checked", "true");
   // The streaming route, end to end through the worker: NDJSON frames in
   // order, terminal `result`, at a budget that finishes in a moment.
   const frames = await page.evaluate(async () => {
@@ -155,10 +155,13 @@ test("advisors run in the worker: hint chips, play best, the EV stream", async (
   expect(parsed.filter((f) => f.type === "tick")).toHaveLength(parsed[0].total ?? -1);
 
   await reachFirstCombat(page);
-  // H asks the combat search; every hand card gets a win% badge, one best.
+  // H asks the combat search: the move to make is ringed and numbered (one
+  // thing: a card, End Turn or a potion), the side panel ranks the moves in
+  // words, and the engine's own win % stays off the board.
   await page.keyboard.press("h");
-  await expect(page.locator(".gs-badge.gs-win").first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator(".gs-badge.gs-win.gs-best")).toHaveCount(1);
+  await expect(page.locator(".gs-mark-best")).toHaveCount(1, { timeout: 60_000 });
+  await expect(page.getByTestId("advice-list").getByText("Best", { exact: true })).toBeVisible();
+  await expect(page.locator(".gs-badge.gs-win")).toHaveCount(0);
   // G plays the starred move: the history grows by one row.
   const rows = await historyRows(page).count();
   await page.getByRole("button", { name: "play best (G)" }).click();
@@ -169,15 +172,17 @@ test("run mode in the worker: the PPO panel at Neow, play to end, autobattle", a
   await startRun(page, "E2E3");
   // Static capabilities advertise run mode: the live band's "play to end (F)"
   // is there (the lobby's "Watch the AI play" launcher is gone once a run is
-  // live — GH #711), the autobattle chip beside the hints switch.
+  // live — GH #711), the Autobattle verb on the Mode bar.
   await expect(page.getByRole("button", { name: /play to end \(F\)/ }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /autobattle/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Autobattle", exact: true })).toBeVisible();
   // The worker fetched /ppo/<champion>.onnx before the start and the engine
-  // scored Neow with it: in Hints style, the PPO panel shows V(s) and one
-  // starred option (the net's pick), not the "no PPO net" line.
-  await page.locator(".wb-chips").getByRole("button", { name: "🎓 coach" }).click();
-  await expect(page.getByText(/^V\(s\) = -?\d+\.\d{3}$/)).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByText(/PPO net unavailable/)).toHaveCount(0);
+  // scored Neow with it: in Hints (the default) the net's pick is ringed on
+  // the screen and ranked in the Advice panel; with Tools → engine numbers
+  // the panel adds V(s). Not the "unavailable" line.
+  await expect(page.locator(".wb-mark--best")).toHaveCount(1, { timeout: 120_000 });
+  await (await openMenu(page, "Tools")).getByRole("menuitemcheckbox", { name: /engine numbers/ }).click();
+  await expect(page.getByText(/V\(s\) = -?\d+\.\d{3}/)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(/is unavailable/)).toHaveCount(0);
   // F plays the run with the native agent (combat MCTS + the PPO brain):
   // the history grows on its own, Escape pauses it.
   const before = await historyRows(page).count();
@@ -197,7 +202,7 @@ test("run mode in the worker: the PPO panel at Neow, play to end, autobattle", a
   // Autobattle: the agent resolves the fights and stops at the next
   // run-level decision with the change card ("Run start" at the first stop,
   // "Since your last stop — floor N" afterwards).
-  await page.getByRole("button", { name: /autobattle/ }).click();
+  await page.getByRole("button", { name: "Autobattle", exact: true }).click();
   await expect(page.getByText("Autobattle", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Start autobattle|Skip to next decision|Play to next decision/ }).click();
   await expect(page.getByText(/^Run start|^Since your last stop/)).toBeVisible({ timeout: 180_000 });
@@ -233,16 +238,18 @@ test("the replay viewer in the worker: end run → review the recorded log → p
   await closeMenu(page);
 });
 
-test("Coach style (the default): nothing unprompted, P peeks, End turn grades the turn", async ({ page }) => {
+test("Coach: nothing unprompted, P peeks and rings the pick, End turn grades the turn", async ({ page }) => {
   await startRun(page, "E2E2");
+  await page.getByRole("radio", { name: "Coach" }).click();
   await reachFirstCombat(page);
-  // Coach: no win-% badges on the hand until something asks for them.
-  await expect(page.locator(".gs-badge.gs-win")).toHaveCount(0);
-  // P reveals the AI's next action, one line, and still no scores.
+  // Coach: nothing marked on the board until something asks for it.
+  await expect(page.locator(".gs-mark-best")).toHaveCount(0);
+  // P reveals the AI's next action, one line, and rings that one move only.
   await page.keyboard.press("p");
   const peek = page.getByTestId("peek-banner");
   await expect(peek).toContainText("AI's next action:", { timeout: 60_000 });
-  await expect(page.locator(".gs-badge.gs-win")).toHaveCount(0);
+  await expect(page.locator(".gs-mark-best")).toHaveCount(1);
+  await expect(page.locator(".gs-mark-good, .gs-mark-alt")).toHaveCount(0);
   // No grade before the turn ends: combat is graded per turn, never per card.
   await expect(page.getByTestId("turn-chip")).toHaveCount(0);
   // End turn with the hand untouched: the turn is graded (a chip, unless the

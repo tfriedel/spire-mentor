@@ -4,6 +4,7 @@ import CardSelect from "./CardSelect";
 import { cardBoxHeight } from "../cardGeometry";
 import { isCombatChoiceStep } from "../choiceKinds";
 import { HintsFixture } from "../hints/HintsContext";
+import { MarksFixture } from "../advice/AdviceContext";
 import type { Step } from "../api";
 
 /** Run `body` with `window.matchMedia` answering true for exactly `query`.
@@ -182,11 +183,25 @@ function stubFetch(handler: (url: string) => unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CardSelect choice-ranker chips", () => {
+  it("rings the ranker's pick like every other pick, its search % hidden", async () => {
+    stubFetch(() => RANKING);
+    const { container } = render(
+      <HintsFixture on>
+        <CardSelect step={step("add_generated_free_to_hand")} onChoose={() => {}} />
+      </HintsFixture>,
+    );
+    await waitFor(() => expect(container.querySelector(".gs-mark-best")).not.toBeNull());
+    expect(container.querySelector(".gs-mark-best")).toHaveTextContent("1");
+    expect(screen.queryByText(/61(.d)?%/)).toBeNull();
+  });
+
   it("fetches the choice ranker eagerly on a live in-combat single-pick and badges options", async () => {
     const spy = stubFetch(() => RANKING);
     render(
       <HintsFixture on>
-        <CardSelect step={step("add_generated_free_to_hand")} onChoose={() => {}} />
+        <MarksFixture marks={[]} showNumbers>
+          <CardSelect step={step("add_generated_free_to_hand")} onChoose={() => {}} />
+        </MarksFixture>
       </HintsFixture>,
     );
     await waitFor(() => expect(screen.getByText(/61(\.\d)?%/)).toBeTruthy());
@@ -231,7 +246,9 @@ describe("CardSelect under the e2e advisor", () => {
     }));
     render(
       <HintsFixture on>
-        <CardSelect step={step("add_generated_free_to_hand")} onChoose={() => {}} />
+        <MarksFixture marks={[]} showNumbers>
+          <CardSelect step={step("add_generated_free_to_hand")} onChoose={() => {}} />
+        </MarksFixture>
       </HintsFixture>,
     );
     await waitFor(() => expect(screen.getByText("★ Instinct 83.0%")).toBeTruthy());

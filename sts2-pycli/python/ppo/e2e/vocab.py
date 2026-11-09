@@ -61,9 +61,10 @@ REST_OPTIONS: Final = ("HEAL", "SMITH", "DIG", "LIFT", "COOK", "CLONE", "HATCH",
 # only, but `CombatState.encounter_id` names an event's fight by its event
 # encounter (sts2-wire `emit::names::event_encounter_id`, GH #1097). Pinned
 # from the v0.111.0 decomp, `Models.Encounters/*EventEncounter.cs`, in file
-# order, as C# `ModelId` slugs. The engine reports the abstract
-# `BATTLEWORN_DUMMY_EVENT_ENCOUNTER` for all three settings, the game its
-# V1-V3 subclasses; the engine has no PunchOff or TheArchitect fight yet.
+# order, as C# `ModelId` slugs. On v0.111.0 the engine reports the game's
+# V1-V3 subclass of each BattlewornDummy setting (#1181; v0.107.1 has only the
+# abstract `BATTLEWORN_DUMMY_EVENT_ENCOUNTER`); it has no PunchOff or
+# TheArchitect fight yet.
 # Vocabulary revision 2.1 appended them at ids 1939-1947.
 EVENT_ENCOUNTERS: Final = (
     "BATTLEWORN_DUMMY_EVENT_ENCOUNTER",

@@ -479,12 +479,13 @@ def write_conf(
     resume: bool,
     time_scale: float,
     advisor_brain: str = "search",
+    seed: str | None = None,
 ) -> None:
     conf = {
         "port": 9002,
         "character": character,
         "ascension": ascension,
-        "seed": None,
+        "seed": seed,
         "num_runs": 1,
         "speed_patches": True,
         "agent_timeout_seconds": 0,
@@ -922,6 +923,7 @@ def play_one(
     resume_first: bool = False,
     time_scale: float = 1.0,
     advisor_brain: str = "search",
+    seed: str | None = None,
 ) -> RunResult:
     global PROGRESS
     stamp = datetime.now().strftime("%m%d-%H%M")
@@ -947,7 +949,7 @@ def play_one(
     for attempt in range(1, RESUME_ATTEMPTS + 2):
         kill_everything()
         resume = attempt > 1 or resume_first
-        write_conf(character, ascension, resume, time_scale, advisor_brain)
+        write_conf(character, ascension, resume, time_scale, advisor_brain, seed)
         how = "resuming the saved run" if resume else f"ascension {ascension} (max {before})"
         say(f"RUN {tag}: launching {character}, {how} [attempt {attempt}]")
         # Straight to a scratch path: the game's stderr is the same flood as
@@ -1142,6 +1144,14 @@ def main() -> int:
         ),
     )
     ap.add_argument(
+        "--seed",
+        default=None,
+        help=(
+            "play this run seed (the conf's seed; e.g. one from a ledger line, "
+            "to replay a run after a fix). Default: a random seed."
+        ),
+    )
+    ap.add_argument(
         "--skip-prebuild",
         action="store_true",
         help=(
@@ -1211,6 +1221,7 @@ def main() -> int:
             resume_first=args.resume and played == 1,
             time_scale=args.time_scale,
             advisor_brain=args.advisor_brain,
+            seed=args.seed,
         )
         if args.ascension is not None:
             if result.record_win is None:

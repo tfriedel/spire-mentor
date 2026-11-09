@@ -16,6 +16,13 @@ export function parseFollowParams(search: string): FollowParams {
   return { follow: params.get("follow") === "1", run: params.get("run"), step };
 }
 
+/** `?open=<path>` (the seed checker's "open in the replay viewer"): the
+ *  stored run log to open, or null. */
+export function parseOpenParam(search: string): string | null {
+  const v = new URLSearchParams(search).get("open");
+  return v && v.trim() ? v : null;
+}
+
 /** The step to open a run of `n` steps at: the newest without a `step`, else
  *  `step` clamped into the run (a link to a step not yet mirrored opens at the
  *  tail rather than nowhere). */

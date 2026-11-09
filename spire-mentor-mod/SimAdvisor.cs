@@ -1470,7 +1470,7 @@ internal sealed class SimAdvisor
             SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Connected);
             if (screen.LocalAdvice != null)
             {
-                SimHud.Instance.ShowAdvice(screen.LocalAdvice, null);
+                SimHud.Instance.ShowAdvice(screen.LocalAdvice, null, screen);
                 RenderLatchedPeek();
             }
             if (_autoPlay && !HoldForAutobattle(screen, isCombat: false) &&
@@ -1670,12 +1670,31 @@ internal sealed class SimAdvisor
 
                 _lastBestLabel = advice.Options.FirstOrDefault(o => o.IsBest)?.Label
                                  ?? advice.Options.FirstOrDefault()?.Label;
-                _lastBest = advice.Best;
+                // A fight reply that raced a board change (our own play, a
+                // teammate's, the enemy's) renders, but never executes: its
+                // card and target indices name a hand that is gone, and
+                // the board change already scheduled a fresh request. In
+                // co-op that race is routine -- the teammate keeps moving
+                // -- and a stale index played Dazed (refused) right after
+                // the Anger it had already played (live, 2026-11-08); a
+                // legal card at the stale index would have been played
+                // silently instead.
+                bool racedBoard = isCombat && !samePosition;
+                if (racedBoard)
+                {
+                    Logger.Log($"[SimAdvisor] Advice {requestId} raced a board change: shown, not played; the fresh one is coming.");
+                }
+                _lastBest = racedBoard ? null : advice.Best;
                 _lastBestNote = advice.Note;
 
                 SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Connected);
                 RunState? runState = RunManager.Instance.DebugOnlyGetState();
-                SimHud.Instance.ShowAdvice(advice, LocalContext.GetMe(runState));
+                // The screen this reply answers gets its pick ringed (combat: none).
+                SimScreenDecision? shownOn = !isCombat && _lastScreen != null &&
+                                             ReferenceEquals(_lastScreen.Screen, forScreen)
+                    ? _lastScreen
+                    : null;
+                SimHud.Instance.ShowAdvice(advice, LocalContext.GetMe(runState), shownOn);
                 RenderLatchedPeek();
 
                 // The screen this reply answers, for `pause_on`'s ids and the
@@ -1692,7 +1711,7 @@ internal sealed class SimAdvisor
                     // (and press F7 to stop) before it fires.
                     ScheduleAutoPlay(isCombat ? AllyWaitMs(advice) : 0);
                 }
-                if (isCombat)
+                if (isCombat && !racedBoard)
                 {
                     _noMoveInARow = _lastBest != null ? 0 : _noMoveInARow + 1;
                     if (_autoPlay && _lastBest == null)
@@ -2340,15 +2359,18 @@ internal sealed class SimAdvisor
         {
             return index;
         }
-        string want = best.Label.Trim();
+        // Compared in display form on both sides: the advisor names an option
+        // in words ("discard Fire Potion") where the screen may still spell
+        // the game id ("discard FIRE_POTION", PotionSwapAdvice.Labels).
+        string want = AdviceMarks.Humanize(best.Label).Trim();
         if (index >= 0 && index < labels.Count &&
-            string.Equals(labels[index].Trim(), want, StringComparison.OrdinalIgnoreCase))
+            string.Equals(AdviceMarks.Humanize(labels[index]).Trim(), want, StringComparison.OrdinalIgnoreCase))
         {
             return index;
         }
         for (int i = 0; i < labels.Count; i++)
         {
-            if (string.Equals(labels[i].Trim(), want, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(AdviceMarks.Humanize(labels[i]).Trim(), want, StringComparison.OrdinalIgnoreCase))
             {
                 Logger.Log($"[SimAdvisor] Takeover: '{want}' moved {index} -> {i} since the advice; " +
                            "clicking the named option.");
@@ -2851,6 +2873,9 @@ internal sealed class SimAdvisor
                 });
             }
 
+            // The verdict word over the hand and the fight score (SimMoveFeedback).
+            CardPlay? humanPlay = PlayOf(entry);
+            Callable.From(() => SimMoveFeedback.Instance.OnHumanPlay(humanPlay?.Card, TargetIndexOf(humanPlay))).CallDeferred();
             SendHumanAction("card_play", detail, PlayOf(entry), DrinkOf(entry));
         }
         _historySeen = entries.Count;

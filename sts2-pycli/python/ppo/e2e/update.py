@@ -229,7 +229,9 @@ class Rank:
                 raise RuntimeError(f"shm holds {rows.n} rows, the table {len(table['ref'])}")
             res = self._update(sched, table, rows, it, t0, dropped)
             if job.get("pack_held") and self.rank == 0 and not res.get("nonfinite"):
-                res["held"], res["stats"]["held_pack_s"] = self._pack_held(table, rows)
+                res["held"], res["stats"]["held_pack_s"] = self._pack_held(
+                    table, rows, job.get("owner")
+                )
             del rows
         finally:
             try:
@@ -239,11 +241,12 @@ class Rank:
         return res
 
     def _pack_held(
-        self, table: dict[str, np.ndarray], rows: Chunk
+        self, table: dict[str, np.ndarray], rows: Chunk, owner: int | None = None
     ) -> tuple[dict[str, Any] | None, float]:
         """The rows the hold-back keeps (`HoldBack.carry`), copied out of the row
         block into a block of their own for the learner (step 6), and the copy's
-        wall time. None when it keeps no row."""
+        wall time. None when it keeps no row. The block's name carries `owner`
+        (the learner's pid, `rowstore.shm_name`): it is the learner's to unlink."""
         t0 = time.time()
         hold = self.algo.hold
         if not len(hold):
@@ -251,7 +254,7 @@ class Rank:
         pos = np.flatnonzero(np.isin(table["ref"], hold.cols["ref"]))
         if len(pos) != len(hold):
             raise RuntimeError(f"{len(hold)} held rows, {len(pos)} of them in the table")
-        shm, layout = take_to_shm(rows, pos)
+        shm, layout = take_to_shm(rows, pos, owner=owner)
         shm.close()  # the learner maps it by name and owns it from then on
         return {"shm": shm.name, "layout": layout, "pos": pos}, time.time() - t0
 

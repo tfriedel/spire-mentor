@@ -140,6 +140,13 @@ if (-not (Test-Path (Join-Path $workbenchDist "wb-precache.json"))) {
 
 # --- stage -------------------------------------------------------------------
 $version = (Get-Content (Join-Path $bridge "SpireMentor.json") | ConvertFrom-Json).version
+# The DLL's own version string (toolbar, F1 help, bug reports, every
+# envelope's mod_version) is a const, not read from the manifest.
+$constLine = Select-String -Path (Join-Path $bridge "MainFile.cs") -Pattern 'ModVersion = "([^"]+)"' | Select-Object -First 1
+$codeVersion = if ($constLine) { $constLine.Matches[0].Groups[1].Value } else { "" }
+if ($codeVersion -ne $version) {
+    throw "MainFile.ModVersion is '$codeVersion' but SpireMentor.json says '$version'; bump both."
+}
 $staging = Join-Path $bridge "staging"
 if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 $simDir = New-Item -ItemType Directory -Path (Join-Path $staging "mods/SpireMentor") -Force

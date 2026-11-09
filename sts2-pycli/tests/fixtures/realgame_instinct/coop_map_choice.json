@@ -1,0 +1,1258 @@
+{
+ "type": "advice_request",
+ "nodes": [
+  {
+   "index": 0,
+   "type": "Monster",
+   "row": 1,
+   "col": 1
+  },
+  {
+   "index": 1,
+   "type": "Monster",
+   "row": 1,
+   "col": 4
+  }
+ ],
+ "map": {
+  "row_count": 15,
+  "col_count": 7,
+  "current": {
+   "col": 3,
+   "row": 0
+  },
+  "boss": {
+   "col": 3,
+   "row": 15,
+   "id": "VANTOM_BOSS"
+  },
+  "visited": [
+   {
+    "col": 3,
+    "row": 0
+   }
+  ],
+  "nodes": [
+   {
+    "col": 0,
+    "row": 2,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 0,
+      "row": 3
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 3,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 1,
+      "row": 4
+     },
+     {
+      "col": 0,
+      "row": 4
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 4,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 0,
+      "row": 5
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 5,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 0,
+      "row": 6
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 6,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 0,
+      "row": 7
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 7,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 0,
+      "row": 8
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 8,
+    "type": "Treasure",
+    "children": [
+     {
+      "col": 0,
+      "row": 9
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 9,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 0,
+      "row": 10
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 10,
+    "type": "Shop",
+    "children": [
+     {
+      "col": 0,
+      "row": 11
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 11,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 0,
+      "row": 12
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 12,
+    "type": "Elite",
+    "children": [
+     {
+      "col": 0,
+      "row": 13
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 13,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 0,
+      "row": 14
+     }
+    ]
+   },
+   {
+    "col": 0,
+    "row": 14,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 3,
+      "row": 15
+     }
+    ]
+   },
+   {
+    "col": 1,
+    "row": 1,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 0,
+      "row": 2
+     }
+    ]
+   },
+   {
+    "col": 1,
+    "row": 4,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 2,
+      "row": 5
+     }
+    ]
+   },
+   {
+    "col": 1,
+    "row": 6,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 0,
+      "row": 7
+     }
+    ]
+   },
+   {
+    "col": 1,
+    "row": 9,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 2,
+      "row": 10
+     }
+    ]
+   },
+   {
+    "col": 1,
+    "row": 11,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 0,
+      "row": 12
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 3,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 2,
+      "row": 4
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 4,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 3,
+      "row": 5
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 5,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 3,
+      "row": 6
+     },
+     {
+      "col": 1,
+      "row": 6
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 7,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 2,
+      "row": 8
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 8,
+    "type": "Treasure",
+    "children": [
+     {
+      "col": 2,
+      "row": 9
+     },
+     {
+      "col": 1,
+      "row": 9
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 9,
+    "type": "Shop",
+    "children": [
+     {
+      "col": 2,
+      "row": 10
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 10,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 2,
+      "row": 11
+     },
+     {
+      "col": 1,
+      "row": 11
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 11,
+    "type": "Elite",
+    "children": [
+     {
+      "col": 2,
+      "row": 12
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 12,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 2,
+      "row": 13
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 13,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 2,
+      "row": 14
+     }
+    ]
+   },
+   {
+    "col": 2,
+    "row": 14,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 3,
+      "row": 15
+     }
+    ]
+   },
+   {
+    "col": 3,
+    "row": 2,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 4,
+      "row": 3
+     },
+     {
+      "col": 2,
+      "row": 3
+     }
+    ]
+   },
+   {
+    "col": 3,
+    "row": 5,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 3,
+      "row": 6
+     }
+    ]
+   },
+   {
+    "col": 3,
+    "row": 6,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 2,
+      "row": 7
+     },
+     {
+      "col": 3,
+      "row": 7
+     }
+    ]
+   },
+   {
+    "col": 3,
+    "row": 7,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 2,
+      "row": 8
+     }
+    ]
+   },
+   {
+    "col": 3,
+    "row": 11,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 3,
+      "row": 12
+     }
+    ]
+   },
+   {
+    "col": 3,
+    "row": 12,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 4,
+      "row": 13
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 1,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 5,
+      "row": 2
+     },
+     {
+      "col": 3,
+      "row": 2
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 3,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 4,
+      "row": 4
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 4,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 5,
+      "row": 5
+     },
+     {
+      "col": 4,
+      "row": 5
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 5,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 5,
+      "row": 6
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 8,
+    "type": "Treasure",
+    "children": [
+     {
+      "col": 4,
+      "row": 9
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 9,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 4,
+      "row": 10
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 10,
+    "type": "Elite",
+    "children": [
+     {
+      "col": 3,
+      "row": 11
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 13,
+    "type": "Elite",
+    "children": [
+     {
+      "col": 4,
+      "row": 14
+     }
+    ]
+   },
+   {
+    "col": 4,
+    "row": 14,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 3,
+      "row": 15
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 2,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 5,
+      "row": 3
+     },
+     {
+      "col": 6,
+      "row": 3
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 3,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 4,
+      "row": 4
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 5,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 6,
+      "row": 6
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 6,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 5,
+      "row": 7
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 7,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 6,
+      "row": 8
+     },
+     {
+      "col": 4,
+      "row": 8
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 11,
+    "type": "RestSite",
+    "children": [
+     {
+      "col": 5,
+      "row": 12
+     },
+     {
+      "col": 6,
+      "row": 12
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 12,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 5,
+      "row": 13
+     }
+    ]
+   },
+   {
+    "col": 5,
+    "row": 13,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 4,
+      "row": 14
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 3,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 6,
+      "row": 4
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 4,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 6,
+      "row": 5
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 5,
+    "type": "Unknown",
+    "children": [
+     {
+      "col": 6,
+      "row": 6
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 6,
+    "type": "Elite",
+    "children": [
+     {
+      "col": 5,
+      "row": 7
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 8,
+    "type": "Treasure",
+    "children": [
+     {
+      "col": 6,
+      "row": 9
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 9,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 6,
+      "row": 10
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 10,
+    "type": "Monster",
+    "children": [
+     {
+      "col": 5,
+      "row": 11
+     }
+    ]
+   },
+   {
+    "col": 6,
+    "row": 12,
+    "type": "Shop",
+    "children": [
+     {
+      "col": 5,
+      "row": 13
+     }
+    ]
+   }
+  ]
+ },
+ "seed": "X34PFXGPYZ1F",
+ "act": 1,
+ "act_name": "OVERGROWTH",
+ "floor": 1,
+ "mod_version": "0.10.0-beta.6",
+ "game_version": "v0.111.0",
+ "run_state": {
+  "gold": 99,
+  "hp": 80,
+  "max_hp": 80,
+  "potions": [
+   {
+    "slot": 0,
+    "empty": true
+   },
+   {
+    "slot": 1,
+    "empty": true
+   },
+   {
+    "slot": 2,
+    "empty": true
+   }
+  ],
+  "potion_slot_count": 3,
+  "relics": [
+   {
+    "id": "BURNING_BLOOD",
+    "name": "Burning Blood",
+    "description": "At the end of combat, heal [green]6[/green] HP.",
+    "rarity": "Starter",
+    "counter": null,
+    "stack_count": 1,
+    "is_wax": false,
+    "is_melted": false
+   },
+   {
+    "id": "NEOWS_TORMENT",
+    "name": "Neow's Torment",
+    "description": "Upon pickup, add [blue]1[/blue] [gold]Neow's Fury[/gold] to your [gold]Deck[/gold].",
+    "rarity": "Ancient",
+    "counter": null,
+    "stack_count": 1,
+    "is_wax": false,
+    "is_melted": false
+   }
+  ],
+  "master_deck": [
+   {
+    "id": "STRIKE_IRONCLAD",
+    "name": "Strike",
+    "description": "Deal 6 damage.",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Basic",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 6
+    }
+   },
+   {
+    "id": "STRIKE_IRONCLAD",
+    "name": "Strike",
+    "description": "Deal 6 damage.",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Basic",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 6
+    }
+   },
+   {
+    "id": "STRIKE_IRONCLAD",
+    "name": "Strike",
+    "description": "Deal 6 damage.",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Basic",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 6
+    }
+   },
+   {
+    "id": "STRIKE_IRONCLAD",
+    "name": "Strike",
+    "description": "Deal 6 damage.",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Basic",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 6
+    }
+   },
+   {
+    "id": "STRIKE_IRONCLAD",
+    "name": "Strike",
+    "description": "Deal 6 damage.",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Basic",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 6
+    }
+   },
+   {
+    "id": "DEFEND_IRONCLAD",
+    "name": "Defend",
+    "description": "Gain 5 [gold]Block[/gold].",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Skill",
+    "rarity": "Basic",
+    "target_type": "Self",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "block": 5
+    }
+   },
+   {
+    "id": "DEFEND_IRONCLAD",
+    "name": "Defend",
+    "description": "Gain 5 [gold]Block[/gold].",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Skill",
+    "rarity": "Basic",
+    "target_type": "Self",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "block": 5
+    }
+   },
+   {
+    "id": "DEFEND_IRONCLAD",
+    "name": "Defend",
+    "description": "Gain 5 [gold]Block[/gold].",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Skill",
+    "rarity": "Basic",
+    "target_type": "Self",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "block": 5
+    }
+   },
+   {
+    "id": "DEFEND_IRONCLAD",
+    "name": "Defend",
+    "description": "Gain 5 [gold]Block[/gold].",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Skill",
+    "rarity": "Basic",
+    "target_type": "Self",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "block": 5
+    }
+   },
+   {
+    "id": "BASH",
+    "name": "Bash",
+    "description": "Deal 8 damage.\nApply 2 [gold]Vulnerable[/gold].",
+    "cost": 2,
+    "base_cost": 2,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 2,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Basic",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": false,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 8,
+     "vulnerablepower": 2
+    }
+   },
+   {
+    "id": "NEOWS_FURY",
+    "name": "Neow's Fury",
+    "description": "Deal 10 damage.\nPut up to 2 cards from your [gold]Discard Pile[/gold] into your [gold]Hand[/gold].\n[gold]Exhaust[/gold].",
+    "cost": 1,
+    "base_cost": 1,
+    "persistent_cost": null,
+    "played_cost": null,
+    "stable_cost": null,
+    "effective_cost": 1,
+    "star_cost": null,
+    "persistent_star_cost": null,
+    "costs_x": false,
+    "type": "Attack",
+    "rarity": "Ancient",
+    "target_type": "AnyEnemy",
+    "upgrade_level": 0,
+    "is_upgradable": true,
+    "is_removable": true,
+    "exhaust": true,
+    "innate": false,
+    "retain": false,
+    "ethereal": false,
+    "will_exhaust": false,
+    "will_retain": false,
+    "sly": false,
+    "sly_this_turn": false,
+    "is_curse": false,
+    "is_status": false,
+    "pile": "Deck",
+    "stats": {
+     "damage": 10,
+     "cards": 2
+    }
+   }
+  ],
+  "ascension": 0,
+  "is_last_act": false,
+  "awaiting_second_boss": false,
+  "character": "IRONCLAD",
+  "unlocked_epochs": [
+   "COLORLESS1_EPOCH",
+   "RELIC1_EPOCH",
+   "COLORLESS2_EPOCH",
+   "SILENT6_EPOCH",
+   "CUSTOM_AND_SEEDS_EPOCH",
+   "ACT3_B_EPOCH",
+   "RELIC2_EPOCH",
+   "COLORLESS3_EPOCH",
+   "IRONCLAD4_EPOCH",
+   "IRONCLAD3_EPOCH",
+   "ACT2_B_EPOCH",
+   "COLORLESS4_EPOCH",
+   "RELIC4_EPOCH",
+   "EVENT3_EPOCH",
+   "IRONCLAD2_EPOCH",
+   "COLORLESS5_EPOCH",
+   "SILENT4_EPOCH",
+   "SILENT5_EPOCH",
+   "DEFECT6_EPOCH",
+   "IRONCLAD5_EPOCH",
+   "POTION2_EPOCH",
+   "SILENT2_EPOCH",
+   "OROBAS_EPOCH",
+   "EVENT1_EPOCH",
+   "RELIC5_EPOCH",
+   "REGENT6_EPOCH",
+   "DEFECT3_EPOCH",
+   "RELIC3_EPOCH",
+   "DEFECT4_EPOCH",
+   "REGENT1_EPOCH",
+   "SILENT3_EPOCH",
+   "IRONCLAD6_EPOCH",
+   "REGENT5_EPOCH",
+   "DEFECT5_EPOCH",
+   "POTION1_EPOCH",
+   "NEOW_EPOCH",
+   "NECROBINDER2_EPOCH",
+   "SILENT1_EPOCH",
+   "REGENT2_EPOCH",
+   "EVENT2_EPOCH",
+   "DEFECT1_EPOCH",
+   "NECROBINDER3_EPOCH",
+   "UNDERDOCKS_EPOCH",
+   "REGENT3_EPOCH",
+   "DEFECT2_EPOCH",
+   "NECROBINDER4_EPOCH",
+   "REGENT4_EPOCH",
+   "NECROBINDER5_EPOCH",
+   "NECROBINDER6_EPOCH",
+   "DARV_EPOCH",
+   "NECROBINDER1_EPOCH",
+   "REGENT7_EPOCH",
+   "IRONCLAD7_EPOCH",
+   "SILENT7_EPOCH",
+   "DAILY_RUN_EPOCH",
+   "DEFECT7_EPOCH",
+   "NECROBINDER7_EPOCH"
+  ]
+ },
+ "rng": {},
+ "coop_rng": {
+  "run_seed": 4162008922771362702,
+  "counters": {
+   "up_front": 533,
+   "shuffle": 0,
+   "combat_card_generation": 0,
+   "combat_potion_generation": 0,
+   "combat_card_selection": 0,
+   "combat_energy_costs": 0,
+   "combat_targets": 0,
+   "monster_ai": 0,
+   "niche": 0,
+   "combat_orbs": 0,
+   "rewards": 0,
+   "shops": 0,
+   "transformations": 0
+  }
+ },
+ "player_count": 2,
+ "state_id": 92,
+ "advice_for": "map_select",
+ "capabilities": {
+  "coach": 2
+ },
+ "brain": "instinct",
+ "request_id": "a3"
+}

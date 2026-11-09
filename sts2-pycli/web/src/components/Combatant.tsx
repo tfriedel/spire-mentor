@@ -62,8 +62,12 @@ const INTENT_ART: Record<string, string> = {
 // own "unknown" disc — never raw enum text in the scene.
 const INTENT_ART_FALLBACK = "intent_atlas/intent_unknown.png";
 
-export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChange, hotkey, anchor, animation, actionAnim, actionAnimCandidates, actionNonce, holdLast, dying, dissolve, deathAnimSeconds, effects, noSprite, maxBodyH, pxPerScene = 1, orbs, orbSlots, locStrings, label }: {
+export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChange, hotkey, anchor, animation, actionAnim, actionAnimCandidates, actionNonce, holdLast, dying, dissolve, deathAnimSeconds, effects, noSprite, hpWidth, maxBodyH, pxPerScene = 1, orbs, orbSlots, locStrings, label, reticle }: {
   c: PlayerLike; isEnemy: boolean; dataIndex?: number; onClick?: () => void;
+  /** The advice's target: the enemy the plan's first targeted move aims at
+   *  (advice/marks.ts). Gold targeting brackets around the creature, as the
+   *  mod draws a copy of the game's own reticle — it stays up while you decide. */
+  reticle?: boolean;
   /** The enemy's board label (`enemyLabeller`): `c.name`, plus `" #k"` when
    *  several live enemies share the name. The nameplate shows the number so
    *  three Two-Tailed Rats say WHICH one; absent = the plain name (the
@@ -85,6 +89,10 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
   // spacer reserves the rig's footprint so the HP bar sits below it and the
   // intent above it.
   noSprite?: { w: number; h: number };
+  /** The HP bar's width in px, where the game's own is known (the Kaiser Crab
+   *  arms: their `Bounds` width + 24, see crabMount.ts). Absent, the bar
+   *  follows `hpBarWidth`'s max-HP curve. */
+  hpWidth?: number;
   /** Tallest rig body the arena has room for — see SpineSprite's `maxBodyH`.
    *  The arena does NOT set this (the game has no such clamp; it shrinks the
    *  whole row instead — see `scene.aspectFit`); the preview harnesses do. */
@@ -323,6 +331,12 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
         style={{ "--rig-top": rigTop } as React.CSSProperties}>
         {wantOrbs && !rigLoading && <Orbs orbs={orbs} slots={orbSlots} bodyH={bodyH} />}
         {hotkey != null && !rigLoading && <span aria-hidden="true" className="gs-hotkey">{hotkey}</span>}
+        {reticle && !rigLoading && (
+          <span className="gs-reticle" data-testid="advice-reticle" aria-label="the AI's target">
+            <i className="gs-reticle-tl" /><i className="gs-reticle-tr" />
+            <i className="gs-reticle-bl" /><i className="gs-reticle-br" />
+          </span>
+        )}
         {isEnemy && intent && !rigLoading && (
           /* The game centres the ICON over the creature's crown and hangs the
              damage numeral off its lower-LEFT (refs/game-combat-1.png: the "4"
@@ -486,7 +500,7 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
           `#3B6FA3` and the HP numerals take the `#1B3045` outline
           (RefreshText). */}
       <div className={`gs-hpwrap${blocked ? " gs-hp-blocked" : ""}`}
-        style={{ "--gs-hpw": `${hpBarWidth(c.max_hp)}px` } as React.CSSProperties}>
+        style={{ "--gs-hpw": `${hpWidth ?? hpBarWidth(c.max_hp)}px` } as React.CSSProperties}>
         <div className="gs-hpbar">
           <div className="gs-hptrack">
             {/* Doom band. The game draws it from the bar's LOW end out to

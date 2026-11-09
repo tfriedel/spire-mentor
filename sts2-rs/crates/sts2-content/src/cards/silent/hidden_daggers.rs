@@ -107,6 +107,9 @@ fn spawn_hidden_dagger_shivs(state: &mut CombatState, shivs: sts2_core::PostChoi
     else {
         return;
     };
+    // The discard can down the last enemy (Tingsha); then `CardCmd.Upgrade`
+    // is a no-op (`CombatManager.IsEnding`, CardCmd.cs:267-270, GH #1150).
+    let upgraded = upgraded && !sts2_core::combat_loop::combat_is_ending(state);
     for _ in 0..count {
         let shiv_uid = spawn_shiv(state, PileKind::Hand);
         if upgraded {

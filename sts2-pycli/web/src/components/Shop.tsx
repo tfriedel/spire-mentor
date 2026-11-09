@@ -1,3 +1,6 @@
+import { MarkBadge } from "../advice/AdviceContext";
+import { markClass, markFor, useAdviceMarks } from "../advice/useAdviceMarks";
+import type { Mark } from "../advice/marks";
 import type { CSSProperties } from "react";
 import type { Step, ChooseHandler, Card, Relic, Potion } from "../api";
 import { assetUrl } from "../api";
@@ -129,9 +132,15 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
   // own — see the Task 10 report for the full judgement call.
   const sound = useSound();
 
+  // The run policy's marks (advice/marks.ts): on the ware, the card, the
+  // removal service (the policy names the card to remove, so any removal pick
+  // marks the service) and Leave.
+  const { marks } = useAdviceMarks();
+  const removalMark = [...marks.values()].find((m) => m.key.startsWith("select_cards|")) ?? null;
   const buy = (action: string, args: Record<string, unknown>, cost?: number, stocked?: boolean) => ({
     disabled: !onChoose || !stocked || (cost != null && cost > gold),
     onClick: () => onChoose?.(action, args),
+    mark: markFor(marks, action, args),
   });
 
   const buyRelic = (relic: Relic) => {
@@ -177,7 +186,7 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
     description: string | undefined,
     cost: number | undefined,
     available: boolean | undefined,
-    b: { disabled: boolean; onClick: () => void },
+    b: { disabled: boolean; onClick: () => void; mark?: Mark | null },
   ) => {
     const affordable = (cost ?? 0) <= gold;
     // "Sold" means the slot is EMPTY — someone bought it. Not being able to
@@ -189,7 +198,8 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
     const cls =
       `gs-shop-item is-${kind}` +
       (soldOut ? " is-soldout" : "") +
-      (!affordable ? " is-unaffordable" : "");
+      (!affordable ? " is-unaffordable" : "") +
+      markClass(b.mark ?? null);
     return (
       <button
         className={cls}
@@ -198,6 +208,7 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
         title={(description ? `${name} — ${description}` : name)
           + (soldOut ? " (sold out)" : !affordable ? " (too expensive)" : "")}
       >
+        <MarkBadge mark={b.mark ?? null} />
         <span className="gs-shop-itemart" aria-hidden="true">
           {image ? (
             <img src={image} alt="" />
@@ -325,7 +336,8 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
                 }
               >
                 <span className="gs-shop-cardshadow" aria-hidden="true" />
-                <CardFrame card={framed} width={CARD_W} onClick={b.disabled ? undefined : b.onClick} />
+                <CardFrame card={framed} width={CARD_W} onClick={b.disabled ? undefined : b.onClick}
+                  mark={b.mark?.tier} step={b.mark?.order} />
                 {/* The discounted card's "%" tag, pinned where merchant_card.tscn
                     pins its SaleVisual: a Sprite2D at (146.3, -153.2) on the
                     300x422 card, i.e. centred on 98.8% / 13.7% of the frame. */}
@@ -405,7 +417,7 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
             {removalCost != null ? (
               <button
                 className={
-                  "gs-shop-removal" + (removalCost > gold ? " is-unaffordable" : "")
+                  "gs-shop-removal" + (removalCost > gold ? " is-unaffordable" : "") + markClass(removalMark)
                 }
                 disabled={!onChoose || removalCost > gold}
                 onClick={() => onChoose?.("remove_card", {})}
@@ -448,7 +460,8 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
               </div>
             )}
 
-            <button className="gs-shop-hexbtn" disabled={!onChoose} onClick={() => onChoose?.("leave_room", {})}>
+            <button className={`gs-shop-hexbtn${markClass(markFor(marks, "leave_room"))}`} disabled={!onChoose}
+              onClick={() => onChoose?.("leave_room", {})}>
               <span className="gs-shop-hexface">Leave shop</span>
             </button>
             {adv.byKey.has("leave") && (

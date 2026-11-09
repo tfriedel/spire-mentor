@@ -9,6 +9,7 @@ pub mod act1_underdocks;
 pub mod act1_weak;
 pub mod act2_hive;
 pub mod act3_glory;
+pub mod forecast;
 pub mod shared;
 
 mod legacy_power_surface;

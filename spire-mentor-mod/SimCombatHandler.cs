@@ -560,10 +560,16 @@ public class SimCombatHandler : IRoomHandler, IHandler
     }
 
     /// <summary>
-    /// Discards <paramref name="potion"/> via PotionCmd.Discard (v0.107.1
-    /// decomp section 3 -- distinct from "using" it: this mutates the slot
-    /// synchronously, so a settle-poll on the slot emptying is enough; no
-    /// RequestEnqueue/ActionQueueSynchronizer round-trip is involved).
+    /// Discards the potion in <paramref name="slot"/> the way the game's own
+    /// Discard button does (NPotionPopup.OnDiscardButtonPressed, identical in
+    /// v0.107.1 and v0.111.0): a <c>DiscardPotionGameAction</c> through the
+    /// ActionQueueSynchronizer, so every co-op peer discards it too.
+    ///
+    /// It used to call <c>PotionCmd.Discard</c> directly, which changes only
+    /// THIS machine's belt. In co-op the teammate's copy kept the potion, so
+    /// the reward this discard made room for could not be taken there: its
+    /// reward set never completed and both games hung on the next room's
+    /// sync (2-instance run, Potion Courier, 2026-11-08).
     /// </summary>
     internal static async Task DiscardPotionAndWaitAsync(
         Player player, int slot, CancellationToken ct)
@@ -572,10 +578,12 @@ public class SimCombatHandler : IRoomHandler, IHandler
         if (potion == null)
             return;
 
-        await PotionCmd.Discard(potion);
+        RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
+            new DiscardPotionGameAction(player, (uint)slot, CombatManager.Instance.IsInProgress));
 
+        // A co-op client's discard round-trips through the host first.
         int waitMs = 0;
-        while (waitMs < 1000)
+        while (waitMs < 3000)
         {
             if (SafeGetPotionAtSlot(player, slot) == null)
                 break;

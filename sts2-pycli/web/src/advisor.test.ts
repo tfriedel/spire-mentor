@@ -25,7 +25,9 @@ describe("the e2e advisor", () => {
     expect(e2eAdvisable(true, "Ironclad", "v0.111.0", "csharp")).toBe(false);
   });
 
-  it("the preference defaults to the search and survives a reload", () => {
+  it("the preference defaults to Instinct (as the mod) and survives a reload", () => {
+    expect(readAdvisorPref()).toBe("e2e");
+    localStorage.setItem(ADVISOR_KEY, "search");
     expect(readAdvisorPref()).toBe("search");
     localStorage.setItem(ADVISOR_KEY, "e2e");
     expect(readAdvisorPref()).toBe("e2e");

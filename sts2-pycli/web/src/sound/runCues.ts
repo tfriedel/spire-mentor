@@ -1,5 +1,5 @@
 import type { CardAnim, SfxMap } from "./sfxMap";
-import type { SoundCue } from "./types";
+import { PITCH_VARIANCE, type SoundCue } from "./types";
 
 // CORRECTION (2026-08-24, round 2). An earlier amendment here recorded that
 // `victory` "is NOT a real key" and that "a win is silent by design, since the
@@ -52,7 +52,21 @@ export type UiCueKind =
  * the map names directly). A single-key kind is the degenerate case of the
  * same shape, so there is one code path rather than two.
  */
-const UI_KEYS: Record<UiCueKind, { keys: readonly string[]; cls: SoundCue["cls"] }> = {
+//
+// `gain` / `pitch` are the `volume` and `PitchVariance` arguments of the
+// game's own `NDebugAudioManager.Play` call for that sound. The non-FMOD layer
+// has no mixer data of its own, so the call site IS its mix: without these the
+// card deal played four times louder than the game's (0.25), the combat-start
+// slosh more than three times (0.3), and every one of them at one fixed pitch
+// where the game spreads it. Absent = the call passes the defaults (1,
+// `PitchVariance.None`). FMOD events carry their volume/pitch randomisation
+// inside the bank (the renderer bakes one seeded take), so they take neither.
+const UI_KEYS: Record<UiCueKind, {
+  keys: readonly string[];
+  cls: SoundCue["cls"];
+  gain?: number;
+  pitch?: number;
+}> = {
   click: { keys: ["uiClick"], cls: "chatter" },
   mapOpen: { keys: ["mapOpen"], cls: "chatter" },
   mapSelect: { keys: ["mapSelect"], cls: "informative" },
@@ -74,20 +88,32 @@ const UI_KEYS: Record<UiCueKind, { keys: readonly string[]; cls: SoundCue["cls"]
   // Chatter, both of them: `card_deal` fires per card at 0.25 volume in the
   // game and `card_exhaust` rides a vfx the workbench does not draw in
   // `reduced` mode, so dropping them there keeps sound level with the visuals.
-  cardDeal: { keys: ["cardDeal"], cls: "chatter" },
+  // `CardPileCmd.cs:875`.
+  cardDeal: { keys: ["cardDeal"], cls: "chatter", gain: 0.25, pitch: PITCH_VARIANCE.small },
   cardExhaust: { keys: ["cardExhaust"], cls: "chatter" },
-  cardSelect: { keys: ["cardSelect"], cls: "chatter" },
+  // `NMouseCardPlay.cs:336`: the workbench is mouse-driven (the controller
+  // path, `NControllerCardPlay.cs:199`, plays it at 1).
+  cardSelect: { keys: ["cardSelect"], cls: "chatter", gain: 0.5 },
   // --- deck operations ---
-  cardSmith: { keys: ["cardSmith"], cls: "informative" },
+  // `NCardSmithVfx.cs:179` (its `SfxVolume` defaults to 1).
+  cardSmith: { keys: ["cardSmith"], cls: "informative", pitch: PITCH_VARIANCE.small },
   cardTransform: { keys: ["cardTransform"], cls: "informative" },
   enchant: { keys: ["enchant"], cls: "informative" },
   // --- potions ---
-  potionGain: { keys: ["potionGain"], cls: "informative" },
-  potionSlosh: { keys: ["potionSlosh1", "potionSlosh2", "potionSlosh3"], cls: "chatter" },
+  // `PotionCmd.cs:44`.
+  potionGain: { keys: ["potionGain"], cls: "informative", pitch: PITCH_VARIANCE.small },
+  // `NPotionHolder.cs:662` (`ShineOnStartOfCombat`), the only slosh the
+  // workbench plays: entering a fight while holding a potion.
+  potionSlosh: {
+    keys: ["potionSlosh1", "potionSlosh2", "potionSlosh3"], cls: "chatter",
+    gain: 0.3, pitch: PITCH_VARIANCE.large,
+  },
   // --- rest site ---
   restSleep: { keys: ["restSleep1", "restSleep2", "restSleep3"], cls: "informative" },
-  restBlanket: { keys: ["restBlanket"], cls: "informative" },
-  restDig: { keys: ["restDig"], cls: "informative" },
+  // `HealRestSiteOption.PlayRestSiteHealSfx` (`:99`).
+  restBlanket: { keys: ["restBlanket"], cls: "informative", pitch: PITCH_VARIANCE.small },
+  // `DigRestSiteOption.DoLocalPostSelectVfx` (`:35`).
+  restDig: { keys: ["restDig"], cls: "informative", pitch: PITCH_VARIANCE.small },
   // --- screens / NPCs ---
   screenOpen: { keys: ["screenOpen"], cls: "chatter" },
   // Necrobinder's Osty arriving on the board.
@@ -237,7 +263,10 @@ export function cueForUi(
   // `Math.min` guards the one input this cannot control: a `rand` returning
   // exactly 1 (or a hair under, then rounding up) would index past the end.
   const event = events[Math.min(events.length - 1, Math.floor(rand() * events.length))];
-  return { event, cls: spec.cls };
+  const cue: SoundCue = { event, cls: spec.cls };
+  if (spec.gain !== undefined) cue.gain = spec.gain;
+  if (spec.pitch !== undefined) cue.pitchVariance = spec.pitch;
+  return cue;
 }
 
 /**

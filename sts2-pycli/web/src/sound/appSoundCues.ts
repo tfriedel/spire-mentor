@@ -160,6 +160,13 @@ export function actionCues(
   rand: () => number = Math.random,
 ): SoundCue[] {
   const cues: (SoundCue | null)[] = [];
+  // Playing a card. It used to be voiced only from the Board's click handler,
+  // so every card the ADVISOR played — "play recommended", the A-key autoplay
+  // — went silent; this is the funnel all of them share. `card_index` is the
+  // card's position in the hand the action was taken from, i.e. `state.hand`.
+  if (action === "play_card" && typeof args.card_index === "number") {
+    cues.push(...cardPlayCues(map, state.hand ?? [], args.card_index, state.player?.name));
+  }
   // Any purchase. `NMerchantInventory.cs:460` plays the thank-you on every
   // successful buy, whatever the ware was.
   if (action.startsWith("buy_")) cues.push(cueForUi(map, "merchantThanks", rand));
@@ -187,6 +194,33 @@ export function actionCues(
     if (context === "enchant") cues.push(cueForUi(map, "enchant", rand));
   }
   return cues.filter((c) => c !== null);
+}
+
+/**
+ * The cues for a step the ENGINE took on the player's behalf — "play to end"
+ * (`runModeStep`) and the watched autobattle leg (`autobattleStep`).
+ *
+ * Those loops never see the action they dispatched; the step comes back with
+ * only its human-readable label (`debug.action`, built by the wasm's
+ * `describe_action`: `"Play Strike"` or `"Play Strike → Nibbit"`). The card
+ * name in it is read off the hand of the state the action was taken FROM, so
+ * it joins `prev.hand` exactly — after dropping the `+` the label appends to
+ * an upgraded card (`render.rs::card_name`), since `Card.name` never carries
+ * it. Only card plays are voiced; any other label, a non-combat step, or a
+ * name the hand doesn't hold yields nothing rather than a guess.
+ */
+export function steppedActionCues(
+  map: SfxMap,
+  prev: { decision: string; state: CombatState } | null,
+  label: string | undefined,
+): SoundCue[] {
+  if (!prev || prev.decision !== "combat_play" || !label) return [];
+  const m = /^Play (.+?)(?: → .*)?$/.exec(label);
+  if (!m) return [];
+  const name = m[1].replace(/\+$/, "");
+  const card = (prev.state.hand ?? []).find((c) => c.name === name);
+  if (!card) return [];
+  return cuesForCard(map, card.name, card.type, prev.state.player?.name);
 }
 
 /**

@@ -130,7 +130,7 @@ public sealed class SimConfig
 
     /// <summary>
     /// Whole-game speed (<c>Engine.TimeScale</c>) applied at run start,
-    /// clamped by <see cref="SimSpeed"/> to the game's own [0.1, 4.0].
+    /// clamped by <see cref="SimSpeed"/> to [0.1, 8.0].
     /// Default 1.0 = untouched, which is the historical behaviour.
     ///
     /// Applied ONLY in Autopilot. In Advisor/Off a human is watching, and

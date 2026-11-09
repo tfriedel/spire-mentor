@@ -213,6 +213,9 @@ pub struct Data {
     pub loc_potions: LocMap,
     /// `localization_eng/characters.json`.
     pub loc_characters: LocMap,
+    /// `localization_eng/encounters.json` (encounter titles, e.g. a boss's
+    /// name for the seed checker).
+    pub loc_encounters: LocMap,
     /// `localization_eng/events.json`.
     pub loc_events: LocMap,
     /// `localization_eng/monsters.json`.
@@ -322,6 +325,10 @@ impl Data {
             loc_characters: parse(
                 "localization_eng/characters.json",
                 bundled!(version, "localization_eng/characters.json"),
+            ),
+            loc_encounters: parse(
+                "localization_eng/encounters.json",
+                bundled!(version, "localization_eng/encounters.json"),
             ),
             loc_events: parse(
                 "localization_eng/events.json",

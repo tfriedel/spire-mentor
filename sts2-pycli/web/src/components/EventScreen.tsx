@@ -1,3 +1,5 @@
+import { MarkBadge } from "../advice/AdviceContext";
+import { markClass, markFor, useAdviceMarks } from "../advice/useAdviceMarks";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import type { Step, ChooseHandler, EventOption } from "../api";
@@ -53,6 +55,8 @@ const TREASURE_RIG_H = 420;
  * Interactive in Play (``onChoose`` provided); read-only in Replay.
  */
 export default function EventScreen({ step, onChoose }: { step: Step; onChoose?: ChooseHandler }) {
+  // The run policy's marks on the options (advice/marks.ts).
+  const { marks } = useAdviceMarks();
   const s = step.state;
   const illustration = s.art?.illustration ?? null;
   const options: EventOption[] = s.event_options ?? [];
@@ -187,10 +191,12 @@ export default function EventScreen({ step, onChoose }: { step: Step; onChoose?:
                 <button
                   className={
                     "gs-event-option" + (taken ? " is-taken" : "") + (locked ? " is-locked" : "")
+                    + markClass(markFor(marks, "choose_option", { option_index: o.index }))
                   }
                   disabled={locked || !onChoose}
                   onClick={() => onChoose?.("choose_option", { option_index: o.index })}
                 >
+                  <MarkBadge mark={markFor(marks, "choose_option", { option_index: o.index })} />
                   {o.image && (
                     <span className="gs-event-option-icon">
                       <img src={o.image} alt="" />

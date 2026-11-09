@@ -158,49 +158,32 @@ def _wire(hand: int = 5, player_powers=(), enemy_powers=(), relics=()) -> dict[s
 
 
 @pytest.mark.parametrize(
-    ("msg", "reason"),
+    "msg",
     [
-        ("duplicate PowerKind ToricToughness on creature 1 (e2e)", "instanced_power"),
-        ("duplicate PowerKind TheBomb on player (e2e)", "instanced_power"),
-        (
-            "card CardUid(6) in pinned_top but not in the pile it annotates (e2e)",
-            "stale_pinned_top",
-        ),
-        (
-            "card CardUid(9) in retain_this_turn but not in the pile it annotates (e2e)",
-            "stale_retain_this_turn",
-        ),
-        ("duplicate PowerKind Strength on player (e2e)", None),
-        ("card CardUid(6) in pinned_top but not in state.cards arena (e2e)", None),
-        ("hand size 11 exceeds cap 10 (e2e)", None),
+        # Pre-#1166 engines flagged these two legal states and the checker let
+        # them pass. The engine allows them itself now (invariants.rs
+        # `power_kind_may_repeat` and the arena-only annotation check;
+        # invariants_checks.rs `stale_pinned_top_passes`), so the same text
+        # from a current engine is a real fault.
+        "duplicate PowerKind ToricToughness on creature 1 (e2e)",
+        "card CardUid(6) in pinned_top but not in the pile it annotates (e2e)",
+        "duplicate PowerKind Strength on player (e2e)",
+        "card CardUid(6) in pinned_top but not in state.cards arena (e2e)",
+        "hand size 11 exceeds cap 10 (e2e)",
     ],
 )
-def test_only_legal_engine_failures_are_tolerated(msg: str, reason: str | None) -> None:
-    assert inv.tolerated_engine_message(msg) == reason
-
-
-def test_a_tolerated_failure_reruns_the_checks_it_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    wire = {"state": _wire()}
-    monkeypatch.setattr(sts2_rs, "state_to_dict", lambda _cs: wire["state"])
+def test_no_engine_failure_is_tolerated_by_default(msg: str) -> None:
     checker = inv.InvariantChecker(ledger_every=0)
-    stale = _Combat(
-        engine_msg="card CardUid(6) in pinned_top but not in the pile it annotates (e2e)"
-    )
-    assert checker.check(_Run(combat=stale)) == []
-    assert checker.stats()["tolerated"] == {"stale_pinned_top": 1}
-    assert checker.stats()["violations"] == 0
-    # What the engine suite never reached is still checked.
-    wire["state"] = _wire(hand=11)
-    found = checker.check(_Run(combat=stale))
+    found = checker.check(_Run(combat=_Combat(engine_msg=msg)))
     assert _codes(found) == [inv.COMBAT_ENGINE]
-    assert "hand size 11" in found[0].detail
-    wire["state"] = _wire(player_powers=[("STRENGTH", 1), ("STRENGTH", 2)])
-    assert "duplicate power STRENGTH" in checker.check(_Run(combat=stale))[0].detail
-    wire["state"] = _wire(enemy_powers=[("VULNERABLE", -1)])
-    assert "negative VULNERABLE" in checker.check(_Run(combat=stale))[0].detail
-    # Instanced powers may repeat on any owner.
-    wire["state"] = _wire(player_powers=[("TORIC_TOUGHNESS", 1), ("TORIC_TOUGHNESS", 2)])
-    assert checker.check(_Run(combat=stale)) == []
+    assert checker.stats()["tolerated"] == {}
+
+
+def test_the_engine_tolerances_are_gone() -> None:
+    """The Python tolerance for instanced powers and stale annotations went
+    with #1166/#1169: the wheel's own suite passes both states."""
+    assert not hasattr(inv, "tolerated_engine_message")
+    assert not hasattr(inv, "_STALE_ANNOTATION")
 
 
 def test_the_crossbow_overflow_passes_only_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,13 +197,14 @@ def test_the_crossbow_overflow_passes_only_when_asked(monkeypatch: pytest.Monkey
     # Without Crossbow the same hand is still a fault.
     wire["state"] = _wire(hand=11)
     assert _codes(known.check(_Run(combat=over))) == [inv.COMBAT_ENGINE]
-    # A stale annotation can hide the cap check; the re-check honours the key.
-    stale = _Combat(
-        engine_msg="card CardUid(6) in pinned_top but not in the pile it annotates (e2e)"
-    )
-    wire["state"] = _wire(hand=11, relics=["CROSSBOW"])
-    assert known.check(_Run(combat=stale)) == []
-    assert _codes(inv.InvariantChecker().check(_Run(combat=stale))) == [inv.COMBAT_ENGINE]
+    # The cap failure stops the engine suite; the re-check covers the powers after it.
+    wire["state"] = _wire(hand=11, relics=["CROSSBOW"], player_powers=[("STRENGTH", 1)] * 2)
+    assert "duplicate power STRENGTH" in known.check(_Run(combat=over))[0].detail
+    wire["state"] = _wire(hand=11, relics=["CROSSBOW"], enemy_powers=[("VULNERABLE", -1)])
+    assert "negative VULNERABLE" in known.check(_Run(combat=over))[0].detail
+    # Instanced powers may repeat on any owner.
+    wire["state"] = _wire(hand=11, relics=["CROSSBOW"], player_powers=[("TORIC_TOUGHNESS", 1)] * 2)
+    assert known.check(_Run(combat=over)) == []
     with pytest.raises(ValueError, match="unknown known-issue"):
         inv.InvariantChecker(tolerate_known=["no_such_issue"])
 
@@ -413,7 +397,7 @@ def test_no_v0111_power_is_typed_as_a_non_power() -> None:
 
 
 def test_the_instanced_powers_match_the_decomp() -> None:
-    """The tolerated duplicates are exactly C#'s instanced powers, and
+    """The duplicates the Crossbow re-check allows are exactly C#'s instanced powers, and
     MadScience is the only card whose type is not fixed."""
     import re
     from pathlib import Path

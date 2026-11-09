@@ -463,6 +463,50 @@ champion verdict (the run brain's, not the advisor's).
   hand-played potion records `slot: null` — the M2 asymmetry stays in the
   live coach only), so a recorded line hashes like the oracle's.
 
+## Seed check (`/seedcheck.html`)
+
+A page for a seed seen in a post ("maybe unwinnable"): paste the game seed,
+and Instinct plays it until it wins. Linked from the top bar (🎲 Seed check).
+The page picks character, build and ascension. Instinct only plays Ironclad
+on v0.111.0, so the other characters and builds are listed but disabled (the
+engine refuses them with a 400 too); any ascension 0–10 runs, with a note
+below A10 that the net trained at A10. Design:
+`docs/superpowers/specs/2026-11-08-workbench-seed-checker-design.md`.
+
+- **The seed is the game's.** `sts2_e2e::env::new_run_from_game_seed`
+  canonicalises (uppercase, `O`→`0`, `I`→`1`) and hashes with the v0.111.0
+  run-seed hash, the same as `sts2_rs.RunManager(string_seed=…)` and the C#
+  oracle. The page shows the Neow offers and the bosses before anything runs,
+  so a typo is visible. A character outside the game's alphabet is a 400; a
+  length other than 12 is shown as a warning.
+- **Check.** Attempt 0 is greedy, then T=1.0 samples, each attempt's PRNG
+  seeded from (seed, `check`, k) (`e2e::attempt`), so attempt k replays from
+  its index alone. `pool.ts` runs `min(8, cores − 1)` workers
+  (`seedcheck.worker.ts`, each its own wasm and net), stops at the first win
+  or at 5 minutes. No win: the rule-of-three bound over counted attempts
+  (engine errors and decision caps excluded), the best attempt saved, and
+  "Keep searching" continues the same sequence from the next k.
+- **Win rate.** A separate sequence (seed, `rate`, k), 200 sampled attempts,
+  Wilson 95% interval and deaths per floor with the room.
+- **Replay.** The winning (or best) attempt's class sequence is replayed
+  through a live e2e session (`POST /api/seedcheck/log`) and stored like any
+  run log; the result links to `/?open=<path>`. The run identity carries the
+  string seed as `game:<SEED>` (`ModeSeed`), so seek and restore rebuild it.
+- **The text.** `verdict.ts` writes the paste-ready verdict; it never says
+  "impossible". It carries the route floor by floor
+  (`seedcheck::line_summary` `route`, built from `visited_map_coords` so
+  forced moves are there too): the node's room ("?" says whether it was a
+  fight or an event), which node to take ("go left/straight/right" from the
+  node you stand on, "Nth of M from the left" on that floor), the encounter
+  or event, the choices and relics, and the HP on leaving. With no win, the
+  best attempt's route. Paragraphs are blank-line separated and the route is a
+  `- ` list, so Reddit and Discord markdown keep the lines apart.
+- **Acceptance (node, no browser).** `node web/scripts/seedcheck-node.mjs`
+  after `just wasm-build`: the greedy attempt must win both reference seeds and
+  the sampled rate on `1SNVTCEXKR0Q` must fall in [4.6%, 12.0%], the Wilson
+  interval of the Python `ppo.e2e.solve` d1250 rate (15/200). That reference
+  predates the d2500 avg5 net (shipped 2026-11-08) and needs re-measuring.
+
 ## Persistence
 
 IndexedDB `sts2-workbench`:

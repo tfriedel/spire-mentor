@@ -176,6 +176,11 @@ const WASM_ROUTES = new Set([
   "POST /api/live/start-faithful",
   // The e2e student's headless self-play (speed / parity probe).
   "POST /api/e2e/selfplay",
+  // The seed checker (seedcheck.html): a seed's preview and an attempt's
+  // named line. Its attempts run in its own workers; its run logs are
+  // stored by `POST /api/seedcheck/log` below.
+  "POST /api/seedcheck/preview",
+  "POST /api/seedcheck/summary",
   "POST /api/live/run-mode",
   "POST /api/live/run-mode-step",
   "POST /api/live/faithful-step",
@@ -296,6 +301,7 @@ export const NO_E2E_NET = 424;
 function selectsE2e(key: string, body: unknown): boolean {
   const b = (body ?? {}) as { e2e?: unknown; off_combat_brain?: unknown; advisor?: unknown };
   if (key === "POST /api/e2e/selfplay" || key === "POST /api/live/e2e-advice") return true;
+  if (key === "POST /api/seedcheck/log") return true;
   if (key === "POST /api/live/start-faithful") return b.e2e === true;
   if (key === "POST /api/live/run-mode") return b.off_combat_brain === "e2e" || b.advisor === "e2e";
   return false;
@@ -444,19 +450,21 @@ export function createEngine(deps: EngineDeps): Engine {
     let last: string | null = null;
     for (let raw = wb.take_run_log(); raw.trim() !== "null" && raw !== ""; raw = wb.take_run_log()) {
       const log = JSON.parse(raw) as { filename: string; text: string };
-      const stored: StoredRun = {
-        text: log.text,
-        size: new TextEncoder().encode(log.text).length,
-        mtime: Date.now() / 1000,
-      };
-      const taken = new Set(await kv.keys("runs"));
-      const stem = log.filename.replace(/\.jsonl$/, "");
-      let name = log.filename;
-      for (let n = 2; taken.has(name); n++) name = `${stem}_${n}.jsonl`;
-      await kv.put("runs", name, stored);
-      last = name;
+      last = await storeLog(log.filename, log.text);
     }
     return last;
+  }
+
+  /** Store one log under `filename`, suffixed `_2`, … on a clash; returns
+   *  the name it was stored under. */
+  async function storeLog(filename: string, text: string): Promise<string> {
+    const stored: StoredRun = { text, size: new TextEncoder().encode(text).length, mtime: Date.now() / 1000 };
+    const taken = new Set(await kv.keys("runs"));
+    const stem = filename.replace(/\.jsonl$/, "");
+    let name = filename;
+    for (let n = 2; taken.has(name); n++) name = `${stem}_${n}.jsonl`;
+    await kv.put("runs", name, stored);
+    return name;
   }
 
   /** `GET /api/runs`: every stored log, newest first (mtime, then name). */
@@ -630,6 +638,15 @@ export function createEngine(deps: EngineDeps): Engine {
           const stored = await storeRunLogs();
           const out = reply.body as { log_path?: string | null } | null;
           if (stored && out?.log_path) out.log_path = stored;
+        }
+      } else if (key === "POST /api/seedcheck/log") {
+        // The engine writes the attempt's log; the worker keeps it with the
+        // other run logs, so the replay viewer lists and opens it.
+        await ensureE2e();
+        reply = parseReply(wb.call(m, path, JSON.stringify({ ...((body as object | null) ?? {}), now: now() })));
+        if (reply.status === 200) {
+          const log = reply.body as { path: string; text: string };
+          reply = { status: 200, body: { path: await storeLog(log.path, log.text) } };
         }
       } else if (key.startsWith("POST /api/sweeps") || key.startsWith("GET /api/sweeps")) {
         if (!WASM_ROUTES.has(key) && !SWEEP_ROUTE.test(path)) return detail(501, `not available in the browser build: ${key}`);

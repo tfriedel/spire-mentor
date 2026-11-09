@@ -579,6 +579,20 @@ pub(crate) const TOKEN_V0107: &[CardId] = &[
     CardId::WasteAway,
 ];
 
+/// Cards whose `VisualCardPool` override is a non-colorless pool, v0.107.1.
+pub(crate) const CHARACTER_VISUAL_POOL_V0107: &[CardId] = &[
+    CardId::Caltrops,       // Caltrops: SilentCardPool
+    CardId::Clash,          // Clash: IroncladCardPool
+    CardId::Distraction,    // Distraction: SilentCardPool
+    CardId::DualWield,      // DualWield: IroncladCardPool
+    CardId::Entrench,       // Entrench: IroncladCardPool
+    CardId::HelloWorldCard, // HelloWorld: DefectCardPool
+    CardId::Outmaneuver,    // Outmaneuver: SilentCardPool
+    CardId::Rebound,        // Rebound: DefectCardPool
+    CardId::RipAndTear,     // RipAndTear: DefectCardPool
+    CardId::Stack,          // Stack: DefectCardPool
+];
+
 /// `IroncladCardPool.GenerateAllCards()`, v0.111.0.
 pub(crate) const IRONCLAD_V0111: &[CardId] = &[
     CardId::AggressionCard,
@@ -1170,4 +1184,18 @@ pub(crate) const TOKEN_V0111: &[CardId] = &[
     CardId::SovereignBlade,
     CardId::SweepingGaze,
     CardId::WasteAway,
+];
+
+/// Cards whose `VisualCardPool` override is a non-colorless pool, v0.111.0.
+pub(crate) const CHARACTER_VISUAL_POOL_V0111: &[CardId] = &[
+    CardId::Caltrops,       // Caltrops: SilentCardPool
+    CardId::Clash,          // Clash: IroncladCardPool
+    CardId::Distraction,    // Distraction: SilentCardPool
+    CardId::DualWield,      // DualWield: IroncladCardPool
+    CardId::Entrench,       // Entrench: IroncladCardPool
+    CardId::HelloWorldCard, // HelloWorld: DefectCardPool
+    CardId::Outmaneuver,    // Outmaneuver: SilentCardPool
+    CardId::Rebound,        // Rebound: DefectCardPool
+    CardId::RipAndTear,     // RipAndTear: DefectCardPool
+    CardId::Stack,          // Stack: DefectCardPool
 ];

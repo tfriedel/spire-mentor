@@ -13,6 +13,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 versions=("$@")
 [[ ${#versions[@]} -gt 0 ]] || versions=(v0.107.1 v0.111.0)
+# The DLL's version const must match the manifest (package.ps1 refuses too).
+manifest_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$HERE/../SpireMentor.json" | head -1)"
+code_version="$(sed -n 's/.*ModVersion = "\([^"]*\)".*/\1/p' "$HERE/../MainFile.cs" | head -1)"
+if [[ "$manifest_version" != "$code_version" ]]; then
+  echo "run_all.sh: MainFile.ModVersion '$code_version' != SpireMentor.json '$manifest_version'" >&2
+  exit 1
+fi
 # The versions build in parallel (each writes only tests/compile/.build/<ver>/);
 # each one's output is buffered and printed whole, in order, once all finish.
 logs="$(mktemp -d)"

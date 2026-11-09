@@ -20,7 +20,7 @@ use crate::api::ApiError;
 use crate::combatlog::format_combat_log;
 use crate::deck;
 use crate::enrich::{asset_url, enrich, enrich_map_nodes, log_names, EnrichCtx};
-use crate::game::{Game, GameError};
+use crate::game::{Game, GameError, ModeSeed};
 use crate::localization::{resolve_state_names, Loc};
 use crate::render::{describe_action, NATIVE_ACTION};
 use crate::runlog::{resume_capability, ReplayStore, Step};
@@ -316,15 +316,18 @@ impl Rebuilt {
         game.set_record_card_plays(true);
         game.set_record_combat_log(true);
         if ident.run_mode {
-            let seed = ident.seed.parse::<i32>().map_err(|_| {
+            let mode_seed = ModeSeed::parse(&ident.seed).ok_or_else(|| {
                 format!(
-                    "run-mode save carries a non-numeric seed {:?}; cannot restore it",
+                    "run-mode save carries an unreadable seed {:?}; cannot restore it",
                     ident.seed
                 )
             })?;
             if ident.e2e_setup {
-                start_e2e(&mut game, seed, ident.ascension)?;
+                start_e2e(&mut game, &mode_seed, ident.ascension)?;
             } else {
+                let ModeSeed::Int(seed) = mode_seed else {
+                    return Err("a game seed string needs the e2e setup".to_string());
+                };
                 game.start_faithful(&ident.character, seed, ident.ascension)
                     .map_err(|GameError(m)| m)?;
             }
@@ -651,10 +654,10 @@ mod tests {
 }
 
 /// `Game::start_e2e`, or an error in a build without the `e2e` feature.
-fn start_e2e(game: &mut Game, seed: i32, ascension: u8) -> Result<(), String> {
+fn start_e2e(game: &mut Game, seed: &ModeSeed, ascension: u8) -> Result<(), String> {
     #[cfg(feature = "e2e")]
     {
-        game.start_e2e(seed, ascension)
+        game.start_e2e_seed(seed, ascension)
             .map(|_| ())
             .map_err(|GameError(m)| m)
     }

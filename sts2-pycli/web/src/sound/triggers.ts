@@ -1,20 +1,24 @@
 import type { CombatState } from "../api";
 import type { EffectEvent } from "../effects/types";
-import { resolveMonsterAttack, type SfxMap } from "./sfxMap";
+import { resolveMonsterAttack, resolveMonsterMove, type SfxMap } from "./sfxMap";
 import { powerValenceLookup, type PowerValence } from "./powerValence";
-import { cueForUi } from "./runCues";
+import { cueForUi, cuesForCard } from "./runCues";
 import type { CueClass, SoundCue } from "./types";
 
-export interface CombatCueContext {
+/** What resolving one `EffectEvent`'s sounds needs — see `cuesForEvent`. */
+export interface CombatEventCueContext {
   map: SfxMap;
-  /** Enemy indices that struck this transition (from `effects/enemyTurn.ts::attackingEnemies`). */
-  attackers: number[];
   enemyName: (index: number) => string | undefined;
   enemyIntent: (index: number) => { type: string; damage?: number; hits?: number } | undefined;
   /** The run's character CLASS name (`state.player.name`), for the player's
-   *  own death cry. Optional: a caller that doesn't know it gets silence
-   *  there, exactly as before this cue existed. */
+   *  own death cry and an auto-played card's grunt. Optional: a caller that
+   *  doesn't know it gets silence there, exactly as before this cue existed. */
   character?: string;
+}
+
+export interface CombatCueContext extends CombatEventCueContext {
+  /** Enemy indices that struck this transition (from `effects/enemyTurn.ts::attackingEnemies`). */
+  attackers: number[];
   /** The two snapshots this transition spans, for the cues that are a
    *  COUNT change rather than an `EffectEvent` — turn banners, card deal,
    *  exhaust, orbs. `combatDiff` deliberately does not model these: they have
@@ -45,7 +49,7 @@ export interface CombatCueContext {
  * A missing `prev`/`next` yields nothing rather than guessing, and so does the
  * first snapshot of a combat (no `prev` to diff).
  */
-function rhythmCues(ctx: CombatCueContext): SoundCue[] {
+function rhythmCues(ctx: Pick<CombatCueContext, "map" | "prev" | "next" | "rand">): SoundCue[] {
   const { prev, next, map } = ctx;
   if (!prev || !next) return [];
   // Direct `cueForUi(...)` calls, not a kinds array — see the same note in
@@ -84,7 +88,7 @@ function rhythmCues(ctx: CombatCueContext): SoundCue[] {
  * `OrbModel.PlayPassiveSfx` is called from each orb's own turn trigger, and
  * only Frost and Glass ever call it (see `load_orb_sfx`).
  */
-function orbCues(ctx: CombatCueContext): SoundCue[] {
+function orbCues(ctx: Pick<CombatCueContext, "map" | "prev" | "next">): SoundCue[] {
   const { prev, next, map } = ctx;
   if (!prev || !next || !map.orbs) return [];
   const count = (orbs: CombatState["orbs"]) => {
@@ -159,167 +163,180 @@ function powerCueKey(
 }
 
 /**
- * Derive the sounds one combat transition should make. Pure — no WebAudio,
- * no React. `ctx.attackers` membership (who counts as having struck this
- * transition) is decided upstream by `effects/enemyTurn.ts::attackingEnemies`;
- * this function does not re-filter by `enemyIntent(...).type`, so an enemy
- * the caller includes as an attacker still gets an attack cue even if its
- * current intent reads `DeathBlow` rather than `Attack` (e.g. an exploding
- * bomb) — `resolveMonsterAttack` already restricts hit-count matching to the
- * monster's `Attack`-tagged moves and falls back to `defaultAttack`/the
- * generic hit sound, so this never fabricates a move that isn't there.
+ * The cues that belong to the TRANSITION as a whole rather than to any one
+ * effect event — the turn banners, the card deal and exhaust, Osty arriving,
+ * the orb queue (`rhythmCues` / `orbCues`) — deduplicated, banners first.
+ *
+ * They lead because they announce what is about to happen. `Board.tsx` plays
+ * these at once when a transition lands, then each event's own cues
+ * (`cuesForEvent`) as the scheduler reaches that event.
  */
-export function cuesForCombat(events: EffectEvent[], ctx: CombatCueContext): SoundCue[] {
-  const cues: SoundCue[] = [];
+export function transitionCues(ctx: Pick<CombatCueContext, "map" | "prev" | "next" | "rand">): SoundCue[] {
   const seen = new Set<string>();
-  // Hoisted out of the event loop below: the lookup builds a Set from the map's
-  // `powersAllowNegative` list, and the map does not change within one call.
-  const valenceOf = powerValenceLookup(ctx.map);
-
-  // Banners announce what is about to happen, so they lead. `seen` is seeded
-  // from them for the same reason it exists at all — one sound per transition.
-  for (const cue of [...rhythmCues(ctx), ...orbCues(ctx)]) {
-    if (seen.has(cue.event)) continue;
+  return [...rhythmCues(ctx), ...orbCues(ctx)].filter((cue) => {
+    if (seen.has(cue.event)) return false;
     seen.add(cue.event);
-    cues.push(cue);
-  }
+    return true;
+  });
+}
 
-  for (const index of ctx.attackers) {
-    const monster = ctx.map.monsters[ctx.enemyName(index) ?? ""];
-    const event = resolveMonsterAttack(
-      monster,
-      ctx.enemyIntent(index),
-      ctx.map.generic.blockHit,
-    );
-    if (event && !seen.has(event)) {
-      seen.add(event);
-      cues.push({ event, cls: "informative" });
-    }
-  }
-
-  // The game's `block_hit` (`CreatureCmd.cs:400-406`) is creature-agnostic —
-  // it fires on `WasFullyBlocked` alone, with no `Side` check — and Task
-  // 12/13 already treat a `fullyBlocked` target the same way on either side
-  // (the "Blocked" text, the block-spark vfx). So a direct `fullyBlocked`
-  // event, from `combatDiff` (gated `sameRound`, see combatDiff.ts) or a
-  // per-hit log row, is the primary source here and wins regardless of what
-  // the fallback below would have concluded.
-  const blockedEvent = events.some((e) => e.kind === "fullyBlocked");
-  if (blockedEvent) {
-    const event = ctx.map.generic.blockHit;
-    if (event && !seen.has(event)) {
-      seen.add(event);
-      cues.push({ event, cls: "informative" });
-    }
-  }
-
-  // The one case the direct event above can't cover: the ENEMY TURN's own
-  // fully-blocked hit on the player. `combatDiff` only emits `fullyBlocked`
-  // when `sameRound` — block also zeroes at end of turn, so a snapshot pair
-  // spanning the enemy turn can't tell "absorbed a hit" from "expired" — and
-  // a recording with no combat log carries no per-hit `fullyBlocked` row at
-  // all (Board.tsx synthesizes its attacks from the `attackingEnemies`
-  // intent-guess instead). This is inherently PLAYER-only, not a legacy
-  // leftover to generalise: `ctx.attackers` only ever names enemies striking
-  // the PLAYER, so there is no symmetric "who did the player attack" input to
-  // widen it with. Skipped whenever the direct check above already fired —
-  // it would only re-derive the same `block_hit` key.
-  if (
-    !blockedEvent &&
-    ctx.attackers.length &&
-    !events.some((e) => e.kind === "hurt" && e.target.side === "player")
-  ) {
-    const event = ctx.map.generic.blockHit;
-    if (event && !seen.has(event)) {
-      seen.add(event);
-      cues.push({ event, cls: "informative" });
-    }
-  }
-
-  for (const e of events) {
-    if (e.kind === "hurt") {
+/**
+ * Every sound ONE effect event makes, in the order the game layers them. Pure.
+ *
+ * This is the unit `Board.tsx` plays per hit in `full` fx mode — the scheduler
+ * fires a 3-hit attack as three `hurt` events 180 ms apart, so the body's
+ * impact now sounds three times, as `SfxCmd.PlayDamage` does in the game,
+ * instead of once for the whole transition. `cuesForCombat` is the same
+ * resolution folded into one deduplicated beat.
+ *
+ * Within an event the cues are distinct; ACROSS events nothing is deduplicated
+ * here (the player's per-event debounce collapses a same-instant repeat).
+ */
+export function cuesForEvent(e: EffectEvent, ctx: CombatEventCueContext): SoundCue[] {
+  const out: SoundCue[] = [];
+  const add = (event: string | undefined, cls: CueClass = "informative") => {
+    if (event && !out.some((c) => c.event === event)) out.push({ event, cls });
+  };
+  switch (e.kind) {
+    case "hurt": {
       // The sound of an attack LANDING, and it belongs to the body it lands on:
       // armor, fur, slime, stone… A monster with no entry of its own falls back
       // to `generic.impact`, which is MonsterModel's own `Armor` default.
       //
       // Enemy-only, exactly as in the decomp: `CreatureCmd.cs` guards the
       // `PlayDamage` call with `Side == CombatSide.Enemy`. A player taking a hit
-      // is voiced by the attacker's own attack cue, played in the loop above —
-      // giving the player an impact too would double every incoming hit.
-      if (e.target.side !== "enemy") continue;
+      // is voiced by the attacker's own attack cue — giving the player an
+      // impact too would double every incoming hit.
+      if (e.target.side !== "enemy") break;
       const monster = ctx.map.monsters[ctx.enemyName(e.target.index) ?? ""];
       // The creature's VOICE, before its body's impact and in ADDITION to it —
       // `CreatureCmd.cs:326-328` plays `Monster.HurtSfx` alongside the "Hit"
       // animation trigger, then `:352` plays the material impact. Only 14 of
-      // the 97 monsters declare one (`MonsterModel.HurtSfx` is virtual `null`),
-      // and this table sat in the map unread until now — the same shape of gap
-      // as the card hit sounds: mapped, shipped, and reachable by nothing.
-      const voice = monster?.hurt;
-      if (voice && !seen.has(voice)) {
-        seen.add(voice);
-        cues.push({ event: voice, cls: "informative" });
-      }
-      const event = monster?.impact ?? ctx.map.generic.impact;
-      if (!event || seen.has(event)) continue;
-      seen.add(event);
-      cues.push({ event, cls: "informative" });
-      continue;
+      // the 97 monsters declare one (`MonsterModel.HurtSfx` is virtual `null`).
+      add(monster?.hurt);
+      add(monster?.impact ?? ctx.map.generic.impact);
+      break;
     }
-    if (e.kind === "death") {
-      // The player dies to their own character's cry (`SfxCmd.PlayDeath(player)`
-      // -> `player.Character.DeathSfx`, SfxCmd.cs:98). Note the game ALSO
-      // starts `event:/temp/sfx/game_over` here, but as MUSIC on a different
-      // bus (`CreatureCmd.cs:460`) — that one is emitted separately by
-      // `runEndCue`, so the two do not duplicate.
-      //
-      // A monster whose class declares no `DeathSfx` stays silent rather than
-      // borrowing another monster's.
+    case "death": {
       // Every monster fades out with the same sound on top of whatever its own
       // class names — `NMonsterDeathVfx.cs:227` plays `enemy_fade` for all of
-      // them, and only 91 of the 97 declare a `DeathSfx` at all, so without
-      // this the majority of kills were silent.
+      // them, and only 91 of the 97 declare a `DeathSfx` at all.
+      //
+      // The player dies to their own character's cry (`SfxCmd.PlayDeath(player)`
+      // -> `player.Character.DeathSfx`, SfxCmd.cs:98). The game ALSO starts
+      // `event:/temp/sfx/game_over` here, but as MUSIC on a different bus
+      // (`CreatureCmd.cs:460`) — `runEndCue` emits that one, so they do not
+      // duplicate. A monster whose class declares no `DeathSfx` stays silent
+      // rather than borrowing another monster's.
       if (e.target.side === "enemy") {
-        const fade = ctx.map.generic.enemyFade;
-        if (fade && !seen.has(fade)) {
-          seen.add(fade);
-          cues.push({ event: fade, cls: "informative" });
-        }
+        add(ctx.map.generic.enemyFade);
+        add(ctx.map.monsters[ctx.enemyName(e.target.index) ?? ""]?.death);
+      } else if (e.target.side === "player") {
+        add(ctx.map.characters?.[ctx.character ?? ""]?.die);
       }
-      const event =
-        e.target.side === "enemy"
-          ? ctx.map.monsters[ctx.enemyName(e.target.index) ?? ""]?.death
-          : ctx.map.characters?.[ctx.character ?? ""]?.die;
-      if (!event || seen.has(event)) continue;
-      seen.add(event);
-      cues.push({ event, cls: "informative" });
-      continue;
+      break;
     }
-    if (e.kind === "powerAdd" || e.kind === "powerRemove") {
-      const key = powerCueKey(e.kind, valenceOf(e.power, e.amount));
-      const event = ctx.map.generic[key];
-      if (!event || seen.has(event)) continue;
-      seen.add(event);
-      // Ruling 47 (final review finding 8, 2026-08-23) made `powerAdd`
-      // informative and left `powerRemove` as `chatter`: Board.tsx:257
-      // rendered the buff/debuff pop for `powerAdd` with no mode gate at
-      // all, so `informative` (kept in `reduced`) mirrored it; but
-      // Board.tsx:258 was `else if (e.kind === "powerRemove") { /* no pop on
-      // remove for v1 */ }` -- there was NO visual for a removal, in ANY
-      // mode, so `chatter` (dropped in `reduced`) was the classification
-      // that actually matched. Task 12 gave `powerRemove` its own visual
-      // (icon + name + "Wears Off" panel, `power_removed_vfx`), which
-      // falsifies that premise: `chatter` would now make sound quieter than
-      // what's on screen. Both kinds are `informative` as of this fix --
-      // they are symmetric on the visual side again.
-      cues.push({ event, cls: "informative" });
-      continue;
+    case "powerAdd":
+    case "powerRemove":
+      // Both kinds are `informative`: Ruling 47 (final review finding 8,
+      // 2026-08-23) once left `powerRemove` as `chatter` because a removal had
+      // NO visual in any mode; Task 12 gave it one (icon + name + "Wears Off",
+      // `power_removed_vfx`), so `chatter` would now make sound quieter than
+      // what is on screen.
+      add(ctx.map.generic[powerCueKey(e.kind, powerValenceLookup(ctx.map)(e.power, e.amount))]);
+      break;
+    case "fullyBlocked":
+      // `CreatureCmd.cs:400-406`: creature-agnostic, on `WasFullyBlocked`
+      // alone — the same call site as the "Blocked" text and the block spark.
+      add(ctx.map.generic.blockHit);
+      break;
+    case "attack": {
+      // A monster performing a move (a `monster_move` row, or the Board's
+      // intent-guess for a recording with no log). The PLAYER's own swing is
+      // voiced by the card it came from (`cuesForCard`), not here.
+      if (e.target.side !== "enemy") break;
+      const index = e.target.index;
+      const moveId = e.source?.kind === "move" ? e.source.id : undefined;
+      add(resolveMonsterMove(
+        ctx.map.monsters[ctx.enemyName(index) ?? ""],
+        moveId,
+        ctx.enemyIntent(index),
+        ctx.map.generic.blockHit,
+      ));
+      break;
     }
-    const spec = GENERIC[e.kind];
-    if (!spec) continue;
-    const event = ctx.map.generic[spec.key];
-    if (!event || seen.has(event)) continue;
-    seen.add(event);
-    cues.push({ event, cls: spec.cls });
+    case "cardPlay":
+      // A card the ENGINE played (Havoc, Mayhem, Stampede, … — GH #1155). It
+      // makes the same sounds as one the player clicked; the click path voices
+      // those from `actionCues`, which never sees an auto-play.
+      for (const cue of cuesForCard(ctx.map, e.card.name, e.card.type, ctx.character)) add(cue.event, cue.cls);
+      break;
+    default: {
+      const spec = GENERIC[e.kind];
+      if (spec) add(ctx.map.generic[spec.key], spec.cls);
+    }
+  }
+  return out;
+}
+
+/**
+ * Derive the sounds one combat transition makes when it all lands in ONE
+ * beat — every fx mode but `full`, where the board settles instantly — with
+ * each sound at most once (one transition can carry six `hurt` events from an
+ * AoE; playing each would machine-gun the mix). Pure — no WebAudio, no React.
+ *
+ * `ctx.attackers` is the intent-sniffing guess at who struck
+ * (`effects/enemyTurn.ts::attackingEnemies`), for a transition whose events
+ * carry no `attack` of their own (no combat log); a caller with the log
+ * passes `[]` and the `attack` events voice the exact moves instead. This
+ * does not re-filter by `enemyIntent(...).type`, so an enemy listed as an
+ * attacker still gets an attack cue even if its intent reads `DeathBlow`
+ * rather than `Attack` (an exploding bomb) — `resolveMonsterAttack` restricts
+ * hit-count matching to `Attack`-tagged moves and falls back to
+ * `defaultAttack`/the generic hit sound, so this never fabricates a move.
+ */
+export function cuesForCombat(events: EffectEvent[], ctx: CombatCueContext): SoundCue[] {
+  const cues: SoundCue[] = [];
+  const seen = new Set<string>();
+  const push = (cue: SoundCue) => {
+    if (seen.has(cue.event)) return;
+    seen.add(cue.event);
+    cues.push(cue);
+  };
+
+  for (const cue of transitionCues(ctx)) push(cue);
+
+  for (const index of ctx.attackers) {
+    const monster = ctx.map.monsters[ctx.enemyName(index) ?? ""];
+    const event = resolveMonsterAttack(monster, ctx.enemyIntent(index), ctx.map.generic.blockHit);
+    if (event) push({ event, cls: "informative" });
+  }
+
+  // A direct `fullyBlocked` event — from `combatDiff` (gated `sameRound`, see
+  // combatDiff.ts) or a per-hit log row — wins regardless of what the
+  // fallback below would have concluded, so it is checked ahead of it.
+  const blockedEvent = events.some((e) => e.kind === "fullyBlocked");
+  if (blockedEvent && ctx.map.generic.blockHit) push({ event: ctx.map.generic.blockHit, cls: "informative" });
+
+  // The one case the direct event can't cover: the ENEMY TURN's own
+  // fully-blocked hit on the player. `combatDiff` only emits `fullyBlocked`
+  // when `sameRound` — block also zeroes at end of turn, so a snapshot pair
+  // spanning the enemy turn can't tell "absorbed a hit" from "expired" — and
+  // a recording with no combat log carries no per-hit `fullyBlocked` row at
+  // all. Inherently PLAYER-only: `ctx.attackers` only ever names enemies
+  // striking the player.
+  if (
+    !blockedEvent &&
+    ctx.attackers.length &&
+    !events.some((e) => e.kind === "hurt" && e.target.side === "player") &&
+    ctx.map.generic.blockHit
+  ) {
+    push({ event: ctx.map.generic.blockHit, cls: "informative" });
+  }
+
+  for (const e of events) {
+    if (e.kind === "fullyBlocked") continue; // voiced above
+    for (const cue of cuesForEvent(e, ctx)) push(cue);
   }
   return cues;
 }

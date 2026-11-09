@@ -30,6 +30,7 @@ export type HostMessage =
   | { type: "game_rect"; x: number; y: number; w: number; h: number }
   | { type: "to_mod"; msg: unknown }
   | { type: "focus_game" }
+  | { type: "workbench"; run: string | null; step: number | null }
   | { type: "menu"; id: string; x: number; y: number; left: number; top: number; right: number; items: NativeMenuItem[] }
   | { type: "log"; text: string };
 
@@ -122,9 +123,26 @@ export function saveUiOutside(outside: boolean): void {
   }
 }
 
-export function openWorkbenchAt(logName: string | null, logIdx: number | null): void {
-  postHost({ type: "to_mod", msg: { type: "open_workbench_at", log_name: logName, log_idx: logIdx } });
-  postHost({ type: "focus_game" });
+/** The workbench's follow view of the live run (`run` / `step`: open that
+ * moment of it). */
+export function workbenchFollowUrl(run: string | null = null, step: number | null = null): string {
+  const q = new URLSearchParams({ follow: "1" });
+  if (run) q.set("run", run);
+  if (step != null) q.set("step", String(step));
+  return `/?${q.toString()}`;
+}
+
+/**
+ * The workbench in its own window (the host's WorkbenchWindow), opened or
+ * brought to the front; with `run` / `step` it shows that moment. Outside
+ * the host (a plain browser tab): a new tab.
+ */
+export function openWorkbenchWindow(run: string | null = null, step: number | null = null): void {
+  if (inHost()) {
+    postHost({ type: "workbench", run, step });
+    return;
+  }
+  window.open(workbenchFollowUrl(run, step), "_blank", "noopener");
 }
 
 /**

@@ -205,12 +205,16 @@ def test_combat_actions_bypass_the_guard() -> None:
 # invisibility bug #399 exists to close.
 #
 # The cover is per game build: v0.111.0 rehashed every seed (XxHash64), so it
-# was re-derived there by that census (seeds 0..40): removal on 11/12/16,
-# upgrade on 9/16/17/18/36/39, transform on 0/4/10/12/14/15/…, enchant on
-# 1/3/14/22/37 — 14 + 16 cover all four.
+# was re-derived there by that census (seeds 0..40). The first cover, 14 + 16,
+# went stale when seed 16 stopped surfacing its removal (already so on main at
+# 2bc55fb2, before #1181's changes). Re-derived 2026-11-08 (#1181): removal on
+# 11/12, upgrade on 9/16/17/18/36/39, transform on 0/4/12/14/15/18/…, enchant
+# on 1/3/14/17/22/37. The cover below has every kind on TWO seeds, so one
+# seed drifting no longer turns the gate red; all of a kind's seeds drifting
+# still does.
 _COVER_SEEDS_BY_VERSION = {
     "v0.107.1": (3, 5, 8, 15, 17),
-    "v0.111.0": (14, 16),
+    "v0.111.0": (11, 12, 17, 18, 22),
 }
 _COVER_SEEDS = _COVER_SEEDS_BY_VERSION[sts2_client.GAME_VERSION]
 _DECK_MUTATION_KINDS = frozenset(

@@ -74,6 +74,16 @@ pub fn in_colorless_pool(id: CardId) -> bool {
     .any(|pool| pool.contains(&id))
 }
 
+/// Whether `id` overrides C# `VisualCardPool` with a pool whose
+/// `IsColorless` is false (#1181): an Event card that wears a character's
+/// color (`Caltrops.cs:17`, `HelloWorld.cs:12`, …). Generated from the
+/// decomp with the pool lists; the same ten cards in both builds.
+#[must_use]
+pub fn has_character_visual_pool(id: CardId) -> bool {
+    use generated as g;
+    g::CHARACTER_VISUAL_POOL_V0107.contains(&id) || g::CHARACTER_VISUAL_POOL_V0111.contains(&id)
+}
+
 /// `pool`'s combat generation list in game build `version`, for a fight of
 /// one player (`multiplayer == false`) or more: `GenerateAllCards()` order
 /// through `FilterForCombat` and `FilterForPlayerCount`, minus the cards an

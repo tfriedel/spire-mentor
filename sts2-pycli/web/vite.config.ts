@@ -303,6 +303,7 @@ export default defineConfig(({ mode, command }) => {
           gallery: "gallery.html",
           cardskin: "cardskin.html",
           simlab: "simlab.html",
+          seedcheck: "seedcheck.html",
           catalog: "catalog.html",
           frame: "frame.html",
         },

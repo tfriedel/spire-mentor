@@ -44,13 +44,18 @@ import { createContext, useContext } from "react";
  * surfaces stay visible — there is no drill to spoil there.
  */
 
-export type AdviceStyle = "hints" | "coach";
+/** `off` (the Mode switch's "Off", as in the mod): the AI stays quiet -- no
+ *  unprompted advice AND no grades after you act. The press-first tools still
+ *  answer when you reach for them. */
+export type AdviceStyle = "off" | "coach" | "hints";
 
 export interface HintsValue {
   style: AdviceStyle;
   setStyle: (s: AdviceStyle) => void;
   /** True when unprompted AI advice may be displayed (`style === "hints"`). */
   on: boolean;
+  /** True in Off: no after-the-fact grades either. */
+  off: boolean;
   setOn: (v: boolean) => void;
   /** Switch between Hints and Coach. */
   toggle: () => void;
@@ -59,7 +64,7 @@ export interface HintsValue {
 // The default is Coach, so a component rendered without a provider (a unit
 // test, a stray subtree) hides advice rather than leaking it.
 export const HintsCtx = createContext<HintsValue>({
-  style: "coach", setStyle: () => {}, on: false, setOn: () => {}, toggle: () => {},
+  style: "coach", setStyle: () => {}, on: false, off: false, setOn: () => {}, toggle: () => {},
 });
 
 export function useHints(): HintsValue {

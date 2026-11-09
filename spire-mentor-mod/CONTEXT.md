@@ -28,6 +28,10 @@ _Avoid_: bot mode, auto, AI mode
 Autoplay limited to the fights: the AI plays every combat, and every run-level decision waits for the human, with a chip saying what changed since the last one. The in-game twin of the workbench's autobattle mode.
 _Avoid_: auto-battler, combat autoplay
 
+**Badge**:
+The mod's one in-game control, docked under the right end of the game's top bar (`SimToolbar`): its colour and word show the mode, a click opens the popover with every control. Its **Mode switch** is Off · Coach · Hints · AI plays, where "AI plays" is F7 autoplay in Advisor mode, not the config-armed **Autopilot** (which only shows there, as "Autopilot").
+_Avoid_: toolbar, strip, pill (the 0.9 layout)
+
 **Advisor brain**:
 Which AI answers the advice, chosen by the player: **Search** (MCTS for the fights, the PPO run policy for the screens; the default) or **Instinct** (the end-to-end net, no search, every decision). Sent as `brain` on every advice request; the advisor decides per request whether Instinct can play it and says so when it cannot (`PROTOCOL.md` section 5, v5.2).
 _Avoid_: mode (that is Off / Advisor / Autopilot), style (Hints / Coach)

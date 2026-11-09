@@ -105,7 +105,7 @@ describe("KaiserCrabGroup — a dying arm's chrome fade duration", () => {
   it("carries the manifest's own dissolve duration, not the 0.9s fallback", () => {
     const { container } = render(
       <KaiserCrabGroup rig="/rig/kaiser_crab/kaiser_crab" pxPerUnit={0.5}
-        groundBelowRoot={200} clampHalfW={960}
+        armAt={{}} clampX={{ min: -960, max: 960 }}
         arms={[dyingArm("left", 0)]} />,
     );
     const wrap = container.querySelector(".gs-combatant") as HTMLElement | null;

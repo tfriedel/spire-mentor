@@ -1,3 +1,5 @@
+import { MarkBadge } from "../advice/AdviceContext";
+import { markClass, markFor, useAdviceMarks } from "../advice/useAdviceMarks";
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Step, ChooseHandler, RestOption } from "../api";
@@ -90,6 +92,8 @@ function restScene(actName?: string | null): [string, (typeof REST_SCENES)[strin
  *  path scheme RestSiteOption.IconPath uses). Interactive in Play; in Replay
  *  the recorded choice keeps the game's ragged gold frame (review keeper). */
 export default function RestSite({ step, onChoose }: { step: Step; onChoose?: ChooseHandler }) {
+  // The run policy's marks on the options (advice/marks.ts).
+  const { marks } = useAdviceMarks();
   const s = step.state;
   const options: RestOption[] = s.rest_options ?? [];
   const chosen = step.chosen_action as { args?: { option_index?: number } } | null;
@@ -186,10 +190,12 @@ export default function RestSite({ step, onChoose }: { step: Step; onChoose?: Ch
               : null;
             // locked (in-game unavailable) dims hard; replay-inert options stay
             // near-full color — the chosen one's gold frame is the differentiator
+            const mark = markFor(marks, "choose_option", { option_index: o.index });
             const cls =
               "gs-rest-option" +
               (taken ? " is-chosen" : "") +
-              (locked ? " is-locked" : disabled && !taken ? " is-dim" : "");
+              (locked ? " is-locked" : disabled && !taken ? " is-dim" : "") +
+              markClass(mark);
             return (
               <button
                 key={o.index}
@@ -200,6 +206,7 @@ export default function RestSite({ step, onChoose }: { step: Step; onChoose?: Ch
                 title={taken ? `${name} — chosen in this run` : name}
                 onClick={() => onChoose?.("choose_option", { option_index: o.index })}
               >
+                <MarkBadge mark={mark} />
                 <span className="gs-rest-plaque">
                   {/* The game's own selected-plaque silhouette (option_outline.png
                       is a white alpha mask of the plaque, 4px proud of the art),

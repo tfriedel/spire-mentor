@@ -16,6 +16,8 @@ import { detectCharacter, synergyFor, type PartnerHint } from "../synergy";
 import { declaredGameVersion } from "../gameVersion";
 import { loadArchetypes, archetypeChipsFor, type ArchetypeChip } from "../archetype";
 import { useHints } from "../hints/useHints";
+import { MarkBadge } from "../advice/AdviceContext";
+import { markClass, markFor, useAdviceMarks } from "../advice/useAdviceMarks";
 import { fitRewardCardWidth } from "../rewardFit";
 
 /** Reward-card widths, in px, largest first.
@@ -207,6 +209,8 @@ type AdvProgress = {
 };
 
 export default function CardReward({ step, onChoose }: { step: Step; onChoose?: ChooseHandler }) {
+  // The run policy's marks on the cards and the skip (advice/marks.ts).
+  const { marks } = useAdviceMarks();
   const s = step.state;
   const cards = s.cards ?? [];
   const action = step.chosen_action as { action?: string; args?: { card_index?: number } } | null;
@@ -462,9 +466,10 @@ export default function CardReward({ step, onChoose }: { step: Step; onChoose?: 
                   "gs-cardreward-slot" +
                   (onChoose ? " is-live" : "") +
                   (taken && onChoose == null ? " is-chosen" : "");
+                const mark = markFor(marks, "select_card_reward", { card_index: c.index });
                 return (
                   <div key={c.index} className={cls}>
-                    <CardFrame card={c} width={cardW}
+                    <CardFrame card={c} width={cardW} mark={mark?.tier} step={mark?.order}
                       onClick={onChoose ? () => onChoose("select_card_reward", { card_index: c.index }) : undefined} />
                     {taken && onChoose == null && (
                       <div className="gs-cardreward-chosenbadge" title="taken" aria-hidden="true" />
@@ -477,13 +482,15 @@ export default function CardReward({ step, onChoose }: { step: Step; onChoose?: 
               <button
                 className={
                   "gs-cardreward-skip" +
-                  (skipped && onChoose == null ? " is-chosen" : "")
+                  (skipped && onChoose == null ? " is-chosen" : "") +
+                  markClass(markFor(marks, "skip_card_reward"))
                 }
                 disabled={!onChoose}
                 onClick={() => onChoose?.("skip_card_reward", {})}
               >
                 <img src={assetUrl("ui/reward_screen/reward_skip_button.png")} alt="" />
                 <span>Skip</span>
+                <MarkBadge mark={markFor(marks, "skip_card_reward")} />
                 {skipped && onChoose == null && (
                   <div className="gs-cardreward-chosenbadge" title="skipped" aria-hidden="true" />
                 )}

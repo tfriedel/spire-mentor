@@ -1,4 +1,4 @@
-# Spire Mentor wire protocol (v5.2 / brain; v5.1 / coach 2; v5 / coach; v3 = advisor mode; v2 = phase 1b)
+# Spire Mentor wire protocol (v5.3 / HUD numbers; v5.2 / brain; v5.1 / coach 2; v5 / coach; v3 = advisor mode; v2 = phase 1b)
 
 Newline-delimited JSON over a single-client TCP socket on `127.0.0.1:<port>`
 (default `9002`, see `SpireMentor.conf`). One JSON object per line.
@@ -279,6 +279,7 @@ separate "hand_select" message type.
 | `min_select` / `max_select` | int | |
 | `min_count` / `max_count` | int | **New, phase 1b.** Aliases of `min_select`/`max_select`, additive. |
 | `cancelable` | bool | **New, phase 1b.** `true` iff `min_select <= 0` -- see "cancel" in section 4. **This is a documented approximation, not the game's real cancelable flag**: the automation-facing `MegaCrit.Sts2.Core.TestSupport.ICardSelector.GetSelectedCards(options, minSelect, maxSelect)` signature does not pass the game's own `CardSelectorPrefs.Cancelable` at all (verified against `CardSelectCmd.cs` in the v0.107.1 decomp -- every `FromXxx` call site forwards only `minSelect`/`maxSelect`). A selection that is genuinely cancelable in-game with `min_select > 0` will report `cancelable:false` here; there is no game symbol reachable from this hook to fix that. |
+| `selected_count` | int | **New, 2026-11-09 (#1206).** Advisor-mode grid screens only (`NCardGridSelectionScreen` describer): how many cards this screen already has selected. `cards` never lists them. Most grids ask only "confirm" once a card is selected. An "up to N" combat pile pick (`screen: "NCombatPileCardSelectScreen"`, e.g. Neow's Fury) asks again after each pick while fewer than `max_select` are taken and cards remain. The advisor then continues its planned picks, or answers `{"action":"skip"}` to confirm what is taken. |
 
 If the option count is `<= min_select`, the mod auto-resolves without asking (unchanged from v1).
 
@@ -665,7 +666,7 @@ carry, plus:
 |---|---|---|
 | `advice_for` | string | The v2 message type this request wraps (`combat_action`, `card_reward`, `map_select`, ...). The payload fields are those of that message type. |
 | `capabilities` | object | **New in v5 / coach.** What this mod build understands from the advisor: `{"coach": 1}` = it renders `coach` messages (section 5, "`coach`") and sends the v5 `human_action` kinds; `{"coach": 2}` (v5.1) = also renders `recap` / `autopsy` records and sends `combat_ended` / Advisor-mode `game_over`. Absent on older builds: treat as `{}` (no coach). |
-| `brain` | string | **New in v5.2.** The player's advisor brain: `"search"` (the default: MCTS for `combat_action`, the PPO run policy for screens) or `"instinct"` (the end-to-end net, no search, plays every decision). Always sent, on the player's requests and the AI partners' alike (`SpireMentorModConfig.AdvisorBrain`, toggled by the toolbar's Search / Instinct button, Shift+F8, the settings pages or the frame's `toggle_brain`). The mod does not filter: the advisor decides per request whether Instinct can answer (character, game build) and falls back to the search otherwise -- see "Advisor brain (v5.2)" below. Absent on older mods: treat as `"search"`. |
+| `brain` | string | **New in v5.2.** The player's advisor brain: `"search"` (the default: MCTS for `combat_action`, the PPO run policy for screens) or `"instinct"` (the end-to-end net, no search, plays every decision). Always sent, on the player's requests and the AI partners' alike (`SpireMentorModConfig.AdvisorBrain`, toggled by the Spire Mentor badge's Brain switch, Shift+F8, the settings pages or the frame's `toggle_brain`). The mod does not filter: the advisor decides per request whether Instinct can answer (character, game build) and falls back to the search otherwise -- see "Advisor brain (v5.2)" below. Absent on older mods: treat as `"search"`. |
 | `combat_log` | array | The game's own combat-log entries recorded SINCE THE PREVIOUS request (`SimCombatLog.Drain()`): one row per `CombatHistoryEntry`, in the same shape the Rust engine emits (`sts2_core::event_log`), so the workbench renders a live game through the identical formatter it uses for a simulated one. Display only — the advisor never reads it. Empty outside combat. |
 
 Each `combat_log` row carries `kind` (`damage` / `block` / `power` /
@@ -813,6 +814,60 @@ An `advice` message is **never executed** -- it only feeds the HUD and the
 action log. Phase 7's takeover hotkey executes the recommendation through
 the normal game-side paths, not through this message.
 
+### Turn plan, per-option moves and HP, display names (v5.3) -- additive
+
+Every field below is optional; an older advisor sends none of them, and the
+HUD draws what is there.
+
+```json
+"advice":{
+  "best":{"action":"play","card_index":1,"label":"Defend"},
+  "options":[
+    {"stable_idx":1,"card_index":1,"target_index":null,"action":"play",
+     "label":"Defend","p_win":1.0,"q":1.188,"visits":720,"visit_share":0.36,
+     "hp_mean":52.7,"mean_final_hp":52.72,"hp_sd":4.59,"hp_n":720, ...},
+    {"stable_idx":-100,"card_index":null,"target_index":null,"action":"potion","slot":1,
+     "label":"Blood Potion", ...},
+    {"stable_idx":-1,"card_index":null,"target_index":null,"action":"end_turn",
+     "label":"End turn", ...}],
+  "plan":[
+    {"action":"play","card_index":1,"label":"Defend"},
+    {"action":"play","card_index":0,"target_index":0,"label":"Strike → Fuzzy Wurm Crawler"},
+    {"action":"play","card_index":3,"label":"Defend"},
+    {"action":"end_turn","label":"End turn"}]}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `advice.options[].action` | string | **New in v5.3, combat only (both brains).** What the row does, in `best.action`'s dialect: `play`, `potion`, `end_turn`; rarely `choose` / `skip` (a pending in-fight choice), `channel` / `evoke`, or `unknown`. Lets the HUD ring the potion slot or the End Turn button, and colour rows by kind, for every row and not only the best. `card_index` / `target_index` / `ally_index` are unchanged. |
+| `advice.options[].slot` | int | **New in v5.3, combat only.** On a `potion` row: the bridge belt slot (`potions[].slot`), remapped exactly as `best.slot` is (the engine counts held potions densely). Absent on other rows, and on a potion row whose potion the belt no longer shows. |
+| `advice.options[].hp_mean` | number | **New in v5.3, Search combat only.** Expected player HP **at the end of the fight** through this move: the mean final HP of the search's playouts through it that reached the fight's end (a death counts as 0), one decimal. The same number as the older `mean_final_hp` (full precision), which rides with `hp_sd` (its standard deviation) and `hp_n` (how many playouts it averages; small `hp_n` = noisy). Absent when no playout through the move resolved the fight (`hp_n` 0), and always absent for Instinct (a policy has no value). It is a search statistic, not a forecast: the playouts are the search's own and its line is optimistic (the recap's GH #856 note), so it reads best as a comparison between rows. No extra search runs for it. |
+| `advice.plan[]` | array | **New in v5.3, combat only (both brains).** This turn's moves in order, to number the cards 1, 2, 3: `{action, card_index?, target_index?, ally_index?, slot?, label}`. `action` is `play` / `potion` / `end_turn`; `card_index` indexes the hand **exactly as this request sent it** (the same indexing as `options[].card_index` and `best.card_index`), and is NOT shifted for the cards played before it: step 3's index is the position that card has in this request's hand now, so the HUD can number the cards it is showing; `slot` is the bridge belt slot (as `best`). Step 1 is always `best`. The plan holds only moves mapped with certainty: it stops **after** a card that draws, generates, discards, upgrades or reorders cards in hand, opens a choice, or ends the fight (that card is still a step, the next one is not), stops **before** a move it cannot map (a choice, an index the current hand does not have, a move the engine refuses), and ends with `end_turn` when the line reaches it. A plan of one step is common (a draw card first, or `End turn`). Absent when there is no executable `best`. **Search:** the principal variation, then -- the honest search's PV is one ply deep, its deeper nodes keep no state to name a move against -- the same search at an eighth of the decision's budget (min 500 sims) from the fight as the plan has left it, one search per further step, within a 0.5 s wall-clock cap (the plan ends where the cap leaves it). **Instinct:** the student's greedy rollout through the turn on the rebuilt run. When `best` is not the line's first move (the mod's unplayable veto moved the crown), the plan is `best` alone. |
+
+`advice.path[]` (map, above) is now also sent by **Instinct** (v5.3): the
+student's own MAP choice walked hop by hop -- at every fork a copy of the
+rebuilt run is placed on the hop's node with the projected HP, and the student
+is asked again -- with the same schema, the same HP projection and the same
+`route … floors → N HP` note as the search's. It ends at the act's last row.
+
+**No raw game ids (v5.3).** Every human-facing string the advisor sends --
+`note`, `hand_back`, `instinct_unavailable`, `pv[]`, `options[].label`,
+`plan[].label`, `best.label`, and in `coach` records every `label`, `you`,
+`ai`, `why`, `hand` and `name` -- uses the game's display names
+(`Shrug It Off`, not `SHRUG_IT_OFF`): from the payload's names where it has
+them (a `shop` option's `item.name`; its `label` is the merchant entry's id),
+else from the English localization tables, with a final guard at the wire.
+One exception, for the takeover's cross-check: on a screen where the mod
+checks `best.label` against its own option labels (`card_reward`,
+`card_select`, `card_bundle`, `boss_relic`, `treasure`, `rest_site`,
+`potion_swap`, the Fake Merchant `event`), a `best.label` that is the mod's own
+spelling of an option is sent unchanged. Today that matters only for
+`potion_swap`, whose mod labels are `decline` / `discard <POTION_ID>`: its
+`options[].label` read `Keep your potions (leave Skill Potion)` /
+`Discard Gambler's Brew for Skill Potion`, but `best.label` stays
+`discard GAMBLERS_BREW` until the mod spells those labels with the potion's
+title (then it is a display name, and passes through as is).
+
 ### Advisor brain (v5.2) -- additive
 
 Instinct is the e2e PPO net (today the Ironclad one, v0.111.0) answering
@@ -835,8 +890,8 @@ one; the default stays Search.
   request was stamped with the other brain (`AdvisorBrainRules.IsStale`); it
   does not key on `advice.brain`, which legitimately differs on a fallback.
 - **HUD:** an Instinct answer is tagged "Instinct" (advice panel, status line,
-  F5 peek); a fallback is tagged "Search (Instinct: <reason>)". The toolbar's
-  Search / Instinct button shows the current brain; it is shown where
+  F5 peek); a fallback is tagged "Search (Instinct: <reason>)". The badge's
+  Brain switch (Search / Instinct) shows the current brain; it is shown where
   `capabilities.instinct` names the run's character and build, and also while
   Instinct is chosen anywhere else, so it can be switched back.
 

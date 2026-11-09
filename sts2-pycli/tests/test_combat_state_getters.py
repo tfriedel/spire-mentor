@@ -10,8 +10,8 @@ MCTS and every other decision is a seeded random pick:
   multi-intent moves show their other intents after it.
 * ``peek_intents`` leaves every hash and ``state_to_dict`` as they were, a
   clone that called the getters plays on exactly like one that did not, it
-  is deterministic, and a certain step 1 names the move the enemy telegraphs
-  after the coming enemy turn.
+  is deterministic, and a certain step names the move, and the intents, the
+  enemy telegraphs that many enemy turns later (steps 1-3, #1181).
 * ``encounter_id`` is the encounter the run generated for the room: the act's
   ``normal`` / ``elite`` lists in visit order, its ``boss`` and then its
   ``second_boss``, or an event's own fight. A lingering finished fight has
@@ -40,33 +40,50 @@ MAX_DECISIONS = 4000
 #: Strength below any damage); such a run is abandoned at this round.
 MAX_ROUNDS = 60
 EVENT_ENCOUNTERS = {
-    "BATTLEWORN_DUMMY_EVENT_ENCOUNTER",
+    "BATTLEWORN_DUMMY_EVENT_ENCOUNTER",  # v0.107.1; V1-V3 per setting on v0.111.0 (#1181)
+    "BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER",
+    "BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER",
+    "BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER",
     "MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER",
     "FAKE_MERCHANT_EVENT_ENCOUNTER",
     "DENSE_VEGETATION_EVENT_ENCOUNTER",
 }
-#: Monsters whose next move is decided by something the coming turn does
-#: besides the move machine, so a forecast made against the current board can
-#: name another move with certainty 1.0. The first three are also in the Rust
-#: census (`sts2-wire/tests/combat_getters_1097.rs`, `BOARD_DRIVEN`).
-BOARD_DRIVEN = {
-    # The Slumber counter runs out at turn end and the wake re-points the
-    # telegraph.
-    "SlumberingBeetle",
+#: Moves the board forces on a monster besides its move machine, by monster:
+#: a forecast made against the current board can name another move with
+#: certainty 1.0 when the coming turn does one of these. Only a miss that
+#: lands on a listed move is excused, so a wrong forecast for one of these
+#: monsters on any other move still fails (#1181).
+BOARD_DRIVEN: dict[str, frozenset[str]] = {
+    # The Slumber counter runs out at turn end; the wake re-points the
+    # telegraph, and a hit while asleep stuns it awake.
+    "SlumberingBeetle": frozenset({"WAKE_UP_MOVE", "ROLL_OUT_MOVE", "STUNNED"}),
     # The telegraphed move decrements the AI counter that opens
     # CALL_FOR_BACKUP.
-    "TwoTailedRat",
-    # Asleep for a fixed number of turns, then it wakes.
-    "LagavulinMatriarch",
-    # A fully blocked HEADBUTT knocks it off balance into DIZZY
-    # (`ImbalancedPower`).
-    "BowlbugRock",
-    # Breaking its block while burrowed stuns it into DIZZY_MOVE
-    # (`BurrowedPower.AfterBlockBroken`).
-    "Tunneler",
+    "TwoTailedRat": frozenset({"CALL_FOR_BACKUP"}),
+    # Asleep for a fixed number of turns (or until hit), then it wakes.
+    "LagavulinMatriarch": frozenset({"WAKE_UP_MOVE", "SLASH", "SLASH_MOVE"}),
+    # A fully blocked HEADBUTT knocks it off balance (`ImbalancedPower`), and
+    # whether the coming one is blocked decides DIZZY vs HEADBUTT after it.
+    "BowlbugRock": frozenset({"DIZZY", "HEADBUTT"}),
+    # CHARGE_CHECK fires once it drops below half HP.
+    "FrogKnight": frozenset({"BEETLE_CHARGE"}),
+    # Breaking its block while burrowed stuns it (`BurrowedPower.
+    # AfterBlockBroken`) and ends the burrow, so it surfaces to BITE.
+    "Tunneler": frozenset({"DIZZY_MOVE", "BITE_MOVE"}),
     # An ally's death stuns it while it devours the corpse
     # (`RavenousPower.AfterDeath`).
-    "CorpseSlug",
+    "CorpseSlug": frozenset({"STUNNED"}),
+    # `CanLay` counts living teammates (`Ovicopter.cs:46`): eggs hatching or
+    # dying decide LAY_EGGS vs NUTRITIONAL_PASTE.
+    "Ovicopter": frozenset({"NUTRITIONAL_PASTE_MOVE"}),
+    # `CanFabricate` counts living teammates (`Fabricator.cs:51`).
+    "Fabricator": frozenset({"FABRICATE"}),
+    # The Amalgam's death turns a coming BURN_BRIGHT_FOR_ME into the enraged
+    # move (`Queen.AfterDeath`, `SetMoveImmediate(EnragedState)`).
+    "Queen": frozenset({"OFF_WITH_YOUR_HEAD_MOVE"}),
+    # Shriek stuns it into TERROR when it drops below half HP
+    # (`ShriekPower.cs:30`).
+    "TerrorEel": frozenset({"TERROR_MOVE"}),
 }
 
 
@@ -103,7 +120,11 @@ class _Tally:
     states: int = 0
     multi_intent: int = 0
     forecast_checked: int = 0
+    #: Certain steps 2 and 3 checked (`_check_chains`).
+    later_steps_checked: int = 0
     forecast_excused: int = 0
+    #: (kind, move the board forced) of every excused miss.
+    excused_moves: Counter[tuple[str, str]] = field(default_factory=Counter)
     forecast_misses: list[str] = field(default_factory=list)
     draws_checked: int = 0
     replays_checked: int = 0
@@ -112,13 +133,32 @@ class _Tally:
     acts: set[int] = field(default_factory=set)
 
 
+#: One forecast step: (move_id, certainty, bare intents).
+_Step = tuple[str, float, list[tuple[Any, Any, Any]]]
+
+
+@dataclass
+class _Chain:
+    """An end turn's 3-step forecast, checked against the next three turns.
+
+    A step is checked only while every earlier step of the same enemy held:
+    the forecast assumes those moves happen.
+    """
+
+    round: int
+    #: uid -> its steps 1-3.
+    steps: dict[int, list[_Step]]
+    #: Rows already in the run's combat log at the end turn.
+    log_len: int
+
+
 @dataclass
 class _EndTurn:
     """What an end-turn decision predicted for the next player turn."""
 
     round: int
     #: uid -> (move_id, certainty, bare intents) of step 1.
-    forecast: dict[int, tuple[str, float, list[tuple[Any, Any, Any]]]]
+    forecast: dict[int, _Step]
     #: The whole draw pile's card ids, top first, from ``true_draw_top``.
     draw: list[str]
     #: Every card uid in the fight's piles.
@@ -194,13 +234,7 @@ def _check_forecast(
     a revive (the Test Subject's next form) opens with that form's own move.
     """
     tele = cs.telegraph()
-    killed = {
-        r["receiver"].get("uid")
-        for r in rows
-        if r.get("kind") == "damage"
-        and r.get("hp_after") == 0
-        and r.get("receiver", {}).get("kind") == "monster"
-    }
+    killed = _killed_since(rows)
     for i, enemy in enumerate(wire["encounter"]):
         uid = enemy["uid"]
         if uid not in end.forecast or enemy.get("is_dead") or "move_state" not in enemy:
@@ -213,17 +247,109 @@ def _check_forecast(
             continue
         tally.forecast_checked += 1
         if enemy["move_state"] == move_id:
-            # The turn shows the forecast move's telegraph, head and tail.
-            if tele[i] and _bare(tele[i][0]) == intents[0]:
-                assert [_bare(t) for t in tele[i]] == intents, (tele[i], intents)
+            # The turn shows the forecast move's telegraph, head and tail,
+            # with the forecast's numbers (#1181: MULTI_CLAW, DREAD, EXPLODE).
+            _assert_intents(tele[i], intents, cs, enemy, end.round, 1)
             continue
-        if enemy["kind"] in BOARD_DRIVEN:
-            tally.forecast_excused += 1
+        if _board_driven(enemy, tally):
             continue
         tally.forecast_misses.append(
             f"{cs.encounter_id} {enemy['kind']} round {end.round}: "
             f"forecast {move_id}, then {enemy['move_state']}"
         )
+
+
+def _assert_intents(
+    tele: list[dict[str, Any]],
+    intents: list[tuple[Any, Any, Any]],
+    cs: Any,
+    enemy: dict[str, Any],
+    made: int,
+    step: int,
+) -> None:
+    """The telegraph shows the forecast step's intents.
+
+    A telegraph whose head was re-pointed away from its move (a stun) shows
+    that head alone and is not compared.
+    """
+    if len(tele) == 1 and len(intents) > 1 and tele[0]["kind"] in ("Stun", "Sleep"):
+        return
+    assert [_bare(t) for t in tele] == intents, (
+        f"{cs.encounter_id} {enemy['kind']} {enemy['move_state']}: step {step} of the "
+        f"round-{made} forecast",
+        tele,
+        intents,
+    )
+
+
+def _board_driven(enemy: dict[str, Any], tally: _Tally) -> bool:
+    """Whether a missed forecast is one the board forced (`BOARD_DRIVEN`)."""
+    if enemy["move_state"] not in BOARD_DRIVEN.get(enemy["kind"], ()):
+        return False
+    tally.forecast_excused += 1
+    tally.excused_moves[enemy["kind"], enemy["move_state"]] += 1
+    return True
+
+
+def _killed_since(rows: list[dict[str, Any]]) -> set[Any]:
+    return {
+        r["receiver"].get("uid")
+        for r in rows
+        if r.get("kind") == "damage"
+        and r.get("hp_after") == 0
+        and r.get("receiver", {}).get("kind") == "monster"
+    }
+
+
+def _check_chains(
+    chains: list[_Chain], wire: dict[str, Any], cs: Any, rm: Any, tally: _Tally
+) -> None:
+    """Steps 2 and 3 of the earlier end turns' forecasts against this turn.
+
+    Step 1 is `_check_forecast`'s. An enemy leaves a chain at its first miss,
+    excused or not, at a kill, and at an uncertain step.
+    """
+    tele = cs.telegraph()
+    log = rm.combat_log()
+    for chain in chains:
+        step = wire["round"] - chain.round
+        if not 1 <= step <= 3:
+            continue
+        killed = _killed_since(log[chain.log_len :])
+        for i, enemy in enumerate(wire["encounter"]):
+            uid = enemy["uid"]
+            steps = chain.steps.get(uid)
+            if steps is None:
+                continue
+            move_id, certainty, intents = steps[step - 1]
+            if (
+                enemy.get("is_dead")
+                or "move_state" not in enemy
+                or uid in killed
+                or certainty < 1.0
+                or enemy["move_state"] != move_id
+            ):
+                # Step 1's miss is `_check_forecast`'s to judge; a later
+                # step's is judged here.
+                if (
+                    step > 1
+                    and certainty >= 1.0
+                    and not enemy.get("is_dead")
+                    and "move_state" in enemy
+                    and uid not in killed
+                    and enemy["move_state"] != move_id
+                    and not _board_driven(enemy, tally)
+                ):
+                    tally.forecast_misses.append(
+                        f"{cs.encounter_id} {enemy['kind']} round {chain.round} step {step}: "
+                        f"forecast {move_id}, then {enemy['move_state']}"
+                    )
+                del chain.steps[uid]
+                continue
+            if step > 1:
+                _assert_intents(tele[i], intents, cs, enemy, chain.round, step)
+                tally.later_steps_checked += 1
+    chains[:] = [c for c in chains if wire["round"] - c.round < 3 and c.steps]
 
 
 def _pile_cards(wire: dict[str, Any]) -> list[int]:
@@ -281,6 +407,7 @@ def _drive(seed: int, version: str, tally: _Tally) -> None:
     seen: Counter[tuple[int, str]] = Counter()
     fight: tuple[Any, str | None] | None = None  # (map coord, encounter id)
     end: _EndTurn | None = None
+    chains: list[_Chain] = []
     for n in range(MAX_DECISIONS):
         if rm.is_over():
             return
@@ -291,6 +418,7 @@ def _drive(seed: int, version: str, tally: _Tally) -> None:
             stale = rm.combat_state()
             assert stale is None or stale.encounter_id is None
             fight = end = None
+            chains = []
             rm.take_action(rng.choice(actions))
             continue
 
@@ -299,6 +427,7 @@ def _drive(seed: int, version: str, tally: _Tally) -> None:
         if fight is None or fight[0] != coord:
             _check_new_fight(rm, cs, seen, tally)
             fight, end = (coord, cs.encounter_id), None
+            chains = []
         assert cs.encounter_id == fight[1], "the id holds for the whole fight"
 
         wire = _check_state(cs, tally, deep=n % 5 == 0)
@@ -312,10 +441,29 @@ def _drive(seed: int, version: str, tally: _Tally) -> None:
         ):
             _check_forecast(end, wire, cs, rm.combat_log()[end.log_len :], tally)
             _check_draw(end, wire, rm, tally)
+            _check_chains(chains, wire, cs, rm, tally)
+        elif end is not None:
+            # Not the next player turn's first state: the chain's turns are
+            # no longer consecutive.
+            chains = []
         end = None
 
         action = rm.mcts_pick_action(sims=24, depth=6, seed=n, threads=1) or rng.choice(actions)
         if action.get("action") == "end_turn" and wire["phase"] == "PlayerPlayPhase":
+            chains.append(
+                _Chain(
+                    round=wire["round"],
+                    steps={
+                        enemy["uid"]: [
+                            (s["move_id"], s["certainty"], [_bare(t) for t in s["intents"]])
+                            for s in steps
+                        ]
+                        for enemy, steps in zip(wire["encounter"], cs.peek_intents(3), strict=True)
+                        if len(steps) == 3 and not enemy.get("is_dead")
+                    },
+                    log_len=len(rm.combat_log()),
+                )
+            )
             end = _EndTurn(
                 round=wire["round"],
                 forecast={
@@ -345,7 +493,8 @@ def test_getters_on_live_a10_runs(version: str) -> None:
     summary = (
         f"{version}: {tally.states} states, acts {sorted(tally.acts)}, "
         f"fights {dict(tally.fights)}, {tally.multi_intent} multi-intent telegraphs, "
-        f"{tally.forecast_checked} certain forecasts ({tally.forecast_excused} board-driven), "
+        f"{tally.forecast_checked} certain forecasts, {tally.later_steps_checked} certain "
+        f"steps 2-3 ({tally.forecast_excused} board-driven: {dict(tally.excused_moves)}), "
         f"{tally.draws_checked} draws, {tally.replays_checked} replays, "
         f"{tally.stalled} stalled runs"
     )
@@ -356,6 +505,7 @@ def test_getters_on_live_a10_runs(version: str) -> None:
     assert tally.fights["elite"] > 0 and tally.fights["boss"] >= 4, summary
     assert tally.multi_intent > 0, summary
     assert tally.forecast_checked > 200, summary
+    assert tally.later_steps_checked > 200, summary
     assert tally.draws_checked > 200, summary
     assert tally.replays_checked > 100, summary
 
@@ -383,6 +533,9 @@ def test_an_event_fight_reports_the_event_encounter(
         rm.take_action(actions[0])
     assert rm.phase() == "combat"
     cs = rm.combat_state()
+    if version == "v0.111.0" and encounter == "BATTLEWORN_DUMMY_EVENT_ENCOUNTER":
+        # One encounter class per setting from v0.111.0 (#1181); option 0 is V1.
+        encounter = "BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"
     assert cs.encounter_id == encounter
     assert (
         len(cs.telegraph()) == len(cs.peek_intents()) == len(sts2_rs.state_to_dict(cs)["encounter"])

@@ -752,9 +752,10 @@ def test_wp_eng1_getter_columns() -> None:
 
 #: The engine's event fights: (event, the fight option's `option_id`, its encounter id).
 EVENT_FIGHTS = (
-    ("BattlewornDummy", "setting_1", "BATTLEWORN_DUMMY_EVENT_ENCOUNTER"),
-    ("BattlewornDummy", "setting_2", "BATTLEWORN_DUMMY_EVENT_ENCOUNTER"),
-    ("BattlewornDummy", "setting_3", "BATTLEWORN_DUMMY_EVENT_ENCOUNTER"),
+    # v0.111.0 has one encounter class per setting (#1181).
+    ("BattlewornDummy", "setting_1", "BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"),
+    ("BattlewornDummy", "setting_2", "BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER"),
+    ("BattlewornDummy", "setting_3", "BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER"),
     ("DenseVegetation", "rest", "DENSE_VEGETATION_EVENT_ENCOUNTER"),
     ("TheLanternKey", "keep_key", "MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER"),
     ("FakeMerchant", "throw_foul", "FAKE_MERCHANT_EVENT_ENCOUNTER"),

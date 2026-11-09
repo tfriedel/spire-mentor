@@ -3,7 +3,7 @@
 // Search is what the advisor always was: MCTS for the fights, the PPO run
 // policy for the screens. Instinct is the end-to-end net (no search) playing
 // every decision, today the e2e Ironclad net on v0.111.0 only. The player
-// picks one (SpireMentorModConfig.AdvisorBrain, the toolbar's brain button,
+// picks one (SpireMentorModConfig.AdvisorBrain, the badge's Brain switch,
 // Shift+F8); the mod sends the choice on every advice_request as `brain`, and
 // the ADVISOR decides per request whether Instinct can answer (PROTOCOL.md
 // section 5, v5.2). The mod never filters by character itself: it only uses

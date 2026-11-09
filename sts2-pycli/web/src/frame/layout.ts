@@ -3,17 +3,16 @@
 // persists it per viewer (localStorage).
 
 export type DockId = "top" | "left" | "right" | "bottom";
-export type PanelId = "toolbar" | "advice" | "coach" | "log" | "workbench";
+export type PanelId = "toolbar" | "advice" | "coach" | "log";
 
 export const DOCKS: readonly DockId[] = ["top", "left", "right", "bottom"];
-export const PANELS: readonly PanelId[] = ["toolbar", "advice", "coach", "log", "workbench"];
+export const PANELS: readonly PanelId[] = ["toolbar", "advice", "coach", "log"];
 
 export const PANEL_TITLES: Record<PanelId, string> = {
   toolbar: "Spire Mentor",
   advice: "Advice",
   coach: "Coach",
   log: "Action log",
-  workbench: "Workbench",
 };
 
 export interface Layout {
@@ -27,11 +26,14 @@ export interface Layout {
 
 // The game gets everything the panels do not: a one-row toolbar on top and
 // one column on the right (advice, coach, log -- the workbench's sidebar
-// order). The bottom dock only holds the Workbench panel, hidden by default.
+// order). The workbench is not a panel: docked under the game it was either
+// too short to read or, dragged taller, left the game too small, so it opens
+// in a window of its own (spire-mentor-frame/WorkbenchWindow.cs). A stored
+// layout that still names it drops it (normalizeLayout).
 export const DEFAULT_LAYOUT: Layout = {
-  docks: { top: ["toolbar"], left: [], right: ["advice", "coach", "log"], bottom: ["workbench"] },
+  docks: { top: ["toolbar"], left: [], right: ["advice", "coach", "log"], bottom: [] },
   sizes: { top: 42, left: 320, right: 360, bottom: 260 },
-  hidden: ["workbench"],
+  hidden: [],
 };
 
 export const MIN_SIZE = 32;

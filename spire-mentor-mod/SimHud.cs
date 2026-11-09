@@ -41,6 +41,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
@@ -93,6 +94,46 @@ internal sealed class SimAdviceOption
 
     /// <summary>Legacy 0..1 score (old cards[] shape) when no p_win exists.</summary>
     public double? Score;
+
+    /// <summary>`action` ("play" / "potion" / "end_turn" / "choose" / "skip");
+    /// empty from an advisor that sends it only on `best`.</summary>
+    public string Action = "";
+
+    /// <summary>Enemy (`target_index`) or teammate (`ally_index`) the move
+    /// aims at, in the request's own lists; null when it aims at nothing.</summary>
+    public int? TargetIndex;
+    public int? AllyIndex;
+
+    /// <summary>Potion slot (bridge absolute), for a potion option.</summary>
+    public int? Slot;
+
+    /// <summary>Screen option index (`index`), for a screen decision.</summary>
+    public int? Index;
+
+    /// <summary>`hp_mean`: the HP the search expects this move to leave you
+    /// with (PROTOCOL.md section 5); null when the advisor sends none.</summary>
+    public double? HpMean;
+
+    /// <summary>"How much the AI likes it", in [0,1]: the search's visit
+    /// share, else the net's probability. Null for a legacy score.</summary>
+    public double? Share => VisitShare ?? (Q == null ? PWin : null);
+
+    /// <summary>The game-free view AdviceMarks works on.</summary>
+    public MarkOption ToMark() => new(Label, Action, CardIndex, TargetIndex, AllyIndex, Slot, Index,
+        IsBest, InBand, Share, Q, PickRank);
+}
+
+/// <summary>One step of the turn's plan (`advice.plan[]`, PROTOCOL.md section 5).</summary>
+internal sealed class SimPlanStep
+{
+    public string Action = "";
+    public int? CardIndex;
+    public int? TargetIndex;
+    public int? AllyIndex;
+    public int? Slot;
+    public string Label = "";
+
+    public MarkPlanStep ToMark() => new(Action, CardIndex, TargetIndex, AllyIndex, Slot, Label);
 }
 
 /// <summary>
@@ -144,6 +185,9 @@ internal sealed class SimAdvice
     public SimBestAction? Best;
     public readonly List<SimAdviceOption> Options = new();
     public readonly List<string> Pv = new();
+
+    /// <summary>The turn's play order (`plan[]`): step 1 is `best`.</summary>
+    public readonly List<SimPlanStep> Plan = new();
 
     /// <summary>
     /// `advice.hand_back`: the advisor's own word that this answer is not
@@ -262,6 +306,12 @@ internal sealed class SimAdvice
                     CardIndex = ReadInt(o, "card_index"),
                     Col = ReadInt(o, "col"),
                     Row = ReadInt(o, "row"),
+                    Action = ReadString(o, "action") ?? "",
+                    TargetIndex = ReadInt(o, "target_index"),
+                    AllyIndex = ReadInt(o, "ally_index"),
+                    Slot = ReadInt(o, "slot"),
+                    Index = ReadInt(o, "index"),
+                    HpMean = ReadDouble(o, "hp_mean"),
                 });
             }
         }
@@ -311,6 +361,26 @@ internal sealed class SimAdvice
                     Type = ReadString(p, "type") ?? "",
                     Hop = ReadInt(p, "hop") ?? advice.Path.Count,
                     Hp = ReadInt(p, "hp"),
+                });
+            }
+        }
+
+        if (el.TryGetProperty("plan", out JsonElement planEl) && planEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement p in planEl.EnumerateArray())
+            {
+                if (p.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                advice.Plan.Add(new SimPlanStep
+                {
+                    Action = ReadString(p, "action") ?? "play",
+                    CardIndex = ReadInt(p, "card_index"),
+                    TargetIndex = ReadInt(p, "target_index"),
+                    AllyIndex = ReadInt(p, "ally_index"),
+                    Slot = ReadInt(p, "slot"),
+                    Label = ReadString(p, "label") ?? "",
                 });
             }
         }
@@ -446,6 +516,7 @@ internal sealed class SimHud
     /// rendered for. Cleared by <see cref="ClearAdvice"/>.</summary>
     private SimAdvice? _latestAdvice;
     private Player? _latestPlayer;
+    private SimScreenDecision? _latestDecision;
 
     /// <summary>The F5 peek (or its "thinking…" line) is on screen.</summary>
     private bool _peekShowing;
@@ -455,10 +526,18 @@ internal sealed class SimHud
     // Public entry points (any thread)
     // ------------------------------------------------------------------
 
-    /// <summary>Render an advice payload. Never throws.</summary>
-    public void ShowAdvice(SimAdvice advice, Player? player)
+    /// <summary>Render an advice payload. Never throws.
+    /// <paramref name="decision"/>: the screen the advice answers, whose
+    /// option nodes get the highlight rings (null in combat).</summary>
+    public void ShowAdvice(SimAdvice advice, Player? player, SimScreenDecision? decision = null)
     {
-        RunOnMainThread(() => RenderAdvice(advice, player));
+        RunOnMainThread(() =>
+        {
+            _latestDecision = decision;
+            // The grade book for the play the human makes from this position.
+            SimMoveFeedback.Instance.OnAdvice(advice, player);
+            RenderAdvice(advice, player);
+        });
     }
 
     /// <summary>Legacy annotations entry point (autopilot action replies).</summary>
@@ -532,8 +611,10 @@ internal sealed class SimHud
         {
             _latestAdvice = null;
             _latestPlayer = null;
+            _latestDecision = null;
             _peekShowing = false;
             ClearCardLabels();
+            SimHighlights.Instance.Clear();
             ClearMapMarkers();
             ClearAdvicePanel();
         });
@@ -604,7 +685,46 @@ internal sealed class SimHud
         RefreshStatusAndVisibility(AdvisorBrainRules.NoteWithSource(advice.Note, advice.Brain, advice.InstinctUnavailable));
         RenderAdvicePanel(advice);
         RenderCardLabels(advice, player);
+        RenderHighlights(advice, player, _latestDecision, peek: false);
         RenderMapMarkers(advice);
+    }
+
+    /// <summary>
+    /// Ring and number what the advice says to click (AdviceMarks decides,
+    /// SimHighlights draws). The map keeps its own markers and route.
+    /// <paramref name="peek"/>: the F5 peek -- the pick alone, with its target
+    /// marked without a hover.
+    /// </summary>
+    private static void RenderHighlights(SimAdvice advice, Player? player, SimScreenDecision? decision, bool peek)
+    {
+        try
+        {
+            if (advice.Options.Exists(o => o.Col != null && o.Row != null))
+            {
+                SimHighlights.Instance.Clear();
+                return;
+            }
+            List<Mark> marks = AdviceMarks.Build(
+                advice.Options.ConvertAll(o => o.ToMark()),
+                peek ? null : advice.Plan.ConvertAll(s => s.ToMark()));
+            if (peek)
+            {
+                marks = marks.FindAll(m => m.Tier == MarkTier.Best);
+            }
+            SimHighlights.Instance.Show(marks, player, decision, showTarget: peek);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[SimHud] Highlights failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>A label as the player should read it: no raw game ids.</summary>
+    private static string Words(string? label)
+    {
+        string words = AdviceMarks.Humanize(label);
+        // "skip" / "leave" from an advisor reads as a sentence start.
+        return words.Length > 0 && char.IsLower(words[0]) ? char.ToUpperInvariant(words[0]) + words[1..] : words;
     }
 
     // ------------------------------------------------------------------
@@ -630,7 +750,7 @@ internal sealed class SimHud
             return false;
         }
         SimAdviceOption? best = advice.Options.Find(o => o.IsBest) ?? (advice.Options.Count > 0 ? advice.Options[0] : null);
-        string label = best?.Label is { Length: > 0 } l ? l : advice.Best?.Label ?? "";
+        string label = Words(best?.Label is { Length: > 0 } l ? l : advice.Best?.Label ?? "");
         if (label.Length == 0)
         {
             return false;
@@ -651,10 +771,9 @@ internal sealed class SimHud
                 FrameLink.PublishAdvice(null, "AI would: " + label);
                 return true;
             }
-            if (best?.CardIndex != null)
-            {
-                PeekCardLabel(best);
-            }
+            // The pick's ring (card, potion, End Turn, reward card, shop
+            // slot...) and, in a fight, its target -- no other marks.
+            RenderHighlights(advice, _latestPlayer, _latestDecision, peek: true);
         }
         catch (Exception ex)
         {
@@ -715,18 +834,6 @@ internal sealed class SimHud
         _advicePanel.Visible = true;
     }
 
-    private void PeekCardLabel(SimAdviceOption best)
-    {
-        Player? player = _latestPlayer;
-        NPlayerHand? handUi = NPlayerHand.Instance;
-        if (player == null || !CombatManager.Instance.IsInProgress ||
-            handUi == null || !GodotObject.IsInstanceValid(handUi))
-        {
-            return;
-        }
-        RenderOneCardLabel(best, PileType.Hand.GetPile(player), handUi);
-    }
-
     private bool PeekMapMarker(SimAdviceOption best)
     {
         NMapScreen? map = NMapScreen.Instance;
@@ -752,6 +859,7 @@ internal sealed class SimHud
     private void ClearPreActionSurfaces(bool publish = true)
     {
         ClearCardLabels();
+        SimHighlights.Instance.Clear();
         ClearMapMarkers();
         if (publish)
         {
@@ -805,7 +913,7 @@ internal sealed class SimHud
         bool hasEval = advice.BestQ != null || advice.PWin != null;
         bool wantPanel = (SpireMentorModConfig.ShowWinBar && hasEval) ||
                          (SpireMentorModConfig.ShowRankedList && hasRanked) ||
-                         advice.Pv.Count > 0;
+                         advice.Pv.Count > 0 || advice.Plan.Count > 0;
         if (!wantPanel || _adviceRows == null || !GodotObject.IsInstanceValid(_adviceRows))
         {
             if (_advicePanel != null && GodotObject.IsInstanceValid(_advicePanel))
@@ -837,8 +945,10 @@ internal sealed class SimHud
 
         if (SpireMentorModConfig.ShowRankedList && hasRanked)
         {
-            // Best first, then by visit share / p_win.
+            // Best first, then the plan in its order, then by share. A move
+            // nobody would make (under 0.5%) waits behind "… N more".
             List<SimAdviceOption> ranked = advice.Options.FindAll(o => o.PWin != null || o.Q != null || o.VisitShare != null);
+            Dictionary<SimAdviceOption, int> planOrder = PlanOrder(advice);
             ranked.Sort((a, b) =>
             {
                 int best = b.IsBest.CompareTo(a.IsBest);
@@ -846,20 +956,26 @@ internal sealed class SimHud
                 {
                     return best;
                 }
-                double ka = a.VisitShare ?? a.PWin ?? 0;
-                double kb = b.VisitShare ?? b.PWin ?? 0;
-                return kb.CompareTo(ka);
+                int pa = planOrder.TryGetValue(a, out int x) ? x : int.MaxValue;
+                int pb = planOrder.TryGetValue(b, out int y) ? y : int.MaxValue;
+                if (pa != pb)
+                {
+                    return pa.CompareTo(pb);
+                }
+                return (b.Share ?? 0).CompareTo(a.Share ?? 0);
             });
             const int maxRows = 6;
             double? bestQ = advice.BestQ;
-            int shown = _rankedExpanded ? ranked.Count : Math.Min(ranked.Count, maxRows);
-            for (int i = 0; i < shown; i++)
+            List<SimAdviceOption> visible = ranked.FindAll(o => !AdviceMarks.Hidden(o.ToMark()));
+            List<SimAdviceOption> rows = _rankedExpanded ? ranked : visible.GetRange(0, Math.Min(visible.Count, maxRows));
+            bool anyHp = rows.Exists(o => o.HpMean != null);
+            foreach (SimAdviceOption o in rows)
             {
-                _adviceRows.AddChildSafely(BuildOptionRow(ranked[i], bestQ));
+                _adviceRows.AddChildSafely(BuildOptionRow(o, bestQ, planOrder.TryGetValue(o, out int step) ? step : null, anyHp));
             }
-            if (ranked.Count > maxRows)
+            if (ranked.Count > rows.Count || _rankedExpanded && ranked.Count > maxRows)
             {
-                _adviceRows.AddChildSafely(BuildRankedToggle(ranked.Count - maxRows));
+                _adviceRows.AddChildSafely(BuildRankedToggle(ranked.Count - rows.Count));
             }
 
             // Say when the ranking is not really a ranking: the moves the
@@ -871,23 +987,31 @@ internal sealed class SimHud
             List<SimAdviceOption> band = advice.Options.FindAll(o => o.InBand);
             band.Sort((a, b) => (a.IsBest ? -1 : a.PickRank ?? int.MaxValue)
                 .CompareTo(b.IsBest ? -1 : b.PickRank ?? int.MaxValue));
-            List<string> inBand = band.ConvertAll(o => o.Label);
+            List<string> inBand = band.ConvertAll(o => Words(o.Label));
             foreach (string line in TieBandText.Lines(inBand, advice.PickReason, advice.PickGapHp))
             {
                 _adviceRows.AddChildSafely(SmallLabel(line, new Color(0.7f, 0.7f, 0.75f)));
             }
         }
 
-        if (advice.Pv.Count > 0)
+        // The turn's plan in words, numbered like the cards' badges. Without a
+        // plan, the search's line is engine detail (its later plies can only
+        // name the action kind): behind "Show engine numbers".
+        string? planLine = advice.Plan.Count > 0
+            // No-break spaces inside a step: the line wraps BETWEEN steps,
+            // never between "3." and its card (live, 2026-11-07).
+            ? "Plan: " + string.Join("    ", advice.Plan.Select((s, i) => $"{i + 1}. {Words(s.Label)}".Replace(' ', ' ')))
+            : advice.Pv.Count > 0 && SpireMentorModConfig.ShowNumbers
+                ? "Line: " + string.Join(" · ", advice.Pv.Select(Words))
+                : null;
+        if (planLine != null)
         {
-            // ClipText + a fixed width: the panel sizes itself to its widest
-            // child, so one long row is enough to take over the screen.
-            Label pv = SmallLabel(
-                "line: " + string.Join(" · ", advice.Pv),
-                new Color(0.75f, 0.75f, 0.9f));
-            pv.CustomMinimumSize = new Vector2(400, 0);
-            pv.ClipText = true;
-            _adviceRows.AddChildSafely(pv);
+            // Wrapped at the panel's width: the panel sizes itself to its
+            // widest child, so an unwrapped row would take over the screen.
+            Label plan = SmallLabel(planLine, new Color(1f, 0.9f, 0.62f));
+            plan.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            plan.CustomMinimumSize = new Vector2(PanelWidth - 24f, 0);
+            _adviceRows.AddChildSafely(plan);
         }
 
         if (advice.LowConfidence)
@@ -899,36 +1023,39 @@ internal sealed class SimHud
     }
 
     /// <summary>
-    /// Chess-style eval bar for the recommended line. Driven by Q (mapped
-    /// from [-1,1] to a 0..1 fill), with the raw win estimate shown after it
-    /// and marked "~" when the search flagged it saturated/low confidence --
-    /// a fight the net expects to win reports p_win 100% for every option, so
-    /// p_win alone is not a usable bar.
+    /// The position's headline: the search's calibrated win chance, as a bar.
+    /// The raw eval (Q) and the "~" for a saturated search are engine detail,
+    /// behind "Show engine numbers". Q drives the fill only when there is no
+    /// win chance -- a fight the net expects to win reports p_win 100% for
+    /// every option, which is why the rows never show it.
     /// </summary>
     private static Control BuildEvalBar(double? q, double? pWin, bool lowConfidence)
     {
-        double fill = q != null
-            ? Math.Clamp((q.Value + 1.0) / 2.0, 0.0, 1.0)
-            : Math.Clamp(pWin ?? 0.5, 0.0, 1.0);
+        double fill = pWin != null
+            ? Math.Clamp(pWin.Value, 0.0, 1.0)
+            : Math.Clamp(((q ?? 0) + 1.0) / 2.0, 0.0, 1.0);
 
         var row = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        string text = q != null
-            ? $"eval {(q.Value >= 0 ? "+" : "")}{q.Value.ToString("0.00", CultureInfo.InvariantCulture)}"
-            : "eval ?";
-        if (pWin != null)
+        row.AddThemeConstantOverride("separation", 2);
+        string text = pWin != null
+            ? $"Win chance {pWin.Value.ToString("0%", CultureInfo.InvariantCulture)}"
+            : "Win chance ?";
+        if (SpireMentorModConfig.ShowNumbers && q != null)
         {
-            text += $"  ·  est. win {pWin.Value.ToString("0%", CultureInfo.InvariantCulture)}";
+            text += $"   eval {(q.Value >= 0 ? "+" : "")}{q.Value.ToString("0.00", CultureInfo.InvariantCulture)}";
+            if (lowConfidence)
+            {
+                text += " (~)";
+            }
         }
-        if (lowConfidence)
-        {
-            text += " (~)";
-        }
-        row.AddChild(SmallLabel(text, Colors.White));
+        Label head = SmallLabel(text, Colors.White);
+        head.AddThemeFontSizeOverride("font_size", 16);
+        row.AddChild(head);
 
         var barBg = new ColorRect
         {
-            Color = new Color(0.25f, 0.1f, 0.1f),
-            CustomMinimumSize = new Vector2(0, 10),
+            Color = new Color(0.22f, 0.1f, 0.1f),
+            CustomMinimumSize = new Vector2(0, 8),
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         var barFill = new ColorRect
@@ -943,57 +1070,242 @@ internal sealed class SimHud
         return row;
     }
 
+    /// <summary>What the frame's advice panel shows per option, decided here
+    /// once so both panels agree (FrameLink.AdviceDto).</summary>
+    internal readonly record struct OptionFacts(string Label, string Kind, int? Step, string Verdict, bool Hidden);
+
     /// <summary>
-    /// One ranked row, laid out like the workbench's Reasoning panel:
-    /// name · Q (colored) · visit-share bar · share% · W/L/T. Deliberately no
-    /// p_win column -- see <see cref="SimAdvice.BestQ"/>.
+    /// <see cref="OptionFacts"/> for every option of <paramref name="advice"/>,
+    /// in option order: the label in words, the move's kind ("attack",
+    /// "skill", "power", "potion", "end_turn", "pick", "skip", "other"), its
+    /// plan step, the verdict word, and whether it is a move nobody would
+    /// make. Main thread (reads the hand for the card kinds).
     /// </summary>
-    private static Control BuildOptionRow(SimAdviceOption o, double? bestQ)
+    internal List<OptionFacts> FactsFor(SimAdvice advice)
+    {
+        Dictionary<SimAdviceOption, int> order = PlanOrder(advice);
+        double? bestQ = advice.BestQ;
+        return advice.Options.ConvertAll(o =>
+        {
+            MarkOption m = o.ToMark();
+            string kind = KindOf(o) switch
+            {
+                RowKind.EndTurn => "end_turn",
+                RowKind k => k.ToString().ToLowerInvariant(),
+            };
+            return new OptionFacts(Words(o.Label), kind, order.TryGetValue(o, out int s) ? s : null,
+                AdviceMarks.RowVerdict(m, bestQ, order.TryGetValue(o, out int st) ? st : null), AdviceMarks.Hidden(m));
+        });
+    }
+
+    /// <summary>The plan's step labels, in words (FrameLink.AdviceDto).</summary>
+    internal static List<string> PlanWords(SimAdvice advice) => advice.Plan.ConvertAll(s => Words(s.Label));
+
+    /// <summary>
+    /// The step each option is in the turn's plan (1 = the pick), matched by
+    /// the thing it acts on (AdviceMarks.Target) and, for a card, its target.
+    /// </summary>
+    private static Dictionary<SimAdviceOption, int> PlanOrder(SimAdvice advice)
+    {
+        var order = new Dictionary<SimAdviceOption, int>();
+        for (int i = 0; i < advice.Plan.Count; i++)
+        {
+            MarkPlanStep s = advice.Plan[i].ToMark();
+            var stepThing = AdviceMarks.Target(new MarkOption(s.Label, s.Action, s.CardIndex, s.TargetIndex,
+                s.AllyIndex, s.Slot, null, false, false, null, null, null));
+            if (stepThing == null)
+            {
+                continue;
+            }
+            SimAdviceOption? match = advice.Options.Find(o =>
+                !order.ContainsKey(o) && AdviceMarks.Target(o.ToMark()) == stepThing &&
+                o.TargetIndex == s.TargetIndex && o.AllyIndex == s.AllyIndex);
+            match ??= advice.Options.Find(o => !order.ContainsKey(o) && AdviceMarks.Target(o.ToMark()) == stepThing);
+            if (match != null)
+            {
+                order[match] = i + 1;
+            }
+        }
+        SimAdviceOption? best = advice.Options.Find(o => o.IsBest);
+        if (best != null && !order.ContainsKey(best))
+        {
+            order[best] = 1;
+        }
+        return order;
+    }
+
+    /// <summary>What kind of move a row is, for its colour chip.</summary>
+    private enum RowKind
+    {
+        Attack,
+        Skill,
+        Power,
+        Potion,
+        EndTurn,
+        Pick,
+        Skip,
+        Other,
+    }
+
+    private RowKind KindOf(SimAdviceOption o)
+    {
+        switch (o.Action)
+        {
+            case "end_turn":
+                return RowKind.EndTurn;
+            case "potion":
+                return RowKind.Potion;
+            case "skip":
+                return RowKind.Skip;
+        }
+        if (o.CardIndex is int ci && _latestPlayer != null)
+        {
+            try
+            {
+                CardPile hand = PileType.Hand.GetPile(_latestPlayer);
+                if (ci >= 0 && ci < hand.Cards.Count)
+                {
+                    return hand.Cards[ci].Type switch
+                    {
+                        CardType.Attack => RowKind.Attack,
+                        CardType.Skill => RowKind.Skill,
+                        CardType.Power => RowKind.Power,
+                        _ => RowKind.Other,
+                    };
+                }
+            }
+            catch (Exception)
+            {
+                // fall through
+            }
+        }
+        string label = o.Label.Trim().ToLowerInvariant();
+        if (label is "end turn" || label.StartsWith("end turn", StringComparison.Ordinal))
+        {
+            return RowKind.EndTurn;
+        }
+        if (label is "skip" or "leave" or "leave shop" or "decline" || label.StartsWith("skip", StringComparison.Ordinal))
+        {
+            return RowKind.Skip;
+        }
+        return o.Action == "choose" || o.Index != null ? RowKind.Pick : RowKind.Other;
+    }
+
+    /// <summary>The game's own palette for card types: red attacks, blue
+    /// skills, gold powers; potions green; pass-moves grey.</summary>
+    private static Color KindColor(RowKind kind) => kind switch
+    {
+        RowKind.Attack => new Color(0.86f, 0.32f, 0.26f),
+        RowKind.Skill => new Color(0.30f, 0.56f, 0.92f),
+        RowKind.Power => new Color(0.92f, 0.70f, 0.25f),
+        RowKind.Potion => new Color(0.32f, 0.78f, 0.52f),
+        RowKind.EndTurn or RowKind.Skip => new Color(0.52f, 0.53f, 0.58f),
+        RowKind.Pick => new Color(0.40f, 0.74f, 0.80f),
+        _ => new Color(0.6f, 0.6f, 0.66f),
+    };
+
+    private static Color VerdictColor(string verdict) => verdict switch
+    {
+        "Best" => new Color(1f, 0.82f, 0.3f),
+        "Also good" => new Color(0.5f, 0.88f, 0.55f),
+        "Then" => new Color(1f, 0.9f, 0.62f),
+        "Okay" => new Color(0.85f, 0.85f, 0.7f),
+        "Weak" => new Color(0.98f, 0.66f, 0.3f),
+        "Mistake" => new Color(0.95f, 0.38f, 0.32f),
+        _ => new Color(0.6f, 0.6f, 0.65f),
+    };
+
+    /// <summary>
+    /// One ranked row: a chip in the move's colour carrying its step in the
+    /// plan (the same number as the card's badge), the move in words, wrapped
+    /// rather than cut ("Strike → Sludge ..." hid which enemy, reported
+    /// 2026-11-07), a verdict word, the expected HP when the search has it,
+    /// and how much of the AI's attention it got. The engine's own columns
+    /// (Q delta, W/L/T, visits) only with "Show engine numbers".
+    /// </summary>
+    private Control BuildOptionRow(SimAdviceOption o, double? bestQ, int? step, bool hpColumn)
     {
         var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        row.AddThemeConstantOverride("separation", 6);
 
-        string marker = o.IsBest ? "★ " : "   ";
-        Color labelColor = o.IsBest ? new Color(1f, 0.85f, 0.3f) : Colors.White;
-        Label name = SmallLabel(marker + o.Label, labelColor);
-        name.CustomMinimumSize = new Vector2(215, 0);
-        name.ClipText = true;
+        // Chip: kind colour, plan step inside.
+        RowKind kind = KindOf(o);
+        Color kc = KindColor(kind);
+        var chipStyle = new StyleBoxFlat
+        {
+            BgColor = step != null ? kc : new Color(kc.R, kc.G, kc.B, 0.28f),
+            BorderColor = kc,
+            AntiAliasing = true,
+        };
+        chipStyle.SetBorderWidthAll(1);
+        chipStyle.SetCornerRadiusAll(9);
+        var chip = new PanelContainer
+        {
+            CustomMinimumSize = new Vector2(22, 18),
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        chip.AddThemeStyleboxOverride("panel", chipStyle);
+        Label chipText = SmallLabel(step?.ToString(CultureInfo.InvariantCulture) ?? "", new Color(0.06f, 0.05f, 0.04f));
+        chipText.AddThemeConstantOverride("outline_size", 0);
+        chipText.AddThemeFontSizeOverride("font_size", 13);
+        chipText.HorizontalAlignment = HorizontalAlignment.Center;
+        chip.AddChild(chipText);
+        row.AddChild(chip);
+
+        // The move, in words, wrapping instead of clipping.
+        Label name = SmallLabel(Words(o.Label), o.IsBest ? new Color(1f, 0.85f, 0.3f) : Colors.White);
+        name.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        name.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        name.CustomMinimumSize = new Vector2(120, 0);
         row.AddChild(name);
 
-        // Q in [-1,1]: +1 sure win, 0 even, -1 sure loss. The signed value is
-        // what separates moves the win-probability column cannot.
-        double? q = o.Q ?? (o.PWin != null ? o.PWin.Value * 2 - 1 : (double?)null);
-        if (q != null)
+        MarkOption mark = o.ToMark();
+        string verdict = AdviceMarks.RowVerdict(mark, bestQ, step);
+        Label v = SmallLabel(verdict, VerdictColor(verdict));
+        v.CustomMinimumSize = new Vector2(72, 0);
+        v.HorizontalAlignment = HorizontalAlignment.Right;
+        row.AddChild(v);
+
+        if (hpColumn)
         {
-            // The best row carries the absolute eval; the rest carry what
-            // they COST relative to it. Two decimals of an absolute Q are
-            // all identical once the position is winning (+1.00, +1.00,
-            // +1.00 -- reported 2026-08-05); the loss against the best move
-            // is the number that actually orders them, and it needs the
-            // extra digit to be visible at all.
+            Label hp = SmallLabel(o.HpMean is double h ? $"♥ {h.ToString("0", CultureInfo.InvariantCulture)}" : "",
+                new Color(0.95f, 0.5f, 0.5f));
+            hp.CustomMinimumSize = new Vector2(46, 0);
+            hp.HorizontalAlignment = HorizontalAlignment.Right;
+            row.AddChild(hp);
+        }
+
+        double? q = o.Q ?? (o.PWin != null ? o.PWin.Value * 2 - 1 : (double?)null);
+        if (SpireMentorModConfig.ShowNumbers && q != null)
+        {
+            // The best row carries the absolute eval; the rest what they COST
+            // against it (two decimals of an absolute Q all read +1.00 once
+            // the position is winning -- reported 2026-08-05).
             bool delta = !o.IsBest && bestQ != null;
             double shown = delta ? q.Value - bestQ!.Value : q.Value;
             string text = delta
                 ? (shown >= 0 ? "+" : "−") + Math.Abs(shown).ToString("0.000", CultureInfo.InvariantCulture)
                 : (shown >= 0 ? "+" : "") + shown.ToString("0.00", CultureInfo.InvariantCulture);
             Label qLabel = SmallLabel(text, delta ? DeltaColor(shown) : QColor(q.Value));
-            qLabel.CustomMinimumSize = new Vector2(52, 0);
+            qLabel.CustomMinimumSize = new Vector2(50, 0);
             qLabel.HorizontalAlignment = HorizontalAlignment.Right;
             row.AddChild(qLabel);
         }
 
-        if (o.VisitShare != null)
+        if (o.Share is double rawShare)
         {
-            double share = Math.Clamp(o.VisitShare.Value, 0.0, 1.0);
+            double share = Math.Clamp(rawShare, 0.0, 1.0);
             var shareBg = new ColorRect
             {
                 Color = new Color(0.2f, 0.2f, 0.2f),
-                CustomMinimumSize = new Vector2(60, 8),
+                CustomMinimumSize = new Vector2(44, 6),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
             var shareFill = new ColorRect
             {
-                Color = q != null ? QColor(q.Value) : new Color(0.5f, 0.7f, 1f),
+                Color = o.IsBest ? new Color(1f, 0.8f, 0.3f) : new Color(kc.R, kc.G, kc.B, 0.9f),
                 AnchorRight = (float)share,
                 AnchorBottom = 1f,
                 MouseFilter = Control.MouseFilterEnum.Ignore,
@@ -1002,25 +1314,27 @@ internal sealed class SimHud
             row.AddChild(shareBg);
 
             Label shareLabel = SmallLabel(
-                share.ToString("0%", CultureInfo.InvariantCulture), new Color(0.75f, 0.75f, 0.75f));
-            shareLabel.CustomMinimumSize = new Vector2(34, 0);
+                share < 0.005 ? "<1%" : share.ToString("0%", CultureInfo.InvariantCulture), new Color(0.72f, 0.72f, 0.74f));
+            shareLabel.CustomMinimumSize = new Vector2(36, 0);
             shareLabel.HorizontalAlignment = HorizontalAlignment.Right;
             row.AddChild(shareLabel);
         }
 
-        if (o.Wins != null || o.Losses != null || o.Ties != null)
+        if (SpireMentorModConfig.ShowNumbers)
         {
-            row.AddChild(SmallLabel($"{o.Wins ?? 0}/{o.Losses ?? 0}/{o.Ties ?? 0}",
-                new Color(0.55f, 0.55f, 0.55f)));
-        }
-        else if (o.Visits != null)
-        {
-            row.AddChild(SmallLabel($"{o.Visits}v", new Color(0.6f, 0.6f, 0.6f)));
-        }
-
-        if (o.LowConfidence)
-        {
-            row.AddChild(SmallLabel("~", new Color(0.95f, 0.75f, 0.3f)));
+            if (o.Wins != null || o.Losses != null || o.Ties != null)
+            {
+                row.AddChild(SmallLabel($"{o.Wins ?? 0}/{o.Losses ?? 0}/{o.Ties ?? 0}",
+                    new Color(0.55f, 0.55f, 0.55f)));
+            }
+            else if (o.Visits != null)
+            {
+                row.AddChild(SmallLabel($"{o.Visits}v", new Color(0.6f, 0.6f, 0.6f)));
+            }
+            if (o.LowConfidence)
+            {
+                row.AddChild(SmallLabel("~", new Color(0.95f, 0.75f, 0.3f)));
+            }
         }
 
         return row;
@@ -1097,7 +1411,11 @@ internal sealed class SimHud
     {
         ClearCardLabels();
 
-        if (!SpireMentorModConfig.ShowCardLabels || !HudVisible)
+        // The engine's numbers over the cards are opt-in now ("Show engine
+        // numbers"): the rings and step numbers (SimHighlights) say what to
+        // play, and a "+0.42 63%" over every card said it in units nobody
+        // reads (reported 2026-11-07).
+        if (!SpireMentorModConfig.ShowNumbers || !HudVisible)
         {
             return;
         }
@@ -1122,12 +1440,26 @@ internal sealed class SimHud
             return;
         }
 
+        // ONE label per card: a targeted card has an option per target, and
+        // a label for each stacked two numbers on one card, unreadable
+        // (reported 2026-11-07). The card's label is its best option's. A
+        // move nobody would make ("0%") gets none.
+        var perCard = new Dictionary<int, SimAdviceOption>();
         foreach (SimAdviceOption o in advice.Options)
         {
-            if (o.CardIndex == null)
+            if (o.CardIndex is not int ci || AdviceMarks.Hidden(o.ToMark()))
             {
                 continue;
             }
+            if (!perCard.TryGetValue(ci, out SimAdviceOption? have) ||
+                (o.IsBest && !have.IsBest) ||
+                (o.IsBest == have.IsBest && (o.Q ?? o.Share ?? o.Score ?? 0) > (have.Q ?? have.Share ?? have.Score ?? 0)))
+            {
+                perCard[ci] = o;
+            }
+        }
+        foreach (SimAdviceOption o in perCard.Values)
+        {
             try
             {
                 RenderOneCardLabel(o, hand, handUi);
@@ -1425,7 +1757,8 @@ internal sealed class SimHud
 
         foreach (SimAdviceOption o in advice.Options)
         {
-            if (o.Col == null || o.Row == null ||
+            // A path nobody would take gets no "0%" (live, 2026-11-07).
+            if (o.Col == null || o.Row == null || AdviceMarks.Hidden(o.ToMark()) ||
                 !byCoord.TryGetValue((o.Col.Value, o.Row.Value), out NMapPoint? point))
             {
                 continue;
@@ -1495,11 +1828,32 @@ internal sealed class SimHud
         var line = new Line2D
         {
             Name = "SpireMentorRoute",
-            Width = 4f,
-            DefaultColor = new Color(1f, 0.85f, 0.3f, 0.55f),
-            ZIndex = -1,
+            Width = 5f,
+            DefaultColor = new Color(1f, 0.85f, 0.3f, 0.6f),
+            JointMode = Line2D.LineJointMode.Round,
+            BeginCapMode = Line2D.LineCapMode.Round,
+            EndCapMode = Line2D.LineCapMode.Round,
+            Antialiased = true,
         };
-        _layer!.AddChildSafely(line);
+        // Drawn INSIDE the map, behind its nodes: it scrolls with the map and
+        // passes under the game's top bar like the map's own paths do. On the
+        // HUD layer it ran over the top bar (live, 2026-11-07).
+        Node? host = _routePoints[0].GetParent();
+        if (host is CanvasItem)
+        {
+            host.AddChildSafely(line);
+            Callable.From(() =>
+            {
+                if (GodotObject.IsInstanceValid(line) && line.GetParent() == host)
+                {
+                    host.MoveChild(line, 0);
+                }
+            }).CallDeferred();
+        }
+        else
+        {
+            _layer!.AddChildSafely(line);
+        }
         _routeLine = line;
         UpdateRouteLine();
     }
@@ -1593,6 +1947,12 @@ internal sealed class SimHud
                 if (alive)
                 {
                     PositionMapMarker(anchor);
+                    // Scrolled under the game's top bar: hidden, as the map's
+                    // own icons are there (live, 2026-11-07).
+                    if (anchor.Label.GlobalPosition.Y < SimTopBarLayout.SafeTopY(anchor.Label) - 8f)
+                    {
+                        anchor.Label.Visible = false;
+                    }
                 }
             }
             UpdateRouteLine();
@@ -1610,9 +1970,19 @@ internal sealed class SimHud
             return;
         }
         var points = new List<Vector2>(_routePoints.Count);
+        // In the line's own space: the map's (it lives in the map's tree), or
+        // the viewport's when it fell back to the HUD layer.
+        bool inMap = _routeLine.GetParent() is CanvasItem;
+        Transform2D toLocal = inMap ? _routeLine.GetGlobalTransform().AffineInverse() : Transform2D.Identity;
         foreach (Control point in _routePoints)
         {
-            Vector2? centre = MapPointCentre(point);
+            if (!GodotObject.IsInstanceValid(point) || !point.IsInsideTree())
+            {
+                continue;
+            }
+            Vector2? centre = inMap
+                ? toLocal * (point.GetGlobalTransform() * (point.Size / 2f))
+                : MapPointCentre(point);
             if (centre != null)
             {
                 points.Add(centre.Value);
@@ -1893,7 +2263,7 @@ internal sealed class SimHud
     private const float ChipToPanelGap = 80f;
 
     /// <summary>Advice panel width (its minimum; a coach chip is as wide).</summary>
-    private const float PanelWidth = 430f;
+    private const float PanelWidth = 470f;
 
     /// <summary>
     /// Left edge and bottom of the advice column -- the advice panel and the
@@ -1970,7 +2340,11 @@ internal sealed class SimHud
                 // Below the toolbar strip when there is one; otherwise leave
                 // the old chip-sized gap so the panel is where it always was.
                 float? toolbarBottom = SimToolbar.Instance.BottomY();
-                want = new Vector2(PanelLeft, toolbarBottom.HasValue
+                // Co-op: beside the teammates' list, never on it.
+                float left = SimTopBarLayout.CoopRosterRight() is float roster
+                    ? Math.Max(PanelLeft, roster + AdviceColumn.Gap)
+                    : PanelLeft;
+                want = new Vector2(left, toolbarBottom.HasValue
                     ? Math.Max(top, toolbarBottom.Value + AdviceColumn.Gap)
                     : top + ChipToPanelGap);
             }
@@ -2000,7 +2374,11 @@ internal sealed class SimHud
         }
         try
         {
-            CombatManager.Instance.CombatEnded += _ => ClearAdvice();
+            CombatManager.Instance.CombatEnded += _ =>
+            {
+                ClearAdvice();
+                RunOnMainThread(SimMoveFeedback.Instance.OnCombatEnded);
+            };
             _combatEndedSubscribed = true;
         }
         catch (Exception ex)

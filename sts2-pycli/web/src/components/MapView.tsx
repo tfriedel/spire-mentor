@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type SVGProps } from "react";
 import type { MapRow, MapGraph, FullMap, FullMapNode, PathPlan, BossNode } from "../api";
 import { assetUrl } from "../api";
+import { markFor, useAdviceMarks } from "../advice/useAdviceMarks";
 import { useHints } from "../hints/useHints";
 import "../skins/map.css";
 import { nodeMeta, bossArt } from "./mapArt";
@@ -287,6 +288,8 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
   // Filter ids are document-global; namespace them so the map screen and the
   // docked minimap (both mounted at once) each own their own definitions.
   const fid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  // The run policy's mark on the node to pick next (advice/marks.ts).
+  const { marks } = useAdviceMarks();
   const COL = (rich ? RICH_COLW : COLW) * scale;
   const ROW = (rich ? RICH_ROWH : ROWH) * scale;
   const R = (rich ? RICH_R : R_BASE) * scale;
@@ -555,6 +558,26 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
               transform={`rotate(${jit(n.col, n.row, 13, 180)})`}
               stroke={INK} strokeWidth={0.26 * R} strokeLinecap="round"
               strokeDasharray={`${0.55 * R} ${0.34 * R}`} opacity={0.8} />}
+            {/* The AI's pick: a gold ring, breathing, and its step number —
+                the same mark the cards and the screens' options wear. */}
+            {canSelect && (() => {
+              const mk = markFor(marks, "select_map_node", { col: n.col, row: n.row });
+              if (!mk) return null;
+              return (
+                <g className={`gsm-advice gsm-advice--${mk.tier}`} pointerEvents="none" data-testid="map-advice">
+                  {/* The shared mark look (responsive.css --mark-*, .wb-mark-badge). */}
+                  <circle r={R * 1.95} fill="none" style={{ stroke: "var(--mark-gold)" }}
+                    strokeWidth={(mk.tier === "best" ? 0.28 : 0.16) * R} />
+                  {mk.order != null && (
+                    <g transform={`translate(${R * 1.5},${-R * 1.5})`}>
+                      <circle r={R * 0.72} style={{ fill: "var(--mark-gold)" }} stroke="oklch(32% 0.05 75)" strokeWidth={0.12 * R} />
+                      <text textAnchor="middle" dy={R * 0.3} fontSize={R * 0.9} fontWeight={800}
+                        style={{ fontFamily: "var(--font)" }} fill="oklch(20% 0.02 70)">{mk.order}</text>
+                    </g>
+                  )}
+                </g>
+              );
+            })()}
             <g className={`gsm-node-art${faded ? " gsm-node-future" : ""}`}>
               {(() => {
                 // The game's own room stamp, printed into the paper by the

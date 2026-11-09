@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 const GROUPS: { title: string; keys: [string, string][] }[] = [
-  { title: "Advice style (top bar)", keys: [["🎓 coach", "the default: nothing judges your options before you act; your turns and choices are graded after"], ["💡 hints", "the AI's opinion shows unprompted — scores, policy panel, planned route"]] },
+  { title: "Mode (top bar)", keys: [["Off", "the AI stays quiet: no hints, no grades (H and P still answer)"], ["Coach", "nothing judges your options before you act; your turns and choices are graded after"], ["Hints", "the default: the AI's picks are ringed and numbered while you decide, ranked in words in the Advice panel"], ["AI plays", "the AI plays the run until you stop it (Esc)"], ["Tools → engine numbers", "win %, Q, shares and W/L/T beside the advice"]] },
   { title: "Global", keys: [["Ctrl+K / ⌘K", "command palette — every Run / Analyze / Tools command, filterable"], ["?", "toggle this help"], ["Esc", "close help / cancel targeting"]] },
   { title: "Replay", keys: [["← / →", "previous / next step"], ["Home / End", "first / last step"], ["h", "recommend (in combat)"]] },
   { title: "Play — combat", keys: [["1–9", "play the Nth card (then Nth enemy to target)"], ["e", "end turn"], ["h", "hint — score this position and show the reasoning"], ["p", "peek — the AI's next action only (Coach style)"], ["g", "play the recommended move"], ["a", "autoplay the turn; press again to end it & advance"], ["f", "play to end — finish the whole run (Esc to stop)"], ["Esc", "cancel targeting / stop autoplay"]] },

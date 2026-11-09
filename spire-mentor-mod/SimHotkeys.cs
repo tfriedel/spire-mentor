@@ -26,8 +26,8 @@
 //   F8  AI on / off in the current style (from Autopilot: stop the AI and take over)
 //   Shift+F8 advisor brain (toggle): Search <-> Instinct (AdvisorBrainRules).
 //       An F-key chord like Shift+F6 / Shift+F7, not Ctrl: streaming drops those.
-//   F9  game speed down to the next whole speed (1x-4x)
-//   F10 game speed up to the next whole speed (1x-4x)
+//   F9  game speed down to the next speed (1x, 2x, 3x, 4x, 6x, 8x)
+//   F10 game speed up to the next speed (1x, 2x, 3x, 4x, 6x, 8x)
 //   Ctrl+Shift+B report a bug (SimBugReport): B is unbound in the game's
 //       keyboard map (NInputManager: E S D X A M, digits, arrows, space).
 //

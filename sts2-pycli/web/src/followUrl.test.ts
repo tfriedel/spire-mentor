@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFollowParams, resolveRunPath, runLogName, seekIndex } from "./followUrl";
+import { parseFollowParams, parseOpenParam, resolveRunPath, runLogName, seekIndex } from "./followUrl";
 
 describe("parseFollowParams", () => {
   it("reads follow, run and step", () => {
@@ -52,5 +52,14 @@ describe("resolveRunPath", () => {
     expect(resolveRunPath("other.jsonl", live)).toBe("other.jsonl");
     expect(resolveRunPath(null, live)).toBe(live);
     expect(resolveRunPath(null, null)).toBeNull();
+  });
+});
+
+describe("parseOpenParam", () => {
+  it("reads the run log to open", () => {
+    expect(parseOpenParam("?open=a%2Fb_game_1SNV.jsonl")).toBe("a/b_game_1SNV.jsonl");
+    expect(parseOpenParam("?open=")).toBeNull();
+    expect(parseOpenParam("?open=%20")).toBeNull();
+    expect(parseOpenParam("?follow=1")).toBeNull();
   });
 });

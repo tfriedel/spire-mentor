@@ -920,8 +920,16 @@ fn entomancer_pheromone_spit_effect(state: &mut CombatState, uid: CreatureUid) {
 /// hive as 0 and grows it (decomp Entomancer.cs:59-63). A power at 0 is
 /// removed, so amount 0 here means absent.
 fn entomancer_spit_strength(state: &CombatState, uid: CreatureUid) -> i32 {
-    let hive = entomancer_personal_hive_amount(state, uid);
-    if state.game_version >= sts2_core::GameVersion::V0_111_0 && hive == 0 {
+    entomancer_spit_strength_for_hive(
+        state.game_version,
+        entomancer_personal_hive_amount(state, uid),
+    )
+}
+
+/// [`entomancer_spit_strength`] for a hive of `hive`: a spit that grants 1
+/// also grows the hive by 1 (`entomancer_pheromone_spit_effect`).
+pub(crate) fn entomancer_spit_strength_for_hive(version: sts2_core::GameVersion, hive: i32) -> i32 {
+    if version >= sts2_core::GameVersion::V0_111_0 && hive == 0 {
         return 2;
     }
     if hive < 3 {
@@ -953,7 +961,7 @@ pub(crate) fn set_buff_intent_amount(
 /// Read the `PersonalHive` counter on `owner` (0 if absent). Shared by
 /// PHEROMONE_SPIT (ramp gate) and the AfterDamageReceived hook (Dazed
 /// count).
-fn entomancer_personal_hive_amount(state: &CombatState, owner: CreatureUid) -> i32 {
+pub(crate) fn entomancer_personal_hive_amount(state: &CombatState, owner: CreatureUid) -> i32 {
     state
         .creatures
         .iter()

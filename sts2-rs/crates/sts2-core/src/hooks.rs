@@ -1964,7 +1964,9 @@ fn retrieve_attacks_from_discard(state: &mut CombatState, count: i32, upgrade: b
             }
         }
     }
-    if upgrade {
+    // `CardCmd.Upgrade` is a no-op once `CombatManager.IsEnding`
+    // (CardCmd.cs:267-270, GH #1150).
+    if upgrade && !crate::combat_loop::combat_is_ending(state) {
         let version = state.game_version;
         for uid in &picks {
             let idx = uid.0.get() as usize - 1;

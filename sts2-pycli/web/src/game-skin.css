@@ -1173,7 +1173,7 @@
    in live play: a replay frame has no energy agency, so its cards stay
    neutral-bright and unrimmed, and only the played card keeps its gold glow.
    Hand.tsx puts `gs-playable` on the slot when the card is actually clickable. */
-.gs-handslot.gs-playable .gs-card:not(.gs-played):not(.gs-best) {
+.gs-handslot.gs-playable .gs-card:not(.gs-played):not(.gs-best):not([class*="gs-mark-"]) {
   filter: drop-shadow(0 calc(var(--cw) * 0.027) calc(var(--cw) * 0.045) rgba(0,0,0,.55))
           drop-shadow(0 0 calc(var(--cw) * 0.018) #7ef0fa)
           drop-shadow(0 0 calc(var(--cw) * 0.035) rgba(66,214,232,.75));
@@ -1246,42 +1246,19 @@
 /* The MCTS knobs get their own full-width line under the buttons. */
 .gs-toolrow-adv { display: block; width: 100%; margin-top: 4px; }
 
-/* ---- potion belt ------------------------------------------------------------
-   Game-like tray under the stage: recessed dark strip of circular sockets
-   (mirrors .gs-hud-potions' material), potion sprite in each filled socket.
-   Name / description / Use / Discard live in a popover that opens on hover or
+/* ---- potion belt (PotionTray, in the HUD band) ---------------------------
+   The band's sockets (.gs-hud-socket) are the belt, as in the game. Name /
+   description / Use / Discard live in a popover that opens on hover, tap or
    keyboard focus — the controls stay in the DOM at all times (tests, a11y);
-   CSS only fades them, so no interaction is lost. No typed "potions:" label,
-   no bordered web pills. */
-.gs-potiontray {
-  /* IN the scene, at the stage's left edge above the energy orb (Board.tsx
-     renders it inside .gs-arena-stage now). As a flex sibling BELOW the stage
-     it was a lone rounded chip floating on app-black in the gutter under the
-     viewport — the "orphaned green relic chip" / "stray rounded-square icon
-     orphaned in the gutter" both r4 lenses logged. Same z-index band as the
-     other in-scene furniture (orb, piles, End Turn). */
-  position: absolute; left: 16px; bottom: 216px; z-index: 4;
-  display: inline-flex; align-items: center; gap: 7px;
-  /* No outer plate. The sockets ARE the furniture; a rounded-rect panel around
-     them is what read as "a stray rounded-square icon" in the r4 capture. */
-  font-family: var(--game-font);
-}
-.gs-potion { position: relative; }
-.gs-potion-socket {
-  position: relative; width: 40px; height: 40px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: radial-gradient(circle at 38% 30%, #23292c, #0b0e10 78%);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,.85), 0 1px 0 rgba(255,246,226,.07);
-}
+   CSS only fades them, so no interaction is lost. */
+.gs-potion { position: relative; display: inline-flex; font-family: var(--game-font); }
+.gs-potion > .gs-hud-socket { position: relative; }
 .gs-potion-empty { opacity: .75; }
 .gs-potion-filled { cursor: pointer; outline-offset: 2px; }
 .gs-potion-art { width: 34px; height: 34px; object-fit: contain; display: block;
   filter: drop-shadow(0 2px 3px rgba(0,0,0,.7)); transition: transform .12s ease; }
 .gs-potion:hover .gs-potion-art, .gs-potion:focus-within .gs-potion-art { transform: scale(1.12); }
 .gs-potion-glyph { font-size: 18px; color: #cfc3a6; text-shadow: 0 1px 2px #000; }
-/* recommender pick: gold rim on the socket (press-first advice keeper) */
-.gs-potion-best .gs-potion-socket { box-shadow: inset 0 2px 4px rgba(0,0,0,.85),
-  0 0 0 2px var(--accent-strong), 0 0 8px rgba(0,0,0,.5); }
 /* tiny win-prob tag riding the socket's lower edge (workbench keeper) */
 .gs-potion-win { position: absolute; right: -5px; bottom: -3px; z-index: 1;
   font-size: 9px; font-weight: 700; color: #e8d9ad; padding: 0 3px; border-radius: 5px;
@@ -1292,23 +1269,24 @@
    accessibility tree keep the buttons). The padding-bottom bridge keeps the
    hover contiguous from socket to popover. */
 .gs-potion-pop {
-  /* left-anchored (not centered): the tray hugs the viewport's left edge, so
-     a centered 210px popover on the first socket clips off-screen. */
-  position: absolute; bottom: 100%; left: -8px;
-  z-index: 30; width: 210px; padding-bottom: 7px;
+  /* Opens BELOW the socket: the belt rides the HUD band at the top of the
+     viewport. Left-anchored, so the first socket's popover stays on screen. */
+  position: absolute; top: 100%; left: -8px;
+  z-index: 60; width: 210px; padding-top: 7px;
   opacity: 0; pointer-events: none; transition: opacity .12s ease;
 }
 .gs-potion:hover .gs-potion-pop, .gs-potion:focus-within .gs-potion-pop {
   opacity: 1; pointer-events: auto; }
 .gs-potion-popin {
+  display: block; text-align: left; white-space: normal;
   padding: 8px 10px; border-radius: 8px; color: #f6ead0;
   background: linear-gradient(#262b25, #14181a 80%);
   border: 1px solid #6b5732;
   box-shadow: 0 6px 18px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,246,226,.1);
 }
-.gs-potion-popname { font-weight: 700; font-size: 13px; margin-bottom: 3px;
+.gs-potion-popname { display: block; font-weight: 700; font-size: 13px; margin-bottom: 3px;
   color: #e8d9ad; text-shadow: 0 1px 2px #000; }
-.gs-potion-popdesc { font-size: 11.5px; line-height: 1.4; color: #cfc3a6;
+.gs-potion-popdesc { display: block; font-size: 11.5px; line-height: 1.4; color: #cfc3a6;
   white-space: pre-line; }
 .gs-potion-actions { display: flex; gap: 6px; margin-top: 7px; }
 .gs-potion-btn {
@@ -1556,3 +1534,114 @@
   animation: gs-autoplay-in-out 1.1s ease-out forwards; }
 .gs-autoplay-tag { font-family: var(--game-font); font-size: 12px; letter-spacing: .08em;
   text-transform: uppercase; color: #fff6e2; text-shadow: 0 1px 0 #000, 0 0 6px #000; }
+
+/* ---- advice marks on cards (advice/marks.ts, Hand.tsx) -------------------
+   The mod's ring is a copy of the card's own outline glow, wider than the
+   game's cyan and gold (outline width 0.15 against the game's 0.075): here the
+   same silhouette drop-shadow the playable rim uses, in the mod's warm
+   white-gold, twice the rim's width and breathing on the move to make. */
+/* The card keeps its contact shadow under the shared glow (responsive.css
+   --mark-*). Listed with every host rule that re-sets a card's filter on
+   hover or at rest (the reward row's hover rim, the shop stand, the hand's
+   playable rim), so the mark is never dropped while you look at the card. */
+.gs-card.gs-mark-best,
+.gs-handslot.gs-playable .gs-card.gs-mark-best,
+.gs-cardreward-slot.is-live:hover .gs-card.gs-mark-best,
+.gs-cardreward-slot.is-chosen .gs-card.gs-mark-best,
+.gs-shop-cardstand .gs-card.gs-mark-best,
+.gs-shop-cardstand:hover .gs-card.gs-mark-best {
+  filter: drop-shadow(0 calc(var(--cw) * 0.027) calc(var(--cw) * 0.045) rgba(0,0,0,.55)) var(--mark-best);
+  animation: gs-mark-breathe 1.8s ease-in-out infinite;
+}
+.gs-card.gs-mark-good,
+.gs-handslot.gs-playable .gs-card.gs-mark-good,
+.gs-cardreward-slot.is-live:hover .gs-card.gs-mark-good,
+.gs-cardreward-slot.is-chosen .gs-card.gs-mark-good,
+.gs-shop-cardstand .gs-card.gs-mark-good,
+.gs-shop-cardstand:hover .gs-card.gs-mark-good {
+  filter: drop-shadow(0 calc(var(--cw) * 0.027) calc(var(--cw) * 0.045) rgba(0,0,0,.55)) var(--mark-good);
+}
+.gs-card.gs-mark-alt,
+.gs-handslot.gs-playable .gs-card.gs-mark-alt,
+.gs-cardreward-slot.is-live:hover .gs-card.gs-mark-alt,
+.gs-cardreward-slot.is-chosen .gs-card.gs-mark-alt,
+.gs-shop-cardstand .gs-card.gs-mark-alt,
+.gs-shop-cardstand:hover .gs-card.gs-mark-alt {
+  filter: drop-shadow(0 calc(var(--cw) * 0.027) calc(var(--cw) * 0.045) rgba(0,0,0,.55)) var(--mark-alt);
+}
+@keyframes gs-mark-breathe { 50% { filter: drop-shadow(0 calc(var(--cw) * 0.027) calc(var(--cw) * 0.045) rgba(0,0,0,.55)) var(--mark-best-hi); } }
+/* The step number: the card's top edge, centred (the cost orb owns the
+   top-left corner, the upgrade tag the top-right). */
+/* Its look is the shared badge's (responsive.css .wb-mark-badge); only the
+   place differs. */
+.gs-badge.gs-step-tag { top: -13px; left: 50%; transform: translateX(-50%); }
+/* On a card it grows with the card (the hand draws cards at 0.8), so it
+   lands at the same ~27px on screen as on everything else. */
+.gs-card .gs-badge.gs-step-tag { top: calc(var(--cw) * -0.075);
+  min-width: max(26px, calc(var(--cw) * 0.16)); height: max(26px, calc(var(--cw) * 0.16));
+  border-radius: 999px; font-size: max(15px, calc(var(--cw) * 0.095)); }
+/* The plan's cards stand part-way out of the fan: the mod pulls them a fifth
+   of the card's height (SimHighlights LiftShare), which here is most of the
+   hover lift; hovering still takes it the rest of the way. */
+.gs-handslot.gs-pulled:not(.gs-hovered) > .gs-handslot-lift {
+  transform: translateY(calc(var(--fan-y, 0px) - var(--gs-handlift) * .8)) rotate(var(--fan-rot, 0deg));
+}
+@media (prefers-reduced-motion: reduce) {
+  .gs-card.gs-mark-best, .gs-handslot.gs-playable .gs-card.gs-mark-best,
+  .gs-endturn.gs-mark-best, .gs-potion.gs-mark-best > .gs-hud-socket { animation: none; }
+}
+
+/* ---- the advice's target (Combatant \`reticle\`) --------------------------
+   Four gold corner brackets around the creature's drawn body (from its rig
+   head, --rig-top, to its feet), breathing with the card ring. */
+.gs-reticle { position: absolute; left: -8%; right: -8%; top: calc(var(--rig-top, 0px) - 6%); bottom: -4%;
+  pointer-events: none; z-index: 3; animation: gs-reticle-breathe 1.8s ease-in-out infinite; }
+.gs-reticle > i { position: absolute; width: min(22%, 34px); height: min(18%, 34px);
+  border: 3px solid oklch(88% 0.15 90); filter: drop-shadow(0 0 4px oklch(82% 0.14 90 / .9)); }
+.gs-reticle-tl { top: 0; left: 0; border-right: none !important; border-bottom: none !important; border-top-left-radius: 6px; }
+.gs-reticle-tr { top: 0; right: 0; border-left: none !important; border-bottom: none !important; border-top-right-radius: 6px; }
+.gs-reticle-bl { bottom: 0; left: 0; border-right: none !important; border-top: none !important; border-bottom-left-radius: 6px; }
+.gs-reticle-br { bottom: 0; right: 0; border-left: none !important; border-top: none !important; border-bottom-right-radius: 6px; }
+@keyframes gs-reticle-breathe { 50% { transform: scale(1.04); opacity: .8; } }
+/* End Turn and potion slots: a gold ring on the thing itself. */
+.gs-endturn.gs-mark-best { filter: drop-shadow(0 5px 8px rgba(0,0,0,.55)) var(--mark-best);
+  animation: gs-endturn-breathe 1.8s ease-in-out infinite; }
+@keyframes gs-endturn-breathe { 50% { filter: drop-shadow(0 5px 8px rgba(0,0,0,.55)) var(--mark-best-hi); } }
+.gs-endturn.gs-mark-good { filter: drop-shadow(0 5px 8px rgba(0,0,0,.55)) var(--mark-good); }
+.gs-endturn.gs-mark-alt { filter: drop-shadow(0 5px 8px rgba(0,0,0,.55)) var(--mark-alt); }
+/* The plate lives in the scaled stage (--gs-k); the badge undoes that scale
+   so it is the same 26px coin on screen as everywhere else. */
+.gs-endturn .gs-step-tag { top: -10px; scale: calc(1 / var(--gs-k, 1)); transform-origin: 50% 100%; }
+/* Potion sockets on the band's belt: the same glow round the socket, plus a
+   gold rim on it so it reads as ringed even over the stone. */
+.gs-potion.gs-mark-best > .gs-hud-socket { filter: var(--mark-best); animation: wb-mark-breathe 1.8s ease-in-out infinite; }
+.gs-potion.gs-mark-good > .gs-hud-socket { filter: var(--mark-good); }
+.gs-potion.gs-mark-alt > .gs-hud-socket { filter: var(--mark-alt); }
+.gs-potion[class*="gs-mark-"] > .gs-hud-socket { box-shadow: inset 0 0 0 2px var(--mark-gold), inset 0 2px 5px rgba(0,0,0,.85); }
+.gs-potion.gs-mark-alt > .gs-hud-socket { box-shadow: inset 0 0 0 2px oklch(85% 0.06 255 / .8), inset 0 2px 5px rgba(0,0,0,.85); }
+.gs-potion .gs-step-tag { top: -14px; }
+@media (prefers-reduced-motion: reduce) { .gs-reticle { animation: none; } }
+
+/* ---- the verdict over a played card (App `moveGrade`, the mod's
+   SimMoveFeedback): rises from the hand and fades, in the ranked list's
+   colours. */
+.gs-move-grade { position: absolute; left: 50%; bottom: 34%; z-index: 70; pointer-events: none;
+  transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
+  font: 700 22px/1.2 var(--game-font); letter-spacing: .5px; white-space: nowrap;
+  text-shadow: 0 2px 4px rgba(0,0,0,.8); background: rgba(10, 12, 20, .55);
+  animation: gs-move-grade-rise 1.9s ease-out forwards; }
+.gs-move-grade--best { color: var(--gold); }
+.gs-move-grade--good { color: oklch(80% 0.14 150); }
+.gs-move-grade--okay { color: oklch(85% 0.05 100); }
+.gs-move-grade--weak { color: oklch(78% 0.14 60); }
+.gs-move-grade--mistake { color: oklch(68% 0.18 28); }
+@keyframes gs-move-grade-rise {
+  0% { opacity: 0; transform: translate(-50%, 18px) scale(.9); }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -46px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gs-move-grade { animation: gs-move-grade-fade 1.9s linear forwards; }
+  @keyframes gs-move-grade-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+}

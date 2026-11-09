@@ -25,6 +25,10 @@ nearly every round of them.
   copy); `gather_to_shm`: rows from any chunks straight into a new block
   (`batch_to_shm(gather(...))` in one copy, the learner's cut);
   `ShmChunk`: a chunk of a block's views that owns the block.
+* Cleanup: every block's name carries its owner's pid (`PREFIX`, `shm_name`):
+  the learner's, also for the held rows' block rank 0 makes for it. Normal
+  paths unlink the names; a learner killed by SIGKILL cannot, and `sweep` (at
+  each learner start) removes the blocks of owners that are gone (GH #1152).
 
 Dense rows cost 486 bytes per token (SCHEMA.md "Size"). The compact layout
 (`contracts.to_compact`) would cut that about tenfold; it is not used yet
@@ -34,9 +38,12 @@ Dense rows cost 486 bytes per token (SCHEMA.md "Size"). The compact layout
 from __future__ import annotations
 
 import contextlib
+import os
+import secrets
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import shared_memory
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -51,6 +58,57 @@ AXIS_COUNT = {"tok": "n_tok", "mem": "n_mem", "cls": "n_classes", "priv": "n_pri
 AXIS_COUNT |= {"pool": "n_pool", "ppool": "n_ppool"}
 #: The fields the actor fills at acting time (the worker leaves them at their defaults).
 ACTING = ("actor", "logp_behav", "action", "iter", "v_behav", "t_src")
+
+#: Row blocks' name prefix: `PREFIX<owner pid>_<random>` (`shm_name`, `sweep`).
+PREFIX = "sts2psm_"
+SHM_DIR = Path("/dev/shm")
+
+
+def shm_name(owner: int | None = None) -> str:
+    """A new row block's name. `owner` (default: this process) is the pid whose
+    death makes the block garbage: the learner's."""
+    return f"{PREFIX}{os.getpid() if owner is None else int(owner)}_{secrets.token_hex(6)}"
+
+
+def _new_block(size: int, owner: int | None) -> shared_memory.SharedMemory:
+    return shared_memory.SharedMemory(
+        name=shm_name(owner), create=True, size=max(size, 64), track=False
+    )
+
+
+def _owner_of(name: str) -> int | None:
+    try:
+        return int(name[len(PREFIX) :].split("_", 1)[0])
+    except ValueError:
+        return None
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # another user's process
+        return True
+    return True
+
+
+def sweep(shm_dir: Path = SHM_DIR) -> list[str]:
+    """Unlink the row blocks whose owner is gone (a learner killed by SIGKILL, which
+    unlinks nothing) and return their names. A live learner's blocks stay."""
+    gone: list[str] = []
+    # No /dev/shm (not Linux): nothing to sweep. On Windows `os.kill(pid, 0)` would
+    # terminate `pid`, and a block goes with its last handle anyway.
+    if os.name == "nt" or not shm_dir.is_dir():
+        return gone
+    for p in shm_dir.glob(PREFIX + "*"):
+        pid = _owner_of(p.name)
+        if pid is None or pid <= 0 or _alive(pid):
+            continue
+        with contextlib.suppress(FileNotFoundError):
+            p.unlink()
+            gone.append(p.name)
+    return gone
 
 
 def offsets(rb: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -222,16 +280,17 @@ def _layout(
 
 
 def gather_to_shm(
-    refs: Sequence[tuple[Chunk, int]], *, threads: int = 1
+    refs: Sequence[tuple[Chunk, int]], *, threads: int = 1, owner: int | None = None
 ) -> tuple[shared_memory.SharedMemory, dict[str, Any]]:
     """`batch_to_shm(gather(refs))` in one copy: each chunk's rows go straight to
     their places in a new block (the same bytes, the same layout), with no row
     batch in between, split over `threads` threads by chunk (their rows' places
     are disjoint). It only reads the chunks, and numpy drops the GIL while it
     copies, so it can run in a thread while the chunks' owner goes on (the
-    learner's cut, S1-cut). The caller owns the block (`close`, `unlink`)."""
+    learner's cut, S1-cut). The caller owns the block (`close`, `unlink`); its
+    name carries `owner` (`shm_name`)."""
     if not refs:
-        return batch_to_shm(C.empty_row_batch())
+        return batch_to_shm(C.empty_row_batch(), owner=owner)
     n = len(refs)
     groups: dict[int, tuple[Chunk, list[int], list[int]]] = {}
     for pos, (ch, i) in enumerate(refs):
@@ -275,7 +334,7 @@ def gather_to_shm(
             plans.append((ch, [(slice(i0, i1), slice(p0, p1))]))
         else:
             plans.append((ch, _blocks(ch, idx, pos, like)))
-    shm = shared_memory.SharedMemory(create=True, size=max(size, 64), track=False)
+    shm = _new_block(size, owner)
 
     def copy(group: list[tuple[Chunk, list[tuple[Any, Any]]]]) -> None:
         views = {f.name: shm_view(shm, layout[f.name]) for f in FIELDS}
@@ -307,22 +366,24 @@ def gather_to_shm(
 
 
 def batch_to_shm(
-    rb: Mapping[str, np.ndarray],
+    rb: Mapping[str, np.ndarray], *, owner: int | None = None
 ) -> tuple[shared_memory.SharedMemory, dict[str, Any]]:
-    """`rb` in one `SharedMemory` block; the caller owns it (`close`, `unlink`)."""
+    """`rb` in one `SharedMemory` block; the caller owns it (`close`, `unlink`); its
+    name carries `owner` (`shm_name`)."""
     spec = {}
     for f in FIELDS:
         x = np.asarray(rb[f.name])
         spec[f.name] = (x.shape, x.dtype, x)
-    return to_shm(spec)
+    return to_shm(spec, name=shm_name(owner))
 
 
 def take_to_shm(
-    ch: Chunk, idx: Sequence[int] | np.ndarray
+    ch: Chunk, idx: Sequence[int] | np.ndarray, *, owner: int | None = None
 ) -> tuple[shared_memory.SharedMemory, dict[str, Any]]:
     """Rows `idx` of `ch` in a new `SharedMemory` block, laid out as `batch_to_shm`
     lays out `take(ch, idx)`: each field's rows go straight into the block, with
-    no row batch in between. The caller owns the block (`close`, `unlink`)."""
+    no row batch in between. The caller owns the block (`close`, `unlink`); its
+    name carries `owner` (`shm_name`)."""
     idx = np.asarray(idx, np.int64)
     sel = {axis: _ranges(o[idx], o[idx + 1] - o[idx]) for axis, o in ch.off.items()}
     src = {f.name: (ch.rb[f.name], idx if f.axis == "row" else sel[f.axis]) for f in FIELDS}
@@ -332,7 +393,7 @@ def take_to_shm(
         shape = (len(ix), *x.shape[1:])
         layout[name] = (off, shape, x.dtype.str)
         off += -(-int(np.prod(shape, dtype=np.int64)) * x.dtype.itemsize // 64) * 64
-    shm = shared_memory.SharedMemory(create=True, size=max(off, 64), track=False)
+    shm = _new_block(off, owner)
     try:
         for name, (x, ix) in src.items():
             v = shm_view(shm, layout[name])

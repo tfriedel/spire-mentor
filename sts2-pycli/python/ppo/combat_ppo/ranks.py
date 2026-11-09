@@ -57,11 +57,14 @@ from . import nets
 
 def to_shm(
     spec: dict[str, tuple[tuple[int, ...], Any, np.ndarray | list[np.ndarray]]],
+    *,
+    name: str | None = None,
 ) -> tuple[shared_memory.SharedMemory, dict[str, tuple[int, tuple[int, ...], str]]]:
     """One `SharedMemory` block holding every array of `spec`.
 
     `spec[name] = (shape, dtype, fill)`: `fill` is an array, or a list of
     arrays concatenated along axis 0. The caller owns the block (`unlink`).
+    `name` names it (default: a random name).
     """
     layout: dict[str, tuple[int, tuple[int, ...], str]] = {}
     off = 0
@@ -69,7 +72,7 @@ def to_shm(
         d = np.dtype(dt)
         layout[k] = (off, tuple(int(x) for x in shape), d.str)
         off += -(-int(np.prod(shape, dtype=np.int64)) * d.itemsize // 64) * 64
-    shm = shared_memory.SharedMemory(create=True, size=max(off, 64), track=False)
+    shm = shared_memory.SharedMemory(name=name, create=True, size=max(off, 64), track=False)
     for k, (_shape, _dt, fill) in spec.items():
         v = shm_view(shm, layout[k])
         if isinstance(fill, list):

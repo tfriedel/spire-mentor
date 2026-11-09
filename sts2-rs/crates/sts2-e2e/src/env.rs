@@ -195,6 +195,56 @@ pub fn new_run_at(seed: i64, ascension: u8) -> RunManager {
         sts2_core::potions::CharacterId::Ironclad,
         ascension,
     );
+    finish_run(rm, gv, master_seed)
+}
+
+/// The game's seed alphabet (`SeedHelper._characters`: no `O`, no `I`).
+const GAME_SEED_ALPHABET: &str = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/// A typed game seed as the game reads it (`SeedHelper.CanonicalizeSeed`:
+/// upper-cased, `O`→`0`, `I`→`1`, trimmed).
+///
+/// # Errors
+///
+/// The seed is empty, or has a character outside the game's alphabet.
+pub fn canonical_game_seed(seed: &str) -> Result<String, String> {
+    let s = sts2_core::canonicalize_seed(seed);
+    if s.is_empty() {
+        return Err("the seed is empty".to_string());
+    }
+    if let Some(c) = s.chars().find(|c| !GAME_SEED_ALPHABET.contains(*c)) {
+        return Err(format!(
+            "seed character '{c}' is not in the game's alphabet"
+        ));
+    }
+    Ok(s)
+}
+
+/// [`new_run_at`] for a game seed string: the run the v0.111.0 game deals for
+/// `seed` (canonicalised, then `RunRngSet`'s XxHash64), with the same setup.
+///
+/// # Errors
+///
+/// See [`canonical_game_seed`].
+pub fn new_run_from_game_seed(seed: &str, ascension: u8) -> Result<RunManager, String> {
+    let canonical = canonical_game_seed(seed)?;
+    ensure_engine_installed();
+    let gv: sts2_core::GameVersion = GAME_VERSION.parse().expect("v0.111.0 is a known build");
+    let master_seed = gv.run_seed_hash(&canonical);
+    // The i32 view `sts2_rs.RunManager(string_seed=...)` constructs with.
+    #[allow(clippy::cast_possible_truncation)]
+    let effective_seed = master_seed as i32;
+    let rm = sts2_content::run_callbacks::new_run_manager_for_character_with_ascension(
+        effective_seed,
+        sts2_core::potions::CharacterId::Ironclad,
+        ascension,
+    );
+    Ok(finish_run(rm, gv, master_seed))
+}
+
+/// The campaign's run setup shared by [`new_run_at`] and
+/// [`new_run_from_game_seed`].
+fn finish_run(rm: RunManager, gv: sts2_core::GameVersion, master_seed: u64) -> RunManager {
     let mut rm = rm
         .with_game_version(gv)
         .with_run_seed(master_seed)

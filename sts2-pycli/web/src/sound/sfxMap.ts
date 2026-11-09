@@ -199,6 +199,40 @@ export function resolveMonsterAttack(
   return m.defaultAttack ?? attacks[0]?.event ?? fallback;
 }
 
+/**
+ * The sound of one monster MOVE, any kind — the attack, but also the buff,
+ * the debuff, the summon (Axebot's `BOOT_UP_MOVE` is its `axebot_buff`).
+ *
+ * With the engine log, the workbench knows exactly which move fired
+ * (`monster_move` rows carry its state id), so this picks that move's own
+ * sound instead of guessing from the intent's hit count; before it existed,
+ * 78 of the 259 mapped moves — every non-attack one — could never be heard.
+ * The id join is the same one `effects/bindings.ts::ownerKeyCandidates`
+ * makes for the VFX: the engine writes `THRASH` where most C# states are
+ * `THRASH_MOVE` but some are bare (`SWING_1`), so both spellings are tried.
+ *
+ * Without an id that resolves (no log, or one of the handful of engine ids
+ * that RENAME the C# state), it falls back to the intent the move was shown
+ * with: an attack goes through `resolveMonsterAttack` exactly as before, and
+ * any other intent is voiced only when the monster has exactly one move of
+ * that kind. Otherwise `undefined` — silence beats a wrong sound.
+ */
+export function resolveMonsterMove(
+  m: MonsterSfx | undefined,
+  moveId: string | undefined,
+  intent: { type: string; hits?: number } | undefined,
+  fallback: string,
+): string | undefined {
+  if (m && moveId) {
+    const exact = m.moves.find((mv) => mv.name === `${moveId}_MOVE`) ?? m.moves.find((mv) => mv.name === moveId);
+    if (exact) return exact.event;
+  }
+  if (!intent) return moveId ? undefined : resolveMonsterAttack(m, undefined, fallback);
+  if (intent.type === "Attack") return resolveMonsterAttack(m, intent, fallback);
+  const same = (m?.moves ?? []).filter((mv) => mv.intent === intent.type);
+  return same.length === 1 ? same[0].event : undefined;
+}
+
 /** One memoised fetch per map URL (one per game build). */
 const cached = new Map<string, Promise<SfxMap>>();
 

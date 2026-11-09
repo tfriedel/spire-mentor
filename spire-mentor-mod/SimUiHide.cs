@@ -61,7 +61,7 @@ internal static class SimUiHide
                 }
                 HiddenByUs.Clear();
             }
-            GD.Print($"[SpireMentor] UI {(Hidden ? "hidden (Ctrl+H or the pill shows it)" : "shown")}");
+            GD.Print($"[SpireMentor] UI {(Hidden ? "hidden (Ctrl+H or the Spire Mentor badge shows it)" : "shown")}");
         }
         catch (Exception ex)
         {

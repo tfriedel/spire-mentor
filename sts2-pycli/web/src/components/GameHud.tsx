@@ -1,5 +1,6 @@
-import { assetUrl, type CombatState } from "../api";
+import { assetUrl, type CombatState, type Score } from "../api";
 import RelicTray from "./RelicTray";
+import PotionTray from "./PotionTray";
 import { characterKey } from "../characters";
 
 /**
@@ -15,8 +16,10 @@ import { characterKey } from "../characters";
  * live in the workbench chrome row OUTSIDE this band — the real game's bar
  * has no such buttons.
  *
- * Potion sockets are display-only (tooltip), exactly like the old strip's
- * potion chips; in-combat Use/Discard stays on the Board's PotionTray.
+ * The potion belt (PotionTray) is the game's: in a live fight its sockets
+ * open Use / Discard and carry the AI's mark; elsewhere they only name the
+ * potion. (It used to be display-only here, with a second, clickable copy
+ * inside the combat scene — two belts, and the one the game has did nothing.)
  *
  * Icon sourcing note (why three of these are drawn, not sprited): the PCK has
  * no extracted art for the band's heart, coin or map scroll. The nearest
@@ -91,16 +94,23 @@ export default function GameHud({
   state,
   onOpenMap,
   onOpenDeck,
+  scores,
+  onUsePotion,
+  onDiscardPotion,
 }: {
   state: CombatState;
   onOpenMap?: () => void;
   onOpenDeck?: () => void;
+  /** The fight's advice rows, for a socket's win number (engine numbers on). */
+  scores?: Score[];
+  onUsePotion?: (slot: number) => void;
+  onDiscardPotion?: (slot: number) => void;
 }) {
   const p = state.player;
   if (!p || p.hp == null) return null;
   const slug = characterKey(p.name);
   const charIcon = slug ? assetUrl(`ui/top_panel/character_icon_${slug}.png`) : null;
-  const potions = (p.potions ?? []).filter(Boolean);
+  const potions = p.potions ?? [];
   // Show every socket the belt has (empty ones read as dark recessed slots in
   // the tray, like the game); fall back to just the owned potions when the
   // slot count is unknown.
@@ -146,18 +156,8 @@ export default function GameHud({
         </span>
       )}
       {socketCount > 0 && (
-        <span className="gs-hud-potions" data-testid="hud-potions">
-          {Array.from({ length: socketCount }, (_, i) => {
-            const pt = potions[i];
-            return (
-              <span key={i} className="gs-hud-socket" role="img"
-                aria-label={pt ? pt.name : "empty potion slot"}
-                title={pt ? (pt.description ? `${pt.name}: ${pt.description}` : pt.name) : "empty potion slot"}>
-                {pt?.image && <img src={pt.image} alt="" />}
-              </span>
-            );
-          })}
-        </span>
+        <PotionTray potions={potions} slots={socketCount} scores={scores}
+          onUse={onUsePotion} onDiscard={onDiscardPotion} />
       )}
       {p.relics && p.relics.length > 0 && <RelicTray relics={p.relics} skin="hud" />}
       <span className="gs-hud-right">

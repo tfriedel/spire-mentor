@@ -2,7 +2,9 @@
 
 Spire Mentor rates your options while you play: a score on every card in hand, a ranked list of the moves the AI considered, a win-chance bar, and the map route it likes. Combat advice comes from a Monte Carlo tree search over a full simulation of the fight; map, card-reward, shop, event and rest-site advice comes from a trained run policy. It can also take a single decision for you, or play on by itself until you stop it.
 
-It has two styles, switched with the toolbar's [b]Hints / Coach[/b] button:
+[b]Instinct[/b] (new): for Ironclad on game v0.111.0 the advice comes by default from one trained network that makes every decision of the run, fights included, without a search. Switch between Search and Instinct in the badge or with [b]Shift+F8[/b].
+
+It has two styles, picked in the badge's [b]Mode[/b] switch:
 [list]
 [*][b]Hints[/b] (the default): its opinion while you decide: card scores, ranked moves, the win-chance bar and map markers. Each can be switched off in the settings.
 [*][b]Coach[/b]: nothing shows before you act, so you play your own game. Press [b]F5[/b] to peek at its pick for the next decision. After a turn that cost HP or win chance, or a choice it clearly disagrees with, a small note shows what it would have done and why.
@@ -13,7 +15,7 @@ It has two styles, switched with the toolbar's [b]Hints / Coach[/b] button:
 [h2]Requirements[/h2]
 [list]
 [*][b]Windows only.[/b] The AI runs as a bundled Windows program (SimAdvisor.exe). On Mac or Linux the mod loads but the coach cannot start.
-[*][b]Game builds v0.107.1 (stable) and v0.111.0 (public beta).[/b] One download supports both. The mod hooks into game internals, so a game update can break it until a new version is out. If the game has updated and things misbehave, disable the mod and wait for an update.
+[*][b]Game builds v0.107.1 (stable) and v0.111.0 (public beta).[/b] One download supports both. A game update can break the mod until a new version is out; if things misbehave after one, disable the mod and wait for an update.
 [*][b]BaseLib[/b] (by Alchyr), which Steam installs alongside this mod as a required item.
 [/list]
 
@@ -21,6 +23,7 @@ It has two styles, switched with the toolbar's [b]Hints / Coach[/b] button:
 [list]
 [*][b]F1[/b] help: mode, keys, file locations
 [*][b]F8[/b] AI coach on / off (from Autopilot: take the controls back)
+[*][b]Shift+F8[/b] advisor brain: Search / Instinct
 [*][b]F5[/b] Coach style: peek at the AI's pick for just the next decision
 [*][b]F6[/b] let the AI take just this one decision
 [*][b]Shift+F6[/b] co-op: an AI partner that is waiting for you plays its turn now
@@ -28,24 +31,26 @@ It has two styles, switched with the toolbar's [b]Hints / Coach[/b] button:
 [*][b]Shift+F7[/b] autobattle: the AI plays the fights, you make every run-level decision (card rewards, map, shops, rest sites, events), with a note at each one on what changed since the last. Press again to stop.
 [*][b]F4[/b] show / hide the HUD
 [*][b]Ctrl+L[/b] action log: what was played, and what was advised at the time
-[*][b]Ctrl+H[/b] hide every panel down to the toolbar pill for a quick look (again, or click the pill, to bring them back)
-[*][b]F9 / F10[/b] game speed down / up
+[*][b]Ctrl+H[/b] hide every panel for a quick look (again, or click the badge, to bring them back)
+[*][b]F9 / F10[/b] game speed down / up (1x to 8x)
 [*][b]Ctrl+Z[/b] undo to the start of this combat turn
 [*][b]Ctrl+Shift+Z[/b] rewind to the start of this room
 [*][b]Ctrl+Shift+C[/b] copy this position, to paste into the workbench
 [*][b]Ctrl+Shift+B[/b] report a bug (see below)
 [/list]
-The [b]Spire Mentor[/b] strip in the top-left (drag it by its ⠿ grip) does the same with the mouse: the coach and AI controls, game speed, and the [b]Rewind[/b], [b]Panels[/b] and [b]Workbench[/b] menus.
+The [b]Spire Mentor[/b] badge under the right end of the top bar does the same with the mouse: click it for the mode, the brain, the AI controls, game speed and the [b]Rewind[/b], [b]Panels[/b] and [b]Workbench[/b] menus. Drag its grip to move it.
+
+The coach's panels open in [b]their own window[/b] around the game, so they never cover the board. Close that window to put them back in the game (or untick it in the Panels menu).
 
 Settings: [b]Panels → Settings[/b] on the toolbar (works mid-run), or Main menu → Options → Mod Configuration → SpireMentor.
 
 [h2]Co-op[/h2]
 The coach also works in co-op runs, as host or as a client, and your teammates do not need the mod. It advises you only, but its combat search sees the whole party: your teammates' cards, block, powers and orbs, and what their cards do to you. Undo and rewind are off in co-op, since they would roll back everyone's game.
 
-[b]AI partners (new, experimental):[/b] play co-op with AI teammates instead of, or next to, your friends. Each partner takes a seat of its own, with its own character, deck and decisions, and plays it with its own copy of the coach.
+[b]AI partners (new, experimental):[/b] play co-op with AI teammates instead of, or next to, your friends. Each partner plays its own seat, character and deck with its own copy of the coach.
 [list]
 [*]Multiplayer → Host shows a [b]With AI partners[/b] entry: a co-op run on your PC alone.
-[*]A lobby you host gets [b]Add AI partner[/b] / [b]Remove AI partner[/b] tiles (up to three partners). Friends join as usual and play next to the AI. They do not need the mod; their game shows the partner without a name.
+[*]A lobby you host gets [b]Add AI partner[/b] / [b]Remove AI partner[/b] tiles (up to three). Friends join as usual and do not need the mod.
 [*][b]Click an AI partner in the lobby[/b] to change its character (right-click goes back). Each partner seat remembers its last pick.
 [*]Save and continue work: loading the run brings the partners back.
 [*]When a partner's best move needs your setup (your Vulnerable on its target, your block on it), it waits up to 10 seconds for it; the settings ([i]Co-op AI partners[/i]) change that (0-60 s) and can make it wait for your first play, or until you end your turn, before it moves.
@@ -54,12 +59,11 @@ The coach also works in co-op runs, as host or as a client, and your teammates d
 Each partner runs one more advisor process while the run lasts, so expect more CPU use. It is new: if a partner gets stuck or acts strangely, please send a bug report (Ctrl+Shift+B).
 
 [h2]The workbench[/h2]
-The toolbar's [b]Workbench → Open workbench[/b] opens a page in your browser that follows your run as you play: every decision with what the AI advised at the time, regret reviews and search trees for any past step, the run tree (click a save point to rewind the real game), live search over the board, replays and a combat sandbox. [b]Workbench → Copy state[/b] (or Ctrl+Shift+C) puts the current position on the clipboard; paste it into the workbench's [b]Import state[/b] to try other lines. It is served by the coach on [i]127.0.0.1:8079[/i] and runs entirely on your machine.
+The toolbar's [b]Workbench → Open workbench[/b] opens a page in your browser that follows your run as you play: every decision with what the AI advised, regret reviews and search trees, the run tree (click a save point to rewind the real game), replays and a combat sandbox. [b]Workbench → Copy state[/b] (or Ctrl+Shift+C) puts the current position on the clipboard; paste it into the workbench's [b]Import state[/b] to try other lines. It runs entirely on your machine ([i]127.0.0.1:8079[/i]).
 
 [h2]What it does on your machine[/h2]
 [list]
 [*]When the coach is on, the mod starts the bundled [b]SimAdvisor.exe[/b] in the background and talks to it over a local connection ([i]127.0.0.1:9002[/i]). Nothing leaves your computer unless you send a bug report. The exe is not code-signed, so Windows SmartScreen may ask about it the first time.
-[*]The first start takes a few seconds while the advisor loads its networks.
 [*][b]Autopilot mode[/b] (off by default) lets an AI play whole runs on its own. It turns tutorials off and makes every character selectable on your [b]modded[/b] profile. The game keeps modded progress separate from your normal save, so your unmodded profile is never touched. Advisor mode and F6/F7 never change your save.
 [/list]
 
@@ -68,13 +72,13 @@ Config: [i]%LOCALAPPDATA%\SpireMentor\SpireMentor.conf[/i]
 Logs: [i]%LOCALAPPDATA%\SpireMentor\[/i]
 
 [h2]Documentation[/h2]
-How the AI works, how it was trained, benchmarks and screenshots: [url=https://tfriedel.github.io/spire-mentor/index.html]tfriedel.github.io/spire-mentor[/url]
+How the AI works and how well it plays: [url=https://tfriedel.github.io/spire-mentor/index.html]tfriedel.github.io/spire-mentor[/url]
 
 [h2]Source and license[/h2]
 Open source under the MIT license: [url=https://github.com/tfriedel/spire-mentor]github.com/tfriedel/spire-mentor[/url].
 
 [h2]Reporting a bug[/h2]
-Press [b]Ctrl+Shift+B[/b] (or [b]Panels → Report a bug[/b]) the moment something goes wrong, say what happened in one line, and press [b]Send report[/b]. The report carries the position you were in, the game's save at the start of the room, the coach's log of the run and the last lines of the mod, game and coach logs (your Windows user name is removed from file paths), so the bug can be replayed exactly. Nothing is sent until you press Send. You get a link on your clipboard; paste it into a comment here or a GitHub issue. [b]Save to file only[/b] writes the same report to [i]%LOCALAPPDATA%\SpireMentor\bugreports\[/i] and sends nothing. The workbench's [b]🐞 Report[/b] button does the same from the browser.
+Press [b]Ctrl+Shift+B[/b] (or [b]Panels → Report a bug[/b]) the moment something goes wrong, say what happened in one line, and press [b]Send report[/b]. The report carries the position, the room's save, the coach's run log and the last lines of the logs (your Windows user name is removed), so the bug can be replayed exactly. Nothing is sent until you press Send. You get a link on your clipboard; paste it into a comment here or a GitHub issue. [b]Save to file only[/b] writes the same report to [i]%LOCALAPPDATA%\SpireMentor\bugreports\[/i] and sends nothing.
 
 Spire Mentor is an unofficial fan project, not affiliated with or endorsed by Mega Crit. Slay the Spire 2 and the art and sound shown in the workbench are © Mega Crit.
 

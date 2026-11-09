@@ -4,8 +4,8 @@ import { describe, it, expect } from "vitest";
 import Board from "../Board";
 import fixture from "./fixture-step.json";
 import type { Step } from "../../api";
-import { GROUND_Y, SCENE_CX, cameraFor, fitScene } from "../../scene";
-import { RIG_BOUNDS } from "../../rigBounds";
+import { SCENE_CX, SCENE_CY, cameraFor, fitScene } from "../../scene";
+import { CRAB_ROOT_DX, CRAB_ROOT_Y, crabArmMount } from "../crabMount";
 
 /**
  * The Kaiser Crab boss is a ROOM, not a combatant.
@@ -44,25 +44,43 @@ describe("Kaiser Crab boss layout", () => {
     }
   });
 
-  it("frames the crab to the TOP of the stage, not to the ground line", () => {
-    // The rig hangs off the combat-room background, so it is composed to the
-    // frame: in the real game there is no room art above the boss at all. Its
-    // silhouette's top therefore lands at the top of the stage, and the ground
-    // line has nothing to do with where it is drawn.
+  it("mounts the rig where the game's background does, through the camera", () => {
+    // kaiser_crab_boss_background.tscn puts the setup scene at (-1029, -544)
+    // and the setup scene its skeleton at (979, 450): the root is (-50, -94)
+    // from %BgContainer's origin, which the encounter camera (0.75, Down*35)
+    // zooms with the room. Not flushed to the stage top, which is what drew
+    // the crab small and low.
+    expect(CRAB_ROOT_DX).toBe(23 - 50);
+    expect(CRAB_ROOT_Y).toBe(SCENE_CY - 94);
     const c = boardWith([crab("left", 0, "Crusher"), crab("right", 1, "Rocket")]);
     const anchor = c.querySelector(".gs-crab-group")!.parentElement!;
     const stage = c.querySelector<HTMLElement>(".gs-stage-scale")!;
     // jsdom reports 0-size boxes, so Board falls back to its seeded stage box.
-    const box = { w: stage.offsetWidth || 1600, h: stage.offsetHeight || 800 };
-    const fit = fitScene(box.w, box.h);
+    const fit = fitScene(stage.offsetWidth || 1600, stage.offsetHeight || 800);
     const cam = cameraFor(["/assets/monster_rigs/kaiser_crab/kaiser_crab"]);
-    const pxPerUnit = 0.5 * fit.k * cam.scale;
-    const rigTop = RIG_BOUNDS.kaiser_crab.y + RIG_BOUNDS.kaiser_crab.h;
-    expect(parseFloat(anchor.style.top)).toBeCloseTo(rigTop * pxPerUnit, 0);
-    expect(parseFloat(anchor.style.left)).toBeCloseTo(fit.x(0), 0);
-    // ...which is well above the ground line the fighters stand on.
-    const groundStageY = fit.y(540 + (GROUND_Y - 540) * cam.scale + cam.offsetY);
-    expect(parseFloat(anchor.style.top)).toBeLessThan(groundStageY);
+    const camY = (y: number) => SCENE_CY + (y - SCENE_CY) * cam.scale + cam.offsetY;
+    expect(parseFloat(anchor.style.left)).toBeCloseTo(fit.x(CRAB_ROOT_DX * cam.scale), 0);
+    expect(parseFloat(anchor.style.top)).toBeCloseTo(fit.y(camY(CRAB_ROOT_Y)), 0);
+  });
+
+  it("stands each arm on its own encounter marker, with the game's bar width", () => {
+    // Crusher and Rocket are creatures on kaiser_crab_boss.tscn's markers;
+    // NHealthBar sizes each bar to its creature's Bounds width + 24.
+    expect(crabArmMount("left")).toMatchObject({ dx: -824, y: 736, hpW: 457 + 24, intentH: 580 });
+    expect(crabArmMount("right")).toMatchObject({ dx: 896, y: 712, hpW: 431 + 24, intentH: 450 });
+    const c = boardWith([crab("left", 0, "Crusher"), crab("right", 1, "Rocket")]);
+    const anchor = c.querySelector(".gs-crab-group")!.parentElement!;
+    const stage = c.querySelector<HTMLElement>(".gs-stage-scale")!;
+    const fit = fitScene(stage.offsetWidth || 1600, stage.offsetHeight || 800);
+    const cam = cameraFor(["/assets/monster_rigs/kaiser_crab/kaiser_crab"]);
+    const left = c.querySelector<HTMLElement>("[data-crab-arm=left]")!;
+    const right = c.querySelector<HTMLElement>("[data-crab-arm=right]")!;
+    const rootLeft = parseFloat(anchor.style.left);
+    // Each readout is centred on its marker (plus its Bounds' own centre).
+    expect(rootLeft + parseFloat(left.style.left)).toBeCloseTo(fit.x((-824 + 8.5) * cam.scale), 0);
+    expect(rootLeft + parseFloat(right.style.left)).toBeCloseTo(fit.x((896 + 10.5) * cam.scale), 0);
+    const bar = left.querySelector<HTMLElement>(".gs-hpwrap")!;
+    expect(parseFloat(bar.style.getPropertyValue("--gs-hpw"))).toBeCloseTo(481 * fit.k * cam.scale, 0);
   });
 
   it("centres the player, because the claws come in from both sides", () => {
@@ -74,11 +92,10 @@ describe("Kaiser Crab boss layout", () => {
     const stage = c.querySelector<HTMLElement>(".gs-stage-scale")!;
     const player = c.querySelector<HTMLElement>(".gs-side-player")!;
     expect(parseFloat(player.style.left)).toBeCloseTo((stage.offsetWidth || 1600) / 2, 0);
-    // Each claw's readout stands on the ground line under it, not up on the
-    // claw: the two arms are ordinary creature nodes down in the room.
+    // One readout per arm, each hung from its own feet like any creature.
     const readouts = [...c.querySelectorAll<HTMLElement>(".gs-crab-group > div")];
     expect(readouts).toHaveLength(2);
-    for (const r of readouts) expect(r.style.transform).toContain("-100%");
+    for (const r of readouts) expect(r.style.transform).toBe("translateX(-50%)");
   });
 
   it("keeps one targetable, named overlay per claw", () => {

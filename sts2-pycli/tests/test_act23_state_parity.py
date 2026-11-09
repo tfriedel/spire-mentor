@@ -301,6 +301,104 @@ def test_checkpoint_round_trip(tmp_path) -> None:
     assert resumed.result.terminal in ("max_steps", "game_over_match")
 
 
+@pytest.mark.slow
+@pytest.mark.oracle
+def test_an_a10_run_walks_on_to_the_second_boss_in_lockstep() -> None:
+    """#1181 H1 + H2: after the first act-3 boss at A10 the headless returns to
+    the map (it used to call ``EnterNextAct``, so the run stopped at
+    ``phase: cs='event' rs='map'``), and its map lists the second boss in
+    ``rows`` (it used to stop on ``map.nodes: only_rs=[(3, 15)]``). Seed 1015
+    stalled at (3, 14) before; it must now end at the second boss in step."""
+    import sts2_client
+
+    prev = sts2_client.GAME_VERSION
+    sts2_client.set_game_version("v0.111.0")
+    try:
+        run = a23.run_one_invincible("1015", "Ironclad", ascension=10, max_steps=3000)
+    finally:
+        sts2_client.set_game_version(prev)
+    assert run.result.divergence is None, run.result.divergence
+    assert run.result.terminal == "game_over_match", run.result.terminal
+    assert run.max_act == 3
+
+
+#: Monsters whose ENGINE move log differs from C#'s StateLog (#1181 lockstep
+#: check), so a log restored from C# rightly differs from the engine's own:
+#: the revive / death / enrage moves are forced (unlogged) in C# but logged by
+#: the engine (TestSubject RESPAWN, the Decimillipede segments' DEAD, the
+#: Queen's ENRAGE_MOVE), and a summoned EyeWithTeeth / Parafright carries one
+#: entry fewer. CeremonialBeast's STUN is the engine's real state, whose
+#: follow-up C# sends as the resume.
+_ENGINE_LOG_DIVERGES = {
+    "TestSubject",
+    "DecimillipedeSegmentFront",
+    "DecimillipedeSegmentMiddle",
+    "DecimillipedeSegmentBack",
+    "Queen",
+    "EyeWithTeeth",
+    "Parafright",
+    "CeremonialBeast",
+}
+
+
+@pytest.mark.slow
+@pytest.mark.oracle
+def test_the_csharp_move_log_restores_the_engines_own(monkeypatch) -> None:
+    """#1181: at every lockstep combat step of an A10 run, each living enemy's
+    C# ``ai`` object (``StateLog`` ids, ``performed_first_move``,
+    ``performed``, a synthetic stun's ``forced_next``), put on the engine's own
+    dict, rebuilds the engine's own move log, current move and queued move.
+    Only the monsters in ``_ENGINE_LOG_DIVERGES`` may differ."""
+    import sts2_client
+    import sts2_rs
+
+    tally = {"checked": 0, "unexpected": []}
+    orig = a23.full_state_divs
+
+    def check(g, r):
+        cs_state, divs = orig(g, r)
+        combat = r.combat_state() if cs_state else None
+        if combat is None or divs:
+            return cs_state, divs
+        d = sts2_rs.state_to_dict(combat)
+        cs_alive = sorted(
+            (m for m in cs_state.get("monsters") or [] if m.get("alive")), key=lambda m: m["uid"]
+        )
+        rs_alive = [i for i, e in enumerate(d["encounter"]) if not e.get("is_dead") and e.get("ai")]
+        if len(cs_alive) != len(rs_alive) or any(m.get("ai") is None for m in cs_alive):
+            return cs_state, divs
+
+        def pick(e):
+            return (e["ai"]["log"], e.get("move_state"), e["ai"].get("forced_next"))
+
+        want = [pick(d["encounter"][i]) for i in rs_alive]
+        for i, m in zip(rs_alive, cs_alive, strict=True):
+            d["encounter"][i]["ai"] = {k: v for k, v in m["ai"].items()}
+        back = sts2_rs.state_to_dict(sts2_rs.state_from_dict(d))
+        for j, i in enumerate(rs_alive):
+            tally["checked"] += 1
+            got = pick(back["encounter"][i])
+            kind = d["encounter"][i].get("kind")
+            if got != want[j] and kind not in _ENGINE_LOG_DIVERGES:
+                tally["unexpected"].append((kind, want[j], got))
+        return cs_state, divs
+
+    monkeypatch.setattr(a23, "full_state_divs", check)
+    prev = sts2_client.GAME_VERSION
+    sts2_client.set_game_version("v0.111.0")
+    try:
+        run = a23.run_one_invincible(
+            "1049", "Ironclad", ascension=10, max_steps=3000, full_state=True
+        )
+    finally:
+        sts2_client.set_game_version(prev)
+    assert run.result.terminal == "game_over_match", run.result.terminal
+    assert not tally["unexpected"], tally["unexpected"][:5]
+    # Steps with a full-state split are skipped (the hand-affliction class of
+    # #1188 splits act 2 of this seed), so ~900 enemy states are checked.
+    assert tally["checked"] > 500, tally["checked"]
+
+
 # --------------------------------------------------------------------------- #
 # u8 option-index cap: Rust rejects a pick past option 255
 # --------------------------------------------------------------------------- #

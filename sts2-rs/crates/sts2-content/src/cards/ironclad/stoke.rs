@@ -40,7 +40,10 @@ pub(crate) fn play_stoke(state: &mut CombatState, _t: Option<CreatureUid>) -> Ef
     // current character if set, else Ironclad — defensive: this card
     // can only be played by Ironclad anyway.
     let character = state.player.character.unwrap_or(CharacterId::Ironclad);
-    let upgrade_all = current_upgraded(state);
+    // Exhausting the hand can down the last enemy (Charon's Ashes); then
+    // `CardCmd.Upgrade` is a no-op (`CombatManager.IsEnding`,
+    // CardCmd.cs:267-270, GH #1150).
+    let upgrade_all = current_upgraded(state) && !sts2_core::combat_loop::combat_is_ending(state);
     let uids = crate::cards::colorless::create_character_cards_into_arena(
         state, character, count, None, false,
     );

@@ -608,16 +608,17 @@ def test_f9_sees_every_step_at_rate_one() -> None:
     assert t.counts["f9/violations"] == 0, env.f9_violations
 
 
-def test_f9_tolerated_states_are_counted_not_violations() -> None:
+def test_f9_instanced_powers_are_no_violation() -> None:
     """Seed 162,000,201 (pinned, random actor) holds two Toric Toughness instances (a power
-    C# instances). Engines before #1166 flag them and the checker tolerates them; from
-    #1166 on the engine's own check allows them. Either way they are no violation, and
-    every tolerated failure is counted."""
+    C# instances). Engines before #1166 flagged them and the checker tolerated them; the
+    engine's own check allows them now, so the strict checker sees no violation and
+    nothing is tolerated."""
     seed = SMOKE + 201
     env = pinned_env(seed, EnvConfig(f9_p=1.0))
     _, t = play(env, random_actor(seed))
     assert t.counts["f9/violations"] == 0, env.f9_violations
-    assert t.counts["f9/tolerated"] == sum(env.f9.tolerated.values())
+    assert t.counts["f9/tolerated"] == 0
+    assert dict(env.f9.tolerated) == {}
 
 
 def test_f9_violations_are_counted_and_kept() -> None:

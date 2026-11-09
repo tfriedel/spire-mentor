@@ -191,6 +191,56 @@ internal sealed class SimAiPartnerChoices
         return state;
     }
 
+    /// <summary>A choose-a-card screen as the host's own (SimScreenAdvice
+    /// DescribeChooseACard): in a fight it carries the partner's board and
+    /// what opened it (Discovery, a potion), so the partner's advisor answers
+    /// it on its fight mirror like the host's; out of a fight (Lead
+    /// Paperweight) it is a deck pick and <c>combat</c> is null.</summary>
+    internal static Dictionary<string, object> ChooseACardState(Player me, IReadOnlyList<CardModel> cards, bool canSkip, object? source)
+    {
+        Dictionary<string, object> state = CardRewardState(me, cards, canSkip, "choose_a_card");
+        state["combat"] = (object?)SimCombatHandler.BuildEmbeddedCombatState(me)!;
+        string? sourceModel = SimCardSelectContext.EntryOf(source);
+        if (sourceModel != null)
+        {
+            state["source"] = "FromChooseACardScreen";
+            state["prompt_key"] = "TO_OBTAIN";
+            state["source_model"] = sourceModel;
+            state["source_kind"] = (object?)SimCardSelectContext.KindOfModel(source)!;
+        }
+        return state;
+    }
+
+    /// <summary>A one-card deck screen (upgrade / transform / remove) as the
+    /// host's card_select (SimCardSelector): the prompt key says what it
+    /// does, which is what both brains read.</summary>
+    internal static Dictionary<string, object> DeckSelectState(Player me, IReadOnlyList<CardModel> cards, CardSelectorPrefs? prefs, string kind)
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        for (int i = 0; i < cards.Count; i++)
+        {
+            Dictionary<string, object?> data = SimStateExtractor.SerializeCard(cards[i]);
+            data["index"] = i;
+            rows.Add(data);
+        }
+        string method = kind.Contains('.') ? kind[(kind.LastIndexOf('.') + 1)..] : kind;
+        var state = new Dictionary<string, object>
+        {
+            [NonCombatBridgeProtocol.TypeField] = NonCombatBridgeProtocol.CardSelectState,
+            ["cards"] = rows,
+            ["min_select"] = 1,
+            ["max_select"] = 1,
+            ["min_count"] = 1,
+            ["max_count"] = 1,
+            ["cancelable"] = prefs?.Cancelable ?? false,
+            ["prompt_key"] = (object?)prefs?.Prompt.LocEntryKey!,
+            ["source"] = method,
+            ["combat"] = (object?)SimCombatHandler.BuildEmbeddedCombatState(me)!,
+        };
+        SimStateExtractor.ApplyEnvelope(state, me.RunState as RunState, me);
+        return state;
+    }
+
     /// <summary>The boss_relic surface (also the chest's) for relics offered
     /// to this partner.</summary>
     internal static Dictionary<string, object> RelicState(Player me, IReadOnlyList<RelicModel> relics, string adviceFor, string? surface)
@@ -253,8 +303,9 @@ internal sealed class SimAiPartnerChoices
         {
             bool canSkip = args.OfType<bool>().LastOrDefault();
             List<CardModel> cards = offered.ToList();
+            object? source = SimCardSelectContext.SourceObjectFrom(args);
             return AskIndex(me, $"chooseacard:{id}", NonCombatBridgeProtocol.CardRewardState,
-                () => CardRewardState(me, cards, canSkip, "choose_a_card"), cards.Count, canSkip ? null : 0, cards, out how);
+                () => ChooseACardState(me, cards, canSkip, source), cards.Count, canSkip ? null : 0, cards, out how);
         }
         if (kind.EndsWith(".FromChooseARelicScreen", StringComparison.Ordinal) &&
             args.OfType<IReadOnlyList<RelicModel>>().FirstOrDefault() is { } relics)
@@ -291,7 +342,26 @@ internal sealed class SimAiPartnerChoices
             // An upgrade is always worth taking (a smith, an event's upgrade);
             // other deck prompts take what they must.
             int count = kind.EndsWith("FromDeckForUpgrade", StringComparison.Ordinal) ? Math.Max(1, minSelect) : minSelect;
-            List<CardModel> picks = Rank(candidates, kind).Take(count).ToList();
+            List<CardModel> pool = candidates.ToList();
+            if (count == 1 && pool.Count > 1)
+            {
+                // One card to upgrade / transform / remove: the advisor's
+                // deck screen (the Smith, Neow's New Leaf), as the host's own
+                // card_select. The partner played these by the hand-written
+                // order below until 0.10.0-beta.7.
+                (SimAskState asked, int? index) = Ask(me, $"deck:{id}", NonCombatBridgeProtocol.CardSelectState,
+                    () => DeckSelectState(me, pool, prefs, kind));
+                if (asked == SimAskState.Pending)
+                {
+                    return null;
+                }
+                if (asked == SimAskState.Answered && index is int i && i >= 0 && i < pool.Count)
+                {
+                    how = $"{pool[i].Id.Entry} (advisor)";
+                    return PlayerChoiceResult.FromMutableDeckCards(new List<CardModel> { pool[i] });
+                }
+            }
+            List<CardModel> picks = Rank(pool, kind).Take(count).ToList();
             how = picks.Count == 0 ? "none" : string.Join(",", picks.Select(c => c.Id.Entry)) + " (heuristic)";
             return PlayerChoiceResult.FromMutableDeckCards(picks);
         }

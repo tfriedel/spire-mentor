@@ -508,6 +508,9 @@ class RustGame(GameBackend):
             self.rm.force_remove_card(name)
         for relic_id in snapshot.relics:
             self.rm.force_add_relic(relic_id)
+        # The live run already made the pickups' choices (Lead Paperweight's
+        # choose screen); left queued, they surface as the run advances.
+        self.rm.debug_clear_pending_choices()
         for card_id, _upgraded in snapshot.deck:
             self.rm.force_add_card(card_id)
         for card_id, upgraded in snapshot.deck:

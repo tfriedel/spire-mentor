@@ -1190,6 +1190,45 @@ impl RunManager {
         self.phase = Phase::Shop;
     }
 
+    /// Build this run's act maps the way a co-op run does: one room fewer
+    /// per act. C# `StandardActMap` sets `_mapLength =
+    /// actModel.GetNumberOfRooms(isMultiplayer) + 1`, and `GetNumberOfRooms`
+    /// subtracts one in multiplayer (`ActModel.cs:261-268`); the map's RNG
+    /// (`act_N_map` off the run seed), its point-type counts and its pruning
+    /// do not depend on the player count. Verified against 19 recorded co-op
+    /// act maps (7 seeds, 2026-11-08): node for node and edge for edge, the
+    /// Spoils Map act included (`apply_spoils_map` sizes from the map).
+    ///
+    /// Shortens every act's `num_rooms` once and rebuilds the current act's
+    /// map from a fresh map stream, so call it right after constructing the
+    /// run and before [`Self::debug_place_on_map`] (which builds later acts
+    /// from `num_rooms` as it advances). Only the map: encounter counts and
+    /// everything else stay single-player.
+    ///
+    /// Reconstruction surface, NOT a parity surface.
+    ///
+    /// # Errors
+    /// When the run has no act list, or its maps are already co-op sized.
+    pub fn debug_use_coop_maps(&mut self) -> Result<(), String> {
+        if self.run_state.acts.is_empty() {
+            return Err("this run has no act list to shorten".to_owned());
+        }
+        if self.run_state.coop_maps {
+            return Err("this run already builds co-op maps".to_owned());
+        }
+        for act in &mut self.run_state.acts {
+            act.num_rooms = act.num_rooms.saturating_sub(1);
+        }
+        self.run_state.coop_maps = true;
+        // The single-player maps already drew from their `act_N_map`
+        // streams; the co-op ones start them fresh, as the game does.
+        self.run_state.rng.map_rngs.clear();
+        if self.run_state.current_act_map.is_some() {
+            self.run_state.generate_map();
+        }
+        Ok(())
+    }
+
     /// Place this run on `act`'s map at `coord` without walking to it.
     ///
     /// The positioning half of a live-state import. The map graph is a pure
@@ -1506,6 +1545,45 @@ impl RunManager {
                     optional,
                 });
         }
+    }
+
+    /// Drop every queued player choice, and every effect deferred until one
+    /// resolves: rewards, choose-a-card screens, card grants, bundles, deck
+    /// removals / upgrades / transforms / enchants, potion swaps, post-pick
+    /// relic grants and curses, and the legacy `pending_choice`.
+    ///
+    /// A run rebuilt from a live screen adds the owned relics with their
+    /// pickup hooks (`force_add_relic` → `dispatch_after_obtained`). The live
+    /// run already resolved those pickups' choices; left queued, they
+    /// surface the first time the rebuilt run advances (Lead Paperweight's
+    /// choose screen in place of Tablet of Truth's next page, GH #1183).
+    ///
+    /// Reconstruction surface, never call on a recorded or parity-pinned run.
+    pub fn debug_clear_pending_choices(&mut self) {
+        let rs = &mut self.run_state;
+        rs.pending_rewards.clear();
+        rs.relic_rewards.clear();
+        rs.pending_card_selects.clear();
+        rs.pending_card_grants.clear();
+        rs.pending_bundles.clear();
+        rs.pending_deck_removals = 0;
+        rs.pending_removal_basic_tag = None;
+        rs.pending_removal_paels_tooth = false;
+        rs.pending_paels_tooth_picks.clear();
+        rs.pending_post_removal_cards.clear();
+        rs.pending_post_removal_hp_loss = 0;
+        rs.pending_post_removal_max_hp_gain = 0;
+        rs.pending_post_removal_gold_loss = 0;
+        rs.pending_post_upgrade_hp_loss = 0;
+        rs.pending_post_pick_cards.clear();
+        rs.pending_swipe_returns.clear();
+        rs.pending_neows_bones_curses = 0;
+        rs.pending_post_pick_relic_grants.clear();
+        rs.pending_deck_upgrades = 0;
+        rs.pending_deck_transforms.clear();
+        rs.pending_deck_enchants.clear();
+        rs.pending_potion_swaps.clear();
+        rs.pending_choice = None;
     }
 
     /// Queue a multi-pick card grant (Room Full of Cheese's Gorge, Sea Glass):
@@ -13242,6 +13320,63 @@ mod tests {
             rm.run_state.current_room.and_then(|r| r.map_coord),
             Some(coord)
         );
+    }
+
+    /// The `(col, row, type)` of every grid node, for comparing two maps.
+    fn map_nodes(map: &crate::map::ActMap) -> Vec<(i32, i32, crate::map::MapPointType)> {
+        map.grid
+            .iter()
+            .map(|(c, &i)| (c.col, c.row, map.point(i).point_type))
+            .collect()
+    }
+
+    /// The co-op act map, straight from the generator: one room fewer, the
+    /// act's own fresh `act_N_map` stream.
+    fn coop_map(rm: &RunManager, act: u8) -> crate::map::ActMap {
+        let rooms = i32::from(rm.run_state.acts[usize::from(act) - 1].num_rooms);
+        let mut rng = rm.run_state.rng.named(&format!("act_{act}_map"));
+        crate::map_generator::generate_act_map(
+            rooms,
+            &mut rng,
+            i32::from(rm.run_state.ascension_level),
+            false,
+            i32::from(act),
+            None,
+        )
+    }
+
+    #[test]
+    fn debug_use_coop_maps_rebuilds_the_act_one_room_shorter() {
+        let mut rm = RunManager::new(11, CharacterId::Ironclad);
+        let solo_rooms: Vec<u8> = rm.run_state.acts.iter().map(|a| a.num_rooms).collect();
+        let solo_len = rm.run_state.current_act_map.as_ref().unwrap().map_length;
+
+        rm.debug_use_coop_maps()
+            .expect("a fresh run takes co-op maps");
+
+        let rooms: Vec<u8> = rm.run_state.acts.iter().map(|a| a.num_rooms).collect();
+        assert_eq!(rooms, solo_rooms.iter().map(|r| r - 1).collect::<Vec<_>>());
+        let map = rm.run_state.current_act_map.as_ref().unwrap();
+        assert_eq!(map.map_length, solo_len - 1);
+        assert_eq!(map_nodes(map), map_nodes(&coop_map(&rm, 1)));
+        assert!(
+            rm.debug_use_coop_maps().is_err(),
+            "shortening twice would drop two rooms"
+        );
+    }
+
+    #[test]
+    fn debug_use_coop_maps_reaches_later_acts_on_their_coop_maps() {
+        let mut rm = RunManager::new(11, CharacterId::Ironclad);
+        rm.debug_use_coop_maps().unwrap();
+        let act2 = coop_map(&rm, 2);
+        let coord = act2.points_in_row(1).first().unwrap().coord;
+
+        rm.debug_place_on_map(2, coord, vec![coord], coord.row + 1, 16)
+            .expect("placement onto the co-op act-2 map succeeds");
+
+        let map = rm.run_state.current_act_map.as_ref().unwrap();
+        assert_eq!(map_nodes(map), map_nodes(&act2));
     }
 
     /// GH #806 (PARITY149): a `TryModifyCardRewardOptionsLate` relic stamp

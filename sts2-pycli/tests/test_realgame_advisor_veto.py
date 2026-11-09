@@ -172,7 +172,10 @@ def test_build_advice_reports_the_veto_in_its_note() -> None:
 
     assert advice["best"]["card_index"] == 1
     assert "vetoed 1" in advice["note"]
-    assert "BlockedByHook" in advice["note"]
+    # Named for the player (the card and the game's reason in words), not as
+    # `hand[0]:BlockedByHook`.
+    assert "(blocked by hook)" in advice["note"]
+    assert "hand[" not in advice["note"]
 
 
 def test_vetoed_pick_passes_the_crown_to_the_engines_next_choice() -> None:

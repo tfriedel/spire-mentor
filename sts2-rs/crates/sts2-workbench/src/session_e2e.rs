@@ -783,6 +783,14 @@ impl Session {
     /// net is not loaded (nothing applied); 400 for a run the student does
     /// not play (not Ironclad, or not its build).
     pub(crate) fn e2e_step(&mut self) -> Result<Value, SessionError> {
+        self.e2e_step_with(None)
+    }
+
+    /// [`Self::e2e_step`] with the student's pick at a decision replaced by
+    /// merged class `pick` (the seed checker replays a sampled attempt this
+    /// way). Forced steps are applied as usual; the net still scores the
+    /// decision so the node keeps its probabilities.
+    pub(crate) fn e2e_step_with(&mut self, pick: Option<usize>) -> Result<Value, SessionError> {
         let net = self.e2e_net()?;
         self.e2e_check_run()?;
         let parent = self.active()?;
@@ -830,6 +838,12 @@ impl Session {
             }
             Next::Forced(f) => (f.action, f.kind, None, None),
             Next::Decision(d) => match e2e::decide(&net, &d, rm, &mut st.cache, clock)
+                .map(|mut c| {
+                    if let Some(p) = pick {
+                        c.class = p;
+                    }
+                    c
+                })
                 .and_then(|c| d.class_action(c.class).map(|(a, k)| (a, k, c)))
             {
                 Ok((a, k, c)) => (a, k, Some(c), Some(d)),

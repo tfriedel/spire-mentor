@@ -148,6 +148,7 @@ from .net import (
     to_packed,
 )
 from .rowstore import Chunk, ShmChunk, batch_from_shm, concat, gather_to_shm, take
+from .rowstore import sweep as rowstore_sweep
 from .update import Rank, rank_main
 
 #: The row layout's stamp (`contracts.schema_sha256()`).
@@ -164,6 +165,23 @@ RUN_TEACHERLESS = frozenset({C.DT["POTION_SWAP"]})
 DTYPE_NAMES = tuple(d.name for d in C.DECISION_TYPES)
 FIGHT_CAPS = frozenset({"turns", "fight_decisions"})
 RUN_CAPS = frozenset({"run_decisions", "steps"})
+
+
+def lc_combat_ev(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The learning check's combat value EV over the stats rows (GH #1153).
+
+    The median over the last half of the rows that carry one (at least the last 5).
+    Explained variance is unbounded below, so one blown-up batch dragged the old
+    last-5 mean under the gate on a run that learned normally; the median needs half
+    the window to go bad. `last5_mean` (the old statistic) is reported, not gated."""
+    evs = [(r.get("value_ev") or {}).get("combat") for r in rows]
+    evs = [float(x) for x in evs if isinstance(x, (int, float)) and math.isfinite(x)]
+    tail = evs[-max(5, len(evs) // 2) :]
+    return {
+        "median": float(np.median(tail)) if tail else math.nan,
+        "rows": len(tail),
+        "last5_mean": float(np.mean(evs[-5:])) if evs else math.nan,
+    }
 
 
 class UsageError(RuntimeError):
@@ -1094,6 +1112,9 @@ class Learner:
 
     def start(self) -> None:
         cfg = self.cfg
+        # Row blocks of a learner killed by SIGKILL (GH #1152): /dev/shm is RAM.
+        if gone := rowstore_sweep():
+            print(f"[e2e] removed {len(gone)} row blocks of dead learners", flush=True)
         devs = [d for d in cfg.update_devices.split(",") if d]
         if self.updater_kind == "local":
             if len(devs) != 1:
@@ -1636,6 +1657,7 @@ class Learner:
             "drop_uids": np.asarray(drop, np.int64),
             "stamps": self.stamps,
             "pack_held": True,  # rank 0 copies the rows it holds back (`_land_held`)
+            "owner": os.getpid(),  # names rank 0's held block (`rowstore.shm_name`)
         }
         self.n_new = 0
         self.n_dispatched += 1
@@ -2118,9 +2140,8 @@ class Learner:
         if p.exists():
             with open(p, encoding="utf-8") as f:
                 rows = [json.loads(x) for x in f if x.strip()]
-        evs = [(r.get("value_ev") or {}).get("combat") for r in rows[-5:]]
-        evs = [x for x in evs if isinstance(x, (int, float))]
-        ev = float(np.mean(evs)) if evs else math.nan
+        ev_stat = lc_combat_ev(rows)
+        ev = ev_stat["median"]
         # A NaN a rollback discarded still fails the check: read the parked rows too.
         po = self.sd.p(OC.STATS_ORPHAN)
         parked = []
@@ -2139,7 +2160,9 @@ class Learner:
             "last_mean": float(np.mean(last)) if last else math.nan,
             "gain": gain,
             "margin": cfg.lc_margin,
-            "ev_combat_last5": ev,
+            "ev_combat": ev,  # the gated statistic: lc_combat_ev's median
+            "ev_combat_rows": ev_stat["rows"],
+            "ev_combat_last5": ev_stat["last5_mean"],
             "ev_min": cfg.lc_ev,
             "nan": nan,
             "decisions": int(self.algo.clocks.decisions),

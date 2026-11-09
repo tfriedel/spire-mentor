@@ -1,0 +1,28 @@
+/* Seed check layout on top of the workbench theme tokens (theme.css). */
+body { background: var(--bg); color: var(--text); font-family: var(--font); margin: 0; }
+.sc-app { max-width: 900px; margin: 0 auto; padding: 16px 16px 40px; }
+.sc-header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.sc-header h1 { margin: 0; font-size: 22px; }
+.sc-header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+.sc-blurb { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 0 0 12px; }
+.sc-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; box-shadow: var(--elev-1); }
+.sc-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.sc-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* Room for a 12-character seed with its letter spacing and padding, on a
+   tablet's larger UI text too: the field grows with the row, never below 16ch. */
+.sc-seed { font-family: var(--mono); font-size: 18px; letter-spacing: 0.08em; padding: 6px 10px; box-sizing: border-box; flex: 1 1 18ch; min-width: 16ch; max-width: 26ch; text-transform: uppercase; }
+.sc-options { margin-bottom: 10px; gap: 14px; }
+.sc-options label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.sc-options select { font-size: 14px; padding: 4px 6px; }
+.sc-options option:disabled { color: var(--muted); }
+.sc-note { color: var(--muted); font-size: 12.5px; margin: -4px 0 10px; }
+.sc-error { color: var(--hp); font-size: 13px; }
+.sc-warn { color: var(--gold); font-size: 13px; }
+.sc-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13.5px; margin-top: 8px; }
+.sc-kv dt { color: var(--muted); }
+.sc-kv dd { margin: 0; }
+.sc-progress { font-family: var(--mono); font-size: 13px; }
+.sc-verdict { width: 100%; min-height: 18em; font-family: var(--mono); font-size: 12.5px; box-sizing: border-box; resize: vertical; }
+.sc-deaths { border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+.sc-deaths td, .sc-deaths th { padding: 2px 10px 2px 0; text-align: left; }
+.sc-deaths th { color: var(--muted); font-weight: normal; }

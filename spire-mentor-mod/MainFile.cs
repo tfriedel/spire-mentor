@@ -26,8 +26,11 @@ namespace SpireMentor;
 public static class MainFile
 {
     public const string ModId = "SpireMentor";
-    // Keep in sync with SpireMentor.json "version" (package.ps1 reads that one).
-    public const string ModVersion = "0.10.0-beta.3";
+    // Keep in sync with SpireMentor.json "version" (package.ps1 reads that one
+    // and refuses to stage when they differ; tests/run_all.sh checks it too).
+    // It drifted once: beta.4 to beta.6 shipped saying "beta.3" in the toolbar,
+    // F1 help, bug reports and every envelope's mod_version.
+    public const string ModVersion = "0.10.4";
 
     private static Harmony? _patcher;
     private static SimAutoSlayer? _autoSlayer;
@@ -843,6 +846,8 @@ public static class SimCardSelectContext
     /// <summary>The model's kind, by runtime type. Null for an unrecognized
     /// type, which the client must treat as "unknown", never as "not a
     /// card".</summary>
+    public static string? KindOfModel(object? m) => KindOf(m);
+
     private static string? KindOf(object? m) => m switch
     {
         null => null,

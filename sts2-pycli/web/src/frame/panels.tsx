@@ -4,14 +4,16 @@
 
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import EventLog from "../components/EventLog";
-import { inHost, modAction, openWorkbenchAt, showNativeMenu, type NativeMenuItem } from "./host";
+import { inHost, modAction, openWorkbenchWindow, showNativeMenu, type NativeMenuItem } from "./host";
 import { toTimeline } from "./ledger";
 import {
   inBandLabels,
   rankedOptions,
   tieBandLines,
   type Advice,
+  adviceColumns,
   type AdviceOption,
+  type Cols,
   type FrameState,
   type ShownChip,
 } from "./store";
@@ -127,6 +129,49 @@ function HtmlMenu(props: { label: string; items: MenuItem[] }) {
   );
 }
 
+/** One choice of several, the current one lit: the Mode and Brain switches. */
+function Segmented(props: {
+  label: string;
+  items: { key: string; label: string; title: string; action: string }[];
+  value: string | undefined;
+  disabled?: boolean;
+}) {
+  return (
+    <span className="fr-seg" role="radiogroup" aria-label={props.label}>
+      {props.items.map((it) => (
+        <button
+          key={it.key}
+          type="button"
+          role="radio"
+          aria-checked={props.value === it.key}
+          className={`fr-seg-btn${props.value === it.key ? " fr-seg-on" : ""} fr-seg-${it.key}`}
+          title={it.title}
+          disabled={props.disabled}
+          onClick={() => props.value !== it.key && modAction(it.action)}
+        >
+          {it.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** The Mode switch's segment; derived for an older mod that sends no `mentor_mode`. */
+function mentorMode(ui: FrameState["ui"]): string | undefined {
+  if (!ui) return undefined;
+  if (ui.mentor_mode) return ui.mentor_mode;
+  if (ui.mode === "off") return "off";
+  if (ui.mode === "autopilot" || ui.autoplay_armed) return "aiplays";
+  return ui.coach_style ? "coach" : "hints";
+}
+
+/**
+ * The frame's toolbar, the badge's popover laid flat (SimToolbar): one Mode
+ * switch instead of an on/off button plus a style button whose labels read
+ * as either state or action; the Brain switch; the verbs for this decision;
+ * autobattle; speed; the menus; the status in words. While the AI plays, the
+ * row turns amber and leads with a Stop button nobody can miss.
+ */
 export function ToolbarPanel(props: {
   state: FrameState;
   framePanels: { label: string; shown: boolean; toggle: () => void }[];
@@ -135,27 +180,57 @@ export function ToolbarPanel(props: {
   const { ui, host } = props.state;
   const connected = host.mod_connected && ui != null;
   const takeover = !!ui?.takeover_enabled;
+  const mode = mentorMode(ui);
+  const aiPlaying = !!ui && (ui.mode === "autopilot" || ui.autoplay_armed || ui.autobattle_on);
+  const statusLines = (ui?.status ?? "").split("\n").filter(Boolean);
   return (
-    <div className="fr-toolbar">
+    <div className={`fr-toolbar${aiPlaying ? " fr-toolbar-ai" : ""} fr-mode-${mode ?? "none"}`}>
       <div className="fr-toolbar-row">
-        <Btn
-          label={ui?.power_label ?? "AI off"}
-          title="Turn the AI on / off in the current style (F8)"
-          action="toggle_advisor"
-          active={ui != null && ui.mode !== "off"}
+        {aiPlaying && (
+          <button type="button" className="fr-btn fr-stop" title="Stop the AI (F7)" onClick={() => modAction("stop_ai")}>
+            ■ Stop AI <kbd>F7</kbd>
+          </button>
+        )}
+        <Segmented
+          label="Mode"
+          value={mode}
           disabled={!connected}
+          items={[
+            { key: "off", label: "Off", title: "The AI stays quiet (F8 toggles)", action: "mode_off" },
+            {
+              key: "coach",
+              label: "Coach",
+              title: "Nothing before you act; Peek (F5) shows the AI's pick, the coach says afterwards where you differed",
+              action: "mode_coach",
+            },
+            { key: "hints", label: "Hints", title: "The AI's picks are ringed and numbered while you decide", action: "mode_hints" },
+            {
+              key: "aiplays",
+              label: ui?.mode === "autopilot" ? "Autopilot" : "AI plays",
+              title: "The AI plays until you stop it (F7)",
+              action: "mode_ai_plays",
+            },
+          ]}
         />
-        <Btn label={ui?.style_label ?? "Coach"} title="Switch style: Hints / Coach" action="switch_style" disabled={!connected} />
-        {ui?.coach_style && <Btn label="Peek" title="Peek at the AI's pick for the next decision (F5)" action="peek" />}
+        {ui?.brain?.show && (
+          <Segmented
+            label="Brain"
+            value={ui.brain.value}
+            disabled={!connected}
+            items={[
+              {
+                key: "search",
+                label: "Search",
+                title: "Thinks ahead: a search over the fight, the run net for the screens (Shift+F8)",
+                action: "toggle_brain",
+              },
+              { key: "instinct", label: "Instinct", title: "The end-to-end net, no search: fast, every decision (Shift+F8)", action: "toggle_brain" },
+            ]}
+          />
+        )}
         <span className="fr-sep" />
-        <Btn label="AI once" title="Let the AI take just this decision (F6)" action="ai_once" disabled={!takeover} />
-        <Btn
-          label={ui?.autoplay_armed ? "Stop auto" : "AI auto"}
-          title="The AI keeps playing until you stop it (F7)"
-          action="ai_auto"
-          disabled={!takeover}
-          active={ui?.autoplay_armed}
-        />
+        {ui?.coach_style && <Btn label="Peek" title="Peek at the AI's pick for this decision (F5)" action="peek" />}
+        <Btn label="Let AI pick" title="The AI takes just this decision (F6)" action="ai_once" disabled={!takeover} />
         <Btn
           label={ui?.autobattle_on ? "Stop battle" : "Autobattle"}
           title="The AI plays the fights, you make the run-level decisions (Shift+F7)"
@@ -163,15 +238,6 @@ export function ToolbarPanel(props: {
           disabled={!takeover}
           active={ui?.autobattle_on}
         />
-        {ui?.brain?.show && (
-          <Btn
-            label={ui.brain.label}
-            title="Advisor brain, click to switch (Shift+F8): Search thinks ahead (a search over the fight, the run net for the screens); Instinct is the end-to-end net, no search (Ironclad on v0.111.0 for now)"
-            action="toggle_brain"
-            disabled={!connected}
-            active={ui.brain.value === "instinct"}
-          />
-        )}
         {ui?.partner_go.show && (
           <Btn
             label={ui.partner_go.waiting ? `▶ Partner go${ui.partner_go.seconds > 0 ? ` ${ui.partner_go.seconds}s` : ""}` : "Partner go"}
@@ -181,9 +247,11 @@ export function ToolbarPanel(props: {
           />
         )}
         <span className="fr-sep" />
-        <Btn label="−" title="Game speed down (F9)" action="speed_down" disabled={!connected} />
-        <span className="fr-speed">{ui?.speed ?? "–"}</span>
-        <Btn label="+" title="Game speed up (F10)" action="speed_up" disabled={!connected} />
+        <span className="fr-speed-group" title="Game speed (F9 / F10)">
+          <Btn label="−" title="Game speed down (F9)" action="speed_down" disabled={!connected} />
+          <span className="fr-speed">{ui?.speed ?? "–"}</span>
+          <Btn label="+" title="Game speed up (F10)" action="speed_up" disabled={!connected} />
+        </span>
         <span className="fr-sep" />
         <Menu
           label="Rewind"
@@ -203,14 +271,20 @@ export function ToolbarPanel(props: {
               onClick: p.toggle,
             })),
             {
+              label: "Workbench (its own window)",
+              title: "Follows this run: logs, search tree, run tree. Put it on another monitor or alt-tab to it",
+              checked: host.workbench_open,
+              onClick: () => openWorkbenchWindow(),
+            },
+            {
               label: "Move the panels into the game",
               title: "Full-size game with the panels drawn over it, as without the frame (the in-game Panels menu brings them back out)",
               onClick: props.onPanelsInside,
               separatorBefore: true,
             },
             {
-              label: "Card scores and map markers (F4)",
-              title: "Card scores, map markers and enemy tags in the game",
+              label: "Highlights in the game (F4)",
+              title: "Rings on the moves to make, the map route, enemy tags",
               action: "toggle_hud",
               separatorBefore: true,
             },
@@ -222,25 +296,31 @@ export function ToolbarPanel(props: {
         <Menu
           label="Workbench"
           items={[
-            { label: "Open in browser", title: "Logs, search tree, run tree", action: "open_workbench" },
+            {
+              label: "Open the workbench",
+              title: "Its own window, following this run: logs, search tree, run tree",
+              onClick: () => openWorkbenchWindow(),
+            },
+            { label: "Open in browser", title: "The same, in your browser", action: "open_workbench_browser" },
             { label: "Copy state (Ctrl+Shift+C)", title: "Copy this position for the workbench", action: "copy_state" },
           ]}
         />
         {/* One line, after the buttons: the row is all the height the toolbar
-            gets. The full (multi-line) status is the tooltip. */}
+            gets. The first status line is the badge's word ("Thinking…",
+            "Building the engine 0:42"); the full status is the tooltip. */}
         <span className="fr-status" title={host.mod_connected ? (ui?.status ?? "") : undefined}>
           {!host.mod_connected ? (
-            <span className="fr-dim">game: {host.game} · waiting for the mod…</span>
+            <span className="fr-dim">Waiting for the game…</span>
           ) : (
-            (ui?.status ?? "")
-              .split("\n")
-              .filter(Boolean)
-              .map((line, i) => (
+            <>
+              <span className={`fr-status-dot fr-status-${ui?.advisor_status ?? "none"}`} />
+              {statusLines.slice(0, 2).map((line, i) => (
                 <span key={i} className={i === 0 ? "" : "fr-dim"}>
                   {i > 0 ? " · " : ""}
                   {line}
                 </span>
-              ))
+              ))}
+            </>
           )}
         </span>
       </div>
@@ -263,45 +343,86 @@ function signed(v: number, digits: number): string {
   return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(digits);
 }
 
-function OptionRow({ o, bestQ }: { o: AdviceOption; bestQ: number | null }) {
+const KIND_COLOR: Record<string, string> = {
+  attack: "oklch(64% 0.17 28)",
+  skill: "oklch(64% 0.14 255)",
+  power: "oklch(78% 0.14 80)",
+  potion: "oklch(70% 0.14 155)",
+  end_turn: "oklch(62% 0.02 265)",
+  skip: "oklch(62% 0.02 265)",
+  pick: "oklch(72% 0.09 210)",
+  other: "oklch(66% 0.02 265)",
+};
+
+const VERDICT_COLOR: Record<string, string> = {
+  Best: "var(--gold)",
+  "Also good": "oklch(80% 0.14 150)",
+  Then: "oklch(90% 0.07 85)",
+  Okay: "oklch(85% 0.05 100)",
+  Weak: "oklch(78% 0.14 60)",
+  Mistake: "oklch(68% 0.18 28)",
+};
+
+/**
+ * One ranked row, the same as the in-game panel's (SimHud.BuildOptionRow):
+ * a chip in the move's colour carrying its plan step (the card badge's
+ * number), the move in words -- wrapped, never cut ("Strike → Sludge ..."
+ * hid which enemy) -- a verdict, the expected HP when the search has it, and
+ * the AI's share. Engine columns (Q delta, W/L/T) only with the mod's "Show
+ * engine numbers". Grid columns that would stay empty are not laid out.
+ */
+function OptionRow({ o, bestQ, cols }: { o: AdviceOption; bestQ: number | null; cols: Cols }) {
   const q = o.q ?? (o.p_win != null ? o.p_win * 2 - 1 : null);
   const delta = !o.is_best && bestQ != null && q != null;
   const shown = q == null ? null : delta ? q - bestQ! : q;
   const share = o.visit_share != null ? Math.max(0, Math.min(1, o.visit_share)) : null;
+  const kind = KIND_COLOR[o.kind ?? "other"] ?? KIND_COLOR.other;
+  const verdict = o.verdict ?? (o.is_best ? "Best" : "");
   return (
-    <div className={`fr-opt${o.is_best ? " fr-opt-best" : ""}`}>
-      <span className="fr-opt-label" title={o.label}>
-        {o.is_best ? "★ " : ""}
-        {o.label}
+    <div className={`fr-opt${o.is_best ? " fr-opt-best" : ""}${o.hidden ? " fr-opt-hidden" : ""}`} style={{ gridTemplateColumns: cols.template }}>
+      <span className="fr-opt-chip" style={{ borderColor: kind, background: o.step != null ? kind : "transparent" }}>
+        {o.step ?? ""}
       </span>
-      <span className="fr-opt-q" style={{ color: shown == null ? undefined : delta ? (shown < -0.0005 ? "oklch(70% 0.15 30)" : "var(--muted)") : qColor(q!) }}>
-        {shown == null ? "" : delta ? signed(shown, 3) : signed(shown, 2)}
+      <span className="fr-opt-label">{o.label}</span>
+      <span className="fr-opt-verdict" style={{ color: VERDICT_COLOR[verdict] ?? "var(--muted)" }}>
+        {verdict}
       </span>
-      <span className="fr-opt-bar">
-        {share != null && <span style={{ width: `${share * 100}%`, background: q != null ? qColor(q) : "var(--block)" }} />}
-      </span>
-      <span className="fr-opt-share">{share != null ? `${Math.round(share * 100)}%` : ""}</span>
-      <span className="fr-opt-wlt">
-        {o.wins != null || o.losses != null || o.ties != null
-          ? `${o.wins ?? 0}/${o.losses ?? 0}/${o.ties ?? 0}`
-          : o.visits != null
-            ? `${o.visits}v`
-            : ""}
-        {o.low_confidence ? " ~" : ""}
-      </span>
+      {cols.hp && <span className="fr-opt-hp">{o.hp_mean != null ? `♥ ${Math.round(o.hp_mean)}` : ""}</span>}
+      {cols.q && (
+        <span className="fr-opt-q" style={{ color: shown == null ? undefined : delta ? (shown < -0.0005 ? "oklch(70% 0.15 30)" : "var(--muted)") : qColor(q!) }}>
+          {shown == null ? "" : delta ? signed(shown, 3) : signed(shown, 2)}
+        </span>
+      )}
+      {cols.share && (
+        <>
+          <span className="fr-opt-bar">
+            {share != null && <span style={{ width: `${share * 100}%`, background: o.is_best ? "var(--gold)" : kind }} />}
+          </span>
+          <span className="fr-opt-share">{share == null ? "" : share < 0.005 ? "<1%" : `${Math.round(share * 100)}%`}</span>
+        </>
+      )}
+      {cols.wlt && (
+        <span className="fr-opt-wlt">
+          {o.wins != null || o.losses != null || o.ties != null
+            ? `${o.wins ?? 0}/${o.losses ?? 0}/${o.ties ?? 0}`
+            : o.visits != null
+              ? `${o.visits}v`
+              : ""}
+          {o.low_confidence ? " ~" : ""}
+        </span>
+      )}
     </div>
   );
 }
 
 function EvalBar({ advice }: { advice: Advice }) {
   const q = advice.best_q;
-  const fill = q != null ? (q + 1) / 2 : (advice.p_win ?? 0.5);
+  const fill = advice.p_win ?? (q != null ? (q + 1) / 2 : 0.5);
   return (
     <div className="fr-eval">
       <div className="fr-eval-text">
-        eval {q != null ? signed(q, 2) : "?"}
-        {advice.p_win != null && <> · est. win {Math.round(advice.p_win * 100)}%</>}
-        {advice.low_confidence && " (~)"}
+        Win chance {advice.p_win != null ? `${Math.round(advice.p_win * 100)}%` : "?"}
+        {advice.show_numbers && q != null && <span className="fr-dim"> · eval {signed(q, 2)}{advice.low_confidence ? " (~)" : ""}</span>}
       </div>
       <div className="fr-eval-bar">
         <span style={{ width: `${Math.max(0, Math.min(1, fill)) * 100}%`, background: qColor(fill * 2 - 1) }} />
@@ -312,6 +433,7 @@ function EvalBar({ advice }: { advice: Advice }) {
 
 export function AdvicePanel({ state }: { state: FrameState }) {
   const { advice, peek, ui } = state;
+  const [expanded, setExpanded] = useState(false);
   const ranked = useMemo(() => (advice ? rankedOptions(advice) : []), [advice]);
   if (peek) return <div className="fr-peek">{peek}</div>;
   if (!advice) {
@@ -321,22 +443,42 @@ export function AdvicePanel({ state }: { state: FrameState }) {
       </div>
     );
   }
+  const showNumbers = !!advice.show_numbers;
+  const visible = ranked.filter((o) => !o.hidden);
+  const rows = expanded ? ranked : visible.slice(0, 8);
+  const more = ranked.length - rows.length;
+  const cols = adviceColumns(rows, showNumbers);
   const tie = tieBandLines(inBandLabels(advice), advice.pick_reason, advice.pick_gap_hp);
+  const plan = advice.plan ?? [];
   return (
     <div className="fr-advice">
-      {(advice.best_q != null || advice.p_win != null) && <EvalBar advice={advice} />}
+      {advice.p_win != null && <EvalBar advice={advice} />}
+      {plan.length > 0 && (
+        <div className="fr-plan">
+          {plan.map((s, i) => (
+            <span key={`${i}-${s}`} className="fr-plan-step">
+              <span className="fr-plan-n">{i + 1}</span>
+              {s}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="fr-opts">
-        {ranked.map((o, i) => (
-          <OptionRow key={`${o.label}-${i}`} o={o} bestQ={advice.best_q} />
+        {rows.map((o, i) => (
+          <OptionRow key={`${o.label}-${i}`} o={o} bestQ={advice.best_q} cols={cols} />
         ))}
       </div>
+      {(more > 0 || expanded) && (
+        <button type="button" className="fr-more" onClick={() => setExpanded(!expanded)}>
+          {expanded ? "▴ show fewer" : `… ${more} more ▾`}
+        </button>
+      )}
       {tie.map((l) => (
         <div key={l} className="fr-dim">
           {l}
         </div>
       ))}
-      {advice.pv.length > 0 && <div className="fr-pv">line: {advice.pv.join(" · ")}</div>}
-      {advice.low_confidence && <div className="fr-warn">low confidence</div>}
+      {plan.length === 0 && showNumbers && advice.pv.length > 0 && <div className="fr-pv">line: {advice.pv.join(" · ")}</div>}
       {advice.source_tag && <div className="fr-note">{advice.source_tag}</div>}
       {advice.note && <div className="fr-note">{advice.note}</div>}
     </div>
@@ -366,7 +508,7 @@ function ChipCard({ chip, dispatch }: { chip: ShownChip; dispatch: Dispatch }) {
             title="Open this moment in the workbench"
             onClick={(e) => {
               e.stopPropagation();
-              openWorkbenchAt(chip.log_name, chip.log_idx);
+              openWorkbenchWindow(chip.log_name, chip.log_idx);
             }}
           >
             ↗
@@ -422,7 +564,7 @@ export function CoachPanel({ state, dispatch }: { state: FrameState; dispatch: D
               <div className="fr-recap-heading">
                 {s.heading}
                 {p.log_name && s.log_idx != null && (
-                  <button type="button" className="fr-icon" title="Open in the workbench" onClick={() => openWorkbenchAt(p.log_name, s.log_idx)}>
+                  <button type="button" className="fr-icon" title="Open in the workbench" onClick={() => openWorkbenchWindow(p.log_name, s.log_idx)}>
                     ↗
                   </button>
                 )}
@@ -474,12 +616,4 @@ export function LogPanel({ state }: { state: FrameState }) {
       )}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Workbench (the follow view of the live run)
-// ---------------------------------------------------------------------------
-
-export function WorkbenchPanel() {
-  return <iframe className="fr-workbench" src="/?follow=1" title="Workbench" />;
 }

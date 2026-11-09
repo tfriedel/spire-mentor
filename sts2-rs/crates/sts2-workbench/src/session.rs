@@ -21,7 +21,7 @@ use serde_json::{json, Map, Value};
 use sts2_core::{CombatState, GameVersion};
 
 use crate::combatlog::{format_combat_log, LogNames};
-use crate::game::{Game, GameError};
+use crate::game::{Game, GameError, ModeSeed};
 use crate::localization::{resolve_name, resolve_state_names, Loc};
 use crate::playlog::format_play_log;
 use crate::ppo::{self, Net};
@@ -892,15 +892,21 @@ impl Session {
             game.start_imported(snapshot)
                 .map_err(|e| SessionError::new(409, e.0))?;
         } else if self.run_mode_run {
-            let seed_int = seed.parse::<i32>().map_err(|_| {
+            let mode_seed = ModeSeed::parse(seed).ok_or_else(|| {
                 SessionError::new(
                     409,
-                    format!("run-mode run carries a non-numeric seed {seed:?}; cannot rebuild it"),
+                    format!("run-mode run carries an unreadable seed {seed:?}; cannot rebuild it"),
                 )
             })?;
             if self.e2e_setup {
-                start_e2e_game(game, seed_int, ascension)?;
+                start_e2e_game(game, &mode_seed, ascension)?;
             } else {
+                let ModeSeed::Int(seed_int) = mode_seed else {
+                    return Err(SessionError::new(
+                        409,
+                        "a game seed string needs the e2e setup",
+                    ));
+                };
                 game.start_faithful(character, seed_int, ascension)
                     .map_err(|e| SessionError::new(409, e.0))?;
             }
@@ -1076,18 +1082,18 @@ impl Session {
         run_mode: bool,
     ) -> Result<Value, SessionError> {
         let mut state = if run_mode {
-            let seed_int = seed.parse::<i32>().map_err(|_| {
+            let mode_seed = ModeSeed::parse(seed).ok_or_else(|| {
                 SessionError::new(
                     409,
-                    format!("run-mode save carries a non-numeric seed {seed:?}; cannot restore it"),
+                    format!("run-mode save carries an unreadable seed {seed:?}; cannot restore it"),
                 )
             })?;
             // Benchmark, matching `Session::new`'s defaults — a restored
             // run-mode line must not resume at a fifth of the budget it was
             // recorded at just because the restore path hard-coded Quick.
             let brain = if self.e2e_setup { "e2e" } else { "ppo" };
-            self.start_run_mode(
-                character, seed_int, ascension, brain, "rust", 1000, 4000, 1, None,
+            self.start_run_mode_seed(
+                character, &mode_seed, ascension, brain, "rust", 1000, 4000, 1, None,
             )?
         } else {
             self.start(character, seed, ascension, act1)?
@@ -1305,10 +1311,10 @@ impl Session {
                 .and_then(Value::as_str)
                 .unwrap_or("rust")
                 .to_string();
-            match seed.parse::<i32>() {
-                Ok(seed_int) => self.start_run_mode(
+            match ModeSeed::parse(&seed) {
+                Some(mode_seed) => self.start_run_mode_seed(
                     &character,
-                    seed_int,
+                    &mode_seed,
                     ascension,
                     &brain,
                     &ppo_impl,
@@ -1317,9 +1323,9 @@ impl Session {
                     get_u32("combat_threads", 1),
                     cfg.get("reward_sims").and_then(Value::as_i64),
                 ),
-                Err(_) => Err(SessionError::new(
+                None => Err(SessionError::new(
                     409,
-                    format!("persisted run-mode session carries a non-numeric seed {seed:?}"),
+                    format!("persisted run-mode session carries an unreadable seed {seed:?}"),
                 )),
             }
         } else {
@@ -1470,10 +1476,10 @@ pub fn line_entry(action: &str, args: Value) -> Value {
 }
 
 /// [`Game::start_e2e`], or a 409 when this build has no e2e feature.
-fn start_e2e_game(game: &mut Game, seed: i32, ascension: u8) -> Result<Value, SessionError> {
+fn start_e2e_game(game: &mut Game, seed: &ModeSeed, ascension: u8) -> Result<Value, SessionError> {
     #[cfg(feature = "e2e")]
     {
-        game.start_e2e(seed, ascension)
+        game.start_e2e_seed(seed, ascension)
             .map_err(|e| SessionError::new(409, e.0))
     }
     #[cfg(not(feature = "e2e"))]

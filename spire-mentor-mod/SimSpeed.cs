@@ -1,7 +1,8 @@
 // SimSpeed.cs -- live game-speed control (Engine.TimeScale).
 //
 // Mirrors the game's own debug shortcut NGame.DebugModifyTimescale
-// (NGame.cs:1296-1302): round to one decimal, clamp to [0.1, 4.0], show the
+// (NGame.cs:1296-1302): round to one decimal, clamp to [0.1, 8.0] (the game
+// stops at 4.0; 6x and 8x are ours), show the
 // same fullscreen "TimeScale:x" VFX so the user gets feedback. Used by the
 // settings slider, the speed hotkeys and the `spirementor speed` console
 // command. Distinct from the Autopilot-only WaitSpeedPatch/
@@ -35,7 +36,12 @@ public static class SimSpeed
 {
     // The game's own clamp (NGame.DebugModifyTimescale).
     public const double Min = 0.1;
-    public const double Max = 4.0;
+    // Above the game's own 4.0: the player asked for 8x to watch the AI.
+    public const double Max = 8.0;
+
+    // The game's own ceiling: what the undo replay fast-forwards at (it
+    // ran at Max when Max was 4.0, and only that speed is proven there).
+    public const double GameMax = 4.0;
 
     /// <summary>
     /// The speed that was asked for. Reads deliberately do NOT go to

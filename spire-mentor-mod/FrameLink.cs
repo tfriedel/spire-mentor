@@ -105,6 +105,19 @@ internal static class FrameLink
 
     public static void ToggleUiOutside() => SetUiOutside(!_uiOutside);
 
+    /// <summary>Ask the frame to open (or bring up) the workbench's own
+    /// window, at <paramref name="run"/> / <paramref name="step"/> when given.
+    /// False when there is no frame to ask: the caller opens the browser.</summary>
+    public static bool OpenWorkbenchWindow(string? run, int? step)
+    {
+        if (!Framed || !_connected)
+        {
+            return false;
+        }
+        Enqueue(Serialize(new { type = "workbench_window", run, step }));
+        return true;
+    }
+
     /// <summary>The frame launched the game (<c>--spire-mentor-frame-port</c>):
     /// connect to it. A no-op otherwise.</summary>
     public static void Start()
@@ -392,6 +405,12 @@ internal static class FrameLink
     private static readonly Dictionary<string, Action> Actions = new()
     {
         ["toggle_advisor"] = SimActions.ToggleAdvisor,
+        // The Mode switch (the badge's, MentorModes): one segment each.
+        ["mode_off"] = () => SimActions.SetMentorMode(MentorMode.Off, "The frame's Mode switch"),
+        ["mode_coach"] = () => SimActions.SetMentorMode(MentorMode.Coach, "The frame's Mode switch"),
+        ["mode_hints"] = () => SimActions.SetMentorMode(MentorMode.Hints, "The frame's Mode switch"),
+        ["mode_ai_plays"] = () => SimActions.SetMentorMode(MentorMode.AiPlays, "The frame's Mode switch"),
+        ["stop_ai"] = () => SimActions.StopAi("The frame's Stop button"),
         ["switch_style"] = SimActions.SwitchStyle,
         ["peek"] = SimActions.Peek,
         ["ai_once"] = () => SimActions.AiOnce("The frame's AI-once button"),
@@ -410,6 +429,7 @@ internal static class FrameLink
         ["settings"] = () => SimSettingsPanel.Instance.Toggle(),
         ["report_bug"] = SimActions.ReportBug,
         ["open_workbench"] = () => SimWorkbenchLink.Open(),
+        ["open_workbench_browser"] = () => SimWorkbenchLink.Open(browser: true),
         ["copy_state"] = SimActions.CopyState,
         ["toggle_ui_outside"] = ToggleUiOutside,
     };
@@ -612,41 +632,54 @@ internal static class FrameLink
     // DTOs
     // ------------------------------------------------------------------
 
-    private static object AdviceDto(SimAdvice a) => new
+    private static object AdviceDto(SimAdvice a)
     {
-        note = a.Note,
-        p_win = a.PWin,
-        best_q = a.BestQ,
-        low_confidence = a.LowConfidence,
-        best = a.Best?.Label,
-        pv = a.Pv,
-        pick_reason = a.PickReason,
-        pick_gap_hp = a.PickGapHp,
-        hand_back = a.HandBack,
-        // Which brain answered (PROTOCOL.md section 5, v5.2), and the tag the
-        // in-game panel shows for it ("Instinct" / "Search (Instinct: ...)").
-        brain = a.Brain,
-        instinct_unavailable = a.InstinctUnavailable,
-        source_tag = AdvisorBrainRules.SourceTag(a.Brain, a.InstinctUnavailable),
-        options = a.Options.Select(o => new
+        // Labels in words, the row's kind / plan step / verdict: decided by
+        // SimHud once so the frame's panel and the in-game one agree.
+        List<SimHud.OptionFacts> facts = SimHud.Instance.FactsFor(a);
+        return new
         {
-            label = o.Label,
-            p_win = o.PWin,
-            q = o.Q,
-            visits = o.Visits,
-            visit_share = o.VisitShare,
-            wins = o.Wins,
-            losses = o.Losses,
-            ties = o.Ties,
-            is_best = o.IsBest,
-            low_confidence = o.LowConfidence,
-            in_band = o.InBand,
-            pick_rank = o.PickRank,
-            card_index = o.CardIndex,
-            score = o.Score,
-        }).ToList(),
-        path = a.Path.Select(p => new { col = p.Col, row = p.Row, type = p.Type, hop = p.Hop, hp = p.Hp }).ToList(),
-    };
+            note = a.Note,
+            p_win = a.PWin,
+            best_q = a.BestQ,
+            low_confidence = a.LowConfidence,
+            best = a.Best == null ? null : AdviceMarks.Humanize(a.Best.Label),
+            pv = a.Pv.Select(p => AdviceMarks.Humanize(p)).ToList(),
+            plan = SimHud.PlanWords(a),
+            pick_reason = a.PickReason,
+            pick_gap_hp = a.PickGapHp,
+            hand_back = a.HandBack,
+            // Which brain answered (PROTOCOL.md section 5, v5.2), and the tag the
+            // in-game panel shows for it ("Instinct" / "Search (Instinct: ...)").
+            brain = a.Brain,
+            instinct_unavailable = a.InstinctUnavailable,
+            source_tag = AdvisorBrainRules.SourceTag(a.Brain, a.InstinctUnavailable),
+            show_numbers = SpireMentorModConfig.ShowNumbers,
+            options = a.Options.Select((o, i) => new
+            {
+                label = facts[i].Label,
+                kind = facts[i].Kind,
+                step = facts[i].Step,
+                verdict = facts[i].Verdict,
+                hidden = facts[i].Hidden,
+                hp_mean = o.HpMean,
+                p_win = o.PWin,
+                q = o.Q,
+                visits = o.Visits,
+                visit_share = o.VisitShare ?? (o.Q == null ? o.PWin : null),
+                wins = o.Wins,
+                losses = o.Losses,
+                ties = o.Ties,
+                is_best = o.IsBest,
+                low_confidence = o.LowConfidence,
+                in_band = o.InBand,
+                pick_rank = o.PickRank,
+                card_index = o.CardIndex,
+                score = o.Score,
+            }).ToList(),
+            path = a.Path.Select(p => new { col = p.Col, row = p.Row, type = p.Type, hop = p.Hop, hp = p.Hp }).ToList(),
+        };
+    }
 
     private static string Serialize(object value) => JsonSerializer.Serialize(value);
 

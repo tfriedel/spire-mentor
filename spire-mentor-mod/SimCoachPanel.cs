@@ -6,7 +6,8 @@
 //
 // Behaviour:
 //   * one panel at a time; a new recap / autopsy replaces the shown one;
-//   * right-aligned under the toolbar, max 460 px wide, scrolls when taller
+//   * right-aligned under the Spire Mentor badge and its popover
+//     (SimToolbar.RightColumnTop), max 460 px wide, scrolls when taller
 //     than 55 % of the viewport, so it stays clear of the reward list, the
 //     Proceed button and the game-over screen's buttons;
 //   * the header's ▾/▸ collapses it to title + summary, × closes it; every
@@ -269,8 +270,8 @@ internal sealed class SimCoachPanel
         }
     }
 
-    /// <summary>Right-align under the toolbar and cap the scroll height
-    /// (every tick: the viewport and the toolbar can move).</summary>
+    /// <summary>Right-align under the badge and cap the scroll height
+    /// (every tick: the viewport and the badge can move).</summary>
     private void Place()
     {
         // Not in the tree yet on the first recap: EnsureLayer adds the layer
@@ -282,7 +283,7 @@ internal sealed class SimCoachPanel
             return;
         }
         Vector2 view = _panel.GetViewportRect().Size;
-        float top = (SimToolbar.Instance.BottomY() ?? FallbackTop) + 8f;
+        float top = (SimToolbar.Instance.RightColumnTop() ?? FallbackTop) + 8f;
         if (_scroll != null && _body != null && GodotObject.IsInstanceValid(_body))
         {
             float cap = Math.Max(120f, view.Y * MaxHeightShare);

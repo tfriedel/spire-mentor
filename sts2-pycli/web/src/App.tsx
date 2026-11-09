@@ -25,7 +25,6 @@ import PileViewer from "./components/PileViewer";
 import DeckAnalysis from "./components/DeckAnalysis";
 import RegretReview from "./components/RegretReview";
 import WpaReview from "./components/WpaReview";
-import Reasoning from "./components/Reasoning";
 import CombatBudget, { type CombatPreset } from "./components/CombatBudget";
 import EventLog from "./components/EventLog";
 import LiveLog from "./components/LiveLog";
@@ -54,7 +53,6 @@ function liveLogPath(): Promise<string | null> {
 import BugReportButton from "./components/BugReportButton";
 import BugReportToast, { type BugReportResult } from "./components/BugReportToast";
 import BugReportView from "./components/BugReportView";
-import PpoPolicyPanel from "./components/PpoPolicyPanel";
 import { useShortcuts } from "./useShortcuts";
 import { useMediaQuery, NARROW_QUERY, PHONE_LANDSCAPE_QUERY, SHORT_QUERY } from "./useMediaQuery";
 import { CollapseButton, PanelGrip } from "./components/panelChrome";
@@ -71,6 +69,15 @@ import { bugReportEndpointAvailable } from "./bugreport";
 import OfflineButton from "./components/OfflineButton";
 import { BenchButton } from "./components/BenchButton";
 import TopBar from "./topbar/TopBar";
+import type { MentorBarProps } from "./topbar/MentorBar";
+import { mentorStatus, type MentorMode } from "./topbar/mentorStatus";
+import { AdviceMarksProvider } from "./advice/AdviceContext";
+import { useEngineNumbersPref } from "./advice/useAdviceMarks";
+import {
+  buildMarks, cardKey, END_TURN_KEY, gradeMove, markIndex, onLine, policyOptions, potionKey, scoreOptions,
+  type Grade,
+} from "./advice/marks";
+import { CombatAdvice, PolicyAdvice } from "./advice/AdvicePanel";
 import { buildCommands } from "./topbar/commands";
 import { usePaletteChord } from "./topbar/paletteEntries";
 import TreasureReveal from "./components/TreasureReveal";
@@ -84,13 +91,13 @@ import { SoundProvider } from "./sound/SoundContext";
 import { useSound, type SoundValue } from "./sound/useSound";
 import SoundBridge from "./sound/SoundBridge";
 import { cueForUi, type UiCueKind } from "./sound/runCues";
-import { actionCues, cardPlayCues } from "./sound/appSoundCues";
+import { actionCues, steppedActionCues } from "./sound/appSoundCues";
 import RunEnded from "./components/RunEnded";
 import RunLauncher, { type OffCombatBrain } from "./components/RunLauncher";
 import { ADVISOR_KEY, E2E_CHARACTER, E2E_GAME_VERSION, e2eAdvisable, readAdvisorPref } from "./advisor";
 import { generateSeed } from "./seed";
 import { computeRunEnd, shouldShowViewToggle, type EndedRun } from "./runControl";
-import { parseFollowParams, resolveRunPath, seekIndex } from "./followUrl";
+import { parseFollowParams, parseOpenParam, resolveRunPath, seekIndex } from "./followUrl";
 import ClaudeDock, { ClaudeLinkToggle } from "./claude/ClaudeDock";
 import { useClaudeLink } from "./claude/useClaudeLink";
 
@@ -231,6 +238,15 @@ function AppBody() {
     if (!sound?.map) return;
     const cue = cueForUi(sound.map, kind);
     if (cue) sound.emit([cue]);
+  }
+  /** The card sounds of a step the engine took itself (play to end, the
+   *  watched autobattle), which only reports its action as a label — see
+   *  `steppedActionCues`. `from` is the step the action was taken from. */
+  function emitSteppedCues(from: Step | null, label: string | undefined) {
+    const sound = soundRef.current;
+    if (!sound?.map) return;
+    const cues = steppedActionCues(sound.map, from, label);
+    if (cues.length) sound.emit(cues);
   }
   // A run that was just ended (abandoned mid-run or closed after game over);
   // drives the RunEnded summary shown in the play area until New run / Review
@@ -456,6 +472,26 @@ function AppBody() {
   // OFF: a human plays the game, and asking what the AI thinks is deliberate.
   const hints = useHints();
   const autoHints = hints.on && advisors;
+  // The engine's own numbers beside the advice (Tools → engine numbers).
+  const [engineNumbers, setEngineNumbers] = useEngineNumbersPref();
+  // The verdict over the card you just played (the mod's SimMoveFeedback):
+  // the advice for the position it was played FROM grades it, floating up
+  // from the hand. `nonce` restarts the float for a second card.
+  const [moveGrade, setMoveGrade] = useState<{ grade: Grade; nonce: number } | null>(null);
+  // The float is over in ~2 s; drop the grade then, so a board mounted later
+  // (the next fight, a rewind) does not replay it.
+  useEffect(() => {
+    if (!moveGrade) return;
+    const t = setTimeout(() => setMoveGrade(null), 2200);
+    return () => clearTimeout(t);
+  }, [moveGrade]);
+  // This fight's graded moves, for the one line at its end.
+  const fightTallyRef = useRef({ graded: 0, onLine: 0 });
+  const [fightLine, setFightLine] = useState<string | null>(null);
+  // Set around "Let AI pick" / play best: the AI's own move is not graded.
+  const aiMoveRef = useRef(false);
+  // The run policy's distribution over the screen on show (see policyWanted).
+  const [policy, setPolicy] = useState<import("./api").PpoPolicyPayload | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<string | null>(null);
   const [hintBusy, setHintBusy] = useState(false);
   const [recommendBusy, setRecommendBusy] = useState(false);
@@ -650,6 +686,15 @@ function AppBody() {
   // and its coach chips / recap / autopsy "open in workbench"): open the
   // named run — or the newest one — in the replay view with Follow on, at
   // replay step `step` when given, else at the newest step.
+  // `?open=<path>` (the seed checker): open that stored log in the replay
+  // view at its first step.
+  useEffect(() => {
+    const path = parseOpenParam(window.location.search);
+    if (!path) return;
+    setMode("replay");
+    loadRun(path).catch((e: unknown) => setLiveError(`could not open ${path}: ${e}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const { follow, run, step } = parseFollowParams(window.location.search);
     if (!follow) return;
@@ -1323,10 +1368,15 @@ function AppBody() {
     // a last exact one. Same throttle as the play-to-end loop.
     const TIMELINE_STRIDE = 6;
     let sinceRefresh = TIMELINE_STRIDE; // refresh on the first step, for liveness
+    // The step each engine action is taken FROM, for its card sounds (see
+    // `emitSteppedCues`). `live` is only right for the first iteration.
+    let prevStep: Step | null = live;
     try {
       for (let i = 0; i < 5000; i++) {
         const started = Date.now();
         const r = await api.live.autobattleStep();
+        emitSteppedCues(prevStep, r.debug?.action);
+        prevStep = r.step;
         setLive(r.step);
         // Off-combat steps carry no search; keep the last combat one on screen
         // rather than blanking the panel between fights.
@@ -1385,6 +1435,22 @@ function AppBody() {
     const peeked = peekedRef.current;
     const fromCombat = !!live && (live.decision === "combat_play" || isCombatChoiceStep(live));
     if (action === "end_turn" || !fromCombat) peekedRef.current = false;
+    // Grade a move of yours against the advice for the position it is made
+    // from, when there is advice for it (Hints, or you asked): the mod's
+    // verdict over the played card. Not the AI's moves, not in Off.
+    if (live && live.decision === "combat_play" && live.scores.length > 0 && !aiMoveRef.current
+      && !autoRunningRef.current && !hints.off && advisors) {
+      const key = action === "play_card" ? cardKey(Number(args.card_index))
+        : action === "use_potion" ? potionKey(Number(args.potion_index))
+        : action === "end_turn" ? END_TURN_KEY : null;
+      const target = args.target_index == null ? null : Number(args.target_index);
+      const g = key ? gradeMove(scoreOptions(live.scores), key, target) : null;
+      if (g) {
+        setMoveGrade({ grade: g, nonce: Date.now() });
+        fightTallyRef.current.graded += 1;
+        if (onLine(g)) fightTallyRef.current.onLine += 1;
+      }
+    }
     // The autoplay's last search is about a position this action leaves behind.
     setLastSearch(null);
     // The cues that belong to the CHOICE rather than to its result — a shop
@@ -1399,6 +1465,19 @@ function AppBody() {
     const { step: s, error } = await api.live.action(action, args);
     setLive(s);
     setLiveError(error ?? null);
+    // The fight is over: one line on how many of your graded moves were on
+    // the AI's line (the mod's fight accuracy line).
+    if (!error && fromCombat && s.decision !== "combat_play" && !isCombatChoiceStep(s)) {
+      const t = fightTallyRef.current;
+      if (t.graded > 0) setFightLine(`This fight: ${t.onLine} of ${t.graded} moves on the AI's line`);
+      fightTallyRef.current = { graded: 0, onLine: 0 };
+      setMoveGrade(null);
+    } else if (!error && !fromCombat && s.decision === "combat_play") {
+      // A new fight: last fight's line goes, and so does any tally a fight
+      // the AI finished (autoplay never comes through here) left behind.
+      setFightLine(null);
+      fightTallyRef.current = { graded: 0, onLine: 0 };
+    }
     // Illegal moves create no node; legal ones extend (or fork) the tree.
     if (!error) await refreshTimeline();
     // Choice coach: a run-level choice is graded by agreement with the AI's
@@ -1407,17 +1486,23 @@ function AppBody() {
     // combat move, a forced pick, or no loaded net.
     // After-the-fact feedback runs in both advice styles, for the player's own
     // moves only: an autoplay loop is the AI grading itself.
-    const feedbackOn = advisors && !autoRunningRef.current;
+    // Off is quiet: no grades either.
+    const feedbackOn = advisors && !autoRunningRef.current && !hints.off;
+    //
+    // Not awaited under the action gate (except in autobattle, whose advance
+    // below must come after it): the grade queues in the engine behind
+    // whatever the new screen asks for (the run policy's marks in Hints, the
+    // auto-hint search in a fight), and while the gate was held a click on the
+    // screen that had already appeared was silently dropped. A grade that
+    // lands after the next move is stale and dropped by `isFresh`.
     if (feedbackOn && !error && !COMBAT_VERBS.has(action)) {
-      try {
-        const g = await api.live.lastChoiceGrade();
+      const grade = api.live.lastChoiceGrade().then((g) => {
         if (isFresh(coachGen, coachGenRef.current)) {
           setChoiceGrade(g);
           if (g) setCoachRecords((rs) => [...rs.filter((r) => r.id !== `choice:${g.node_id}`), choiceRecordOf(g, peeked)]);
         }
-      } catch {
-        setChoiceGrade(null);
-      }
+      }, () => setChoiceGrade(null));
+      if (autobattleOn) await grade;
     }
     // Autobattle mode: the pick is committed, so the champion's is now safe to
     // reveal — then skip the combats up to the next run-level decision.
@@ -1435,15 +1520,19 @@ function AppBody() {
     // line (reusing the hint searches it already ran). 409 = nothing to grade
     // or a silent turn (a move stayed uncertain / over the search cap). A
     // reply that lands after you acted again is dropped, never shown late.
+    //
+    // Not awaited under the gate, for the reason the choice grade above is
+    // not: in Hints it queues behind the new turn's auto-hint search, and the
+    // cards of that turn were unclickable for as long. The turn it grades is
+    // closed, so the record stands even when you have moved on; only the chip
+    // is not shown late.
     if (feedbackOn && !error && action === "end_turn") {
-      try {
-        const r = await api.live.lastTurnGrade({ peeked });
-        if (!isFresh(coachGen, coachGenRef.current)) return s;
-        setTurnGrade(r);
+      void api.live.lastTurnGrade({ peeked }).then((r) => {
         setCoachRecords((rs) => [...rs.filter((x) => x.id !== r.id), r]);
-      } catch {
-        setTurnGrade(null);
-      }
+        if (isFresh(coachGen, coachGenRef.current)) setTurnGrade(r);
+      }, () => {
+        if (isFresh(coachGen, coachGenRef.current)) setTurnGrade(null);
+      });
     }
     return error ? null : s;
   }
@@ -1657,6 +1746,14 @@ function AppBody() {
     }
   }
   async function playRecommended() {
+    aiMoveRef.current = true;
+    try {
+      await playRecommendedMove();
+    } finally {
+      aiMoveRef.current = false;
+    }
+  }
+  async function playRecommendedMove() {
     if (!live || live.decision !== "combat_play" || hintInFlight.current) return;
     const scores = live.scores.length > 0 ? live.scores : await fetchHint();
     const a = bestAction(scores);
@@ -1684,6 +1781,10 @@ function AppBody() {
     setAutoPaused(false);
     autoHintedRef.current = true; // suppress the auto-fetch effect during the loop (autoplay fetches itself)
     let played = 0; // cards/potions played during THIS press
+    // The step each action is taken FROM. `live` is this closure's snapshot
+    // and goes stale after the first action, so it is tracked here instead —
+    // the card sounds read the hand the card is played out of.
+    let cur: Step = live;
     try {
       for (let i = 0; i < 20; i++) {
         if (stopAutoRef.current) break; // Esc interrupted
@@ -1706,8 +1807,15 @@ function AppBody() {
             ? ["use_potion", a.targetIndex != null ? { potion_index: a.slot, target_index: a.targetIndex } : { potion_index: a.slot }] as const
             : ["play_card", a.targetIndex != null ? { card_index: a.cardIndex, target_index: a.targetIndex } : { card_index: a.cardIndex }] as const;
         if (a.kind === "play" && a.targetIndex != null) setLiveAttack({ target: a.targetIndex, nonce: Date.now() });
+        // Bypasses `liveAction`, so it has to voice the play itself.
+        const snd = soundRef.current;
+        if (snd?.map) {
+          const cues = actionCues(snd.map, cur.state, cur.decision, actName, actArgs);
+          if (cues.length) snd.emit(cues);
+        }
         const { step: s, error } = await api.live.action(actName, actArgs);
         setLive(s);
+        cur = s;
         played++;
         if (error || s.decision !== "combat_play") break; // illegal move or combat ended
       }
@@ -1794,6 +1902,7 @@ function AppBody() {
         setAutoStepNum(stepCount);
         setAutoStepElapsed(0);
         const r = await api.live.runModeStep();
+        emitSteppedCues(cur, r.debug?.action);
         cur = r.step;
         setLive(r.step);
         // Off-combat steps carry no search; keep the last combat one on screen
@@ -2067,6 +2176,114 @@ function AppBody() {
     },
   }, mode);
 
+  // The AI's controls on the top bar (MentorBar): the mod's Mode switch, its
+  // Brain switch, this decision's verbs and the status in words.
+  const mentorMode: MentorMode = autoRunning ? "aiplays" : hints.style;
+  const setMentorMode = (m: MentorMode) => {
+    if (m === "aiplays") {
+      if (!live || live.decision === "game_over") return;
+      // The whole run when the run's agent can drive it, else this fight.
+      if (runMode) void playToEnd();
+      else if (live.decision === "combat_play") void autoplay();
+      return;
+    }
+    if (autoRunningRef.current) stopAutoRef.current = true;
+    if (m === hints.style) return;
+    if ((m === "hints") !== hints.on) {
+      // Into Hints: release the auto-hint latch so the fetch fires for this
+      // position. Out of Hints: take the scores on screen with it and latch
+      // against an immediate re-fetch (see toggleHintsLatch).
+      const { latch, clearScores } = toggleHintsLatch(hints.on);
+      autoHintedRef.current = latch;
+      if (clearScores) setLive((s) => (s ? { ...s, scores: [], pv: null } : s));
+    }
+    hints.setStyle(m);
+  };
+  const aiPlaysDisabled = !live ? "start a run first"
+    : live.decision === "game_over" ? "the run is over"
+    : !runMode && live.decision !== "combat_play" ? "the AI plays fights only in this build"
+    : undefined;
+  const brainShown = liveAdvisable && advisors;
+  const mentorBar: MentorBarProps | undefined = mode === "play" && advisors ? {
+    mode: mentorMode,
+    setMode: setMentorMode,
+    aiPlaysDisabled,
+    brain: brainShown ? {
+      value: advisor === "e2e" ? "instinct" : "search",
+      set: (b) => pickAdvisor(b === "instinct" ? "e2e" : "search"),
+    } : undefined,
+    onPeek: hints.style === "coach" && live ? peekNext : undefined,
+    letAiPick: live ? {
+      run: () => void (live.decision === "combat_play" ? playRecommended() : playBestChoice()),
+      disabledReason: autoRunning ? "the AI is playing" : live.decision === "game_over" ? "the run is over" : undefined,
+    } : undefined,
+    autobattle: live && runMode ? {
+      on: autobattleOn,
+      toggle: () => {
+        // Leaving autobattle mode drops the drill state so re-entering
+        // starts a fresh diff window rather than resuming a stale one.
+        setAutobattleOn((v) => !v);
+        setAutobattleDiff(null);
+        setAutobattleVerdict(null);
+        setAutobattleOver({ over: false, won: false });
+      },
+    } : undefined,
+    status: mentorStatus({
+      mode: mentorMode, aiPlaying: autoRunning, thinking: hintBusy,
+      brain: brainShown ? (advisor === "e2e" ? "instinct" : "search") : null,
+      autobattle: autobattleOn, aiStep: autoStepNum,
+    }),
+    aiPlaying: autoRunning,
+    onStop: () => { stopAutoRef.current = true; },
+  } : undefined;
+
+  // The run policy's read of a non-combat screen (PPO, or Instinct when it
+  // advises): fetched in Hints only — it IS the answer to the screen — and
+  // shared by the screens' marks and the side panel's ranked list. It used to
+  // be the bottom dock's own fetch (PpoPolicyPanel).
+  const policyWanted = mode === "play" && advisors && !!live && hints.on
+    && live.decision !== "combat_play" && live.decision !== "game_over";
+  useEffect(() => {
+    if (!policyWanted) {
+      setPolicy(null);
+      return;
+    }
+    let cancelled = false;
+    api.live.ppoPolicy()
+      .then((p) => { if (!cancelled) setPolicy(p); })
+      .catch(() => { if (!cancelled) setPolicy(null); });
+    return () => { cancelled = true; };
+    // `live` is a fresh object every step, so a same-floor chain of screens
+    // (event pages, reward chains) still refetches.
+  }, [live, policyWanted]);
+  const togglePolicyImpl = async () => {
+    if (!policy) return;
+    await api.live.runMode({ ppo_impl: policy.impl === "rust" ? "python" : "rust" });
+    setPolicy(await api.live.ppoPolicy().catch(() => null));
+  };
+
+  // The marks on the things to click (advice/marks.ts): the fight's moves when
+  // its scores are on show, the run policy's pick elsewhere, a replayed fight's
+  // recorded search. Not while the AI plays: its moves land faster than a ring
+  // can be read, and none of them is the player's.
+  const shownMarks = useMemo(() => {
+    if (mode === "play") {
+      if (!live || autoRunning) return [];
+      if (live.decision === "combat_play") {
+        if (live.scores.length === 0) return [];
+        if (showScores) return buildMarks(scoreOptions(live.scores));
+        // A peek (P, Coach) rings the pick and its target and nothing else,
+        // as the mod's F5 does.
+        return peek ? buildMarks(scoreOptions(live.scores)).filter((m) => m.tier === "best") : [];
+      }
+      return policy?.ppo_available ? buildMarks(policyOptions(policy.options)) : [];
+    }
+    if (mode === "replay" && step?.decision === "combat_play") return buildMarks(scoreOptions(step.scores));
+    return [];
+  }, [mode, live, autoRunning, showScores, peek, policy, step]);
+  const marksValue = useMemo(() => ({ marks: markIndex(shownMarks), showNumbers: engineNumbers }),
+    [shownMarks, engineNumbers]);
+
   const reportId = new URLSearchParams(window.location.search).get("report");
   if (reportId) return <BugReportView id={reportId} />;
 
@@ -2074,6 +2291,7 @@ function AppBody() {
     <EffectsProvider autoplaying={autoRunning}>
     <SoundProvider gameVersion={shownGameVersion}>
     <SoundBridge soundRef={soundRef} live={live} mode={mode} />
+    <AdviceMarksProvider value={marksValue}>
     <div className="wb-shell"
       style={{ gridTemplateColumns: sideVisible && !narrow ? "1fr 320px" : "1fr" }}>
       <div className="wb-main">
@@ -2093,29 +2311,7 @@ function AppBody() {
           showViewToggle={shouldShowViewToggle({ hasLive: !!live, hasEndedRun: !!endedRun, replayCount: count })}
           replayCount={count}
           commands={commands}
-          chips={{
-            hints: mode === "play" && advisors ? {
-              on: hints.on, toggle: hints.toggle,
-              title: "advice style. 💡 Hints: show the machine's opinion WITHOUT being asked — the PPO policy panel, auto combat hints, the EV analyzers, the synergy/archetype chips and the map's planned route. 🎓 Coach: nothing unprompted before you act; the press-first tools (hint, peek P, the reviews, search) still work. Both grade your turns and choices after you act.",
-            } : undefined,
-            advisor: liveAdvisable && advisors ? {
-              on: advisor === "e2e",
-              toggle: () => pickAdvisor(advisor === "e2e" ? "search" : "e2e"),
-              title: "who advises your moves. 🔎 search: the combat MCTS in fights, the PPO run policy elsewhere. 🧠 Instinct: one transformer, no search — for every decision (hints, the policy panel, play best G / A, the choice coach, the map route). Its probabilities are a policy's, not win chances.",
-            } : undefined,
-            autobattle: mode === "play" && live && advisors && runMode ? {
-              on: autobattleOn,
-              toggle: () => {
-                // Leaving autobattle mode drops the drill state so re-entering
-                // starts a fresh diff window rather than resuming a stale one.
-                setAutobattleOn((v) => !v);
-                setAutobattleDiff(null);
-                setAutobattleVerdict(null);
-                setAutobattleOver({ over: false, won: false });
-              },
-              title: "autobattle mode: the agent plays the fights (watch them play out, or skip them) and you make only the run-level decisions — with a change-diff at each stop and the champion's pick revealed after you commit",
-            } : undefined,
-          }}
+          mentor={mentorBar}
           replay={mode === "replay" ? {
             runs, loadRun: (path) => { void loadRun(path); }, loadedPath,
             follow, setFollow, followIsLive, followFromUrl: followFromUrlRef.current, bridgeError,
@@ -2124,6 +2320,7 @@ function AppBody() {
             simlabLink: advisors && simlab,
             gameVersion: shownGameVersion,
             debug: { on: debugEnabled, toggle: toggleDebug },
+            engineNumbers: { on: engineNumbers, toggle: () => setEngineNumbers(!engineNumbers) },
             onHelp: () => setHelpOpen((o) => !o),
             ...(isStaticMode()
               ? { onBridge: () => setBridgeOpen(true),
@@ -2293,6 +2490,8 @@ function AppBody() {
             // not exist in the real game's band (autoplay, analyze). Map and
             // deck stay in the band: the game's bar has both.
             const cur = (mode === "play" ? live : step)?.state;
+            // The belt's Use / Discard: a live fight the player is driving.
+            const livePotions = mode === "play" && live?.decision === "combat_play" && !autoRunning;
             const p = cur?.player;
             if (!p || p.hp == null) return null;
             const deck = p.deck ?? [];
@@ -2363,7 +2562,12 @@ function AppBody() {
                 {/* Map is always available from the band — the act map can be
                     inspected from any screen (combat, card reward, shop, …). */}
                 <GameHud state={cur} onOpenMap={openMap}
-                  onOpenDeck={deck.length > 0 ? () => { emitUi("screenOpen"); setDeckOpen(true); } : undefined} />
+                  onOpenDeck={deck.length > 0 ? () => { emitUi("screenOpen"); setDeckOpen(true); } : undefined}
+                  {...(livePotions ? {
+                    scores: live?.scores,
+                    onUsePotion: (slot: number) => liveAction("use_potion", { potion_index: slot }),
+                    onDiscardPotion: (slot: number) => liveAction("discard_potion", { potion_index: slot }),
+                  } : {})} />
               </>
             );
           })()}
@@ -2423,20 +2627,11 @@ function AppBody() {
                   actionNode={liveNode}
                   onPlayCard={(ci, ti) => {
                     if (ti != null) setLiveAttack({ target: ti, nonce: Date.now() });
-                    const sound = soundRef.current;
-                    if (sound?.map) {
-                      const cues = cardPlayCues(
-                        sound.map, live.state.hand, ci, live.state.player?.name,
-                      );
-                      if (cues.length) sound.emit(cues);
-                    }
+                    // The card's sounds are emitted by `liveAction` (see
+                    // `actionCues`), so a recommended play sounds the same.
                     liveAction("play_card", ti != null ? { card_index: ci, target_index: ti } : { card_index: ci });
                   }}
                   onEndTurn={() => liveAction("end_turn", {})}
-                  onUsePotion={(slot, ti) =>
-                    liveAction("use_potion", ti != null ? { potion_index: slot, target_index: ti } : { potion_index: slot })
-                  }
-                  onDiscardPotion={(slot) => liveAction("discard_potion", { potion_index: slot })}
                   onHint={advisors ? liveHint : undefined}
                   onPeek={advisors ? peekNext : undefined}
                   attack={liveAttack ?? undefined}
@@ -2445,22 +2640,9 @@ function AppBody() {
                   onAutoplay={advisors ? autoplay : undefined}
                   onAutoplayToEnd={advisors ? playToEnd : undefined}
                   onSearch={advisors ? () => openSearchTree() : undefined}
-                  autoHints={autoHints}
-                  onToggleHints={!advisors ? undefined : () => {
-                    // The toggle only governs the *auto-fetch* effect; last
-                    // fetched scores (from H / autoplay / a prior auto-hint)
-                    // live on `live.scores`. Turning OFF latches against a
-                    // re-fetch and clears those scores so the off state is
-                    // visible; turning ON releases the latch so the auto-fetch
-                    // effect fires again (otherwise re-enabling is a no-op and
-                    // the toggle looks stuck off). See toggleHintsLatch.
-                    const { latch, clearScores } = toggleHintsLatch(autoHints);
-                    autoHintedRef.current = latch;
-                    if (clearScores) setLive((s) => (s ? { ...s, scores: [], pv: null } : s));
-                    hints.setOn(!autoHints);
-                  }}
                   hintBusy={hintBusy || autoRunning}
                   showScores={showScores}
+                  moveGrade={moveGrade}
                   hintConfig={advisors ? hintConfig : undefined}
                   onHintConfig={setHintConfig} />
               )}
@@ -2522,16 +2704,6 @@ function AppBody() {
             </>
           )}
           </div>
-          {/* PPO dock — a SIBLING of the scroll box, never a child of it. It
-              used to ride inside it as `position: sticky`, which lays it OVER
-              the bottom of whatever screen is up: on a card reward that is
-              exactly where the advisor rail (the EV chips, the analyze button's
-              own output) lives, so the panel simply covered the evidence it was
-              sitting next to. Out here the scroll box is `flex: 1` against it
-              and the screen re-fits into what is left — the dock takes space
-              instead of stealing it, and it is still on screen on every
-              non-combat screen without needing to be sticky. */}
-          {mode === "play" && live && advisors && <PpoPolicyPanel live={live} />}
         </div>
         {count > 0 && <Timeline idx={idx} count={count} entries={entries} marks={coachMarks} onSeek={(i) => setIdx(Math.max(0, Math.min(count - 1, i)))} />}
         {/* Debug drawer, docked at the bottom of the left column. A fixed-height
@@ -2626,12 +2798,29 @@ function AppBody() {
                       {view.text}
                     </div>
                   ) : (
-                    <Reasoning scores={view.scores} pv={view.pv} heading={false}
-                      enemies={view.enemies ?? live.state.enemies} />
+                    <CombatAdvice scores={view.scores} pv={view.pv}
+                      enemies={view.enemies ?? live.state.enemies} hand={live.state.hand}
+                      marks={marksValue.marks} showNumbers={engineNumbers} />
                   )}
                 </ReasoningDock>
               );
             })()}
+            {/* The run policy's ranked list for every other screen (it used to
+                be a dock under the screen, PpoPolicyPanel): the same panel as
+                the fight's, as the mod has one advice panel for everything. */}
+            {live && live.decision !== "combat_play" && policy && (
+              <ReasoningDock
+                title={policy.policy === "e2e" ? "Instinct" : null}
+                collapsed={reasoningCollapsed}
+                onToggle={() => setReasoningCollapsed(!reasoningCollapsed)}
+                height={reasoningHeight}
+                onResize={setReasoningHeight}
+              >
+                <PolicyAdvice payload={policy} marks={marksValue.marks} showNumbers={engineNumbers}
+                  implToggle={isStaticMode() || policy.policy === "e2e" ? undefined
+                    : { impl: policy.impl, toggle: () => void togglePolicyImpl() }} />
+              </ReasoningDock>
+            )}
             {/* Log region: a PINNED header (errors, coach banner, branch-tree
                 button, the "history" caption) over an independently-scrolling
                 history list — so the warning + caption stay put as the log
@@ -2659,6 +2848,12 @@ function AppBody() {
                   />
                 )}
                 {peek && mode === "play" && <PeekBanner text={peek} onDismiss={() => setPeek(null)} />}
+                {fightLine && (
+                  <div className="wb-fight-line" role="status" data-testid="fight-line">
+                    <span>{fightLine}</span>
+                    <button type="button" aria-label="dismiss" onClick={() => setFightLine(null)}>✕</button>
+                  </div>
+                )}
                 {turnGrade && <TurnChip record={turnGrade} onDismiss={() => setTurnGrade(null)} />}
                 {choiceGrade && <ChoiceChip key={choiceGrade.node_id} grade={choiceGrade} onDismiss={() => setChoiceGrade(null)} />}
                 {liveTimeline && liveTimeline.nodes.length > 1 && (
@@ -2700,8 +2895,9 @@ function AppBody() {
                 height={reasoningHeight}
                 onResize={setReasoningHeight}
               >
-                <Reasoning scores={step.scores} pv={step.pv} advice={step.meta?.advice}
-                  heading={false} enemies={step.state.enemies} />
+                <CombatAdvice scores={step.scores} pv={step.pv} advice={step.meta?.advice}
+                  enemies={step.state.enemies} hand={step.state.hand}
+                  marks={marksValue.marks} showNumbers={engineNumbers} />
               </ReasoningDock>
             )}
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, paddingBottom: 16 + regretHeight + wpaHeight + coachHeight }}>
@@ -2862,6 +3058,7 @@ function AppBody() {
           onClose={() => setWpaOpen(false)} />
       )}
     </div>
+    </AdviceMarksProvider>
     </SoundProvider>
     </EffectsProvider>
   );
@@ -2903,7 +3100,7 @@ function ReasoningDock({ title, collapsed, onToggle, height, onResize, children 
         borderBottom: collapsed ? undefined : "1px solid var(--border)", margin: "0 0 4px" }}>
         <CollapseButton collapsed={collapsed} onToggle={onToggle}
           label="the machine-reasoning panel" />
-        <span style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>Machine reasoning</span>
+        <span style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>Advice</span>
         {title && (
           <span
             title="the search that chose this move — its rows score the position BEFORE it was played, not the board below"

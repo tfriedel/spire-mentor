@@ -1543,7 +1543,7 @@ public class RunSimulator
                         // GH #500 - see the playerPowers note above.
                         ["display_amount"] = pw.DisplayAmount,
                     }).ToList() ?? new List<Dictionary<string, object?>>();
-                    monsters.Add(new Dictionary<string, object?>
+                    var monsterDict = new Dictionary<string, object?>
                     {
                         ["uid"] = i,
                         ["kind"] = e.Monster?.Id.Entry,
@@ -1565,7 +1565,11 @@ public class RunSimulator
                         // (parity_fuzz_state.normalize_*) does NOT read it, so
                         // emitting it can't perturb any existing bucket.
                         ["move_state"] = e.Monster?.NextMove?.Id,
-                    });
+                    };
+                    // The move machine's log and flags (#1181), as on the
+                    // decision dicts: lets the parity harness compare them.
+                    if (e.Monster != null) AppendMoveMachineState(monsterDict, e.Monster);
+                    monsters.Add(monsterDict);
                 }
             }
 
@@ -2885,6 +2889,10 @@ public class RunSimulator
 
         Log($"Card selection: indices [{string.Join(",", indices)}]");
 
+        if (_cardSelector.PendingIsForcedPick
+            && indices.Count(i => i < (_cardSelector.PendingOptions?.Count ?? 0)) < _cardSelector.PendingMinSelect)
+            return Error($"select_cards: this pick cannot be skipped (min_select={_cardSelector.PendingMinSelect})");
+
         ResolveSelection(() => _cardSelector.ResolvePendingByIndices(indices));
         _syncCtx.Pump();
         // A resumed play can open the next card's select (Catastrophe's
@@ -2960,6 +2968,8 @@ public class RunSimulator
 
     private Dictionary<string, object?> DoSkipSelect(Player player)
     {
+        if (_cardSelector.PendingIsForcedPick)
+            return Error("skip_select: this pick cannot be skipped (H4: FromChooseACardScreen without canSkip)");
         if (_cardSelector.HasPending)
         {
             Log("Skipping card selection");
@@ -3968,6 +3978,57 @@ public class RunSimulator
             if (KnowledgeDemonCurseCounterField?.DeclaringType?.IsInstanceOfType(m) == true
                 && KnowledgeDemonCurseCounterField.GetValue(m) is int curse)
                 d["curse_of_knowledge_counter"] = curse;
+        }
+        catch { }
+        AppendMoveMachineState(d, m);
+    }
+
+    // The move machine's private flags (#1181), looked up once. Same names in
+    // v0.107.1 and v0.111.0 (MonsterMoveStateMachine.cs:14, MoveState.cs:13).
+    // The machine and move types are reached through MonsterModel's own
+    // property types, so no game namespace is named here.
+    private static readonly System.Reflection.FieldInfo? PerformedFirstMoveField =
+        typeof(MonsterModel).GetProperty("MoveStateMachine")?.PropertyType.GetField(
+            "_performedFirstMove",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+    private static readonly System.Reflection.FieldInfo? MovePerformedField =
+        typeof(MonsterModel).GetProperty("NextMove")?.PropertyType.GetField(
+            "_performedAtLeastOnce",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+    /// <summary>
+    /// The move machine's state the next roll reads and <c>move_state</c>
+    /// cannot carry (#1181), as <c>ai</c>: <c>log</c> = the ids of
+    /// <c>MonsterMoveStateMachine.StateLog</c> (moves logged when rolled, the
+    /// initial one at construction; RandomBranchState's repeat rules and
+    /// cooldowns read it), <c>performed_first_move</c> = its
+    /// <c>_performedFirstMove</c>, <c>performed</c> = the current
+    /// <c>MoveState._performedAtLeastOnce</c>, and for a synthetic stun
+    /// <c>forced_next</c> = the move it resumes. The engine restores its own log
+    /// from these. Kept identical in RunSimulator and SimStateExtractor.
+    /// </summary>
+    private static void AppendMoveMachineState(Dictionary<string, object?> d, MonsterModel m)
+    {
+        try
+        {
+            var sm = m.MoveStateMachine;
+            if (sm == null) return;
+            var ai = new Dictionary<string, object?>
+            {
+                ["log"] = sm.StateLog.Select(s => s.Id).ToList(),
+            };
+            if (PerformedFirstMoveField?.GetValue(sm) is bool first)
+                ai["performed_first_move"] = first;
+            if (m.NextMove != null && MovePerformedField?.GetValue(m.NextMove) is bool performed)
+                ai["performed"] = performed;
+            // A synthetic state (Creature.StunInternal's "STUNNED", outside
+            // the machine's States) resumes its FollowUpStateId: the move
+            // the stun interrupted.
+            if (m.NextMove != null && !sm.States.ContainsKey(m.NextMove.Id)
+                && !string.IsNullOrEmpty(m.NextMove.FollowUpStateId))
+                ai["forced_next"] = m.NextMove.FollowUpStateId;
+            d["ai"] = ai;
         }
         catch { }
     }
@@ -8129,6 +8190,14 @@ public class RunSimulator
             if (optList.Count == 0)
                 return Task.FromResult<IEnumerable<CardModel>>(Array.Empty<CardModel>());
 
+            // H4 (#1181): `FromChooseACardScreen` asks a test Selector for 0-1
+            // cards whatever its `canSkip` (CardSelectCmd.cs:265-267), but the
+            // real screen without canSkip offers no skip (NChooseACardSelection
+            // Screen.ShowScreen(cards, canSkip)): KnowledgeDemon.cs:187 forces
+            // a curse pick. Require the pick here, as the game and Rust do.
+            if (ctxSource == "FromChooseACardScreen" && ctxCancelable == false && minSelect < 1 && maxSelect >= 1)
+                minSelect = 1;
+
             // If only one option and minSelect requires it, auto-select
             if (optList.Count == 1 && minSelect >= 1)
                 return Task.FromResult<IEnumerable<CardModel>>(optList);
@@ -8193,6 +8262,16 @@ public class RunSimulator
             _pendingTcs = null;
             tcs?.TrySetResult(selected);
         }
+
+        /// <summary>
+        /// A pending pick the game does not let the player skip: a
+        /// non-cancelable `FromChooseACardScreen` (H4, #1181). Only that
+        /// entry point is enforced; elsewhere `min_select` stays advisory,
+        /// as before.
+        /// </summary>
+        public bool PendingIsForcedPick =>
+            HasPending && PendingSource == "FromChooseACardScreen"
+            && PendingCancelable == false && PendingMinSelect >= 1;
 
         public void ResolvePendingByIndices(int[] indices)
         {
@@ -9569,6 +9648,38 @@ public class RunSimulator
                     if (monsterKey == "THE_KIN") monsterKey = "KIN_PRIEST";
                     secondBossNode["id"] = secondIdEntry;
                     secondBossNode["name"] = _loc.Monster(monsterKey);
+                }
+
+                // H2 (#1181): the second boss is a real, travelable node, so
+                // list it in `rows` too (Rust `full_map` does; the meta node
+                // above only adds its identity). `map.GetPointsInRow` stops
+                // below it, like it stops below the act boss.
+                var alreadyListed = rows.Any(r => r.Any(n =>
+                    (int?)n["col"] == (int)secondPoint.coord.col
+                    && (int?)n["row"] == (int)secondPoint.coord.row));
+                if (!alreadyListed)
+                {
+                    var isVisited = visited?.Any(v =>
+                        v.col == secondPoint.coord.col && v.row == secondPoint.coord.row) ?? false;
+                    var isCurrent = currentCoord.HasValue
+                        && currentCoord.Value.col == secondPoint.coord.col
+                        && currentCoord.Value.row == secondPoint.coord.row;
+                    rows.Add(new List<Dictionary<string, object?>>
+                    {
+                        new()
+                        {
+                            ["col"] = (int)secondPoint.coord.col,
+                            ["row"] = (int)secondPoint.coord.row,
+                            ["type"] = secondPoint.PointType.ToString(),
+                            ["children"] = secondPoint.Children?.Select(ch => new Dictionary<string, object?>
+                            {
+                                ["col"] = (int)ch.coord.col,
+                                ["row"] = (int)ch.coord.row,
+                            }).ToList() ?? new List<Dictionary<string, object?>>(),
+                            ["visited"] = isVisited,
+                            ["current"] = isCurrent,
+                        },
+                    });
                 }
             }
         }

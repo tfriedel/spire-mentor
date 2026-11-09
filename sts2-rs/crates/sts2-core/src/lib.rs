@@ -124,7 +124,7 @@ pub mod enemy_death_effects;
 // dispatch. Content sub-beads (sts2-rs-05f..sts2-rs-uzn) construct
 // per-monster `MonsterAi` instances via struct literals.
 pub mod monster_ai;
-pub use monster_ai::MonsterAi;
+pub use monster_ai::{MonsterAi, WireInstanceState};
 
 // Phase 4 (bead sts2-rs-u4u P4-2): `RelicKind` discriminant lives in its
 // own module so the eventual ~190-variant enum (BurningBlood, BlackBlood,
@@ -12892,6 +12892,10 @@ fn apply_post_choice_effect(state: &mut CombatState, effect: Option<PostChoiceEf
             count,
             upgraded,
         }) => {
+            // Hidden Daggers' discard can down the last enemy (Tingsha); then
+            // `CardCmd.Upgrade` is a no-op (`CombatManager.IsEnding`,
+            // CardCmd.cs:267-270, GH #1150).
+            let upgraded = upgraded && !crate::combat_loop::combat_is_ending(state);
             for _ in 0..count {
                 let Some(card) = build_card_for_version(card_id, upgraded, state.game_version)
                 else {
@@ -21543,6 +21547,57 @@ mod tests {
         assert!(!s.player.draw.contains(&u2), "u2 removed from draw");
         assert_eq!(s.player.draw.len(), 1, "only u1 stays in draw");
         assert_eq!(s.player.draw.first().copied(), Some(u1), "u1 retained");
+    }
+
+    /// GH #1150: a Stratagem select a kill's `AfterDeath` parked answers only
+    /// after the next hand draw, so its fixed option list can name a card that
+    /// draw already took. C# `CardPileCmd.Add(card, Hand)` takes the card from
+    /// wherever it is: a card already in a non-full hand moves to the hand's
+    /// end, and one in a full hand goes to discard, because `isFullHandAdd` is
+    /// tested before the card leaves its old pile (CardPileCmd.cs:420-424).
+    #[test]
+    fn resolve_stratagem_pick_already_in_hand_follows_card_pile_add() {
+        let mk_opt = |uid| ChoiceOption {
+            card_id: cards::CardId::StrikeIronclad,
+            upgraded: false,
+            card_uid: Some(uid),
+            source_pile: Some(cards::PileKind::Draw),
+        };
+        let mk_choice = |uid| PendingChoice {
+            kind: ChoiceKind::AddFromDrawToHand,
+            options: vec![mk_opt(uid)],
+            min_select: 1,
+            max_select: 1,
+            can_skip: false,
+            post_effect: None,
+            picked: SmallVec::new(),
+        };
+        let uid = |n: u32| CardUid::new(n).expect("non-zero");
+        let pick = uid(5);
+
+        // Non-full hand: the pick moves from its slot to the end.
+        let mut s = CombatState::default();
+        s.player.hand.extend([pick, uid(6), uid(7)]);
+        s.pending_choice = Some(mk_choice(pick));
+        let sel: SmallVec<[u8; 4]> = SmallVec::from_slice(&[0]);
+        assert_eq!(
+            apply(&mut s, Action::ResolveChoice { selection: sel }),
+            StepResult::Advanced
+        );
+        assert_eq!(s.player.hand.as_slice(), &[uid(6), uid(7), pick]);
+        assert!(s.player.discard.is_empty());
+
+        // Full hand: the pick leaves the hand for the discard pile.
+        let mut s = CombatState::default();
+        s.player.hand.push(pick);
+        for n in 0..u32::try_from(cards::HAND_LIMIT - 1).expect("u32") {
+            s.player.hand.push(uid(100 + n));
+        }
+        s.pending_choice = Some(mk_choice(pick));
+        let sel: SmallVec<[u8; 4]> = SmallVec::from_slice(&[0]);
+        let _ = apply(&mut s, Action::ResolveChoice { selection: sel });
+        assert!(!s.player.hand.contains(&pick), "left the full hand");
+        assert_eq!(s.player.discard.as_slice(), &[pick]);
     }
 
     /// Bead `sts2-rs-09x5n`: if the chosen draw-pile card was previously

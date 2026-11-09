@@ -3,11 +3,11 @@ import { SoundPlayer, type AudioBackend } from "../player";
 
 function fake() {
   const loads: string[] = [];
-  const plays: { gain: number }[] = [];
+  const plays: { gain: number; rate: number }[] = [];
   let voices = 0;
   const backend: AudioBackend = {
     async load(url) { loads.push(url); return { url }; },
-    play(_b, gain) { plays.push({ gain }); voices += 1; },
+    play(_b, gain, rate) { plays.push({ gain, rate }); voices += 1; },
     activeVoices() { return voices; },
   };
   return { backend, loads, plays, setVoices: (n: number) => { voices = n; } };
@@ -58,6 +58,29 @@ describe("SoundPlayer", () => {
     const p = new SoundPlayer(f.backend);
     await p.play({ ...CUE, gain: 0.5 }, 0.4, 0);
     expect(f.plays[0].gain).toBeCloseTo(0.2);
+  });
+
+  it("plays at rate 1, with no draw, when the cue asks for no pitch variance", async () => {
+    // `GetRandomPitchScale` returns 1 without touching the RNG for
+    // `PitchVariance.None`; every FMOD cue and most debug ones take this path.
+    const f = fake();
+    const rand = vi.fn(() => 0.9);
+    const p = new SoundPlayer(f.backend, { rand });
+    await p.play(CUE, 1, 0);
+    expect(f.plays[0].rate).toBe(1);
+    expect(rand).not.toHaveBeenCalled();
+  });
+
+  it("draws the playback rate uniformly from 1 ± pitchVariance", async () => {
+    // Both ends of the draw, so a sign error or a missing `* 2 - 1` (which
+    // would only ever raise the pitch) fails.
+    const f = fake();
+    const draws = [0, 0.999999];
+    const p = new SoundPlayer(f.backend, { rand: () => draws.shift()!, debounceMs: 0 });
+    await p.play({ ...CUE, pitchVariance: 0.1 }, 1, 0);
+    await p.play({ ...CUE, pitchVariance: 0.1 }, 1, 1);
+    expect(f.plays[0].rate).toBeCloseTo(0.9);
+    expect(f.plays[1].rate).toBeCloseTo(1.1);
   });
 
   it("swallows a failed load rather than breaking the frame", async () => {

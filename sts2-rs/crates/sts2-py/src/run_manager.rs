@@ -707,6 +707,37 @@ impl PyRunManager {
         emit_rm::neow_offers(&self.inner)
     }
 
+    /// Set Neow's three offers to the given relics (`Id.Entry` names, an
+    /// optional `RELIC.` prefix allowed), in the screen's order: the two
+    /// positive offers, then the curse.
+    ///
+    /// For rebuilding a co-op run's Neow, which the engine cannot roll: the
+    /// game seeds each player's Neow with their player slot
+    /// (`EventModel.cs:234`) and keeps Massive Scroll in the pool when there
+    /// is more than one player (`MassiveScroll.IsAllowed`), while the engine
+    /// rolls single player's (slot 0, no Massive Scroll). Reconstruction
+    /// surface, NOT a parity surface.
+    ///
+    /// Raises `ValueError` for a name that is not a Neow relic.
+    fn debug_set_neow_offers(
+        &mut self,
+        positive_1: &str,
+        positive_2: &str,
+        cursed: &str,
+    ) -> PyResult<()> {
+        let parse = |name: &str| {
+            let id = name.strip_prefix("RELIC.").unwrap_or(name);
+            sts2_core::NeowRelic::from_snake_case_id(id)
+                .ok_or_else(|| PyValueError::new_err(format!("{name:?} is not a Neow relic")))
+        };
+        self.inner.run_state.neow_offers = Some(sts2_core::NeowOffers {
+            positive_1: parse(positive_1)?,
+            positive_2: parse(positive_2)?,
+            cursed: parse(cursed)?,
+        });
+        Ok(())
+    }
+
     #[getter]
     fn character(&self) -> &'static str {
         character_str(self.inner.character_id)
@@ -812,6 +843,20 @@ impl PyRunManager {
     /// Raises `ValueError` for an act outside this run's range, an act the
     /// run has already passed, or a coord that is not a live node on that
     /// act's map.
+    /// Build this run's act maps the way a co-op run does: one room fewer
+    /// per act (C# `ActModel.GetNumberOfRooms(isMultiplayer)`), same map RNG.
+    /// Call right after constructing the run, before `debug_place_on_map`.
+    /// See [`sts2_core::run_manager::RunManager::debug_use_coop_maps`].
+    ///
+    /// Reconstruction surface, NOT a parity surface.
+    ///
+    /// Raises `ValueError` when the maps are already co-op sized.
+    fn debug_use_coop_maps(&mut self) -> PyResult<()> {
+        self.inner
+            .debug_use_coop_maps()
+            .map_err(|e| PyValueError::new_err(format!("debug_use_coop_maps: {e}")))
+    }
+
     #[pyo3(signature = (act, col, row, visited, act_floor, total_floor))]
     fn debug_place_on_map(
         &mut self,
@@ -1216,6 +1261,14 @@ impl PyRunManager {
         sts2_wire::graft::enter_rest_site(&mut self.inner, &taken).map_err(graft_err)
     }
 
+    /// Drop every queued player choice and the effects deferred until one
+    /// resolves. A run rebuilt from a live screen calls it after
+    /// `force_add_relic`: the live run already made the pickups' choices
+    /// (Lead Paperweight's choose screen, GH #1183).
+    fn debug_clear_pending_choices(&mut self) {
+        self.inner.debug_clear_pending_choices();
+    }
+
     /// Queue `n` interactive deck removals (`remove_deck_card` preempts).
     fn debug_queue_deck_removals(&mut self, n: u32) {
         self.inner.debug_queue_deck_removals(n);
@@ -1530,8 +1583,17 @@ impl PyRunManager {
     /// display layer should PREFER those — `label` / `description` are
     /// developer shorthand written for logs, and read as such next to the
     /// real game ("Gain a random potion." vs "Procure 1 random Potion.").
-    fn event_option_infos(&self, py: Python<'_>) -> PyResult<PyObject> {
-        crate::value_to_py(py, &emit_rm::event_option_infos(&self.inner)).map(Bound::unbind)
+    ///
+    /// `masked=True` (#1181) returns the view a hidden-information policy
+    /// may read: an option that gains a relic keeps `relics_gained = 1` and
+    /// its losses, and its gold / HP / max-HP / potion / card gains read 0,
+    /// because the raw preview includes the ROLLED relic's pickup. The
+    /// default (`masked=False`) is the raw preview the deployed PPO
+    /// champions were trained on, unchanged.
+    #[pyo3(signature = (masked = false))]
+    fn event_option_infos(&self, py: Python<'_>, masked: bool) -> PyResult<PyObject> {
+        crate::value_to_py(py, &emit_rm::event_option_infos_with(&self.inner, masked))
+            .map(Bound::unbind)
     }
 
     /// Materialize the random event for the room the player is standing

@@ -15,12 +15,15 @@ export function e2eAdvisable(
 /** localStorage key of the hand-played run's advisor preference. */
 export const ADVISOR_KEY = "wb.advisor";
 
-/** The stored advisor preference; anything but "e2e" is the search. */
+/** The stored advisor preference. A fresh browser prefers Instinct, as the
+ *  mod does since 0.10 (it advises only a run it can read; every other run is
+ *  the search's whatever the preference). "search" is kept once chosen. */
 export function readAdvisorPref(): Advisor {
   try {
-    return localStorage.getItem(ADVISOR_KEY) === "e2e" ? "e2e" : "search";
+    const v = localStorage.getItem(ADVISOR_KEY);
+    return v === "search" ? "search" : v === "e2e" || v == null ? "e2e" : "search";
   } catch {
-    return "search";
+    return "e2e";
   }
 }
 

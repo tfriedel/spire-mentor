@@ -38,7 +38,19 @@ internal static class SimWorkbenchLink
     /// <c>log_name</c> / <c>log_idx</c>) open the replay at that decision
     /// instead of the newest step.
     /// </summary>
-    public static void Open(string? run = null, int? step = null) => TaskHelper.RunSafely(OpenAsync(run, step));
+    /// <param name="browser">The browser even in the frame, which otherwise
+    /// shows the workbench in a window of its own.</param>
+    public static void Open(string? run = null, int? step = null, bool browser = false)
+    {
+        // In the frame, its workbench window (same origin as its panels); a
+        // configured Workbench URL is a dev server the browser opens instead.
+        if (!browser && SpireMentorModConfig.WorkbenchUrl.Trim().Length == 0 &&
+            FrameLink.OpenWorkbenchWindow(run, step))
+        {
+            return;
+        }
+        TaskHelper.RunSafely(OpenAsync(run, step));
+    }
 
     private static async Task OpenAsync(string? run, int? step)
     {

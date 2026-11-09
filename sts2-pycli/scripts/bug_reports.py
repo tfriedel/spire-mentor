@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -45,6 +46,8 @@ WEB = PYCLI / "web"
 DEFAULT_SITE = os.environ.get("STS2_WORKBENCH_SITE", "https://your-workbench.example.com")
 DEFAULT_OUT = PYCLI / "logs" / "bugreports"
 KEY_PREFIX = "bugreports/"
+# `npx` is `npx.cmd` on Windows, which subprocess does not find by the bare name.
+NPX = shutil.which("npx") or "npx"
 ID_RE = re.compile(r"^wb-[0-9a-f]{16}$")
 USER_AGENT = "sts2-bug-reports/1 (https://github.com/tfriedel/spire-mentor)"
 BINDING = "BUGREPORTS"
@@ -191,7 +194,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     ns = namespace_id((WEB / "wrangler.toml").read_text())
     # `--remote`: wrangler 4 lists a LOCAL dev store by default and answers `[]`.
     cmd = [
-        "npx",
+        NPX,
         "wrangler",
         "kv",
         "key",
@@ -222,7 +225,7 @@ def cmd_get(args: argparse.Namespace) -> int:
     else:
         ns = namespace_id((WEB / "wrangler.toml").read_text(encoding="utf-8"))
         cmd = [
-            "npx",
+            NPX,
             "wrangler",
             "kv",
             "key",

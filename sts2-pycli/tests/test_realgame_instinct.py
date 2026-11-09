@@ -14,6 +14,7 @@ Two things are pinned here:
 
 from __future__ import annotations
 
+import itertools
 import re
 from typing import Any
 
@@ -179,6 +180,52 @@ class TestInstinct:
             assert by_col[col] == pytest.approx(native["probs"][ci], abs=2e-3)
         best = next(o for o in advice["options"] if o["is_best"])
         assert best["col"] == cols[native["class"]]
+
+        # The route (PROTOCOL.md v5.3): the search's `path` schema, from the
+        # chosen node, one row per hop along the map's edges, to the act's end.
+        path = advice["path"]
+        assert (path[0]["col"], path[0]["row"], path[0]["hop"]) == (best["col"], best["row"], 0)
+        graph = {(n["col"], n["row"]): n for n in msg["map"]["nodes"]}
+        for a, b in itertools.pairwise(path):
+            assert b["hop"] == a["hop"] + 1
+            assert {"col": b["col"], "row": b["row"]} in graph[a["col"], a["row"]]["children"]
+        last = graph[path[-1]["col"], path[-1]["row"]]["children"]
+        assert not [c for c in last if (c["col"], c["row"]) in graph], "walks to the act's end"
+        assert all(set(s) == {"col", "row", "type", "hop", "hp"} for s in path)
+        assert "route" in advice["note"]
+
+    def test_a_fight_without_a_map_sees_what_the_native_student_sees(self, student: Any) -> None:
+        """GH #1212: fight requests carry no map graph, and the graft left the
+        run at act 1 / floor 0, so the student read every live fight as the
+        run's first room. A native act-2 fight, grafted from an envelope with
+        no ``map``, must stand where the native run stands and give the same
+        probabilities."""
+        rm = _campaign_run(SEED)
+        driver = sts2_rs.E2eDriver(rm.seed)
+
+        def act2_fight(peek: Any) -> bool:
+            return rm.act_index >= 2 and peek.decision["decision_type"] == "COMBAT_TURN"
+
+        peek = _play_to(student, rm, driver, act2_fight)
+        native = student.decide(driver.copy(), peek, rm)
+        room = str(rm.current_room()["room_type"]).lower()
+
+        msg = _envelope(rm, SEED, "combat_action")
+        del msg["map"]
+        msg["room_type"] = room.capitalize()
+        grafted, notes = ri.graft_run(msg)
+        assert any(n.startswith("no map position") for n in notes)
+        assert (grafted.act_index, grafted.total_floor(), grafted.act_floor()) == (
+            rm.act_index,
+            rm.total_floor(),
+            rm.act_floor(),
+        )
+        assert grafted.full_map()["current_coord"]["row"] == rm.full_map()["current_coord"]["row"]
+
+        grafted.debug_enter_combat(rm.combat_state(), room)
+        probe = driver.copy()
+        out = student.decide(probe, probe.peek(grafted), grafted)
+        assert out["probs"] == pytest.approx(native["probs"], abs=2e-3)
 
     def test_other_characters_fall_back_to_the_search_with_a_reason(self) -> None:
         advisor = ri.InstinctAdvisor(WEIGHTS)

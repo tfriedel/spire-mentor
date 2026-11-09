@@ -34,7 +34,8 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from realgame_instinct import InstinctPick, InstinctUnavailable, graft_run, note_for
+from display_names import card_name, display_name, potion_swap_label, shop_option_label
+from realgame_instinct import InstinctPick, InstinctUnavailable, graft_run, is_coop, note_for
 
 if TYPE_CHECKING:
     from realgame_instinct import InstinctAdvisor
@@ -234,15 +235,21 @@ def _first_action(pick: InstinctPick, ci: int) -> dict[str, Any]:
 
 
 def card_reward(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str, Any]:
-    if state.get("surface") == "choose_a_card":
+    if state.get("surface") == "choose_a_card" and state.get("combat") is not None:
         raise InstinctUnavailable("a card offered into the fight needs the fight mirror")
     cards = [c for c in (state.get("cards") or []) if isinstance(c, dict)]
     if not cards:
         raise InstinctUnavailable("no cards on this reward")
     rm, _notes = graft_run(state)
     rm.debug_set_room_type(adv.last_room or "monster")
+    # Out of a fight, a choose-a-card screen adds to the deck (Lead
+    # Paperweight, Hefty Tablet): the engine's run-effect choose screen
+    # (`card_offer_choose_screen`), offered as the CARD_REWARD the student
+    # saw in training. It declined these as "offered into the fight" before.
     rm.debug_open_card_offer(
-        [card_spec(c) for c in cards], can_skip=bool(state.get("can_skip", True))
+        [card_spec(c) for c in cards],
+        can_skip=bool(state.get("can_skip", True)),
+        choose_screen=state.get("surface") == "choose_a_card",
     )
     offered = [norm_id(x) for x in rm.card_reward_option_ids()]
     if offered != [norm_id(registry_id(c.get("id"))) for c in cards]:
@@ -340,6 +347,31 @@ _PROMPTS = {
 }
 
 
+def _screen_enchantment(state: dict[str, Any]) -> str | None:
+    """The enchantment an enchant screen applies (``source_model``), or ``None``.
+
+    The mod names the first model argument of ``FromDeckForEnchantment``
+    (``source_kind: "enchantment"``), e.g. ``NIMBLE`` or ``ADROIT``.
+    """
+    model = state.get("source_model")
+    if not model or str(state.get("source_kind") or "enchantment").lower() != "enchantment":
+        return None
+    return str(model)
+
+
+def _shared_card_type(cards: list[dict[str, Any]]) -> str | None:
+    """The one card type every offered card has, when it restricts a pick.
+
+    Self-Help Book enchants only one type (``c.Type == typeRestriction``).
+    Restricting the engine's pool to the screen's shared type never offers a
+    card the screen does not show.
+    """
+    types = {str(c.get("type") or "").lower() for c in cards}
+    if len(types) == 1 and (t := types.pop()) in ("attack", "skill", "power"):
+        return t
+    return None
+
+
 def deck_select(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str, Any]:
     cards = [c for c in (state.get("cards") or []) if isinstance(c, dict)]
     if not cards:
@@ -388,8 +420,9 @@ def deck_select(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> di
         return screen_advice(pick, rows)
 
     if kind == "enchant":
-        raise InstinctUnavailable("the screen does not say which enchantment it applies")
-
+        enchantment = _screen_enchantment(state)
+        if enchantment is None:
+            raise InstinctUnavailable("the screen does not say which enchantment it applies")
     if kind == "upgrade" and adv.last_screen == "rest_site":
         rm = _smith_rm(state)
         expect: tuple[str, ...] = ("SMITH",)
@@ -401,6 +434,19 @@ def deck_select(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> di
         elif kind == "upgrade":
             rm.debug_queue_deck_upgrades(n)
             expect = ("CARD_UPGRADE",)
+        elif kind == "enchant":
+            try:
+                # The net reads only the enchantment (``tokens.rs`` OFFER), so
+                # the amount the screen does not carry changes nothing here.
+                rm.debug_queue_deck_enchant(
+                    enchantment,
+                    optional=lo == 0,
+                    count=n,
+                    card_type=_shared_card_type(cards),
+                )
+            except ValueError as exc:
+                raise InstinctUnavailable(f"the engine has no enchantment {enchantment}") from exc
+            expect = ("CARD_ENCHANT",)
         else:
             rm.debug_queue_deck_transforms(n)
             expect = ("CARD_TRANSFORM",)
@@ -495,7 +541,7 @@ def shop(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str,
             idx = a.get("idx")
             o = lst[idx] if isinstance(idx, int) and 0 <= idx < len(lst) else None
             rows[ci] = (
-                ({"action": "choose", "index": int(o["index"])}, str(o.get("label") or name))
+                ({"action": "choose", "index": int(o["index"])}, shop_option_label(o))
                 if o is not None
                 else None
             )
@@ -505,12 +551,12 @@ def shop(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str,
                 removal_of[ci] = deck[d]
                 rows[ci] = (
                     {"action": "choose", "index": int(remove_opt["index"])},
-                    f"remove {deck[d][0].title()}" + ("+" if deck[d][1] else ""),
+                    f"Remove {_deck_card_name(state, deck[d])}",
                 )
             else:
                 rows[ci] = None
         elif name == "leave_shop" and leave_opt is not None:
-            rows[ci] = ({"action": "choose", "index": int(leave_opt["index"])}, "leave")
+            rows[ci] = ({"action": "choose", "index": int(leave_opt["index"])}, "Leave shop")
         else:
             rows[ci] = None
     advice = screen_advice(pick, rows)
@@ -519,6 +565,18 @@ def shop(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str,
     first_on_screen = next((c for c in order if rows.get(c) is not None), None)
     adv.shop_removal = removal_of.get(first_on_screen) if first_on_screen is not None else None
     return advice
+
+
+def _deck_card_name(state: dict[str, Any], key: tuple[str, bool, str]) -> str:
+    """An engine deck card (identity ``key``) by the name the run's wire
+    deck gives it, else its id's display name."""
+    deck = [
+        c for c in (state.get("run_state") or {}).get("master_deck") or [] if isinstance(c, dict)
+    ]
+    i = _find_card(deck, key, set())
+    if i is not None:
+        return card_name(deck[i])
+    return display_name(key[0]) + ("+" if key[1] else "")
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +653,8 @@ def event(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str
             interactive_potion_swap=True,
             act1="roll",
         )
+        if is_coop(state):
+            rm.debug_use_coop_maps()
         expect: tuple[str, ...] = ("NEOW",)
     else:
         if all(o.get("relic_id") for o in options if o.get("enabled", True)):
@@ -615,6 +675,24 @@ def event(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str
         by_relic = {norm_id(o.get("relic_id")): o for o in options if o.get("relic_id")}
         offers = [norm_id(r) for r in rm.neow_offers()]
         slot_option = [by_relic.get(r) for r in offers]
+        relic_ids = [str(o.get("relic_id") or "") for o in options]
+        if (
+            sum(o is not None for o in slot_option) != len(by_relic)
+            and len(options) == 3
+            and all(relic_ids)
+        ):
+            # The engine rolls single player's Neow. Co-op seeds each
+            # player's with their slot and keeps Massive Scroll in the pool,
+            # so the roll differs there: stand on the screen's own three
+            # offers (the game lists the two positive ones, then the curse).
+            try:
+                rm.debug_set_neow_offers(*relic_ids)
+            except ValueError as exc:
+                raise InstinctUnavailable(
+                    f"the engine has no Neow offer like this ({exc})"
+                ) from exc
+            offers = [norm_id(r) for r in rm.neow_offers()]
+            slot_option = [by_relic.get(r) for r in offers]
         if sum(o is not None for o in slot_option) != len(by_relic) or not by_relic:
             raise InstinctUnavailable("the rebuilt Neow offers other relics than the screen")
         page = rm
@@ -789,16 +867,23 @@ def potion_swap(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> di
     rm.debug_queue_potion_swap(potion)
     pick = adv.evaluate(state, rm, ("POTION_SWAP",))
     by_slot = {o.get("discard_slot"): o for o in group}
+    belt = (state.get("run_state") or {}).get("potions") or state.get("potions") or []
     rows: dict[int, Any] = {}
     for ci in range(len(pick.probs)):
         a = _first_action(pick, ci)
         o = by_slot.get(a.get("discard_slot")) if "discard_slot" in a else None
         rows[ci] = (
-            ({"action": "choose", "index": int(o["index"])}, str(o.get("label") or "?"))
+            ({"action": "choose", "index": int(o["index"])}, potion_swap_label(o, belt))
             if o is not None
             else None
         )
-    return screen_advice(pick, rows)
+    advice = screen_advice(pick, rows)
+    # `best.label` stays the mod's own spelling (`discard <POTION_ID>`): the
+    # takeover cross-checks it (SimAdvisor.ReconcileIndex).
+    chosen = next((o for o in group if o.get("index") == advice["best"].get("index")), None)
+    if chosen is not None and chosen.get("label"):
+        advice["best"]["label"] = str(chosen["label"])
+    return advice
 
 
 #: ``advice_for`` -> handler.

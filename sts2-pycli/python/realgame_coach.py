@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from choice_grade import grade_choice
+from display_names import display_name
 from enemy_labels import ally_label, enemy_label, enemy_labels
 from workbench.reasoning import rows_from_mcts
 from workbench.regret_review import (
@@ -1428,14 +1429,14 @@ class CoachGrader:
         card = msg.get("card")
         if isinstance(card, dict) and card.get("id"):
             cid = _norm(card["id"])
-            name = self._names.get(cid) or cid.replace("_", " ").title()
+            name = self._names.get(cid) or display_name(cid)
             if card.get("upgraded"):
                 name += "+"
             return name + self._target_suffix(msg.get("target_index"))
         potion = msg.get("potion")
         if isinstance(potion, dict) and potion.get("id"):
             pid = _norm(potion["id"])
-            return f"drink {self._names.get(pid) or pid.replace('_', ' ').title()}"
+            return f"drink {self._names.get(pid) or display_name(pid)}"
         return str(msg.get("detail") or msg.get("action") or "?")
 
     def _label_engine(self, state: dict[str, Any], action: dict[str, Any]) -> str:
@@ -1448,7 +1449,7 @@ class CoachGrader:
             i = action.get("card_index")
             card = hand[i] if isinstance(i, int) and 0 <= i < len(hand) else {}
             cid = _norm(card.get("id"))
-            name = self._names.get(cid) or cid.replace("_", " ").title() or "?"
+            name = self._names.get(cid) or display_name(cid) or "?"
             if card.get("upgraded"):
                 name += "+"
             if action.get("ally_index") is not None:
@@ -1459,7 +1460,7 @@ class CoachGrader:
             belt = (state.get("player") or {}).get("potions") or []
             slot = action.get("slot")
             pid = _norm(belt[slot]) if isinstance(slot, int) and 0 <= slot < len(belt) else ""
-            return f"drink {self._names.get(pid) or pid.replace('_', ' ').title() or 'potion'}"
+            return f"drink {self._names.get(pid) or display_name(pid) or 'potion'}"
         return str(kind or "?").replace("_", " ")
 
     # -- run-level choices ------------------------------------------------

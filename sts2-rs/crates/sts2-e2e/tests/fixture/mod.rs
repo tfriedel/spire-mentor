@@ -22,10 +22,10 @@ fn home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
 }
 
-/// `E2E_WEIGHTS`, default `~/runs/e2e-wb/export/ironclad_e2e_d1250_ema0999.e2ew`.
+/// `E2E_WEIGHTS`, default `~/runs/e2e-wb/export/ironclad_e2e_d2500_avg5_ema0999.e2ew`.
 pub fn weights_path() -> PathBuf {
     std::env::var_os("E2E_WEIGHTS").map_or_else(
-        || home().join("runs/e2e-wb/export/ironclad_e2e_d1250_ema0999.e2ew"),
+        || home().join("runs/e2e-wb/export/ironclad_e2e_d2500_avg5_ema0999.e2ew"),
         PathBuf::from,
     )
 }

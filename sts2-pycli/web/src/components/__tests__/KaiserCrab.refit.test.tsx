@@ -239,7 +239,7 @@ describe("Kaiser Crab refit", () => {
     defer = true;
     const { container } = render(
       <KaiserCrabGroup rig="/rig/kaiser_crab/kaiser_crab" pxPerUnit={0.5}
-        groundBelowRoot={200} clampHalfW={960}
+        armAt={{}} clampX={{ min: -960, max: 960 }}
         arms={[arm("left", 0, "Crusher"), arm("right", 1, "Rocket")]} />,
     );
     const overlays = () => [...container.querySelectorAll<HTMLElement>(".gs-crab-group > div")];
@@ -250,11 +250,10 @@ describe("Kaiser Crab refit", () => {
     act(() => { pending.forEach((f) => f()); });
 
     for (const o of overlays()) expect(o.style.opacity).toBe("1");
-    // The left claw's ART is measured, not its bone: the mock paints it across
-    // world x -1800..-1200, so its centre is 750px left of the root at 0.5
-    // px/unit — not the -600px fallback the overlays were parked at.
+    // With no marker given (Board always passes one — Board.crab.test), the
+    // claw's ART is the fallback, measured, not its bone: the mock paints it
+    // across world x -1800..-1200, so its centre is 750px left of the root at
+    // 0.5 px/unit — not the -600px guess the overlays were parked at.
     expect(parseFloat(overlays()[0].style.left)).toBeCloseTo(-750, 1);
-    // …and the readout stands on the ground line, not up on the claw.
-    expect(parseFloat(overlays()[0].style.top)).toBeCloseTo(200, 1);
   });
 });

@@ -31,6 +31,7 @@ const GAME_FILES: &[(&str, &str)] = &[
     ("localization_eng/card_keywords.json", "{}"),
     ("localization_eng/cards.json", "{}"),
     ("localization_eng/characters.json", "{}"),
+    ("localization_eng/encounters.json", "{}"),
     ("localization_eng/events.json", "{}"),
     ("localization_eng/monsters.json", "{}"),
     ("localization_eng/orbs.json", "{}"),

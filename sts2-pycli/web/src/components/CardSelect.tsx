@@ -1,4 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { markClass, useAdviceMarks } from "../advice/useAdviceMarks";
+import { buildMarks, choiceOptions, markIndex, type Mark } from "../advice/marks";
+import { MarkBadge } from "../advice/AdviceContext";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type ChoiceRankRow, type Step, type ChooseHandler, type Card } from "../api";
 import CardFrame from "./CardFrame";
 import { cardBoxHeight } from "../cardGeometry";
@@ -86,6 +89,18 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
   // upgrade preview both come down a size, and the padding/gaps with them —
   // see OPTION_CARD_W / PV_CARD_W for why these particular numbers.
   const short = useMediaQuery(SHORT_QUERY);
+  // The run policy's marks: a select_cards option names one or several cards
+  // (its indices), and each of them wears the option's mark.
+  const { marks, showNumbers } = useAdviceMarks();
+  const cardMarks = new Map<number, Mark>();
+  for (const m of marks.values()) {
+    const hit = /^select_cards\|indices=([\d,]+)$/.exec(m.key);
+    if (!hit) continue;
+    for (const i of hit[1].split(",").map(Number)) {
+      const have = cardMarks.get(i);
+      if (!have || (have.tier !== "best" && m.tier === "best")) cardMarks.set(i, m);
+    }
+  }
   // No hover means the preview can only ever be filled by a PICK, so its
   // empty state has nothing to hold still for — see UpgradeComparison.
   const touch = useMediaQuery(TOUCH_QUERY);
@@ -185,6 +200,18 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
       .catch(() => {}); // 409 off-choice / search failure → silently omit
     return () => { alive = false; };
   }, [resetKey, advEnabled, hints.on]);
+  // The fight's own choice ranking rings the cards like every other pick (the
+  // raw search % only with engine numbers on).
+  const rankMarks = useMemo(
+    () => (ranking.size > 0 ? markIndex(buildMarks(choiceOptions([...ranking.values()]))) : null),
+    [ranking]);
+  if (rankMarks) {
+    for (const c of cards) {
+      const m = rankMarks.get(`choice:${c.index}`);
+      if (m && !cardMarks.has(c.index)) cardMarks.set(c.index, m);
+    }
+  }
+  const skipMark = rankMarks?.get("choice:skip") ?? null;
 
   return (
     <div style={{ padding: pad, display: "flex", flexDirection: "column", gap }}>
@@ -213,6 +240,7 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
             onMouseLeave={isUpgrade ? () => setHovered(null) : undefined}>
             <CardFrame card={c} width={cardW}
               best={picked.includes(c.index) || chosen.includes(c.index)}
+              mark={cardMarks.get(c.index)?.tier} step={cardMarks.get(c.index)?.order}
               dim={(onChoose != null && picked.length >= max && !picked.includes(c.index)) ||
                 (chosen.length > 0 && !chosen.includes(c.index))}
               onClick={onChoose ? () => toggle(c.index) : undefined} />
@@ -221,9 +249,9 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
             )}
             {adv.byKey.has(`choice:${c.index}`) ? (
               <DecisionWinChip c={adv.byKey.get(`choice:${c.index}`)!} adv={adv} />
-            ) : (
+            ) : showNumbers ? (
               <SearchChip c={ranking.get(`choice:${c.index}`)} />
-            )}
+            ) : null}
           </div>
         ))}
       </div>
@@ -232,12 +260,16 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
           <button disabled={picked.length < min} onClick={submit}>Confirm ({picked.length})</button>
           {skippable && (
             <div style={{ textAlign: "center" }}>
-              <button onClick={() => onChoose("skip_select", {})}>Skip</button>
+              <button className={markClass(skipMark).trim() || undefined} style={{ position: "relative" }}
+                onClick={() => onChoose("skip_select", {})}>
+                <MarkBadge mark={skipMark} />
+                Skip
+              </button>
               {adv.byKey.has("choice:skip") ? (
                 <DecisionWinChip c={adv.byKey.get("choice:skip")!} adv={adv} />
-              ) : (
+              ) : showNumbers ? (
                 <SearchChip c={ranking.get("choice:skip")} />
-              )}
+              ) : null}
             </div>
           )}
         </div>

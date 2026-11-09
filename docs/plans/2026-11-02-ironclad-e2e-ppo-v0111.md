@@ -288,7 +288,7 @@ The combat stream keeps #1081's S_ctx tokens bit-for-bit (21 sections; 15 catego
 
 - Rows carry an actor id; a teacherless row type (potion swap may be rule-side, env.py:220-232) gets λ_KS = 0.
 - No per-head KS cuts: a +3pp DEV-1000 read is ~2σ, so 16 reads make a spurious cut likely. Teacher log-probs run on GPU0 at sampling (+25-30% inference while used, est.).
-- **Learning check** (laptop 45 min at G0; box 15 min at T0): random init, λ_KS = 0, no teacher, A10. Pass iff the mean floor of the last 10K finished runs beats the first 10K by ≥1.0 (random play reaches 2.7 [ENG]), combat EV > 0.1, no NaN. Fail → launch with λ_KS held at 1. The check re-runs on the box at K2 and at each restart, and the λ_KS decay starts only once it passes.
+- **Learning check** (laptop 45 min at G0; box 15 min at T0): random init, λ_KS = 0, no teacher, A10. Pass iff the mean floor of the last 10K finished runs beats the first 10K by ≥1.0 (random play reaches 2.7 [ENG]), combat EV > 0.1 (median over the last half of the iterations, #1153), no NaN. Fail → launch with λ_KS held at 1. The check re-runs on the box at K2 and at each restart, and the λ_KS decay starts only once it passes.
 - **K2** (~100M, ~4-5 h after launch): student DEV-1000 ≥ teacher pair − 8pp, paired; agreement ≥85% combat, ≥75% run; finite value loss; EV within 0.1 of its 50M value. Fail → fix, relaunch from the last good pinned state.
 
 ## 8. Systems (WP5, WP5b, WP7)

@@ -331,3 +331,30 @@ describe("cueForUi", () => {
     expect(cueForUi(MAP, "victory")).toBeNull();
   });
 });
+
+describe("cueForUi — the game's per-call volume and pitch spread", () => {
+  const M: SfxMap = {
+    ...MAP,
+    generic: {
+      ...MAP.generic,
+      cardDeal: "res://debug_audio/card_deal.mp3",
+      potionSlosh1: "res://debug_audio/potion_slosh_1.mp3",
+      relicGet: "res://debug_audio/relic_get.mp3",
+    },
+  };
+
+  // `CardPileCmd.cs:875` — `Play("card_deal.mp3", 0.25f, PitchVariance.Small)`.
+  // Shipped at full volume and one fixed pitch until this table existed.
+  it("carries the call site's volume and variance", () => {
+    expect(cueForUi(M, "cardDeal")).toMatchObject({ gain: 0.25, pitchVariance: 0.02 });
+    expect(cueForUi(M, "potionSlosh", () => 0)).toMatchObject({ gain: 0.3, pitchVariance: 0.1 });
+  });
+
+  // `RelicCmd.cs:49` passes the defaults; FMOD cues never take either field.
+  it("leaves both unset where the game passes the defaults", () => {
+    const relic = cueForUi(M, "relicGet");
+    expect(relic?.gain).toBeUndefined();
+    expect(relic?.pitchVariance).toBeUndefined();
+    expect(cueForUi(M, "mapOpen")?.pitchVariance).toBeUndefined();
+  });
+});

@@ -543,3 +543,20 @@
 @media (prefers-reduced-motion: reduce) {
   .gs-treasure-reveal { animation: none; }
 }
+
+/* ---- room for the advice glow ---------------------------------------------
+   The column scrolls (overflow-y: auto), and a scroller clips sideways too, so
+   the ringed option's glow and its step badge were cut flat at the plate's
+   ends. A gutter inside the scroller, paid for by widening the column by the
+   same amount, leaves the plates exactly where they were. */
+.gs-event-col { --ev-gutter: 22px; }
+.gs-event-col, .gs-event--neow .gs-event-col, .gs-event--neow .gs-event-col.is-solo {
+  padding-left: var(--ev-gutter);
+  padding-right: var(--ev-gutter);
+}
+.gs-event-col {
+  width: calc(min(700px, 47%) + 2 * var(--ev-gutter));
+  margin-right: calc(6% - var(--ev-gutter));
+}
+.gs-event--neow .gs-event-col { width: calc(min(660px, 55%) + 2 * var(--ev-gutter)); margin-right: auto; }
+.gs-event--neow .gs-event-col.is-solo { width: calc(min(920px, 62%) + 2 * var(--ev-gutter)); }

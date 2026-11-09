@@ -385,3 +385,110 @@
    Likewise the potion popover already opens on `:focus-within` as well as
    `:hover` (.gs-potion-pop in game-skin.css) and its socket is tabbable, so a
    tap opens it. Nothing to add. */
+
+/* ---- the AI's controls (src/topbar/MentorBar.tsx) -------------------------
+   The mod's badge popover laid flat, in its colours: grey Off, cyan Coach,
+   green Hints, amber AI plays. */
+.wb-mentor { display: inline-flex; align-items: center; gap: 8px; }
+.wb-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.wb-seg-btn { font: inherit; font-family: var(--font); font-size: 12px; padding: 4px 10px; border: none; border-radius: 0;
+  border-right: 1px solid var(--border); background: var(--field-bg); color: var(--muted); cursor: pointer; }
+.wb-seg-btn:last-child { border-right: none; }
+.wb-seg-btn:hover:not(:disabled):not(.wb-seg-on) { color: var(--text); }
+.wb-seg-btn:disabled { opacity: .45; cursor: default; }
+.wb-seg-on { color: oklch(18% 0.01 265); font-weight: 600; cursor: default; background: var(--gold); }
+.wb-seg-on.wb-seg-off { background: oklch(70% 0.01 265); }
+.wb-seg-on.wb-seg-coach { background: oklch(78% 0.11 210); }
+.wb-seg-on.wb-seg-hints { background: oklch(78% 0.14 150); }
+.wb-seg-on.wb-seg-aiplays { background: oklch(80% 0.15 75); }
+.wb-mentor-verbs { display: inline-flex; gap: 4px; padding-left: 8px; border-left: 1px solid var(--border); }
+.wb-mentor kbd { font: inherit; font-size: 10px; opacity: .6; margin-left: 3px; }
+.wb-mentor-on { color: var(--accent-strong); border-color: var(--accent); }
+.wb-mentor-stop { background: oklch(80% 0.15 75); border-color: oklch(70% 0.15 75);
+  color: oklch(18% 0.01 265); font-weight: 700; }
+.wb-mentor-stop kbd { opacity: .75; }
+.wb-mentor-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-family: var(--font); color: var(--muted);
+  white-space: nowrap; }
+.wb-mentor-dot { width: 7px; height: 7px; border-radius: 50%; background: oklch(60% 0.01 265); flex: none; }
+.wb-mentor-dot--idle { background: oklch(75% 0.15 150); }
+.wb-mentor-dot--thinking { background: oklch(80% 0.15 75); animation: wb-pulse 1s ease-in-out infinite; }
+.wb-mentor-dot--ai { background: oklch(80% 0.15 75); animation: wb-pulse 1.4s ease-in-out infinite; }
+@keyframes wb-pulse { 50% { opacity: .35; } }
+/* While the AI plays, the whole bar says so: an amber rule and tint. */
+.wb-topbar:has(.wb-mentor--ai) { box-shadow: inset 0 -2px 0 oklch(80% 0.15 75);
+  background: oklch(80% 0.15 75 / 0.08); }
+
+/* ---- advice marks (src/advice/) ------------------------------------------
+   The mod's rings: gold and breathing on the move to make (numbered 1), a
+   softer gold on the plan's later steps and moves as good as the pick, a thin
+   glow on a real alternative. A drop-shadow, not an outline: it follows the
+   thing's own silhouette (the hex plates, the rest-site plaques, the skip
+   banner), as the mod copies each thing's own glow, and never covers a
+   neighbour. The step badge needs a positioned thing to hang off; the ones
+   that are not positioned already are listed here. */
+/* ONE look for every marked thing (cards, End Turn, potions, event and rest
+   options, shop wares, packs, the map node): these tokens are the only glow
+   and the only badge; game-skin.css (cards, End Turn, potions) and
+   skins/map.css use them too. Gold is the mod's warm white-gold pick
+   (SimHighlights PickGold); an alternative is its pale blue (AltBlue). */
+:root {
+  --mark-gold: oklch(90% 0.13 88);
+  --mark-best: drop-shadow(0 0 2px oklch(97% 0.08 92)) drop-shadow(0 0 7px oklch(88% 0.16 88))
+    drop-shadow(0 0 14px oklch(82% 0.16 85 / .9));
+  --mark-best-hi: drop-shadow(0 0 3px oklch(98% 0.07 92)) drop-shadow(0 0 10px oklch(90% 0.16 88))
+    drop-shadow(0 0 20px oklch(84% 0.16 85));
+  --mark-good: drop-shadow(0 0 2px oklch(95% 0.07 92 / .9)) drop-shadow(0 0 7px oklch(86% 0.13 88 / .7));
+  --mark-alt: drop-shadow(0 0 2px oklch(85% 0.06 255 / .8)) drop-shadow(0 0 6px oklch(78% 0.08 255 / .5));
+}
+.gs-rest-option.wb-mark, .surface.wb-mark, .gs-map-choice.wb-mark { position: relative; }
+.wb-mark--best { filter: var(--mark-best); animation: wb-mark-breathe 1.8s ease-in-out infinite; }
+.wb-mark--good { filter: var(--mark-good); }
+.wb-mark--alt { filter: var(--mark-alt); }
+@keyframes wb-mark-breathe { 50% { filter: var(--mark-best-hi); } }
+/* The step number: a 26px gold coin with a plain, heavy numeral (the game
+   font's "1" carries a flag and a foot and read as a smudge at badge size). */
+.wb-mark-badge, .gs-badge.gs-step-tag {
+  position: absolute; z-index: 6; box-sizing: border-box; min-width: 26px; height: 26px; padding: 0 6px;
+  border-radius: 13px; display: inline-flex; align-items: center; justify-content: center;
+  font: 800 15px/1 var(--font); font-variant-numeric: tabular-nums; letter-spacing: 0;
+  color: oklch(20% 0.02 70); background: var(--mark-gold);
+  border: 2px solid oklch(32% 0.05 75); box-shadow: 0 0 0 1px oklch(97% 0.05 92 / .5), 0 2px 6px rgba(0, 0, 0, .6);
+  pointer-events: none; }
+.wb-mark-badge { top: -12px; left: -12px; }
+/* Hosts that make every child position: relative (the event plate does, to
+   lift its text over the art layers) must not pull the badge into the flow. */
+.wb-mark > .wb-mark-badge { position: absolute; }
+.wb-mark-badge--good, .gs-badge.gs-step-good { background: oklch(93% 0.06 88); }
+@media (prefers-reduced-motion: reduce) {
+  .wb-mark--best { animation: none; }
+  .wb-mentor-dot--thinking, .wb-mentor-dot--ai { animation: none; }
+}
+
+/* ---- the ranked list in words (src/advice/AdviceList.tsx) --------------- */
+.wb-advice { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.wb-advice-rows { display: flex; flex-direction: column; gap: 1px; }
+.wb-advice-row { display: grid; align-items: center; gap: 6px; padding: 3px 4px; font-family: var(--mono); }
+.wb-advice-row--best { color: var(--gold); background: var(--accent-weak); border-radius: 3px; }
+.wb-advice-row--hidden { opacity: .55; }
+.wb-advice-chip { width: 18px; height: 16px; border: 1px solid; border-radius: 8px; font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; color: oklch(18% 0.01 265); }
+.wb-advice-label { font-family: var(--font); white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.wb-advice-verdict { font-family: var(--font); font-size: 11px; white-space: nowrap; text-align: right; }
+.wb-advice-num { text-align: right; color: var(--muted); white-space: nowrap; font-size: 11px; }
+.wb-advice-bar { height: 7px; background: oklch(30% 0.01 265); border-radius: 2px; overflow: hidden; }
+.wb-advice-bar > span { display: block; height: 100%; }
+.wb-advice-wlt { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.wb-advice-more { align-self: flex-start; background: none; border: none; color: var(--muted); font-size: 11px;
+  cursor: pointer; padding: 2px 4px; }
+.wb-advice-plan { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 4px; color: oklch(90% 0.07 85); }
+.wb-advice-plan-step { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.wb-advice-plan-n { min-width: 16px; height: 16px; border-radius: 8px; background: var(--gold); color: oklch(18% 0.01 265);
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.wb-advice-note { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* The fight's accuracy line (App `fightLine`): one line at the fight's end. */
+.wb-fight-line { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px 8px;
+  border: 1px solid oklch(82% 0.14 90 / .5); border-radius: 6px; background: oklch(82% 0.14 90 / .08);
+  font-size: 12px; color: var(--text); }
+.wb-fight-line > span { flex: 1; }
+.wb-fight-line > button { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; }

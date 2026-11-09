@@ -5,6 +5,9 @@
 export interface Ui {
   mode: string;
   mode_name: string;
+  /** The Mode switch's segment: off / coach / hints / aiplays (the badge's,
+   *  MentorModes). Optional: an older mod sends none. */
+  mentor_mode?: string;
   power_label: string;
   style_label: string;
   coach_style: boolean;
@@ -43,6 +46,16 @@ export interface AdviceOption {
   pick_rank: number | null;
   card_index: number | null;
   score: number | null;
+  /** The mod's own reading of the row (SimHud.FactsFor), so both panels
+   *  agree. Optional: an older mod sends none. `kind`: attack / skill /
+   *  power / potion / end_turn / pick / skip / other; `step`: its number in
+   *  the turn's plan (the card badge's); `hidden`: a move nobody would make. */
+  kind?: string | null;
+  step?: number | null;
+  verdict?: string | null;
+  hidden?: boolean;
+  /** Expected HP after this move, when the search has it. */
+  hp_mean?: number | null;
 }
 
 export interface Advice {
@@ -60,6 +73,10 @@ export interface Advice {
   brain?: string | null;
   instinct_unavailable?: string | null;
   source_tag?: string | null;
+  /** The turn's plan in words, step 1 first (older mods: absent). */
+  plan?: string[];
+  /** The player's "Show engine numbers" setting: Q / W-L-T columns. */
+  show_numbers?: boolean;
   options: AdviceOption[];
 }
 
@@ -121,6 +138,8 @@ export interface LogRow {
 export interface HostState {
   game: string;
   mod_connected: boolean;
+  /** The workbench's own window is open (the host's WorkbenchWindow). */
+  workbench_open: boolean;
 }
 
 export interface FrameState {
@@ -136,7 +155,7 @@ export interface FrameState {
 }
 
 export const INITIAL_STATE: FrameState = {
-  host: { game: "starting", mod_connected: false },
+  host: { game: "starting", mod_connected: false, workbench_open: false },
   ui: null,
   advice: null,
   peek: null,
@@ -163,7 +182,7 @@ export function expireChips(chips: ShownChip[], now: number): ShownChip[] {
 }
 
 export type Incoming =
-  | { type: "host"; game: string; mod_connected: boolean }
+  | { type: "host"; game: string; mod_connected: boolean; workbench_open?: boolean }
   | { type: "from_mod"; msg: ModMessage }
   | { type: "pin_chip"; id: string; pinned: boolean }
   | { type: "close_chip"; id: string }
@@ -189,7 +208,10 @@ export type ModMessage =
 export function reduce(state: FrameState, m: Incoming, now = Date.now()): FrameState {
   switch (m.type) {
     case "host":
-      return { ...state, host: { game: m.game, mod_connected: m.mod_connected } };
+      return {
+        ...state,
+        host: { game: m.game, mod_connected: m.mod_connected, workbench_open: m.workbench_open ?? false },
+      };
     case "pin_chip":
       return { ...state, chips: state.chips.map((c) => (c.id === m.id ? { ...c, pinned: m.pinned } : c)) };
     case "close_chip":
@@ -274,12 +296,17 @@ export function tieBandLines(inBand: string[], reason: string | null, gapHp: num
   return lines;
 }
 
-/** SimHud's ranked order: best first, then by visit share / p_win. */
+/** SimHud's ranked order: best first, then the plan's steps, then by visit
+ *  share / p_win. Hidden rows (a move nobody would make) go last. */
 export function rankedOptions(advice: Advice): AdviceOption[] {
   return advice.options
     .filter((o) => o.p_win != null || o.q != null || o.visit_share != null)
     .sort((a, b) => {
       if (a.is_best !== b.is_best) return a.is_best ? -1 : 1;
+      if (!!a.hidden !== !!b.hidden) return a.hidden ? 1 : -1;
+      const sa = a.step ?? 1e9;
+      const sb = b.step ?? 1e9;
+      if (sa !== sb) return sa - sb;
       return (b.visit_share ?? b.p_win ?? 0) - (a.visit_share ?? a.p_win ?? 0);
     });
 }
@@ -291,3 +318,26 @@ export function inBandLabels(advice: Advice): string[] {
     .sort((a, b) => (a.is_best ? -1 : (a.pick_rank ?? 1e9)) - (b.is_best ? -1 : (b.pick_rank ?? 1e9)))
     .map((o) => o.label);
 }
+export interface Cols {
+  hp: boolean;
+  q: boolean;
+  share: boolean;
+  wlt: boolean;
+  template: string;
+}
+
+/** Only the columns some row fills: Instinct sends no Q and no W/L/T, and
+ *  laying those out anyway was the space "wasted on the right". */
+export function adviceColumns(rows: AdviceOption[], showNumbers: boolean): Cols {
+  const hp = rows.some((o) => o.hp_mean != null);
+  const q = showNumbers && rows.some((o) => o.q != null || o.p_win != null);
+  const share = rows.some((o) => o.visit_share != null);
+  const wlt = showNumbers && rows.some((o) => o.wins != null || o.losses != null || o.ties != null || o.visits != null);
+  const parts = ["20px", "minmax(0, 1fr)", "auto"];
+  if (hp) parts.push("44px");
+  if (q) parts.push("52px");
+  if (share) parts.push("44px", "34px");
+  if (wlt) parts.push("auto");
+  return { hp, q, share, wlt, template: parts.join(" ") };
+}
+

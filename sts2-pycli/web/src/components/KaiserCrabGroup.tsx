@@ -65,12 +65,28 @@ export interface CrabArm {
 /** Width of an arm's readout column (HP bar / name / intent), px. The two claws
  *  are at opposite edges of the screen, so nothing here has to squeeze. */
 const OVERLAY_W = 190;
+/** How far above a combatant's body top its intent chip's centre sits, px
+ *  (.gs-intent in game-skin.css: box bottom 25 - 0.25 * 58 over the top, the box
+ *  58 tall — 10.5 + 29). */
+const INTENT_CHIP_RISE = 40;
+
+/** Where one arm stands, in px from the rig's root (Board: crabMount.ts
+ *  through the stage fit). */
+export interface ArmAt {
+  /** Its feet. */
+  x: number;
+  y: number;
+  /** HP bar width, px. */
+  hpW: number;
+  /** `IntentPos` height above the feet, px. */
+  intentH: number;
+}
 
 export default function KaiserCrabGroup({
   rig,
   pxPerUnit,
-  groundBelowRoot,
-  clampHalfW,
+  armAt,
+  clampX,
   arms,
   locStrings,
   onRigEvent,
@@ -81,18 +97,18 @@ export default function KaiserCrabGroup({
    *  box: at its authored scale it is wider than the scene, which is the point
    *  (see KaiserCrab). */
   pxPerUnit: number;
-  /** Stage px from the rig's root DOWN to the combat scene's ground line.
+  /** Each arm's own creature node, by `part`.
    *
    *  The crab rig and the two arm creatures are separate things in the game:
-   *  the rig hangs off the combat-room background (framed to fill the screen),
-   *  while Crusher and Rocket are ordinary creature nodes standing in the room,
-   *  each with its own HP bar and intent — `KaiserCrabBoss.Slots` places them
-   *  from `Marker2D`s down on the floor. So the readouts sit on the GROUND LINE
-   *  under their claw, not up on the claw itself. */
-  groundBelowRoot: number;
-  /** Half the stage's width, px: an arm readout is kept inside it, so a claw
-   *  that hangs off the edge of the screen still has a legible HP bar. */
-  clampHalfW: number;
+   *  the rig hangs off the combat-room background, while Crusher and Rocket are
+   *  ordinary creatures standing on the encounter's markers, each with its own
+   *  HP bar (its `Bounds` width) and intent (at its `IntentPos`). So a
+   *  readout stands where its creature does, not on the claw it moves. */
+  armAt: Record<string, ArmAt | undefined>;
+  /** The stage's x-extent in px from the rig's root: a readout is kept inside
+   *  it, so on a stage narrower than the game's frame an arm whose marker
+   *  falls off the edge still has a legible HP bar. */
+  clampX: { min: number; max: number };
   arms: CrabArm[];
   /** Forwarded straight to each arm's `<Combatant>` — see that prop's own
    *  doc. Board.tsx holds the manifest; this group has no fetch of its own. */
@@ -127,22 +143,25 @@ export default function KaiserCrabGroup({
         onRigEvent={onRigEvent}
       />
       {arms.map((arm) => {
+        const at = armAt[arm.part];
         const box = m?.claw[arm.part];
-        const cx = box?.cx ?? fallback[arm.part] ?? 0;
-        // Keep the readout on screen even when its claw reaches in from off the
-        // edge — the Crusher's arm runs a long way past the left of the frame,
-        // and its own HP bar is not allowed to follow it there.
-        const margin = OVERLAY_W / 2 + 24;
-        const x = Math.max(-clampHalfW + margin, Math.min(clampHalfW - margin, cx));
-        // Spacer = ground line up to this claw's own top, so the intent chip
-        // hangs over the claw the arm actually IS rather than over the shell.
-        const spacerH = Math.max(
-          64, Math.round(groundBelowRoot + (box ? box.top : (m?.bodyH ?? 320))),
-        );
+        const w = Math.max(OVERLAY_W, at?.hpW ?? 0);
+        const cx = at?.x ?? box?.cx ?? fallback[arm.part] ?? 0;
+        // Keep the readout on screen when its marker is not — the game's own
+        // frame always shows both, a narrower stage may not.
+        const margin = w / 2 + 12;
+        const x = Math.max(clampX.min + margin, Math.min(clampX.max - margin, cx));
+        // The spacer is the creature's body: its feet up to its IntentPos, so
+        // the HP bar sits under the feet and the intent where the game hangs it.
+        // The game centres the intent ON IntentPos, where our chip hangs wholly
+        // above the spacer (.gs-intent: its centre ~40px over the top), so the
+        // spacer stops that much short.
+        const spacerH = Math.max(64, Math.round((at?.intentH ?? 360) - INTENT_CHIP_RISE));
+        const feetY = at?.y ?? 0;
         return (
-          <div key={arm.dataIndex}
-            style={{ position: "absolute", left: x, top: groundBelowRoot,
-              transform: "translate(-50%, -100%)",
+          <div key={arm.dataIndex} data-crab-arm={arm.part}
+            style={{ position: "absolute", left: x, top: feetY - spacerH,
+              transform: "translateX(-50%)",
               // Hidden (and untargetable) until the rig has been measured, then
               // faded in with it — SpineSprite-backed combatants hold their own
               // chrome back the same way while their rig loads. Painted against
@@ -157,7 +176,8 @@ export default function KaiserCrabGroup({
               isEnemy
               dataIndex={arm.dataIndex}
               label={arm.label}
-              noSprite={{ w: OVERLAY_W, h: spacerH }}
+              noSprite={{ w, h: spacerH }}
+              hpWidth={at?.hpW}
               hotkey={arm.hotkey}
               onClick={arm.onClick}
               onHoverChange={arm.onHoverChange}

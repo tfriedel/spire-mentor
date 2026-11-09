@@ -57,6 +57,13 @@ from typing import Any
 import realgame_hand_select
 import runtime_paths
 from coop_coordination import apply_ally_wait
+from display_names import (
+    card_name,
+    potion_swap_label,
+    sanitize_advice,
+    sanitize_coach,
+    shop_option_label,
+)
 from enemy_labels import ally_label, enemy_label
 from realgame_adapter import (
     UnsupportedGameVersionError,
@@ -71,12 +78,15 @@ from realgame_coach import CoachGrader, GraderThread
 from realgame_control import BRIDGE_MESSAGE_TYPES, BugReportForward, ControlPlane, StaticSite
 from realgame_instinct import InstinctAdvisor, InstinctUnavailable
 from realgame_livetree import LiveRunTree
+from realgame_turn_plan import search_plan
 from realgame_workbench_log import WorkbenchRunLogger
 from sts2_hint.calibration import calibrated_p_win
 from sts2_hint.recommender import (
+    CHANNEL_STABLE_IDX,
     CHOOSE_SKIP_STABLE_IDX,
     CHOOSE_STABLE_IDX_BASE,
     END_TURN_STABLE_IDX,
+    EVOKE_STABLE_IDX,
     POTION_STABLE_IDX_BASE,
     HintTag,
     RecommendConfig,
@@ -288,6 +298,48 @@ def _best_to_action(tag: HintTag, state: dict[str, Any]) -> dict[str, Any] | Non
     return None
 
 
+def option_move(tag: HintTag, state: dict[str, Any]) -> dict[str, Any]:
+    """What a combat option row DOES, in ``best``'s dialect (PROTOCOL.md §5).
+
+    ``action`` (``play`` / ``potion`` / ``end_turn``, and for the rarer rows
+    ``choose`` / ``skip`` / ``channel`` / ``evoke``) and, for a potion, the
+    bridge belt ``slot`` (:func:`_best_to_action`'s remap), so the HUD can ring
+    the potion or the End Turn button for any row, not only the best.
+    """
+    move = _best_to_action(tag, state)
+    if move is not None:
+        out: dict[str, Any] = {"action": move["action"]}
+        if "slot" in move:
+            out["slot"] = move["slot"]
+        return out
+    if tag.stable_idx == CHOOSE_SKIP_STABLE_IDX:
+        return {"action": "skip"}
+    if tag.stable_idx <= CHOOSE_STABLE_IDX_BASE:
+        return {"action": "choose"}
+    if POTION_STABLE_IDX_BASE - 5 < tag.stable_idx <= POTION_STABLE_IDX_BASE:
+        return {"action": "potion"}  # a potion the belt no longer shows: no slot
+    if tag.stable_idx == CHANNEL_STABLE_IDX:
+        return {"action": "channel"}
+    if tag.stable_idx == EVOKE_STABLE_IDX:
+        return {"action": "evoke"}
+    return {"action": "unknown"}
+
+
+def _veto_text(reason: str, state: dict[str, Any]) -> str:
+    """``hand[2]:EnergyCostTooHigh`` (``veto_unplayable``'s spelling) for the
+    HUD: ``Bash (energy cost too high)``."""
+    import re
+
+    m = re.fullmatch(r"hand\[(\d+)\]:(.*)", reason)
+    if m is None:
+        return reason
+    hand = state.get("hand") or []
+    i = int(m.group(1))
+    name = card_name(hand[i]) if 0 <= i < len(hand) else f"card {i}"
+    why = re.sub(r"(?<!^)(?=[A-Z])", " ", m.group(2)).lower()
+    return f"{name} ({why})"
+
+
 def wire_unplayable(state: dict[str, Any]) -> dict[int, str]:
     """Hand indices the GAME has already declared unplayable, and why.
 
@@ -384,6 +436,7 @@ def build_advice(
                 "card_index": t.stable_idx if t.stable_idx >= 0 else None,
                 "target_index": t.target_index,
                 **({"ally_index": t.ally_index} if t.ally_index is not None else {}),
+                **option_move(t, state),
                 "label": _tag_label(t, state),
                 "p_win": round(t.win_prob, 4),
                 "q": round(t.q, 4),
@@ -405,7 +458,8 @@ def build_advice(
         # Loud on purpose: every one of these is a live disagreement between
         # the mirror and the game, and this note is the only place it is
         # counted now that the play never reaches the refusal log.
-        note += f" · vetoed {len(vetoed)} the game calls unplayable ({', '.join(vetoed[:3])})"
+        named = ", ".join(_veto_text(v, state) for v in vetoed[:3])
+        note += f" · vetoed {len(vetoed)} the game calls unplayable ({named})"
     advice: dict[str, Any] = {
         "note": note,
         # The HUD's "est. win": the search's own number reads far too low
@@ -530,28 +584,72 @@ def compute_combat_advice(
             cs = result = None
     if result is None:
         cs = sts2_rs.state_from_dict(wire)
-        result = sts2_rs.mcts_recommend(
-            cs,
-            sims=call_cfg.sims,
-            c_puct=call_cfg.resolved_c_puct(),
-            depth=call_cfg.depth,
-            seed=call_cfg.seed,
-            threads=call_cfg.threads,
-            fair=call_cfg.fair,
-            rollout_policy=call_cfg.rollout_policy,
-            hidden_info=call_cfg.hidden_info,
-            draw_widening_c=call_cfg.resolved_draw_widening_c(),
-            endturn_widening_c=call_cfg.endturn_widening_c,
-            endturn_widening_alpha=call_cfg.endturn_widening_alpha,
-            common_random_numbers=call_cfg.common_random_numbers,
-            win_hp_carry=call_cfg.win_hp_carry,
-            win_potion_carry=call_cfg.win_potion_carry,
-        )
+        result = sts2_rs.mcts_recommend(cs, **_mcts_kwargs(call_cfg))
     tags = tags_from_result(result, wire["deck"]["hand"])
     pv = _pv_labels(list(result.get("pv") or [])[:4], state)
     advice = build_advice(tags, state, sims=sims, pv=pv, pick=result.get("pick"))
     rows = combat_rows(result, headless, advice)
+    try:
+        plan = search_plan(
+            cs,
+            list(result.get("pv") or []),
+            wire,
+            state,
+            advice.get("best"),
+            research=_plan_research(call_cfg),
+        )
+    except Exception as exc:  # a drawing must never cost the advice
+        logger.warning("turn plan failed: %s", exc)
+        plan = []
+    if plan:
+        advice["plan"] = plan
     return advice, cs, call_cfg, rows
+
+
+def _mcts_kwargs(call_cfg: RecommendConfig, sims: int | None = None) -> dict[str, Any]:
+    """``sts2_rs.mcts_recommend``'s keyword arguments for ``call_cfg``."""
+    return {
+        "sims": call_cfg.sims if sims is None else sims,
+        "c_puct": call_cfg.resolved_c_puct(),
+        "depth": call_cfg.depth,
+        "seed": call_cfg.seed,
+        "threads": call_cfg.threads,
+        "fair": call_cfg.fair,
+        "rollout_policy": call_cfg.rollout_policy,
+        "hidden_info": call_cfg.hidden_info,
+        "draw_widening_c": call_cfg.resolved_draw_widening_c(),
+        "endturn_widening_c": call_cfg.endturn_widening_c,
+        "endturn_widening_alpha": call_cfg.endturn_widening_alpha,
+        "common_random_numbers": call_cfg.common_random_numbers,
+        "win_hp_carry": call_cfg.win_hp_carry,
+        "win_potion_carry": call_cfg.win_potion_carry,
+    }
+
+
+#: The turn plan's re-searches (``realgame_turn_plan.search_plan``) run at an
+#: eighth of the decision's budget, never below this: they only order the
+#: rest of the turn, and they share a 0.5 s cap.
+PLAN_MIN_SIMS = 500
+PLAN_SIMS_DIVISOR = 8
+
+
+def _plan_research(call_cfg: RecommendConfig) -> Any:
+    """The turn plan's next-move search: the same honest search at an eighth of
+    the budget, from the fight as the plan has left it; its line, pick first."""
+    import sts2_rs
+
+    sims = max(PLAN_MIN_SIMS, int(call_cfg.sims) // PLAN_SIMS_DIVISOR)
+    kwargs = _mcts_kwargs(dataclasses.replace(call_cfg, sims=sims, c_puct=None))
+
+    def run(fight: Any) -> list[Any]:
+        result = sts2_rs.mcts_recommend(fight, **kwargs)
+        pick = next((r["action"] for r in result.get("actions") or [] if r.get("is_best")), None)
+        if not isinstance(pick, dict):
+            return []
+        pv = list(result.get("pv") or [])
+        return pv if pv and pv[0] == pick else [pick]
+
+    return run
 
 
 def _row_key(d: dict[str, Any]) -> tuple[Any, Any, Any]:
@@ -587,6 +685,11 @@ def combat_rows(
         if o.get("label"):
             row["action"] = o["label"]
         o["mean_final_hp"] = row.get("mean_final_hp")
+        # The HUD's name for the same number (PROTOCOL.md §5): expected HP at
+        # the END OF THE FIGHT through this move. Omitted when no playout
+        # through it reached the fight's end.
+        if row.get("mean_final_hp") is not None:
+            o["hp_mean"] = round(float(row["mean_final_hp"]), 1)
         o["hp_sd"] = row.get("hp_sd")
         o["hp_n"] = row.get("hp_n", 0)
     best = next((o for o in options if o.get("is_best")), None)
@@ -700,12 +803,14 @@ def _decline_potion_swap(state: dict[str, Any]) -> dict[str, Any]:
     if not group:
         return {"note": "no potion swap on this screen"}
     decline = group[0]
+    # `best.label` stays the mod's own spelling: the takeover cross-checks it.
     label = str(decline.get("label") or "decline")
+    belt = (state.get("run_state") or {}).get("potions") or state.get("potions") or []
     return {
         "note": "potion swap: the run policy's swap head is off, so the reward stays",
         "options": [
             {
-                "label": str(o.get("label") or "?"),
+                "label": potion_swap_label(o, belt),
                 "is_best": o is decline,
                 "index": int(o["index"]),
                 "action": "choose",
@@ -714,6 +819,48 @@ def _decline_potion_swap(state: dict[str, Any]) -> dict[str, Any]:
         ],
         "best": {"action": "choose", "index": int(decline["index"]), "label": label},
     }
+
+
+def screen_labels(state: dict[str, Any], advice_for: str, decision: Any) -> list[str]:
+    """The run policy's option labels, as the player reads them.
+
+    The decision builders (:mod:`realgame_ppo`) label options for logs and
+    for the encoder, and three of those spellings are ids: a shop option's
+    ``label`` is the merchant entry's id (``SHRUG_IT_OFF``), a shop removal is
+    ``remove:<CARD_ID>``, and a Neow option is its relic's id. The screen's
+    own display names replace them here; every other surface's builder
+    already labels from names (and :func:`display_names.sanitize_advice`
+    guards the rest at the wire).
+    """
+    labels = [str(x) for x in decision.labels]
+    by_index = {
+        int(o.get("index", i)): o
+        for i, o in enumerate(state.get("options") or [])
+        if isinstance(o, dict) and isinstance(o.get("index", i), int)
+    }
+    deck = (state.get("run_state") or {}).get("master_deck") or []
+    for i, action in enumerate(decision.actions):
+        if i >= len(labels):
+            break
+        response = decision.responses[i] if i < len(decision.responses) else {}
+        option = by_index.get(response.get("index"))
+        if advice_for == "shop":
+            if action.get("action") == "shop_remove_card":
+                d = action.get("deck_idx")
+                if isinstance(d, int) and 0 <= d < len(deck):
+                    labels[i] = f"Remove {card_name(deck[d])}"
+            elif option is not None:
+                labels[i] = shop_option_label(option)
+        elif advice_for == "event" and option is not None:
+            import realgame_ppo
+
+            shown = realgame_ppo._strip_bbcode(option.get("label"))
+            if shown:
+                labels[i] = str(shown)
+        elif advice_for == "potion_swap" and option is not None:
+            belt = (state.get("run_state") or {}).get("potions") or state.get("potions") or []
+            labels[i] = potion_swap_label(option, belt)
+    return labels
 
 
 def _advisor_builders() -> dict[str, Any]:
@@ -821,6 +968,31 @@ def _searched_card_select_advice(
     return mirror.answer_card_select(state, cfg, sims)
 
 
+def is_fight_offer(state: dict[str, Any]) -> bool:
+    """A choose-a-card screen opened INSIDE a fight (Discovery, a Skill /
+    Attack / Power Potion): a card generated into this fight, not a deck pick.
+    The same screen out of a fight (Lead Paperweight) adds to the deck."""
+    return state.get("surface") == "choose_a_card" and state.get("combat") is not None
+
+
+def fight_offer_as_select(state: dict[str, Any]) -> dict[str, Any]:
+    """An in-fight choose-a-card as the in-combat ``card_select`` it is.
+
+    The game opens both through ``CardSelectCmd`` (``FromChooseACardScreen``),
+    and the fight mirror answers it the same way: replay what opened it
+    (``source_model``, sent by the mod since 0.10.0-beta.7) on a fork of the
+    carried fight and stand on the engine's own choice. Shared by both brains.
+    """
+    return {
+        **state,
+        "advice_for": "card_select",
+        "min_select": 1,
+        "max_select": 1,
+        "cancelable": bool(state.get("can_skip")),
+        "source": "FromChooseACardScreen",
+    }
+
+
 def compute_screen_advice(
     state: dict[str, Any],
     advice_for: str,
@@ -857,6 +1029,14 @@ def compute_screen_advice(
     import realgame_ppo
 
     state = realgame_ppo.apply_session_context(state, session)
+    if advice_for == "card_reward" and is_fight_offer(state):
+        # A card generated into the fight is a fight decision: the combat
+        # MCTS on the mirror's park, when the mirror can stand on it. The
+        # deck-pick head below is only the fallback (it asks "is this a good
+        # DECK card", the wrong question for a copy that lasts one fight).
+        searched = _searched_card_select_advice(fight_offer_as_select(state), mirror, cfg, sims)
+        if searched is not None:
+            return searched
     run_state = state.get("run_state") or {}
     character = character_display_name(run_state.get("character")) or "Ironclad"
     policy, error = policies.get(character)
@@ -962,11 +1142,12 @@ def compute_screen_advice(
     # of coordinates is not something a player can act on while looking at a
     # map that shows no coordinates.
     offered = state.get("nodes") or [] if advice_for == "map_select" else []
+    labels = screen_labels(state, advice_for, decision)
     options = []
     for i, p in enumerate(probs):
         response = decision.responses[i] if i < len(decision.responses) else {}
         option = {
-            "label": decision.labels[i] if i < len(decision.labels) else "?",
+            "label": labels[i] if i < len(labels) else "?",
             "visit_share": round(float(p), 4),
             "is_best": i == best_i,
             "index": _option_index(response, i),
@@ -991,6 +1172,10 @@ def compute_screen_advice(
         "index": _option_index(best_response, best_i),
         "label": options[best_i]["label"],
     }
+    if advice_for == "potion_swap" and best_i < len(decision.labels):
+        # The mod's own spelling (`discard <POTION_ID>`): the takeover
+        # cross-checks `best.label` against it (SimAdvisor.ReconcileIndex).
+        best["label"] = decision.labels[best_i]
     if carried is not None:
         note += " · target carried from the shop pick, not re-ranked here"
     if session is not None and advice_for == "shop":
@@ -999,7 +1184,7 @@ def compute_screen_advice(
         )
     if standin_note:
         note += f" · {standin_note}"
-    if state.get("surface") == "choose_a_card":
+    if is_fight_offer(state):
         # The card-pick head is the closest surface the champion was trained
         # on, but it was trained on "add this to my DECK". This card is
         # generated into the current fight and then gone, so its deck value
@@ -1008,7 +1193,11 @@ def compute_screen_advice(
         note += " · scored as a deck pick; this copy only lasts the fight"
 
     advice = {"note": note, "options": options, "best": best}
-    if advice_for in _HAND_BACK_SURFACES and not trained_surface:
+    # A forced pick (single player's one chest relic) never asked the borrowed
+    # head anything, so there is no untrained decision to hand back: pausing
+    # there stopped "AI plays" at every chest.
+    forced = len(decision.actions) == 1
+    if advice_for in _HAND_BACK_SURFACES and not trained_surface and not forced:
         advice["hand_back"] = _HAND_BACK_SURFACES[advice_for]
 
     if advice_for == "map_select":
@@ -1096,6 +1285,47 @@ def _project_hp(
     return max(hp, 1.0)
 
 
+def route_graph(state: dict[str, Any]) -> dict[tuple[int, int], dict[str, Any]]:
+    """The act's map by coordinate, for a route walk, start and boss included.
+
+    The mod's ``map.nodes`` hold rows 1..N only: the act's start (row 0, the
+    Ancient) shows up just as the offered node at an act's entrance, and the
+    boss just as ``map.boss``. Without them the route at an entrance was empty
+    and every route ended a node short of the boss. The game links the start
+    to every row-1 node and the last row to the boss (StandardActMap.cs:221-232);
+    the last row's ``children`` already name the boss.
+    """
+    m = state.get("map") or {}
+    by_coord: dict[tuple[int, int], dict[str, Any]] = {}
+    for n in m.get("nodes") or []:
+        try:
+            by_coord[int(n["col"]), int(n["row"])] = n
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not by_coord:
+        return by_coord
+    boss = m.get("boss")
+    if isinstance(boss, dict):
+        try:
+            coord = (int(boss["col"]), int(boss["row"]))
+        except (KeyError, TypeError, ValueError):
+            coord = None
+        if coord is not None and coord not in by_coord:
+            by_coord[coord] = {"col": coord[0], "row": coord[1], "type": "Boss", "children": []}
+    first_row = min(r for _, r in by_coord)
+    for n in state.get("nodes") or []:
+        try:
+            coord = (int(n["col"]), int(n["row"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if coord not in by_coord and coord[1] < first_row:
+            by_coord[coord] = {
+                **n,
+                "children": [{"col": c, "row": r} for (c, r) in by_coord if r == first_row],
+            }
+    return by_coord
+
+
 def _project_map_path(
     state: dict[str, Any],
     policy: Any,
@@ -1130,12 +1360,7 @@ def _project_map_path(
     if not graph or not (0 <= best_index < len(offered)):
         return []
 
-    by_coord: dict[tuple[int, int], dict[str, Any]] = {}
-    for n in graph:
-        try:
-            by_coord[int(n["col"]), int(n["row"])] = n
-        except (KeyError, TypeError, ValueError):
-            continue
+    by_coord = route_graph(state)
 
     run_state = state.get("run_state") or {}
     base_obs = realgame_ppo._base_obs(state, run_state)
@@ -1415,6 +1640,8 @@ def build_coach(
         return wlog.log_name, log_idx
 
     def _send(record: dict[str, Any]) -> None:
+        # The same no-raw-ids guard as the advice (`display_names`).
+        record = sanitize_coach(record)
         client.send_action(
             {"action": "coach", "request_id": None, "state_id": None, "coach": record}
         )
@@ -1578,6 +1805,16 @@ def _serve_connected(
         warm_policy_async(policies, (msg.get("run_state") or {}).get("character"))
         control.note_message(msg)
 
+        if mtype == "advice_request" and client.newer_advice_request_pending(msg.get("advice_for")):
+            # A board that no longer exists: the mod already asked again (a
+            # teammate's next card, #1208) and drops any reply to this one.
+            # Answer the newer request instead of paying for this search.
+            logger.info(
+                "advice: skipped request %s (%s), a newer one is queued",
+                msg.get("request_id"),
+                msg.get("advice_for"),
+            )
+            continue
         if mtype == "advice_request":
             _handle_advice_request(
                 client, cfg, args, log, wlog, msg, policies, tree, mirror, session, coach
@@ -1878,6 +2115,13 @@ def _handle_advice_request(
         logger.error("advice_request failed: %s", e, exc_info=True)
         advice = {"note": f"advisor error: {e}", "hand_back": "the advisor hit an error"}
 
+    # The wire boundary: no raw game id reaches the HUD, from either brain or
+    # any surface (`display_names.sanitize_advice`; the cross-checked
+    # `best.label` stays the mod's own spelling).
+    try:
+        advice = sanitize_advice(advice, advice_for, msg)
+    except Exception as exc:  # the guard must never cost the advice
+        logger.warning("advice label guard failed: %s", exc)
     elapsed = time.monotonic() - t0
     reply = {
         "action": "advice",

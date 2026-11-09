@@ -4,7 +4,8 @@ import type { SoundCue } from "./types";
 /** The WebAudio calls, behind an interface so the policy above can be tested. */
 export interface AudioBackend {
   load(url: string): Promise<unknown>;
-  play(buffer: unknown, gain: number): void;
+  /** `rate` is the playback rate, 1 = as rendered (see `SoundCue.pitchVariance`). */
+  play(buffer: unknown, gain: number, rate: number): void;
   activeVoices(): number;
 }
 
@@ -18,8 +19,12 @@ export class SoundPlayer {
   private readonly lastPlayed = new Map<string, number>();
   private readonly maxVoices: number;
   private readonly debounceMs: number;
+  private readonly rand: () => number;
 
-  constructor(private readonly backend: AudioBackend, opts: { maxVoices?: number; debounceMs?: number } = {}) {
+  constructor(
+    private readonly backend: AudioBackend,
+    opts: { maxVoices?: number; debounceMs?: number; rand?: () => number } = {},
+  ) {
     // Recounted (2026-08-24) when the cue set roughly doubled — turn banners,
     // card deal/exhaust, the orb table, the universal monster death fade and
     // the per-card hit layer all landed at once. A single round boundary in a
@@ -30,6 +35,17 @@ export class SoundPlayer {
     // many different things may happen at once.
     this.maxVoices = opts.maxVoices ?? 16;
     this.debounceMs = opts.debounceMs ?? 60;
+    // Uniform [0,1), injected so the pitch draw is testable. The game draws
+    // from `Rng.Chaotic`, a stream nothing else observes, so any uniform
+    // source reproduces it.
+    this.rand = opts.rand ?? Math.random;
+  }
+
+  /** `NDebugAudioManager.GetRandomPitchScale`: `1 + NextFloat(-v, v)`, and
+   *  exactly 1, with no draw, when the call site asked for no variance. */
+  private rate(variance: number | undefined): number {
+    if (!variance) return 1;
+    return 1 + (this.rand() * 2 - 1) * variance;
   }
 
   async play(cue: SoundCue, volume: number, now: number): Promise<void> {
@@ -47,7 +63,7 @@ export class SoundPlayer {
       this.buffers.set(cue.event, buffer);
     }
     try {
-      this.backend.play(await buffer, volume * (cue.gain ?? 1));
+      this.backend.play(await buffer, volume * (cue.gain ?? 1), this.rate(cue.pitchVariance));
     } catch (err) {
       // A missing or undecodable file must never break the frame that
       // triggered it. This also catches a throw from `backend.play` itself,

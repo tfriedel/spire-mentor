@@ -83,7 +83,10 @@ pub(crate) fn play_knife_trap(
         if state.is_over {
             break;
         }
-        if upgraded {
+        // `CardCmd.Upgrade` is a no-op once `CombatManager.IsEnding`
+        // (CardCmd.cs:267-270): a Shiv that downed the last enemy leaves the
+        // rest unupgraded (GH #1150).
+        if upgraded && !sts2_core::combat_loop::combat_is_ending(state) {
             let idx = uid.0.get() as usize - 1;
             if let Some(card) = state.cards.get_mut(idx) {
                 if !card.upgraded {

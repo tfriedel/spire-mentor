@@ -105,8 +105,9 @@ bindings, round-trip tested in `sts2-wire/tests/graft_setters.rs`.
 2b. **Fidelity, every surface** (`tests/test_realgame_instinct*.py`): a native
    campaign run is played to the first decision of each type; the mod's payload
    for that screen is synthesized from the engine there; Instinct answering it
-   must make the same decision with the same probabilities (±5e-3) as the
-   native student. Passes for MAP, NEOW, CARD_REWARD, SHOP, REST, SMITH, EVENT,
+   must make the same decision with the same probabilities (±5e-3 on d1250;
+   ±2e-2 since the d2500 avg5 net, which amplifies the fresh driver's missing
+   history) as the native student. Passes for MAP, NEOW, CARD_REWARD, SHOP, REST, SMITH, EVENT,
    BOSS_RELIC, CARD_UPGRADE, CARD_GRANT and POTION_SWAP.
 3. **Live corpus:** `realgame_advisor --record-requests DIR` writes every raw
    message; a replay test feeds a recorded v0.111.0 Ironclad run through
@@ -120,25 +121,37 @@ bindings, round-trip tested in `sts2-wire/tests/graft_setters.rs`.
 
 ## Co-op (AI partners)
 
-The engine simulates single-player runs; the game's co-op acts are one room
-shorter (`ActModel.GetNumberOfRooms(isMultiplayer)`), so a co-op map is not
-the engine's and the envelope carries no `rng` block. In co-op Instinct stands
-on the nearest node of the engine's map in the same act (act, floor and room
-context right, the map read approximate), declines `map_select` (the search
-answers it), and says "co-op: Instinct trained single-player" in its note. The
-student never saw allies; an ally-targeted move that does not map is dropped.
+The engine simulates single-player runs. Two co-op differences matter to the
+run rebuild, and both are bridged (2026-11-08):
+
+- **The act map** is one room shorter per act
+  (`ActModel.GetNumberOfRooms(isMultiplayer)`); its RNG, room-type counts and
+  pruning are the single-player ones. `RunManager.debug_use_coop_maps()`
+  shortens every act and rebuilds the current map from a fresh `act_N_map`
+  stream. Checked against 19 recorded co-op act maps (7 seeds): node for node
+  and edge for edge (`sts2-core/examples/coop_map_check.rs`). Instinct routes
+  co-op maps like single player's.
+- **Neow** is seeded per player slot (`EventModel.cs:234`) and keeps Massive
+  Scroll in the pool. `RunManager.debug_set_neow_offers()` stands the rebuilt
+  Neow on the screen's three offers.
+
+The envelope carries no `rng` block in co-op. The net never saw allies or
+co-op-scaled enemies; its notes say "co-op: Instinct trained single-player".
 
 ## Open issues
 
-- A card generated into the fight (`card_reward` `surface: "choose_a_card"`)
-  goes through the fight mirror's selection path; live, the mirror could not
-  stand on it 14 times in run 2 (no source fields to replay).
-- Colossal Flower: the engine's "Reach Deeper" goes straight to a reward, the
-  game has two more pages; those pages decline.
-- Not read, the search answers: enchant screens (the screen does not name the
-  enchantment), the chest relic (forced in the student's game).
-- Not exercised live yet: the AI partners with Instinct, Autobattle, a
-  hand-played run with the HUD.
+Live beta.6 runs (2026-11-08, `logs/2026-11-08-beta6-live/FINDINGS.md`) fixed
+the choose-a-card screens (the mod now sends what opened them; out of a fight
+they are the engine's choose screen) and the single-player chest. What still
+goes to the search:
+
+- Colossal Flower and Tablet of Truth: the engine's first choice goes straight
+  to a reward, the game has more pages; those pages decline.
+- Enchant screens: the screen names the enchantment (`source_model`,
+  `source_kind: "enchantment"`), but the engine has no Python hook to queue a
+  deck enchant with a given enchantment (`pending_deck_enchants`).
+- Co-op: a shared chest (several relics, voted).
+- Not exercised live yet: Autobattle, a hand-played run with the HUD.
 - An Act 2/3 Ancient's relic offer is shown to the student with the NEW act's
   index (training saw the old one at that moment); the boss-node placement that
   reproduces it needs the previous act's map.

@@ -28,7 +28,9 @@ pub(crate) fn play_compact(state: &mut CombatState, _t: Option<CreatureUid>) -> 
     let mut fuel_uids = Vec::with_capacity(status_uids.len());
     for uid in status_uids {
         let mut fuel = card_from_spec(&spec);
-        if upgraded {
+        // `CardCmd.Upgrade` is a no-op once `CombatManager.IsEnding`
+        // (CardCmd.cs:267-270, GH #1150).
+        if upgraded && !sts2_core::combat_loop::combat_is_ending(state) {
             // Canonical upgrade path — applies the upgrade delta + flips
             // the flag, mirroring C# `CardCmd.Upgrade(cardModel)`. Bead
             // `sts2-rs-pnlm7`: was a direct `.upgraded = true` flip which

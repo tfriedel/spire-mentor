@@ -1150,6 +1150,57 @@ public static class SimStateExtractor
                 d["curse_of_knowledge_counter"] = curse;
         }
         catch { }
+        AppendMoveMachineState(d, m);
+    }
+
+    // The move machine's private flags (#1181), looked up once. Same names in
+    // v0.107.1 and v0.111.0 (MonsterMoveStateMachine.cs:14, MoveState.cs:13).
+    // The machine and move types are reached through MonsterModel's own
+    // property types, so no game namespace is named here.
+    private static readonly System.Reflection.FieldInfo? PerformedFirstMoveField =
+        typeof(MonsterModel).GetProperty("MoveStateMachine")?.PropertyType.GetField(
+            "_performedFirstMove",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+    private static readonly System.Reflection.FieldInfo? MovePerformedField =
+        typeof(MonsterModel).GetProperty("NextMove")?.PropertyType.GetField(
+            "_performedAtLeastOnce",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+    /// <summary>
+    /// The move machine's state the next roll reads and <c>move_state</c>
+    /// cannot carry (#1181), as <c>ai</c>: <c>log</c> = the ids of
+    /// <c>MonsterMoveStateMachine.StateLog</c> (moves logged when rolled, the
+    /// initial one at construction; RandomBranchState's repeat rules and
+    /// cooldowns read it), <c>performed_first_move</c> = its
+    /// <c>_performedFirstMove</c>, <c>performed</c> = the current
+    /// <c>MoveState._performedAtLeastOnce</c>, and for a synthetic stun
+    /// <c>forced_next</c> = the move it resumes. The engine restores its own log
+    /// from these. Kept identical in RunSimulator and SimStateExtractor.
+    /// </summary>
+    private static void AppendMoveMachineState(Dictionary<string, object?> d, MonsterModel m)
+    {
+        try
+        {
+            var sm = m.MoveStateMachine;
+            if (sm == null) return;
+            var ai = new Dictionary<string, object?>
+            {
+                ["log"] = sm.StateLog.Select(s => s.Id).ToList(),
+            };
+            if (PerformedFirstMoveField?.GetValue(sm) is bool first)
+                ai["performed_first_move"] = first;
+            if (m.NextMove != null && MovePerformedField?.GetValue(m.NextMove) is bool performed)
+                ai["performed"] = performed;
+            // A synthetic state (Creature.StunInternal's "STUNNED", outside
+            // the machine's States) resumes its FollowUpStateId: the move
+            // the stun interrupted.
+            if (m.NextMove != null && !sm.States.ContainsKey(m.NextMove.Id)
+                && !string.IsNullOrEmpty(m.NextMove.FollowUpStateId))
+                ai["forced_next"] = m.NextMove.FollowUpStateId;
+            d["ai"] = ai;
+        }
+        catch { }
     }
 
     // `ImitationLearningPower.PlayerTarget`, looked up once. Reflection, since

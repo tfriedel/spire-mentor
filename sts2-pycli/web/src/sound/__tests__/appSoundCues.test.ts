@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { actionCues, arrivalCues, cardPlayCues, goldGainCue, neowArrivalCue, potionGainCue, relicGainCue, runEndCue } from "../appSoundCues";
+import {
+  actionCues, arrivalCues, cardPlayCues, goldGainCue, neowArrivalCue, potionGainCue, relicGainCue, runEndCue,
+  steppedActionCues,
+} from "../appSoundCues";
 import type { SfxMap } from "../sfxMap";
 import type { Card } from "../../api";
 
@@ -305,5 +308,59 @@ describe("actionCues", () => {
   // `choiceKinds.ts` exists precisely because they are not the same thing.
   it("says nothing for a card_select with no deck-op context", () => {
     expect(actionCues(M, state(), "card_select", "select_card", {})).toEqual([]);
+  });
+});
+
+describe("actionCues — playing a card", () => {
+  const hand = [card({ index: 0, name: "Strike", type: "Attack" }), card({ index: 1, name: "Inflame", type: "Power" })];
+  const state = { hand, player: { name: "Ironclad" } } as never;
+  const m: SfxMap = {
+    ...MAP,
+    characters: { Ironclad: { attack: "event:/sfx/characters/ironclad/ironclad_attack" } },
+    cardAnims: { Strike: { kind: "attack" } },
+  };
+
+  // The regression this pins: card sounds came only from the Board's click
+  // handler, so "play recommended" and the A-key autoplay played silently.
+  // Mutation caught: deleting the `play_card` branch.
+  it("voices the card at `card_index` in the hand it is played from", () => {
+    expect(actionCues(m, state, "combat_play", "play_card", { card_index: 0, target_index: 0 }).map((c) => c.event))
+      .toEqual(["event:/sfx/characters/ironclad/ironclad_attack", "event:/sfx/cards/play"]);
+    expect(actionCues(m, state, "combat_play", "play_card", { card_index: 1 }).map((c) => c.event))
+      .toEqual(["event:/sfx/cards/power"]);
+  });
+
+  it("says nothing for an index the hand doesn't hold", () => {
+    expect(actionCues(m, state, "combat_play", "play_card", { card_index: 7 })).toEqual([]);
+  });
+});
+
+describe("steppedActionCues", () => {
+  const hand = [
+    card({ index: 0, name: "Strike", type: "Attack" }),
+    card({ index: 1, name: "Inflame", type: "Power", upgraded: true }),
+  ];
+  const prev = { decision: "combat_play", state: { hand, player: { name: "Ironclad" } } as never };
+  const events = (cues: { event: string }[]) => cues.map((c) => c.event);
+
+  // The two shapes `describe_action` renders a play as (render.rs).
+  it("joins a targeted and an untargeted play label to the hand it came from", () => {
+    expect(events(steppedActionCues(MAP, prev, "Play Strike → Fuzzy Wurm Crawler"))).toEqual(["event:/sfx/cards/play"]);
+    expect(events(steppedActionCues(MAP, prev, "Play Strike"))).toEqual(["event:/sfx/cards/play"]);
+  });
+
+  // `render.rs::card_name` appends "+" to an upgraded card; `Card.name` never
+  // carries it. Mutation caught: dropping the strip.
+  it("strips the upgrade suffix the label adds", () => {
+    expect(events(steppedActionCues(MAP, prev, "Play Inflame+"))).toEqual(["event:/sfx/cards/power"]);
+  });
+
+  it("is silent for anything that is not a card play from combat", () => {
+    expect(steppedActionCues(MAP, prev, "End turn")).toEqual([]);
+    expect(steppedActionCues(MAP, prev, "drink Fire Potion")).toEqual([]);
+    expect(steppedActionCues(MAP, prev, "Play Bash")).toEqual([]); // not in hand
+    expect(steppedActionCues(MAP, prev, undefined)).toEqual([]);
+    expect(steppedActionCues(MAP, null, "Play Strike")).toEqual([]);
+    expect(steppedActionCues(MAP, { ...prev, decision: "map" }, "Play Strike")).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 //! G-net: the Rust policy forward reproduces torch's logits on every decision
 //! of every `ppo.e2e.export_wb fixtures` file (`E2E_FIXTURES`, default
 //! `~/runs/e2e-wb/fixtures`) with the weights in `E2E_WEIGHTS` (default
-//! `~/runs/e2e-wb/export/ironclad_e2e_d1250_ema0999.e2ew`): max |Δlogit| <
+//! `~/runs/e2e-wb/export/ironclad_e2e_d2500_avg5_ema0999.e2ew`): max |Δlogit| <
 //! 1e-4 and argmax == the fixture's `chosen` (or a float tie: Python's margin
 //! over the Rust pick is within 2x the tolerance). Skips with a message when either
 //! input is missing.

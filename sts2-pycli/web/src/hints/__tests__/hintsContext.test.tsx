@@ -38,9 +38,9 @@ function mount() {
 }
 
 describe("HintsContext", () => {
-  it("defaults to Coach — unprompted advice is never shown until asked for", () => {
+  it("a fresh browser starts in Hints, as the mod does", () => {
     mount();
-    expect(screen.getByTestId("probe")).toHaveTextContent("coach / hints: off");
+    expect(screen.getByTestId("probe")).toHaveTextContent("hints / hints: on");
   });
 
   it("defaults to Coach without a provider, so an ungated subtree cannot leak", () => {
@@ -53,11 +53,11 @@ describe("HintsContext", () => {
     vi.stubGlobal("localStorage", store);
     const { unmount } = mount();
     fireEvent.click(screen.getByTestId("probe"));
-    expect(screen.getByTestId("probe")).toHaveTextContent("hints / hints: on");
-    expect(store.dump().adviceStyle).toBe("hints");
+    expect(screen.getByTestId("probe")).toHaveTextContent("coach / hints: off");
+    expect(store.dump().adviceStyle).toBe("coach");
     unmount();
     mount();
-    expect(screen.getByTestId("probe")).toHaveTextContent("hints / hints: on");
+    expect(screen.getByTestId("probe")).toHaveTextContent("coach / hints: off");
   });
 
   it("migrates the old hints switch: on becomes Hints", () => {
@@ -78,7 +78,7 @@ describe("HintsContext", () => {
     expect(screen.getByTestId("probe")).toHaveTextContent("coach / hints: off");
   });
 
-  it("survives storage being unavailable (private mode) and stays in Coach", () => {
+  it("survives storage being unavailable (private mode), in Hints", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
         throw new Error("denied");
@@ -88,8 +88,20 @@ describe("HintsContext", () => {
       },
     });
     mount();
-    expect(screen.getByTestId("probe")).toHaveTextContent("coach / hints: off");
-    fireEvent.click(screen.getByTestId("probe"));
     expect(screen.getByTestId("probe")).toHaveTextContent("hints / hints: on");
+    fireEvent.click(screen.getByTestId("probe"));
+    expect(screen.getByTestId("probe")).toHaveTextContent("coach / hints: off");
+  });
+});
+
+describe("Off", () => {
+  it("is a stored style of its own, quiet and not Hints", () => {
+    vi.stubGlobal("localStorage", memoryStorage({ adviceStyle: "off" }));
+    function OffProbe() {
+      const h = useHints();
+      return <span data-testid="off">{h.style}/{String(h.on)}/{String(h.off)}</span>;
+    }
+    render(<HintsProvider><OffProbe /></HintsProvider>);
+    expect(screen.getByTestId("off")).toHaveTextContent("off/false/true");
   });
 });

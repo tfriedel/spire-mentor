@@ -1113,6 +1113,31 @@ pub fn combat_state_to_value(state: &CombatState) -> Result<Value, EmitError> {
         // species-`roll_intent` path instead of a `MonsterAi`.
         if let Some(ai) = &c.ai {
             set(&mut m, "move_state", ai.current_state_id());
+            // The move machine's per-instance state (#1181), which the next
+            // roll reads (`CannotRepeat` / `UseOnlyOnce` / cooldowns read the
+            // log) and `move_state` alone loses. `log` is in C#'s
+            // `StateLog` convention (`MonsterAi::wire_move_log`), which the C#
+            // producers send too; `forced` / `counter` / `forced_next` are
+            // engine-only and keep a native round-trip exact.
+            let mut a = obj();
+            a.insert(
+                "log".to_owned(),
+                Value::Array(
+                    ai.wire_move_log()
+                        .iter()
+                        .map(|id| Value::from(*id))
+                        .collect(),
+                ),
+            );
+            set(&mut a, "performed_first_move", ai.performed_first_move());
+            set(&mut a, "performed", ai.performed_at_least_once());
+            set(&mut a, "forced", ai.current_forced());
+            set(&mut a, "counter", ai.counter());
+            a.insert(
+                "forced_next".to_owned(),
+                ai.forced_next_state().map_or(Value::Null, Value::from),
+            );
+            m.insert("ai".to_owned(), Value::Object(a));
             // Hidden AI counters the wire dialect discloses (2026-08-02):
             // emit them so a native round-trip keeps what the C# producers
             // now ship. The Fabricator's counter IS the last-spawned bot
@@ -1766,7 +1791,12 @@ pub const MAX_FORECAST_STEPS: usize = u8::MAX as usize;
 /// not the monster has moved yet, so the list never repeats the telegraph.
 /// `certainty` is the product of the weight shares of the random picks on
 /// the way (`1.0` along a fixed pattern). Intent dicts have the
-/// [`intent_to_value`] shape, baked against the current board. `move_id` is
+/// [`intent_to_value`] shape, baked against the current board. The three
+/// moves whose numbers C# computes at telegraph time (TestSubject
+/// MULTI_CLAW's hit count, TheForgotten DREAD, WaterfallGiant EXPLODE) carry
+/// the number the game will show at that step, counting the predicted moves
+/// before it, not the move table's (#1181,
+/// [`sts2_content::monsters::forecast`]). `move_id` is
 /// the engine's move-state id: hidden state, for a privileged consumer only.
 /// An enemy without an AI, or with one parked on a branch state, has `[]`.
 /// Dead enemies keep their AI's forecast; consumers mask them with the
@@ -1791,25 +1821,35 @@ pub fn enemy_intent_forecast(state: &CombatState, k: usize) -> Result<Value, Emi
             c.ai.as_ref()
                 .map(|ai| ai.forecast_after_current(k, state))
                 .unwrap_or_default();
-        let rows: Vec<Value> = steps
-            .iter()
-            .map(|s| {
-                let mut d = obj();
-                set(&mut d, "step", s.step);
-                set(&mut d, "certainty", f64::from(s.certainty));
-                set(&mut d, "move_id", s.move_id);
-                d.insert(
-                    "intents".to_owned(),
-                    Value::Array(
-                        s.intents
-                            .iter()
-                            .map(|intent| intent_to_value(*intent, state, dealer))
-                            .collect(),
-                    ),
-                );
-                Value::Object(d)
-            })
-            .collect();
+        // The moves performed before each step: the current telegraph (the
+        // coming enemy turn performs it), then the earlier steps.
+        let mut prior: Vec<&str> =
+            c.ai.as_ref()
+                .and_then(|ai| ai.current_move_opt())
+                .map(|m| m.id)
+                .into_iter()
+                .collect();
+        let mut rows: Vec<Value> = Vec::with_capacity(steps.len());
+        for s in &steps {
+            let intents = sts2_content::monsters::forecast::forecast_step_intents(
+                state, dealer, &prior, s.move_id, &s.intents,
+            );
+            let mut d = obj();
+            set(&mut d, "step", s.step);
+            set(&mut d, "certainty", f64::from(s.certainty));
+            set(&mut d, "move_id", s.move_id);
+            d.insert(
+                "intents".to_owned(),
+                Value::Array(
+                    intents
+                        .iter()
+                        .map(|intent| intent_to_value(*intent, state, dealer))
+                        .collect(),
+                ),
+            );
+            rows.push(Value::Object(d));
+            prior.push(s.move_id);
+        }
         out.push(Value::Array(rows));
     }
     Ok(Value::Array(out))

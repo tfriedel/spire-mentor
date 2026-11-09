@@ -26,7 +26,9 @@ use sts2_core::potions::CharacterId;
 use sts2_core::run_manager::{Phase, RunAction, RunManager};
 
 use super::map_ext::{obj, set, val};
-use super::names::{event_encounter_id, map_point_type_str, map_point_type_ui_str, room_type_str};
+use super::names::{
+    event_encounter_id_for, map_point_type_str, map_point_type_ui_str, room_type_str,
+};
 use super::run_action::run_action_to_value;
 
 // ---------------------------------------------------------------------------
@@ -355,7 +357,7 @@ pub fn current_room(rm: &RunManager) -> Value {
 /// `encounter_id` (GH #1097).
 ///
 /// An event's fight reports the event encounter
-/// ([`event_encounter_id`]); a map room's fight reports the encounter that
+/// ([`event_encounter_id_for`], per game build); a map room's fight reports the encounter that
 /// `build_combat_for_room` resolved (`RunState::current_encounter_idx`),
 /// which on the live path is the act's generated identity: the next entry of
 /// `generated_rooms()[act - 1]["normal"]` or `["elite"]`, or its `boss` /
@@ -373,7 +375,10 @@ pub fn combat_encounter_id(rm: &RunManager) -> Option<&'static str> {
         return None;
     }
     if let Some(req) = rm.run_state.event_combat.as_ref() {
-        return Some(event_encounter_id(req.encounter));
+        return Some(event_encounter_id_for(
+            req.encounter,
+            rm.run_state.game_version,
+        ));
     }
     rm.run_state
         .current_encounter_idx
@@ -970,8 +975,29 @@ fn event_vars_value(vars: &[(&'static str, sts2_core::EventVar)]) -> Value {
 /// The host's `materialize_event` (a mutation: it binds the room's event
 /// when none is bound yet) is what makes this return the real choices on
 /// arrival; the serialization itself is read-only and lives here.
+///
+/// The preview deltas are the RAW preview (see [`event_option_infos_with`]
+/// for the masked view a hidden-information policy may read).
 #[must_use]
 pub fn event_option_infos(rm: &RunManager) -> Value {
+    event_option_infos_with(rm, false)
+}
+
+/// [`event_option_infos`] with an opt-in mask on the preview deltas (#1181).
+///
+/// `preview_option_effect` resolves the option on a clone, so an option that
+/// gains a relic includes the ROLLED relic's pickup in its gold / HP / max-HP
+/// / potion / card gains — information the real game hides until the pick
+/// (which relic, and what it grants). With `masked`, such an option keeps
+/// `relics_gained = 1` and its losses, and reports 0 for those gains. Every
+/// other option, and every non-delta key, is unchanged. Idempotent.
+///
+/// `masked = false` is the raw output, byte-identical to before: the deployed
+/// PPO champions and the e2e run teacher were trained on it, so it must not
+/// move. This is the e2e branch's `contracts.honest_event_deltas`, in the
+/// engine.
+#[must_use]
+pub fn event_option_infos_with(rm: &RunManager, masked: bool) -> Value {
     let Some(opts) = sts2_content::events::dispatch::present(&rm.run_state) else {
         return Value::Null;
     };
@@ -1002,9 +1028,17 @@ pub fn event_option_infos(rm: &RunManager) -> Value {
         // silently dark on phrasing/version churn). `None`
         // (an option that can't be previewed) omits the keys
         // and the encoder falls back to its description parse.
-        if let Some(delta) =
+        if let Some(mut delta) =
             sts2_content::events::dispatch::preview_option_effect(&rm.run_state, idx)
         {
+            if masked && delta.relics_gained > 0 {
+                delta.gold_delta = 0;
+                delta.hp_delta = 0;
+                delta.max_hp_delta = 0;
+                delta.potions_gained = 0;
+                delta.cards_gained = 0;
+                delta.relics_gained = 1;
+            }
             set(&mut d, "gold_delta", delta.gold_delta);
             set(&mut d, "hp_delta", delta.hp_delta);
             set(&mut d, "max_hp_delta", delta.max_hp_delta);

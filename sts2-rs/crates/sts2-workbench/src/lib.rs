@@ -36,6 +36,8 @@ pub mod rmx;
 pub mod runlog;
 pub mod runmode;
 pub mod saves;
+#[cfg(feature = "e2e")]
+pub mod seedcheck;
 pub mod session;
 pub mod session_choice;
 #[cfg(feature = "e2e")]

@@ -351,6 +351,7 @@ pub fn name_of_for(version: GameVersion, kind: &str, ident: &str) -> String {
         "relic" | "potion" => format!("{ident}.title"),
         "power" => format!("{ident}_POWER.title"),
         "monster" => format!("{}.name", camel_to_upper_snake(ident)),
+        "encounter" | "event" => format!("{ident}.title"),
         _ => return title_case(ident),
     };
     loc_or_title(l, &key, ident)

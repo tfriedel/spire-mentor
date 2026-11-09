@@ -70,7 +70,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     /// applies immediately and is remembered (<see cref="LastGameSpeed"/>).
     /// </summary>
     [ConfigIgnore]
-    [ConfigSlider(0.1, 4.0, 0.1, Format = "{0:0.0}x")]
+    [ConfigSlider(0.1, SimSpeed.Max, 0.1, Format = "{0:0.0}x")]
     public static double GameSpeed
     {
         get => SimSpeed.Current;
@@ -109,7 +109,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         {
             return;
         }
-        double speed = Math.Clamp(LastGameSpeed, 0.1, 4.0);
+        double speed = Math.Clamp(LastGameSpeed, SimSpeed.Min, SimSpeed.Max);
         if (Math.Abs(speed - 1.0) > 1e-9)
         {
             SimSpeed.Apply(speed, showVfx: false);
@@ -125,7 +125,14 @@ public sealed class SpireMentorModConfig : SimpleModConfig
 
     public static bool ShowHud { get; set; } = true;
     public static bool ShowRankedList { get; set; } = true;
+    /// <summary>Rings + step numbers on the cards, potions, End Turn and
+    /// screen picks the advice names (SimHighlights). The property keeps its
+    /// old name so existing configs keep the player's choice.</summary>
     public static bool ShowCardLabels { get; set; } = true;
+
+    /// <summary>The engine's own numbers: the score over each card and the
+    /// eval / Q / W-L-T columns of the ranked list. Off: words and rings only.</summary>
+    public static bool ShowNumbers { get; set; } = false;
 
     /// <summary>Map-node visit markers + projected route. Used to ride on
     /// ShowCardLabels (a naming mismatch users kept tripping over).</summary>
@@ -233,7 +240,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     /// page.</summary>
     public static string AiPartnerCharacters { get; set; } = "";
 
-    /// <summary>Toolbar strip expanded/collapsed (SimToolbar pill).</summary>
+    /// <summary>The Spire Mentor badge's popover open / closed (SimToolbar).</summary>
     public static bool ToolbarExpanded { get; set; } = true;
 
     /// <summary>Where the player dragged the action log ("x,y", viewport
@@ -308,7 +315,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             "each card, a ranked list of moves, a win-chance bar and the route it likes on the\n" +
             "map. Coach shows nothing before you act -- press F5 to peek at its next pick -- and\n" +
             "afterwards a small note says where your turn or choice differed from its own.\n" +
-            "F8 turns it on / off; the toolbar's Hints / Coach button switches style.\n" +
+            "F8 turns it on / off; the Spire Mentor badge's Mode switch picks the style.\n" +
             "It switches on when the game starts (untick\n" +
             "that below if you would rather press F8), and it never plays for you unless you\n" +
             "ask it to (F7).");
@@ -323,7 +330,8 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         optionContainer.AddChild(CreateSectionHeader("HUD"));
         AddRow(optionContainer, "Show HUD", nameof(ShowHud), CreateRawTickboxControl);
         AddRow(optionContainer, "Show ranked moves", nameof(ShowRankedList), CreateRawTickboxControl);
-        AddRow(optionContainer, "Show card scores", nameof(ShowCardLabels), CreateRawTickboxControl);
+        AddRow(optionContainer, "Highlight the moves to make", nameof(ShowCardLabels), CreateRawTickboxControl);
+        AddRow(optionContainer, "Show engine numbers (scores, eval)", nameof(ShowNumbers), CreateRawTickboxControl);
         AddRow(optionContainer, "Show map markers + route", nameof(ShowMapMarkers), CreateRawTickboxControl);
         AddRow(optionContainer, "Show win chance bar", nameof(ShowWinBar), CreateRawTickboxControl);
         AddRow(optionContainer, "Reduce combat effects", nameof(ReduceEffects), CreateRawTickboxControl);
@@ -336,7 +344,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
                 "An AI teammate plays its own seat during the same turn as you. By default it\n" +
                 "starts as soon as its board is ready; these make it let you go first. When its\n" +
                 "best move needs your setup (Vulnerable, block), it holds it for you up to the\n" +
-                "time below. Shift+F6 or the toolbar's Partner go makes it play now.\n" +
+                "time below. Shift+F6 or the Partner go button makes it play now.\n" +
                 "Click an AI partner in the lobby to change its character.");
             AddRow(optionContainer, "AI partner waits for your first play", nameof(AiPartnerWaitForFirstPlay), CreateRawTickboxControl);
             AddRow(optionContainer, "AI partner waits until you end your turn", nameof(AiPartnerWaitForEndTurn), CreateRawTickboxControl);
@@ -360,7 +368,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             "Shift+F7   autobattle: the AI fights, you make the run's decisions\n" +
             "Shift+F8   advisor brain: Search / Instinct\n" +
             "F4   show / hide the HUD          Ctrl+L action log\n" +
-            "F9 / F10   game speed down / up (1x-4x)   F1   help\n" +
+            "F9 / F10   game speed down / up (1x-8x)   F1   help\n" +
             "Ctrl+H   hide / show all the mod's panels\n" +
             "Ctrl+Shift+B   report a bug (asks for a note, sends only on Send)");
 
@@ -399,7 +407,8 @@ public sealed class SpireMentorModConfig : SimpleModConfig
             cfg.AddLiveRow(container, "Game speed", nameof(GameSpeed), cfg.CreateRawSliderControl);
             cfg.AddLiveRow(container, "Show HUD", nameof(ShowHud), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show ranked moves", nameof(ShowRankedList), cfg.CreateRawTickboxControl);
-            cfg.AddLiveRow(container, "Show card scores", nameof(ShowCardLabels), cfg.CreateRawTickboxControl);
+            cfg.AddLiveRow(container, "Highlight the moves to make", nameof(ShowCardLabels), cfg.CreateRawTickboxControl);
+            cfg.AddLiveRow(container, "Show engine numbers (scores, eval)", nameof(ShowNumbers), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show map markers + route", nameof(ShowMapMarkers), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Show win chance bar", nameof(ShowWinBar), cfg.CreateRawTickboxControl);
             cfg.AddLiveRow(container, "Reduce combat effects", nameof(ReduceEffects), cfg.CreateRawTickboxControl);
@@ -430,7 +439,7 @@ public sealed class SpireMentorModConfig : SimpleModConfig
         "Search thinks ahead: a search over the fight, the run net for the screens. Instinct is\n" +
         "the end-to-end net with no search: it plays every decision on gut feel. Instinct plays\n" +
         "Ironclad on v0.111.0 only for now; anywhere else the search answers and says why.\n" +
-        "The toolbar's Search / Instinct button and Shift+F8 switch it too.";
+        "The Spire Mentor badge's Brain switch and Shift+F8 switch it too.";
 
     /// <summary>A line of explanation under a mid-run row.</summary>
     private void AddLiveNote(Control container, string text)

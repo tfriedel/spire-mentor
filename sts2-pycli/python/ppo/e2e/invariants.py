@@ -34,11 +34,12 @@ Checks, by code:
     holds every deck card and every generated card), hand ``<= 10``, the
     player/creature mirrors, termination, power sanity. The wire dicts clamp
     hp, block and energy on emit, so only this check can see those overflow.
-    Two of its failures are legal states and only count in ``stats()``'s
-    ``tolerated``: a second instance of a power that C# instances
-    (``instanced_power``) and a stale ``pinned_top`` / ``pinned_bottom`` /
-    ``retain_this_turn`` entry (``stale_*``). The F9 soak found both. See
-    :func:`tolerated_engine_message`.
+    Every failure is a violation. (The F9 soak found two legal states the
+    suite used to flag, a second instance of a power C# instances and a stale
+    ``pinned_top`` / ``pinned_bottom`` / ``retain_this_turn`` entry; the
+    engine allows both since #1166/#1169, so the checker no longer tolerates
+    them.) Only a :data:`KNOWN_ISSUES` key passed as ``tolerate_known`` counts
+    a failure in ``stats()["tolerated"]`` instead.
 ``combat.pile_duplicate``
     The ledger tier: a card uid sits twice in hand, draw, discard and exhaust
     (an independent Python re-check of the partition).
@@ -129,8 +130,9 @@ _DYNAMIC_TYPE_CARDS = frozenset({"MADSCIENCE"})
 # Powers whose ``InstanceType`` is ``Instanced`` or ``InstancedPerApplier`` in
 # the v0.111.0 decomp: each application adds a new instance
 # (PowerInstanceType.cs), so one owner can hold two. The engine's dedup check
-# (invariants.rs, check 9) flags those; the checker tolerates them. A test
-# rebuilds this set from the decomp.
+# (invariants.rs, check 9, ``power_kind_may_repeat``) allows them; the
+# Crossbow re-check (:func:`after_tolerated_checks`) does too. A test rebuilds
+# this set from the decomp.
 _INSTANCED_POWERS = frozenset(
     {
         "AUTOMATION",
@@ -157,18 +159,6 @@ _INSTANCED_POWERS = frozenset(
         "TORICTOUGHNESS",
         "WITHERINGPRESENCE",
     }
-)
-_DUPLICATE_POWER = re.compile(r"^duplicate PowerKind (\w+) on ")
-# ``pinned_top`` / ``pinned_bottom`` / ``retain_this_turn`` are annotations on
-# cards in a pile. A card can leave the pile and keep its annotation (an
-# auto-play of a Headbutt-pinned card, a played Expertise draw), and every
-# reader filters them first: ``cards::shuffle`` and ``pop_next_card`` sweep the
-# pins (cards.rs, "Staleness guard"), the reshuffle clears them, and the
-# end-of-turn retain keeps only cards still in hand (combat_loop.rs). So a
-# stale entry changes nothing, and the checker tolerates it.
-_STALE_ANNOTATION = re.compile(
-    r"^card CardUid\(\d+\) in (pinned_top|pinned_bottom|retain_this_turn) "
-    r"but not in the pile it annotates"
 )
 # The hand cap (invariants.rs ``HAND_CAP``; C# ``CardPile.MaxCardsInHand``).
 # C# never exceeds it: an add to a full hand goes to the discard pile
@@ -299,22 +289,6 @@ def deck_ledger(
     return out, None
 
 
-def tolerated_engine_message(msg: str) -> str | None:
-    """The reason the checker lets an engine-suite failure pass, or ``None``.
-
-    Two failures of ``check_invariants`` are legal states (see
-    :data:`_INSTANCED_POWERS` and :data:`_STALE_ANNOTATION`): a duplicate
-    instanced power and a stale pile annotation.
-    """
-    m = _DUPLICATE_POWER.match(msg)
-    if m is not None and _canon(m.group(1)) in _INSTANCED_POWERS:
-        return "instanced_power"
-    m = _STALE_ANNOTATION.match(msg)
-    if m is not None:
-        return f"stale_{m.group(1)}"
-    return None
-
-
 def _owns_relic(state: dict[str, Any], relic: str) -> bool:
     relics = (state.get("player") or {}).get("relics") or []
     return any(_canon(r.get("id") if isinstance(r, dict) else r) == relic for r in relics)
@@ -325,14 +299,14 @@ def after_tolerated_checks(
 ) -> list[Violation]:
     """The engine checks that a tolerated failure skipped, on the wire state.
 
-    ``check_invariants`` returns its first failure only. After a stale
-    annotation it has not checked the hand cap, the mirrors, termination or
-    the powers; after an instanced duplicate it has not checked the rest of
-    the powers. This re-checks what ``state_to_dict`` shows: the hand cap, a
-    duplicate of a power that is not instanced, and a negative amount of a
-    power that cannot go negative. The mirrors and termination stay unchecked
-    for that state. ``crossbow_overflow_ok`` lets a hand over the cap pass
-    when the player owns Crossbow (the ``crossbow_hand_cap`` known issue).
+    ``check_invariants`` returns its first failure only, so after a tolerated
+    hand-cap failure (``crossbow_hand_cap``) it has not checked the mirrors,
+    termination or the powers. This re-checks what ``state_to_dict`` shows:
+    the hand cap, a duplicate of a power that is not instanced, and a negative
+    amount of a power that cannot go negative. The mirrors and termination
+    stay unchecked for that state. ``crossbow_overflow_ok`` lets a hand over
+    the cap pass when the player owns Crossbow (the ``crossbow_hand_cap``
+    known issue).
     """
     out: list[Violation] = []
     hand = len(state["deck"]["hand"])
@@ -489,22 +463,17 @@ class InvariantChecker:
             import sts2_rs
 
             msg = str(msg)
-            reason = tolerated_engine_message(msg)
             state = None
-            if reason is None and self._crossbow_ok and _HAND_OVER_CAP.match(msg):
+            if self._crossbow_ok and _HAND_OVER_CAP.match(msg):
                 state = sts2_rs.state_to_dict(cs)
-                if _owns_relic(state, "CROSSBOW"):
-                    reason = "known_crossbow_hand_cap"
-            if reason is None:
+            if state is None or not _owns_relic(state, "CROSSBOW"):
                 out.append(Violation(COMBAT_ENGINE, msg))
             else:
                 # The engine suite stops at its first failure, so the checks
-                # after a tolerated one did not run. Re-run the ones the wire
-                # can show.
-                self.tolerated[reason] += 1
-                if state is None:
-                    state = sts2_rs.state_to_dict(cs)
-                out.extend(after_tolerated_checks(state, crossbow_overflow_ok=self._crossbow_ok))
+                # after the tolerated hand cap did not run. Re-run the ones the
+                # wire can show.
+                self.tolerated["known_crossbow_hand_cap"] += 1
+                out.extend(after_tolerated_checks(state, crossbow_overflow_ok=True))
         if self.expected_game_version is not None:
             ver = cs.game_version
             if ver != self.expected_game_version:

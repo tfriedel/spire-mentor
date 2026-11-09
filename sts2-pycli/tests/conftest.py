@@ -113,6 +113,7 @@ _NEEDS: dict[str, str] = {
     # --- the vendored English localization
     "test_localization_registry_coverage.py": "localization",
     "test_realgame_advisor_deck_mutation.py": "localization",
+    "test_display_names.py::test_names_come_from_the_game_tables": "localization",
     "test_rust_game_backend.py::test_csharp_resolve_event_fields_resolves_boss_relic_and_regular_event": "localization",
     "test_hint_adapter.py::test_ironclad_vs_nibbit_mid_turn": "localization",
     "test_hint_adapter.py::test_mid_turn_with_potions": "localization",

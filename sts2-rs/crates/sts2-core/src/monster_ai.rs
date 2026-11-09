@@ -405,6 +405,21 @@ pub struct MonsterAi {
     pub after_death: Option<fn(&mut CombatState, CreatureUid, CreatureUid)>,
 }
 
+/// The per-instance move-machine state a wire dict carries (#1181), for
+/// [`MonsterAi::restore_wire_instance_state`]. `log` is in the wire
+/// convention ([`MonsterAi::wire_move_log`]). The C# producers send `log`,
+/// `performed_first_move` and `performed`; only the engine's own dicts carry
+/// `forced`, `counter` and `forced_next`.
+#[derive(Clone, Debug, Default)]
+pub struct WireInstanceState<'a> {
+    pub log: &'a [StateId],
+    pub performed_first_move: Option<bool>,
+    pub performed: Option<bool>,
+    pub forced: Option<bool>,
+    pub counter: Option<i32>,
+    pub forced_next: Option<StateId>,
+}
+
 impl MonsterAi {
     pub fn new(states: BTreeMap<StateId, MonsterState>, initial: StateId) -> Self {
         let mut ai = Self {
@@ -821,6 +836,102 @@ impl MonsterAi {
         }
     }
 
+    /// The move-state id `name` names on this machine: an exact id first,
+    /// else the one that matches with its `_MOVE` segment ignored (the C#
+    /// wire spells `"WRIGGLE_MOVE"` where the port has `"WRIGGLE"`; see
+    /// [`Self::force_current_state_by_name_relaxed`]).
+    #[must_use]
+    pub fn move_state_id_relaxed(&self, name: &str) -> Option<StateId> {
+        fn strip_move_segment(id: &str) -> String {
+            let stripped = id.strip_suffix("_MOVE").unwrap_or(id);
+            stripped.replace("_MOVE_", "_")
+        }
+        let moves = || {
+            self.states
+                .iter()
+                .filter(|(_, st)| st.is_move())
+                .map(|(k, _)| *k)
+        };
+        if let Some(sid) = moves().find(|k| *k == name) {
+            return Some(sid);
+        }
+        let want = strip_move_segment(name);
+        moves().find(|k| strip_move_segment(k) == want)
+    }
+
+    /// Whether the current move has been performed at least once since the
+    /// machine entered it (C# `MoveState._performedAtLeastOnce`).
+    #[must_use]
+    pub fn performed_at_least_once(&self) -> bool {
+        self.performed_at_least_once
+    }
+
+    /// Whether a `SetMoveImmediate` installed the current state (C# never
+    /// logs such a state).
+    #[must_use]
+    pub fn current_forced(&self) -> bool {
+        self.current_forced
+    }
+
+    /// The move log in the WIRE convention (#1181), which is C#'s
+    /// `MonsterMoveStateMachine.StateLog`: C# logs a move when it is ROLLED
+    /// (and the initial move at construction), the engine when it is
+    /// PERFORMED (`on_move_performed_state`). The two differ by the current
+    /// move exactly while it is rolled but not performed yet, so that move
+    /// is appended here. A forced state is in neither log.
+    #[must_use]
+    pub fn wire_move_log(&self) -> SmallVec<[StateId; 16]> {
+        let mut log = self.state_log.clone();
+        if !self.performed_at_least_once
+            && !self.current_forced
+            && self.cur().should_appear_in_logs()
+        {
+            log.push(self.current);
+        }
+        log
+    }
+
+    /// Restore the per-instance move-machine state a wire dict carries
+    /// (#1181): the inverse of [`Self::wire_move_log`] plus the flags.
+    /// Call it after the current state was set from the wire's
+    /// `move_state` ([`Self::force_current_state`]). A `None` keeps what the
+    /// force left.
+    pub fn restore_wire_instance_state(&mut self, s: &WireInstanceState<'_>) {
+        // C# sends no `forced`, but it logs every move it ROLLS, so a current
+        // move that is not the log's last entry was installed by a
+        // `SetMoveImmediate` (a stun, an enrage). Only for a non-empty log:
+        // C# logs the initial move at construction, so its log never is.
+        self.current_forced = match s.forced {
+            Some(forced) => forced,
+            None => s.log.last().is_some_and(|last| *last != self.current),
+        };
+        if let Some(performed) = s.performed {
+            self.performed_at_least_once = performed;
+        }
+        let mut log: SmallVec<[StateId; 16]> = s.log.iter().copied().collect();
+        if !self.performed_at_least_once
+            && !self.current_forced
+            && log.last() == Some(&self.current)
+        {
+            log.pop();
+        }
+        self.state_log = log;
+        if let Some(first) = s.performed_first_move {
+            self.performed_first_move = first;
+        }
+        // The producer resolved the opening telegraph already.
+        self.initial_resolved = true;
+        if let Some(counter) = s.counter {
+            self.counter = counter;
+        }
+        // Restored as sent, as `stun_immediate` queues it: a queued move is
+        // consumed exactly like the graph's follow-up (`roll_move*`), so one
+        // that equals the follow-up changes nothing.
+        if let Some(next) = s.forced_next {
+            self.forced_next_state = Some(next);
+        }
+    }
+
     /// Roll to the next move using the C#-faithful RNG path.
     ///
     /// **Bead `sts2-rs-5w76f`:** matches C# `RandomBranchState.GetNextState`
@@ -1051,6 +1162,11 @@ impl MonsterAi {
             self.state_log.push(performed);
         }
     }
+
+    /// Placeholder for a logged move a wire names but this machine has no
+    /// state for ([`Self::restore_wire_instance_state`]): it keeps the log's
+    /// positions for the repeat rules and matches no branch.
+    pub const UNRESOLVED_LOGGED_MOVE: StateId = "<unresolved>";
 
     /// Id of the generic stun state [`Self::ensure_generic_stun_state`] adds.
     pub const GENERIC_STUN_STATE: StateId = "STUNNED";

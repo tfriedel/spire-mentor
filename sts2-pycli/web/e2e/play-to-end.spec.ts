@@ -140,15 +140,13 @@ test.describe("unified Play to end", () => {
     // switch, which is OFF by default. Both had to change for this to appear.
     // Note we never touch the hints toggle — whole-run automation is exempt.
     await expect(page.getByText(/last search →/)).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByText("Machine reasoning")).toBeVisible();
+    await expect(page.getByText("Advice", { exact: true })).toBeVisible();
 
-    // The bars themselves: one row per searched action. Each carries a
-    // "<label> — Q ±n.nn · N% of search visits · …" tooltip, which is the row's
-    // whole content in one string — so it doubles as the assertion that a row
-    // actually carries numbers rather than rendering as an empty bar.
-    await expect(
-      page.locator('[title*="of search visits"]').first(),
-    ).toBeVisible({ timeout: 30_000 });
+    // The rows themselves, in words (the engine's numbers are behind Tools →
+    // engine numbers): one per searched action, the pick verdicted "Best".
+    const list = page.getByTestId("advice-list");
+    await expect(list).toBeVisible({ timeout: 30_000 });
+    await expect(list.getByText("Best", { exact: true })).toBeVisible();
 
     // It survives a Stop — that is the "we're losing, why?" case.
     await page.keyboard.press("Escape");

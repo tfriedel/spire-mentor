@@ -789,6 +789,10 @@ pub struct ParsedEnemy {
     /// (bead `sts2-rs-3f3rz`). `None` for wires that omit it (older
     /// adapters / the C# backend, which never emitted it).
     pub move_state: Option<String>,
+    /// The move machine's per-instance state (`ai`, #1181), when the
+    /// producer sends it: the Rust `state_to_dict`, the C# headless and the
+    /// mod. See [`ParsedAiState`].
+    pub ai: Option<ParsedAiState>,
     /// Reflection-exported `Fabricator._lastSpawned` (canonical bot id,
     /// e.g. `"ZAPBOT"`), on the Fabricator's own entry. 2026-08-02 wire
     /// disclosure; when present it supersedes the max-uid inference,
@@ -801,6 +805,27 @@ pub struct ParsedEnemy {
     /// mid-fight mirror re-offered curse set 0 (the documented
     /// DISINTEGRATION off-by-one).
     pub curse_of_knowledge_counter: Option<i32>,
+}
+
+/// An enemy's `ai` object (#1181): the move machine's state that
+/// `move_state` (the current move) cannot carry and the next roll reads.
+///
+/// `log` is C#'s `MonsterMoveStateMachine.StateLog` convention: moves are
+/// logged when ROLLED, so it holds the current move unless that move was
+/// forced (`SetMoveImmediate`). `performed_first_move` is C#'s
+/// `_performedFirstMove`, `performed` the current `MoveState`'s
+/// `_performedAtLeastOnce`. `forced`, `counter` and `forced_next` exist only
+/// in the engine's own dicts (`MonsterAi::current_forced` / `counter` /
+/// `forced_next_state`). Ids are wire spellings, resolved per monster at
+/// reconstruction.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParsedAiState {
+    pub log: Vec<String>,
+    pub performed_first_move: Option<bool>,
+    pub performed: Option<bool>,
+    pub forced: Option<bool>,
+    pub counter: Option<i32>,
+    pub forced_next: Option<String>,
 }
 // ---------------------------------------------------------------------------
 // Wire helpers — read-or-fail
@@ -2086,6 +2111,12 @@ fn parse_enemy<V: WireValue>(d: &V, path: &str) -> WireResult<ParsedEnemy> {
         None => None,
     };
 
+    // Optional: the move machine's per-instance state (#1181).
+    let ai = match extract_optional(d, "ai") {
+        Some(a) => Some(parse_ai_state(&a, &format!("{path}.ai"))?),
+        None => None,
+    };
+
     // Optional reflection-exported hidden counters (2026-08-02 producers).
     let fabricator_last_spawned = match extract_optional(d, "fabricator_last_spawned") {
         Some(v) => Some(
@@ -2116,8 +2147,55 @@ fn parse_enemy<V: WireValue>(d: &V, path: &str) -> WireResult<ParsedEnemy> {
         is_escaped,
         intent_damage_known,
         move_state,
+        ai,
         fabricator_last_spawned,
         curse_of_knowledge_counter,
+    })
+}
+
+/// Parse an enemy's `ai` object into [`ParsedAiState`].
+fn parse_ai_state<V: WireValue>(a: &V, path: &str) -> WireResult<ParsedAiState> {
+    let a = as_dict(a, path)?;
+    let log = match extract_optional(&a, "log") {
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| schema_err(path, "`log` must be a list"))?
+            .iter()
+            .map(|e| {
+                e.as_str()
+                    .ok_or_else(|| schema_err(path, "`log` entries must be strings"))
+            })
+            .collect::<WireResult<Vec<String>>>()?,
+        None => Vec::new(),
+    };
+    let flag = |key: &str| -> WireResult<Option<bool>> {
+        extract_optional(&a, key)
+            .map(|v| {
+                v.as_bool()
+                    .ok_or_else(|| schema_err(path, &format!("`{key}` must be a bool")))
+            })
+            .transpose()
+    };
+    let counter = extract_optional(&a, "counter")
+        .map(|v| {
+            v.as_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| schema_err(path, "`counter` must be an int"))
+        })
+        .transpose()?;
+    let forced_next = extract_optional(&a, "forced_next")
+        .map(|v| {
+            v.as_str()
+                .ok_or_else(|| schema_err(path, "`forced_next` must be a string"))
+        })
+        .transpose()?;
+    Ok(ParsedAiState {
+        log,
+        performed_first_move: flag("performed_first_move")?,
+        performed: flag("performed")?,
+        forced: flag("forced")?,
+        counter,
+        forced_next,
     })
 }
 
@@ -2978,6 +3056,10 @@ const WIRE_MOVE_STATE_ALIASES: &[(MonsterKind, &str, &str)] = &[
         "POWER_SHIELD_MOVE",
         "FIRST_POWER_SHIELD",
     ),
+    // C# `MoveState("MAGIC_BOMB", MagicBombMove, …)` has no `_MOVE` segment
+    // to strip; the port named it "BOMB". Found by the #1181 move-log
+    // lockstep check (seeds 1003 / 1049).
+    (MonsterKind::MagiKnight, "MAGIC_BOMB", "BOMB"),
     (MonsterKind::Queen, "YOU_ARE_MINE_MOVE", "YOURE_MINE_MOVE"),
     (MonsterKind::ShrinkerBeetle, "SHRINKER_MOVE", "SHRINK"),
     // C# "THWACK" — the Rust port typo'd the state id as "TWACK".
@@ -4296,6 +4378,16 @@ pub fn state_from_dict_impl(parsed: &ParsedState) -> WireResult<CoreCombatState>
             ai_at_wire_move = wire_move_state_alias(m.kind, ms)
                 .is_some_and(|alias| ai.force_current_state_by_name(alias))
                 || ai.force_current_state_by_name_relaxed(ms);
+            // The synthetic stun (below), rebuilt when the wire carries the
+            // move machine (`ai`, #1181): park on the engine's own generic
+            // `STUNNED` move, as `stun_immediate` does, so the log restore
+            // applies and the stun resumes the move it interrupted
+            // (`forced_next`, else C#'s default, the log's last move).
+            if !ai_at_wire_move && ms == "STUNNED" && m.ai.is_some() && !m.is_dead {
+                let stun = ai.ensure_generic_stun_state();
+                ai.force_current_state(stun);
+                ai_at_wire_move = true;
+            }
             let resolved = ai_at_wire_move
                 // C# `Creature.StunInternal` injects a SYNTHETIC
                 // `MoveState("STUNNED")` (follow-up = the interrupted move) that
@@ -4480,6 +4572,55 @@ pub fn state_from_dict_impl(parsed: &ParsedState) -> WireResult<CoreCombatState>
             ),
             other => other,
         };
+        // The AI's owner (#1181). The engine sets it before every roll
+        // (`roll_next_enemy_intents`), but a reconstructed state read before
+        // its first roll (`peek_intents`, the forecast) resolved its
+        // owner-aware branch predicates (CeremonialBeast PLOW_CHECK, …) with
+        // no owner.
+        let mut ai = ai;
+        if let Some(ai) = ai.as_mut() {
+            ai.set_owner(CreatureUid(cid));
+        }
+        // The move machine's own state (#1181): the move log the repeat rules
+        // read (`CannotRepeat`, `UseOnlyOnce`, cooldowns), the performed
+        // flags, and on the engine's own dicts the counter and a queued
+        // forced move. Applied after the per-monster counter inference above,
+        // so an exact wire counter wins over an inferred one. Only onto an AI
+        // parked on the wire's own move: the log's last entry is read against
+        // it. A logged id this AI has no state for keeps its place as
+        // `UNRESOLVED_LOGGED_MOVE`: the repeat rules count positions (cooldown
+        // windows, "last move"), and the placeholder matches no branch.
+        if let (Some(wire_ai), Some(ai), true) = (m.ai.as_ref(), ai.as_mut(), ai_at_wire_move) {
+            let resolve = |name: &str| {
+                wire_move_state_alias(m.kind, name)
+                    .and_then(|alias| ai.move_state_id_relaxed(alias))
+                    .or_else(|| ai.move_state_id_relaxed(name))
+            };
+            let log: Vec<sts2_core::monster_ai::StateId> = wire_ai
+                .log
+                .iter()
+                .map(|n| resolve(n).unwrap_or(sts2_core::MonsterAi::UNRESOLVED_LOGGED_MOVE))
+                .collect();
+            // A synthetic stun with no `forced_next` resumes what C#'s
+            // `Creature.StunInternal` defaults to: the last logged move.
+            let forced_next = wire_ai
+                .forced_next
+                .as_deref()
+                .and_then(resolve)
+                .or_else(|| {
+                    (ai.current_state_id() == sts2_core::MonsterAi::GENERIC_STUN_STATE)
+                        .then(|| log.last().copied())
+                        .flatten()
+                });
+            ai.restore_wire_instance_state(&sts2_core::WireInstanceState {
+                log: &log,
+                performed_first_move: wire_ai.performed_first_move,
+                performed: wire_ai.performed,
+                forced: wire_ai.forced,
+                counter: wire_ai.counter,
+                forced_next,
+            });
+        }
         state.creatures.push(Creature {
             id: cid,
             // The engine's dead-convention is `current_hp <= 0`; clamp in

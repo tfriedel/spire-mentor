@@ -777,3 +777,30 @@ describe("engine routes — the e2e student, fetched on demand", () => {
     expect(fetchE2e).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("engine routes — the seed checker", () => {
+  it("stores an attempt's log with the run logs, suffixing a clash", async () => {
+    const fetchE2e = vi.fn(async () => new Uint8Array([1]));
+    const { wb, engine } = setupE2e(fetchE2e);
+    const call = wb.call.bind(wb);
+    wb.call = (method: string, route: string, body_json: string) =>
+      route === "/api/seedcheck/log"
+        ? reply(200, { path: "20261108_120000_Ironclad_game_S.jsonl", text: '{"type":"meta"}\n{"type":"state"}\n' })
+        : call(method, route, body_json);
+    const body = { seed: "S", classes: [1], seq: "check", k: 0 };
+    const a = await engine.handle("POST", "/api/seedcheck/log", body);
+    const b = await engine.handle("POST", "/api/seedcheck/log", body);
+    expect(fetchE2e).toHaveBeenCalledTimes(1);
+    expect(a).toEqual({ status: 200, body: { path: "20261108_120000_Ironclad_game_S.jsonl" } });
+    expect(b.body).toEqual({ path: "20261108_120000_Ironclad_game_S_2.jsonl" });
+    const runs = (await engine.handle("GET", "/api/runs")).body as { runs: string[] };
+    expect(runs.runs).toEqual(expect.arrayContaining(["20261108_120000_Ironclad_game_S.jsonl", "20261108_120000_Ironclad_game_S_2.jsonl"]));
+  });
+
+  it("passes the preview and summary through to the engine", async () => {
+    const { wb, engine } = setupE2e(vi.fn(async () => new Uint8Array([1])));
+    expect((await engine.handle("POST", "/api/seedcheck/preview", { seed: "S" })).status).toBe(200);
+    expect((await engine.handle("POST", "/api/seedcheck/summary", { seed: "S", classes: [] })).status).toBe(200);
+    expect(wb.calls.filter((c) => c.startsWith("POST /api/seedcheck/")).length).toBe(2);
+  });
+});

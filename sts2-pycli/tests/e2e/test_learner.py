@@ -864,6 +864,121 @@ def test_a_shm_chunk_reads_its_block_and_closes_it_when_it_goes() -> None:
     assert shm.buf is None
 
 
+# ── GH #1152: row blocks of a SIGKILLed learner ──────────────────────────
+
+
+def _dead_pid() -> int:
+    """The pid of a process that has exited (and been reaped)."""
+    import subprocess
+
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+def test_row_blocks_carry_their_owners_pid() -> None:
+    from ppo.e2e.rowstore import PREFIX, batch_to_shm, gather_to_shm, take_to_shm
+
+    src = _chunk(6, 4)
+    made = [
+        (batch_to_shm(src.rb)[0], os.getpid()),
+        (take_to_shm(src, [1, 3], owner=4242)[0], 4242),
+        (gather_to_shm([(src, 2), (src, 0)], owner=4343)[0], 4343),
+        (gather_to_shm([], owner=4444)[0], 4444),  # the empty table's path
+    ]
+    try:
+        for shm, owner in made:
+            assert shm.name.lstrip("/").startswith(f"{PREFIX}{owner}_"), shm.name
+    finally:
+        for shm, _ in made:
+            shm.close()
+            shm.unlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shared memory names; no sweep on Windows")
+def test_sweep_removes_only_the_blocks_of_dead_owners(tmp_path: Path) -> None:
+    from ppo.e2e.rowstore import PREFIX, sweep
+
+    dead = _dead_pid()
+    names = {
+        "dead": f"{PREFIX}{dead}_aa",
+        "live": f"{PREFIX}{os.getpid()}_bb",
+        "garbled": f"{PREFIX}x_cc",
+        "other": f"psm_{dead}",  # not ours: anyone's random-named block
+    }
+    for n in names.values():
+        (tmp_path / n).write_bytes(b"x")
+    assert sweep(tmp_path) == [names["dead"]]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        v for k, v in names.items() if k != "dead"
+    )
+    assert sweep(tmp_path / "missing") == []  # no /dev/shm: nothing to do
+
+
+@pytest.mark.skipif(not Path("/dev/shm").is_dir(), reason="POSIX shared memory in /dev/shm")
+def test_a_sigkilled_owners_row_block_is_swept() -> None:
+    """A process that makes a row block and dies by SIGKILL leaves it in /dev/shm
+    (nothing unlinks it); the next learner's `sweep` removes it."""
+    import signal
+    import subprocess
+
+    from ppo.e2e.rowstore import sweep
+
+    code = (
+        "import os, signal\n"
+        "from ppo.e2e import contracts as C\n"
+        "from ppo.e2e.rowstore import batch_to_shm\n"
+        "shm, _ = batch_to_shm(C.empty_row_batch())\n"
+        "print(shm.name.lstrip('/'), flush=True)\n"
+        "os.kill(os.getpid(), signal.SIGKILL)\n"
+    )
+    pycli = Path(__file__).resolve().parents[2]
+    p = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=pycli,
+        env={**os.environ, "PYTHONPATH": str(pycli / "python")},
+    )
+    assert p.returncode == -signal.SIGKILL, p.stderr
+    name = p.stdout.strip()
+    block = Path("/dev/shm") / name
+    try:
+        assert block.exists()  # leaked, as GH #1152 found
+        assert name in sweep()
+        assert not block.exists()
+    finally:
+        block.unlink(missing_ok=True)
+
+
+def test_the_learner_names_rank0s_held_blocks_after_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rank 0 makes the held rows' block, but the learner owns it: each job carries
+    the learner's pid, and the held block's name carries it."""
+    from ppo.e2e.rowstore import PREFIX
+
+    owners: list[Any] = []
+    held: list[str] = []
+    real_submit, real_map = L.LocalUpdater.submit, L._map_held
+
+    def submit(self: Any, job: dict[str, Any]) -> None:
+        owners.append(job.get("owner"))
+        real_submit(self, job)
+
+    def map_held(h: Any) -> Any:
+        if h is not None:
+            held.append(h["shm"].lstrip("/"))
+        return real_map(h)
+
+    monkeypatch.setattr(L.LocalUpdater, "submit", submit)
+    monkeypatch.setattr(L, "_map_held", map_held)
+    make_learner(make_cfg(tmp_path, max_iters=3)).train()
+    assert owners and set(owners) == {os.getpid()}
+    assert held and all(n.startswith(f"{PREFIX}{os.getpid()}_") for n in held), held
+
+
 class ChunkProbe(TeacherLearner):
     """Records, whenever an update returns, how many held rows it left and the
     rows of the chunks they point into."""
@@ -1684,6 +1799,24 @@ def test_learning_check_writes_its_verdict_and_a_campaign_applies_it(tmp_path: P
             assert lr.stats_rows[-1]["lc_verdict_pass"] is (not hold)
         finally:
             lr.stop()
+
+
+def test_the_learning_checks_combat_ev_survives_one_blown_up_iteration() -> None:
+    """GH #1153: the gate used the mean EV of the last 5 stats rows, and explained
+    variance is unbounded below, so one bad batch sank a run that learned normally
+    (ep_off: last-5 mean -0.24 where same-config runs read 0.31-0.69). The gate now
+    reads the median over the last half of the rows (at least 5)."""
+    rows = lambda evs: [{"value_ev": {"combat": x}} for x in evs]  # noqa: E731
+    healthy = [0.1, 0.2, 0.3, 0.4, 0.5, 0.5, 0.55, 0.6, 0.6, 0.6, 0.6, -3.5]
+    assert np.mean(healthy[-5:]) < 0.1  # the old statistic fails it
+    ev = L.lc_combat_ev(rows(healthy))
+    assert ev["median"] == pytest.approx(0.6) and ev["rows"] == 6 and ev["last5_mean"] < 0.1
+    # A value head that has not learned still fails.
+    assert L.lc_combat_ev(rows([0.3, 0.2, 0.0, -0.1, 0.05, 0.0, 0.02, -0.2]))["median"] < 0.1
+    # Short traces read at least the last 5 rows; rows without an EV are skipped.
+    short = [*rows([0.0, 0.0, 0.5, 0.5, 0.5, 0.5, -9.0]), {"value_ev": {"combat": None}}, {}]
+    assert L.lc_combat_ev(short) == pytest.approx({"median": 0.5, "rows": 5, "last5_mean": -1.4})
+    assert math.isnan(L.lc_combat_ev([])["median"])
 
 
 def test_a_failed_recheck_after_a_pass_keeps_the_ramp_and_alarms(tmp_path: Path) -> None:

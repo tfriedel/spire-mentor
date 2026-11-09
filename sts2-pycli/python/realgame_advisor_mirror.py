@@ -117,6 +117,39 @@ def _enemy_hp(wire: dict[str, Any]) -> list[Any]:
     return [e.get("hp") for e in (wire.get("encounter") or []) if not e.get("is_dead")]
 
 
+def _selected_count(state: dict[str, Any]) -> int:
+    """How many cards the screen already has selected (``selected_count``,
+    sent by the mod since #1206; absent means none)."""
+    try:
+        return max(0, int(state.get("selected_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _card_labels(cards: Sequence[dict[str, Any]]) -> list[str]:
+    return [str(c.get("name") or c.get("id") or f"card {i}") for i, c in enumerate(cards)]
+
+
+def _confirm_selection_answer(state: dict[str, Any]) -> dict[str, Any]:
+    """Advice to confirm the cards already selected: ``skip``, which the mod
+    plays as the screen's confirm (``ConfirmGridSelection``)."""
+    cards = state.get("cards") or []
+    taken = _selected_count(state)
+    return {
+        "note": f"{taken} pick(s) done · confirm",
+        "options": [
+            {
+                "label": label,
+                "is_best": False,
+                "index": int(cards[i].get("index", i)),
+                "action": "choose",
+            }
+            for i, label in enumerate(_card_labels(cards))
+        ],
+        "best": {"action": "skip", "label": "confirm"},
+    }
+
+
 class AdvisorMirror:
     """Owns the advisor's per-fight :class:`CombatMirror`, or nothing.
 
@@ -1259,6 +1292,30 @@ class AdvisorMirror:
         )
         return True
 
+    def _remembered_pick_answer(self, state: dict[str, Any], remembered: int) -> dict[str, Any]:
+        """Advice for pick 2+ of a selection: the planned pick ``remembered``
+        (an index into this screen's ``cards``), from :meth:`next_remembered_pick`."""
+        cards = state.get("cards") or []
+        labels = _card_labels(cards)
+        self.stats["searched_selects"] += 1
+        return {
+            "note": "combat MCTS · the second pick of the same search",
+            "options": [
+                {
+                    "label": label,
+                    "is_best": i == remembered,
+                    "index": int(cards[i].get("index", i)),
+                    "action": "choose",
+                }
+                for i, label in enumerate(labels)
+            ],
+            "best": {
+                "action": "choose",
+                "index": int(cards[remembered].get("index", remembered)),
+                "label": labels[remembered],
+            },
+        }
+
     def answer_card_select(
         self,
         state: dict[str, Any],
@@ -1295,6 +1352,20 @@ class AdvisorMirror:
             # counted so it never gets mistaken for a fight the mirror missed.
             self.decline("no embedded combat (deck screen)")
             return None
+        # Pick 2+ of an "up to N" combat pile pick (Neow's Fury): the mod asks
+        # again after each card it takes (`selected_count`, #1206). Only the
+        # first ask's plan may continue the selection. A fresh search does not
+        # know what is already taken and would plan N picks again, so without
+        # a remembered pick the picks are done and the answer is to confirm
+        # what is taken. Both brains come through here (Instinct's picker
+        # too), so they behave the same.
+        if _selected_count(state) > 0:
+            remembered = self.next_remembered_pick(
+                state.get("source_model"), state.get("cards") or []
+            )
+            if remembered is not None:
+                return self._remembered_pick_answer(state, remembered)
+            return _confirm_selection_answer(state)
         live = self.live
         if live is None:
             self.decline("no live mirror at the screen")
@@ -1320,26 +1391,7 @@ class AdvisorMirror:
         # wire, no fork and no replay, and the replay is what fails here.
         remembered = self.next_remembered_pick(state.get("source_model"), state.get("cards") or [])
         if remembered is not None:
-            cards = state.get("cards") or []
-            labels = [str(c.get("name") or c.get("id") or f"card {i}") for i, c in enumerate(cards)]
-            self.stats["searched_selects"] += 1
-            return {
-                "note": "combat MCTS · the second pick of the same search",
-                "options": [
-                    {
-                        "label": label,
-                        "is_best": i == remembered,
-                        "index": int(cards[i].get("index", i)),
-                        "action": "choose",
-                    }
-                    for i, label in enumerate(labels)
-                ],
-                "best": {
-                    "action": "choose",
-                    "index": int(cards[remembered].get("index", remembered)),
-                    "label": labels[remembered],
-                },
-            }
+            return self._remembered_pick_answer(state, remembered)
         already_parked = live.state.pending_choice() is not None
         # A screen the END OF TURN opened has no source that can be re-issued: a
         # power is not something the engine can be told to do again. `end_turn`

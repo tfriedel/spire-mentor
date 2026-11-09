@@ -178,14 +178,29 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
 - **Settings page** — main menu → Mod Configuration (BaseLib) → Spire Mentor:
   advisor-mode toggle, game-speed slider, HUD toggles, advisor-backend launch
   settings. Main-menu only.
-- **Toolbar** (`SimToolbar.cs`) — the clickable `SpireMentor` strip in the
-  top-left mirrors every hotkey. The live controls (coach, AI once / auto,
-  speed) are flat buttons; the one-shot verbs sit in three dropdowns
-  (`SimUiKit.MakeMenuButton`): **Rewind ▾** (`⟲ Turn` / `⟲ Room` /
-  `⟲⟲ Back`), **Panels ▾** (log, HUD, help, mid-run **Settings** —
-  `SimSettingsPanel.cs` — **Report a bug** and **Panels in their own
-  window**) and **Workbench ▾** (open the browser view, copy state). Click
-  the pill to collapse the strip.
+- **The Spire Mentor badge** (`SimToolbar.cs`, words in `MentorBadge.cs`) —
+  one compact badge docked under the right end of the game's top bar (under
+  the map / deck / settings buttons; the top-left is the game's relic tray and
+  co-op player list). Its colour and word say the mode at a glance (grey Off,
+  cyan Coach, green Hints, amber while the AI plays) and what the advisor is
+  doing (thinking dots — still with *Reduce combat effects* — starting,
+  offline, or the engine-build counter). Click it for a popover that mirrors
+  every hotkey, grouped: **Mode** `Off · Coach · Hints · AI plays` (one switch
+  for F8 + the style; *AI plays* is F7, and reads *Autopilot* while a
+  config-armed Autopilot holds the run — `MentorModes` in `CoachStyle.cs`),
+  **Brain** Search / Instinct (where Instinct can play), **This decision**
+  Peek (F5) / Let AI pick (F6), **Autoplay** Autobattle (Shift+F7) / AI
+  plays until stopped (F7), **Speed** (F9/F10), and **More**: three dropdowns
+  (`SimUiKit.MakeMenuButton`), **Rewind ▾** (`⟲ Turn` / `⟲ Room` /
+  `⟲⟲ Back`), **Panels ▾** (hide all, log, HUD, help, mid-run **Settings** —
+  `SimSettingsPanel.cs` — **Report a bug** and **Panels in their own window**) and **Workbench ▾** (open
+  the browser view, copy state). The popover closes on the badge, a click
+  elsewhere or Esc (read without swallowing them: the click still reaches the
+  game), and stays open or closed across launches. While the AI plays, an
+  amber frame runs round the screen edge and an **AI is playing — Stop (F7)**
+  button sits next to the badge; **Partner go** sits there too in a combat
+  with AI partners. Drag the `⠿` grip to move the badge; double-click it to
+  dock it again.
 - **Panels in their own window** (`SimFrameLauncher.cs`, `FrameLaunchRules.cs`;
   Windows) — the mod starts the Spire Mentor frame (`../spire-mentor-frame/`,
   shipped in `mods/SpireMentor/SpireMentorFrame/`, .NET Framework 4.8) next
@@ -203,12 +218,12 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
   sits under the advice column and follows it until you drag it; a dragged
   position is kept across launches, and right-clicking its header puts it back
   under the column — `LogPanelPlacement.cs`), `Ctrl+H` hides every
-  panel down to the toolbar pill (again, or click the pill, to show them), `F4` HUD
+  panel down to the Spire Mentor badge (again, or click the badge, to show them), `F4` HUD
   on/off, `F6` AI takes this one decision, `Shift+F6` co-op: every AI
   partner waiting for you plays its turn now (below), `F7` AI plays until you stop,
   `Shift+F7` autobattle (below),
   `F8` turns the AI on / off in the current style (from Autopilot: stops the
-  AI and hands you the controls; the toolbar's Hints / Coach button switches
+  AI and hands you the controls; the badge's Mode switch picks the
   style), `F5` peeks at the AI's next pick in the Coach style,
   `F9`/`F10` game speed −/+ in whole steps, 1x–4x (`SpeedSteps.cs`; the
   settings slider still sets tenths), `Ctrl+Z` undo to the start of the
@@ -222,10 +237,10 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
   best move needs your setup play (Vulnerable on its target, block on it)
   holds it up to **AI partner holds for your setup play** (default 10 s,
   0–60), briefly (2.5 s) when only other AI partners are still to act. The
-  toolbar's **Partner go** (shown in a combat with AI partners; `▶` and a
+  **Partner go** button next to the badge (in a combat with AI partners; `▶` and a
   countdown while one waits) or `Shift+F6` ends every wait for this turn:
   the setup hold and the "waits for your first play / end turn" settings.
-- **Autobattle** (`Autobattle.cs`, `Shift+F7` or the toolbar's
+- **Autobattle** (`Autobattle.cs`, `Shift+F7` or the badge's
   **Autobattle**) — the workbench's autobattle mode in the real game: the AI
   plays the fights (card picks inside a fight included) and every run-level
   decision — card reward, map, shop, rest site, event, card removal /
@@ -345,7 +360,7 @@ How the mod fits the rest of the stack: [`../ARCHITECTURE.md`](../ARCHITECTURE.m
 
 ## The workbench link
 
-The toolbar's **Workbench ▾ → open** opens the *Workbench URL* setting.
+The badge's **More › Workbench ▾ → Open workbench** opens the *Workbench URL* setting.
 Blank (the default) tries two pages in order (`SimWorkbenchLink.cs`):
 
 1. **The bundled workbench**, `http://127.0.0.1:8079/?follow=1`. The release zip

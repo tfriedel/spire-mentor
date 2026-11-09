@@ -10,7 +10,7 @@ import {
   visiblePanels,
 } from "./layout";
 import { hotkeyAction } from "./host";
-import { addChip, expireChips, INITIAL_STATE, reduce, tieBandLines, type Chip } from "./store";
+import { addChip, adviceColumns, expireChips, INITIAL_STATE, reduce, tieBandLines, type Chip } from "./store";
 
 const chip = (id: string, kind = "choice"): Chip => ({
   id,
@@ -28,7 +28,7 @@ describe("layout", () => {
     let l = movePanel(DEFAULT_LAYOUT, "log", "right", 0);
     expect(l.docks.right).toEqual(["log", "advice", "coach"]);
     l = movePanel(l, "coach", "bottom");
-    expect(l.docks.bottom).toEqual(["workbench", "coach"]);
+    expect(l.docks.bottom).toEqual(["coach"]);
     l = movePanel(l, "coach", "right", 2);
     expect(l.docks.right).toEqual(["log", "advice", "coach"]);
     // later within the same dock: index counts the slot before removal
@@ -38,9 +38,19 @@ describe("layout", () => {
   });
 
   it("moving a hidden panel shows it", () => {
-    const l = movePanel(DEFAULT_LAYOUT, "workbench", "left");
-    expect(l.hidden).not.toContain("workbench");
-    expect(visiblePanels(l, "left")).toEqual(["workbench"]);
+    const l = movePanel(setPanelHidden(DEFAULT_LAYOUT, "log", true), "log", "left");
+    expect(l.hidden).not.toContain("log");
+    expect(visiblePanels(l, "left")).toEqual(["log"]);
+  });
+
+  it("drops the workbench a stored layout still docks (it has its own window now)", () => {
+    const l = normalizeLayout({
+      docks: { top: ["toolbar"], right: ["advice", "coach", "log"], bottom: ["workbench"] },
+      hidden: ["workbench"],
+    });
+    expect(l.docks.bottom).toEqual([]);
+    expect(l.hidden).toEqual([]);
+    expect(Object.values(l.docks).flat()).not.toContain("workbench");
   });
 
   it("repairs a stored layout", () => {
@@ -137,5 +147,23 @@ describe("hotkeys", () => {
     expect(key("G", { shiftKey: true })).toBeNull();
     expect(key("e")).toBeNull();
     expect(key("1")).toBeNull();
+  });
+});
+
+describe("adviceColumns", () => {
+  const row = (o: Partial<import("./store").AdviceOption>) =>
+    ({
+      label: "x", p_win: null, q: null, visits: null, visit_share: null, wins: null, losses: null, ties: null,
+      is_best: false, low_confidence: false, in_band: false, pick_rank: null, card_index: null, score: null, ...o,
+    }) as import("./store").AdviceOption;
+  it("lays out no Q / W-L-T columns for Instinct (probability only)", () => {
+    const c = adviceColumns([row({ visit_share: 0.7 }), row({ visit_share: 0.3 })], true);
+    expect(c).toMatchObject({ hp: false, q: false, share: true, wlt: false });
+    expect(c.template).toBe("20px minmax(0, 1fr) auto 44px 34px");
+  });
+  it("keeps engine columns behind show_numbers", () => {
+    const rows = [row({ q: 0.5, visit_share: 0.6, wins: 3, losses: 1, ties: 0, hp_mean: 41 })];
+    expect(adviceColumns(rows, false)).toMatchObject({ hp: true, q: false, wlt: false });
+    expect(adviceColumns(rows, true)).toMatchObject({ hp: true, q: true, wlt: true });
   });
 });

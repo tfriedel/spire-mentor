@@ -752,6 +752,11 @@ fn translate_enemy(
     if let Some(c) = int_of(enemy.get("curse_of_knowledge_counter")) {
         out.insert("curse_of_knowledge_counter".into(), json!(c));
     }
+    // The move machine's state (#1181): forwarded verbatim, as the Python
+    // adapters do.
+    if let Some(ai) = get(enemy, "ai").filter(|v| v.is_object()) {
+        out.insert("ai".into(), ai.clone());
+    }
     Ok(Value::Object(out))
 }
 

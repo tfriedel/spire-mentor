@@ -42,10 +42,13 @@ export function createWebAudioBackend(): AudioBackend {
       if (!res.ok) throw new Error(`${url}: ${res.status}`);
       return ctx.decodeAudioData(await res.arrayBuffer());
     },
-    play(buffer, gain) {
+    play(buffer, gain, rate) {
       if (ctx.state === "suspended") resume();
       const src = ctx.createBufferSource();
       src.buffer = buffer as AudioBuffer;
+      // Godot's `PitchScale` resamples (pitch and speed together), which is
+      // exactly what `playbackRate` does — not a pitch-preserving shift.
+      src.playbackRate.value = rate;
       const g = ctx.createGain();
       g.gain.value = gain;
       src.connect(g).connect(ctx.destination);

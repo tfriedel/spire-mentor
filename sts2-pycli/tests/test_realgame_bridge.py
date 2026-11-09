@@ -141,6 +141,75 @@ def test_receive_state_splits_batched_messages(fake_server: FakeServer) -> None:
     client.disconnect()
 
 
+def _advice_request(request_id: str, advice_for: str = "combat_action") -> dict:
+    return {"type": "advice_request", "request_id": request_id, "advice_for": advice_for}
+
+
+def _wait_buffered(client: RealGameBridgeClient, advice_for: str) -> bool:
+    """`newer_advice_request_pending` once the server's bytes have landed."""
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if client.newer_advice_request_pending(advice_for):
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_a_queued_advice_request_supersedes_the_one_received(fake_server: FakeServer) -> None:
+    """#1208: two queued requests -> the first has a newer one behind it,
+    the second does not; both still come out of receive_state in order."""
+    client = RealGameBridgeClient(host="127.0.0.1", port=fake_server.port, reconnect_attempts=1)
+    client.connect()
+    fake_server.wait_for_connection()
+    fake_server.send_json_line(_advice_request("1"))
+    fake_server.send_json_line(_advice_request("2"))
+
+    first = client.receive_state()
+    assert first["request_id"] == "1"
+    assert _wait_buffered(client, "combat_action")
+    second = client.receive_state()
+    assert second["request_id"] == "2"
+    assert not client.newer_advice_request_pending("combat_action")
+    client.disconnect()
+
+
+def test_other_messages_do_not_supersede_a_request(fake_server: FakeServer) -> None:
+    """A queued non-advice message, a request for another kind of advice (an
+    AI partner's screen question behind its combat one) or a half-arrived
+    line does not count; none of them is consumed."""
+    client = RealGameBridgeClient(host="127.0.0.1", port=fake_server.port, reconnect_attempts=1)
+    client.connect()
+    fake_server.wait_for_connection()
+    fake_server.send_json_line(_advice_request("1"))
+    fake_server.send_json_line({"type": "human_action", "advice_for": "combat_action"})
+    fake_server.send_json_line(_advice_request("2", advice_for="card_select"))
+    partial = json.dumps(_advice_request("3")).encode("utf-8")
+    fake_server.send_raw(partial[:20])
+
+    assert client.receive_state()["request_id"] == "1"
+    # Every queued byte is buffered once card_select's request is seen.
+    assert _wait_buffered(client, "card_select")
+    assert not client.newer_advice_request_pending("combat_action")
+    fake_server.send_raw(partial[20:] + b"\n")
+    assert _wait_buffered(client, "combat_action")
+    assert client.receive_state()["type"] == "human_action"
+    assert client.receive_state()["request_id"] == "2"
+    assert client.receive_state()["request_id"] == "3"
+    client.disconnect()
+
+
+def test_nothing_queued_does_not_block(fake_server: FakeServer) -> None:
+    client = RealGameBridgeClient(
+        host="127.0.0.1", port=fake_server.port, reconnect_attempts=1, timeout=30.0
+    )
+    client.connect()
+    fake_server.wait_for_connection()
+    started = time.monotonic()
+    assert not client.newer_advice_request_pending("combat_action")
+    assert time.monotonic() - started < 1.0
+    client.disconnect()
+
+
 def test_send_action_echoes_last_request_id(fake_server: FakeServer) -> None:
     client = RealGameBridgeClient(host="127.0.0.1", port=fake_server.port, reconnect_attempts=1)
     client.connect()

@@ -321,23 +321,85 @@ body {
 }
 .fr-opt {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 54px 64px 34px 58px;
+  /* the row sets its own columns (adviceColumns): empty ones are not laid out */
+  grid-template-columns: 20px minmax(0, 1fr) auto 44px 34px;
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
   font-size: 12px;
-  padding: 1px 2px;
+  padding: 2px 3px;
 }
 .fr-opt-best {
   color: var(--gold);
   background: var(--accent-weak);
   border-radius: 3px;
 }
+.fr-opt-hidden {
+  opacity: 0.55;
+}
+.fr-opt-chip {
+  width: 18px;
+  height: 16px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: oklch(18% 0.01 265);
+}
 .fr-opt-label {
   font-family: var(--font);
+  /* wrap, never cut: the enemy's name is the part that got cut */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+.fr-opt-verdict {
+  font-family: var(--font);
+  font-size: 11px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: right;
+}
+.fr-opt-hp {
+  color: oklch(72% 0.13 20);
+  text-align: right;
+  white-space: nowrap;
+}
+.fr-plan {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 6px;
+  color: oklch(90% 0.07 85);
+}
+.fr-plan-step {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fr-plan-n {
+  display: inline-block;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: oklch(18% 0.01 265);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.fr-more {
+  align-self: flex-start;
+  margin-top: 3px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
 }
 .fr-opt-q,
 .fr-opt-share {
@@ -424,18 +486,6 @@ body {
   display: flex;
 }
 
-/* ---- workbench -------------------------------------------------------- */
-.fr-panel-workbench .fr-panel-body {
-  padding: 0;
-  overflow: hidden;
-}
-.fr-workbench {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
-}
-
 /* ---- compact layout (the game gets the height) ------------------------ */
 .fr-panel-head {
   padding: 1px 6px;
@@ -502,4 +552,110 @@ body {
    workbench's page flow; in a panel it is wasted height. */
 .fr-log-list > div > div:first-child {
   margin-top: 0 !important;
+}
+
+/* ---- toolbar: Mode / Brain switches, AI-playing state ------------------ */
+.fr-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.fr-seg-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--field-bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+.fr-seg-btn:last-child {
+  border-right: none;
+}
+.fr-seg-btn:hover:not(:disabled):not(.fr-seg-on) {
+  color: var(--text);
+}
+.fr-seg-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fr-seg-on {
+  color: oklch(18% 0.01 265);
+  font-weight: 600;
+  cursor: default;
+}
+/* the badge's colours: grey off, cyan coach, green hints, amber AI */
+.fr-seg-on.fr-seg-off {
+  background: oklch(70% 0.01 265);
+}
+.fr-seg-on.fr-seg-coach {
+  background: oklch(78% 0.11 210);
+}
+.fr-seg-on.fr-seg-hints {
+  background: oklch(78% 0.14 150);
+}
+.fr-seg-on.fr-seg-aiplays {
+  background: oklch(80% 0.15 75);
+}
+.fr-seg-on.fr-seg-search,
+.fr-seg-on.fr-seg-instinct {
+  background: var(--gold);
+}
+.fr-speed-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.fr-toolbar-ai {
+  box-shadow: inset 0 -2px 0 oklch(80% 0.15 75);
+  background: oklch(80% 0.15 75 / 0.08);
+}
+.fr-stop {
+  background: oklch(80% 0.15 75);
+  border-color: oklch(70% 0.15 75);
+  color: oklch(18% 0.01 265);
+  font-weight: 700;
+}
+.fr-stop kbd {
+  font: inherit;
+  font-size: 10px;
+  opacity: 0.7;
+}
+.fr-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+  background: oklch(60% 0.01 265);
+}
+.fr-status-connected {
+  background: oklch(75% 0.15 150);
+}
+.fr-status-thinking {
+  background: oklch(80% 0.15 75);
+  animation: fr-pulse 1s ease-in-out infinite;
+}
+.fr-status-building,
+.fr-status-launching {
+  background: oklch(78% 0.11 210);
+  animation: fr-pulse 1.4s ease-in-out infinite;
+}
+.fr-status-crashed {
+  background: oklch(68% 0.18 28);
+}
+@keyframes fr-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fr-status-thinking,
+  .fr-status-building,
+  .fr-status-launching {
+    animation: none;
+  }
 }

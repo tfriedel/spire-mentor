@@ -305,14 +305,31 @@ impl Game {
     /// says (the caller's session must be built in it).
     #[cfg(feature = "e2e")]
     pub fn start_e2e(&mut self, seed: i32, ascension: u8) -> Result<Value, GameError> {
-        let seed = i64::from(seed);
-        if !(0..1_i64 << 31).contains(&seed) {
-            return err(format!("e2e seed {seed} outside [0, 2**31)"));
-        }
+        self.start_e2e_seed(&ModeSeed::Int(seed), ascension)
+    }
+
+    /// [`Self::start_e2e`] for either kind of run-mode seed: an integer run
+    /// seed, or a game seed string (the seed checker), hashed the way the
+    /// v0.111.0 game hashes it.
+    #[cfg(feature = "e2e")]
+    pub fn start_e2e_seed(&mut self, seed: &ModeSeed, ascension: u8) -> Result<Value, GameError> {
+        let rm = match seed {
+            ModeSeed::Int(seed) => {
+                let seed = i64::from(*seed);
+                if !(0..1_i64 << 31).contains(&seed) {
+                    return err(format!("e2e seed {seed} outside [0, 2**31)"));
+                }
+                sts2_e2e::env::new_run_at(seed, ascension)
+            }
+            ModeSeed::Game(s) => match sts2_e2e::env::new_run_from_game_seed(s, ascension) {
+                Ok(rm) => rm,
+                Err(e) => return err(e),
+            },
+        };
         ensure_content_installed();
         self.character = crate::e2e::CHARACTER.to_string();
         self.act1 = "roll".to_string();
-        self.rm = Some(sts2_e2e::env::new_run_at(seed, ascension));
+        self.rm = Some(rm);
         self.option_actions.clear();
         self.shop_removal_pick = false;
         self.pre_action = None;
@@ -2132,6 +2149,49 @@ pub(crate) fn seed_json(seed: u64) -> Value {
         json!(seed)
     } else {
         json!(seed.to_string())
+    }
+}
+
+/// A run-mode run's seed as a session stores it (`Session::seed`): an
+/// integer run seed (`"123"`), or a game seed string (`"game:1SNVTCEXKR0Q"`,
+/// the seed checker's e2e runs).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModeSeed {
+    Int(i32),
+    Game(String),
+}
+
+/// The session-seed prefix of a game seed string.
+pub const GAME_SEED_PREFIX: &str = "game:";
+
+impl ModeSeed {
+    /// Read a stored session seed; `None` when it is neither form.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.strip_prefix(GAME_SEED_PREFIX) {
+            Some(g) if !g.is_empty() => Some(ModeSeed::Game(g.to_string())),
+            Some(_) => None,
+            None => s.parse::<i32>().ok().map(ModeSeed::Int),
+        }
+    }
+
+    /// The form [`Self::parse`] reads back.
+    #[must_use]
+    pub fn session_string(&self) -> String {
+        match self {
+            ModeSeed::Int(i) => i.to_string(),
+            ModeSeed::Game(g) => format!("{GAME_SEED_PREFIX}{g}"),
+        }
+    }
+
+    /// An `i32` for the parts that want one (the native combat agent's
+    /// seed): the integer, or a stable hash of the game seed.
+    #[must_use]
+    pub fn as_i32(&self) -> i32 {
+        match self {
+            ModeSeed::Int(i) => *i,
+            ModeSeed::Game(g) => crate::runmode::hash_seed(g),
+        }
     }
 }
 

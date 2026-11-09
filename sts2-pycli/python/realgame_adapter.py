@@ -546,6 +546,13 @@ def _translate_enemy(enemy: dict[str, Any], index: int) -> dict[str, Any]:
     curse_counter = enemy.get("curse_of_knowledge_counter")
     if isinstance(curse_counter, int) and not isinstance(curse_counter, bool):
         out["curse_of_knowledge_counter"] = curse_counter
+    # The move machine's state (#1181, ``AppendMoveMachineState`` in both C#
+    # producers): ``log`` (``StateLog`` ids), ``performed_first_move``,
+    # ``performed``. The engine restores the AI's move log from it, which the
+    # repeat rules and cooldowns read. Forwarded verbatim.
+    ai = enemy.get("ai")
+    if isinstance(ai, dict):
+        out["ai"] = ai
     # C# ``Creature.CombatId`` (newer mods): what a combat-log row names its
     # target by, so a co-op replay can find it (``coop_replay``).
     combat_id = enemy.get("combat_id")

@@ -10,7 +10,7 @@ use sts2_core::run_manager::RunAction;
 use sts2_wire::emit;
 
 use crate::advisors::{best_action, native_action};
-use crate::game::GameError;
+use crate::game::{GameError, ModeSeed};
 use crate::localization::resolve_state_names;
 use crate::options::normalize_options;
 use crate::ppo;
@@ -151,6 +151,41 @@ impl Session {
         threads: u32,
         reward_sims: Option<i64>,
     ) -> Result<Value, SessionError> {
+        self.start_run_mode_seed(
+            character,
+            &ModeSeed::Int(seed),
+            ascension,
+            off_combat_brain,
+            ppo_impl,
+            combat_sims,
+            combat_boss_sims,
+            threads,
+            reward_sims,
+        )
+    }
+
+    /// [`Self::start_run_mode`] for either kind of [`ModeSeed`]; a game seed
+    /// string needs the e2e setup (`set_e2e_setup(true)`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_run_mode_seed(
+        &mut self,
+        character: &str,
+        mode_seed: &ModeSeed,
+        ascension: u8,
+        off_combat_brain: &str,
+        ppo_impl: &str,
+        combat_sims: u32,
+        combat_boss_sims: u32,
+        threads: u32,
+        reward_sims: Option<i64>,
+    ) -> Result<Value, SessionError> {
+        if matches!(mode_seed, ModeSeed::Game(_)) && !self.e2e_setup {
+            return Err(SessionError::new(
+                400,
+                "a game seed string needs the e2e run setup",
+            ));
+        }
+        let seed = mode_seed.as_i32();
         self.set_run_mode(
             Some(off_combat_brain),
             Some(ppo_impl),
@@ -161,20 +196,24 @@ impl Session {
         )?;
         self.run_mode_run = true;
         self.character = character.to_string();
-        self.seed = seed.to_string();
+        self.seed = mode_seed.session_string();
         self.ascension = ascension;
         self.act1 = "overgrowth".to_string();
         let raw = if self.e2e_setup {
             // The e2e student's training run (`Game::start_e2e`).
             self.act1 = "roll".to_string();
-            self.start_e2e_raw(seed, ascension)?
+            self.start_e2e_raw(mode_seed, ascension)?
         } else {
             self.spawn_game()
                 .start_faithful(character, seed, ascension)
                 .map_err(|e| SessionError::new(400, e.0))?
         };
         let state = self.map_state(raw);
-        let label = format!("Started {character} (seed {seed}, A{ascension}, {off_combat_brain})");
+        let shown = match mode_seed {
+            ModeSeed::Int(i) => i.to_string(),
+            ModeSeed::Game(g) => g.clone(),
+        };
+        let label = format!("Started {character} (seed {shown}, A{ascension}, {off_combat_brain})");
         let root = self.add_node(None, state.clone(), None, json!({}), label, vec![], vec![]);
         self.set_root(root);
         self.autobattle_prev_state = None;
@@ -190,11 +229,11 @@ impl Session {
     }
 
     /// `Game::start_e2e` on a fresh game (400 in a build without `e2e`).
-    fn start_e2e_raw(&mut self, seed: i32, ascension: u8) -> Result<Value, SessionError> {
+    fn start_e2e_raw(&mut self, seed: &ModeSeed, ascension: u8) -> Result<Value, SessionError> {
         #[cfg(feature = "e2e")]
         {
             self.spawn_game()
-                .start_e2e(seed, ascension)
+                .start_e2e_seed(seed, ascension)
                 .map_err(|e| SessionError::new(400, e.0))
         }
         #[cfg(not(feature = "e2e"))]

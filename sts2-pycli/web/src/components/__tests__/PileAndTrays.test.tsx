@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import Board from "../Board";
+import GameHud from "../GameHud";
 import RelicTray from "../RelicTray";
 import type { Card, Step } from "../../api";
 
@@ -90,7 +91,7 @@ describe("PotionTray empty slots", () => {
     const step = pileStep();
     step.state.player.potions = [{ index: 0, name: "Fire Potion", description: "Deal 20 damage." }];
     step.state.player.max_potion_slot_count = 3;
-    render(<Board step={step} onPlayCard={() => {}} onEndTurn={() => {}} onUsePotion={vi.fn()} />);
+    render(<GameHud state={step.state} onUsePotion={vi.fn()} />);
     expect(screen.getByText("Fire Potion")).toBeInTheDocument();
     expect(screen.getAllByLabelText("empty potion slot")).toHaveLength(2);
   });

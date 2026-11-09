@@ -560,6 +560,140 @@ impl Workbench {
         }
     }
 
+    /// `POST /api/seedcheck/{preview,attempt,summary,log}` (the seed
+    /// checker, `seedcheck.html`):
+    ///
+    /// - `preview {seed}` — Neow offers, act 1 and bosses of a game seed;
+    /// - `attempt {seed, seq, k, max_decisions?}` — one attempt
+    ///   (`e2e::attempt`), 424 without the net;
+    /// - `summary {seed, classes}` — the attempt's named run-level choices;
+    /// - `log {seed, classes, seq, k, now}` — the attempt as a run log
+    ///   `{path, text}` for the host to store (424 without the net).
+    ///
+    /// A bad seed is a 400 naming the character.
+    fn seedcheck(&mut self, body: &Value, what: &str) -> Result<Value, ApiError> {
+        #[cfg(feature = "e2e")]
+        {
+            use crate::e2e::Seq;
+            let bad = |e: String| ApiError::new(400, e);
+            let seed = body
+                .get("seed")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::new(400, "seed must be a string"))?;
+            let seq = || {
+                Seq::parse(body.get("seq").and_then(Value::as_str).unwrap_or("check")).map_err(bad)
+            };
+            let k = || {
+                body.get("k")
+                    .and_then(Value::as_u64)
+                    .and_then(|k| u32::try_from(k).ok())
+                    .ok_or_else(|| ApiError::new(400, "k must be a non-negative integer"))
+            };
+            let classes = || -> Result<Vec<usize>, ApiError> {
+                body.get("classes")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| ApiError::new(400, "classes must be a list"))?
+                    .iter()
+                    .map(|v| {
+                        v.as_u64()
+                            .and_then(|c| usize::try_from(c).ok())
+                            .ok_or_else(|| ApiError::new(400, "classes must be integers"))
+                    })
+                    .collect()
+            };
+            // The run Instinct plays: Ironclad on v0.111.0 only (the page
+            // shows the other characters and builds, grayed out), at any
+            // ascension 0-10 (it trained at A10).
+            let character = body
+                .get("character")
+                .and_then(Value::as_str)
+                .unwrap_or(crate::e2e::CHARACTER);
+            if !character.eq_ignore_ascii_case(crate::e2e::CHARACTER) {
+                return Err(bad(format!(
+                    "the seed checker only plays {} for now, not {character}",
+                    crate::e2e::CHARACTER
+                )));
+            }
+            let version = body
+                .get("game_version")
+                .and_then(Value::as_str)
+                .unwrap_or(crate::e2e::GAME_VERSION);
+            if version != crate::e2e::GAME_VERSION {
+                return Err(bad(format!(
+                    "the seed checker only plays {} for now, not {version}",
+                    crate::e2e::GAME_VERSION
+                )));
+            }
+            let ascension = match body.get("ascension") {
+                None | Some(Value::Null) => crate::e2e::DEFAULT_ASCENSION,
+                Some(v) => v
+                    .as_u64()
+                    .and_then(|a| u8::try_from(a).ok())
+                    .filter(|a| *a <= 10)
+                    .ok_or_else(|| {
+                        ApiError::new(400, format!("ascension must be 0-10, not {v}"))
+                    })?,
+            };
+            let net = || {
+                self.e2e.clone().ok_or_else(|| {
+                    ApiError::new(
+                        crate::e2e::NO_NET_STATUS,
+                        crate::e2e::missing_net_error(self.e2e_error.as_deref()),
+                    )
+                })
+            };
+            match what {
+                "preview" => crate::seedcheck::preview(seed, ascension).map_err(bad),
+                "summary" => {
+                    crate::seedcheck::line_summary(seed, ascension, &classes()?).map_err(bad)
+                }
+                "attempt" => {
+                    sts2_e2e::env::canonical_game_seed(seed).map_err(bad)?;
+                    let net = net()?;
+                    let max_decisions = body
+                        .get("max_decisions")
+                        .and_then(Value::as_u64)
+                        .map_or(20_000, |m| usize::try_from(m).unwrap_or(usize::MAX));
+                    let clock = self.config.perf_ms.unwrap_or(crate::e2e::fallback_ms);
+                    let a = crate::e2e::attempt(
+                        &net,
+                        seed,
+                        ascension,
+                        seq()?,
+                        k()?,
+                        max_decisions,
+                        clock,
+                    )
+                    .map_err(bad)?;
+                    serde_json::to_value(a).map_err(|e| ApiError::new(500, e.to_string()))
+                }
+                "log" => {
+                    sts2_e2e::env::canonical_game_seed(seed).map_err(bad)?;
+                    net()?;
+                    let now = body.get("now").and_then(Value::as_str).unwrap_or("");
+                    let mut sess = self.new_session(crate::e2e::CHARACTER, GameVersion::V0_111_0);
+                    let log = crate::seedcheck::run_log(
+                        &mut sess,
+                        seed,
+                        ascension,
+                        &classes()?,
+                        seq()?,
+                        k()?,
+                        now,
+                    )
+                    .map_err(|e| ApiError::new(e.status, e.message))?;
+                    Ok(json!({"path": log.filename, "text": log.text}))
+                }
+                _ => Err(ApiError::new(404, "unknown seedcheck route")),
+            }
+        }
+        #[cfg(not(feature = "e2e"))]
+        {
+            let _ = (body, what);
+            Err(ApiError::new(404, "this build has no e2e feature"))
+        }
+    }
+
     /// Point the live session at its character's net (or error).
     fn attach_ppo(&mut self) {
         let Some(sess) = self.live.as_mut() else {
@@ -871,6 +1005,10 @@ impl Workbench {
             ("POST", "/api/live/run-mode") => self.live_run_mode(body),
             ("POST", "/api/advisor") => self.set_advisor_pref(body),
             ("POST", "/api/e2e/selfplay") => self.e2e_selfplay(body),
+            ("POST", "/api/seedcheck/preview") => self.seedcheck(body, "preview"),
+            ("POST", "/api/seedcheck/attempt") => self.seedcheck(body, "attempt"),
+            ("POST", "/api/seedcheck/summary") => self.seedcheck(body, "summary"),
+            ("POST", "/api/seedcheck/log") => self.seedcheck(body, "log"),
             ("POST", "/api/live/run-mode-step" | "/api/live/faithful-step") => {
                 let sess = self.live()?;
                 let out = sess.run_mode_step()?;

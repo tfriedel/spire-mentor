@@ -1697,7 +1697,9 @@ pub const fn is_colorless_card_id(id: CardId) -> bool {
 /// cards override `VisualCardPool` with the character pool whose color they
 /// wear, so they do not count: Caltrops, Distraction, Outmaneuver (Silent),
 /// Clash, DualWield, Entrench (Ironclad), HelloWorld, Rebound, RipAndTear,
-/// Stack (Defect). Both the override list and the pools are the same in
+/// Stack (Defect) — `scripts/gen_card_pool_order.py` reads the overrides
+/// from the decomp ([`crate::cards::pool_order::has_character_visual_pool`]).
+/// Both the override list and the pools are the same in
 /// v0.107.1 and v0.111.0, apart from the two v0.111.0-only cards
 /// [`crate::cards::pool_order::in_colorless_pool`] describes.
 ///
@@ -1716,21 +1718,9 @@ pub const fn is_colorless_card_id(id: CardId) -> bool {
 #[must_use]
 pub fn is_visual_pool_colorless(id: CardId) -> bool {
     // `public override CardPoolModel VisualCardPool => ModelDb.CardPool<..>()`
-    // on these ten Event cards (e.g. `Caltrops.cs:17`, `HelloWorld.cs:12`).
-    let character_colored = matches!(
-        id,
-        CardId::Caltrops
-            | CardId::Clash
-            | CardId::Distraction
-            | CardId::DualWield
-            | CardId::Entrench
-            | CardId::HelloWorldCard
-            | CardId::Outmaneuver
-            | CardId::Rebound
-            | CardId::RipAndTear
-            | CardId::Stack
-    );
-    !character_colored && crate::cards::pool_order::in_colorless_pool(id)
+    // on these ten Event cards, generated from the decomp (#1181).
+    !crate::cards::pool_order::has_character_visual_pool(id)
+        && crate::cards::pool_order::in_colorless_pool(id)
 }
 
 /// Card ids in the "colorless modifier" generation pool. Returned in a

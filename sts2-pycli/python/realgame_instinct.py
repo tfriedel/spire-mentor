@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 #: The student's weights, relative to the data root (dev: ``sts2-pycli/``;
 #: frozen: the bundle root, where the spec replicates the layout).
-WEIGHTS_RELPATH = Path("data/e2e/ironclad_e2e_d1250_ema0999.e2ew")
+WEIGHTS_RELPATH = Path("data/e2e/ironclad_e2e_d2500_avg5_ema0999.e2ew")
 
 #: What this student plays. A tuple per character as more students land.
 INSTINCT_CHARACTER = "Ironclad"
@@ -99,6 +99,15 @@ def _norm_char(raw: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: The act whose map the Spoils Map quest card replaces (``SpoilsActIndex = 1``,
+#: 0-based, ``SpoilsMap.cs:47-50``).
+SPOILS_MAP_ACT = 2
+
+#: ``graft_run``'s note when a co-op run stands on the nearest node of a map
+#: that is not the screen's.
+COOP_MAP_APPROX = "co-op: placed on the nearest node of a map that differs"
+
+
 def graft_run(state: dict[str, Any]) -> tuple[Any, list[str]]:
     """Rebuild the live run behind ``state`` as an engine ``RunManager``.
 
@@ -126,46 +135,88 @@ def graft_run(state: dict[str, Any]) -> tuple[Any, list[str]]:
         snap = _run_snapshot(state, notes)
     except StateImportError as exc:
         raise InstinctUnavailable(f"no run to rebuild ({exc})") from exc
-    try:
-        rm = sts2_rs.RunManager(
-            game_version=INSTINCT_GAME_VERSION,
-            string_seed=snap.seed,
-            character=snap.character,
-            ascension_level=snap.ascension,
-            neow_start=False,
-            mode="agent",
-            interactive_potion_swap=True,
-            act1="roll",
-        )
-    except Exception as exc:
-        raise InstinctUnavailable(f"the engine cannot rebuild this run ({exc})") from exc
+    deck = (state.get("run_state") or {}).get("master_deck") or []
+    spoils_quest = any(
+        isinstance(c, dict) and str(c.get("id") or "").upper().endswith("SPOILS_MAP") for c in deck
+    )
 
+    def new_run(spoils: bool) -> Any:
+        try:
+            rm = sts2_rs.RunManager(
+                game_version=INSTINCT_GAME_VERSION,
+                string_seed=snap.seed,
+                character=snap.character,
+                ascension_level=snap.ascension,
+                neow_start=False,
+                mode="agent",
+                interactive_potion_swap=True,
+                act1="roll",
+            )
+        except Exception as exc:
+            raise InstinctUnavailable(f"the engine cannot rebuild this run ({exc})") from exc
+        if is_coop(state):
+            # The game builds co-op act maps one room shorter, from the same
+            # map RNG (`ActModel.GetNumberOfRooms(isMultiplayer)`): the engine
+            # then builds exactly the screen's map (19 of 19 recorded co-op
+            # acts).
+            rm.debug_use_coop_maps()
+        if spoils:
+            # The Spoils Map quest card swaps act 2's map for the hourglass
+            # one as the act is built (`SpoilsMap.ModifyGeneratedMap`), and
+            # the deck is restored only after placement (below): put the
+            # card in first, or act 2 is built as a standard map.
+            rm.debug_set_master_deck([{"id": "SPOILS_MAP", "upgraded": 0}])
+        return rm
+
+    def place(rm: Any, col: int, row: int) -> None:
+        rm.debug_place_on_map(
+            snap.act,
+            col,
+            row,
+            list(snap.visited),
+            row + 1,
+            engine_total_floor(snap.floor, snap.act),
+        )
+
+    rm = new_run(spoils_quest)
     coord = snap.coord
     if coord is not None:
         col, row = coord
         try:
-            rm.debug_place_on_map(
-                snap.act,
-                col,
-                row,
-                list(snap.visited),
-                row + 1,
-                engine_total_floor(snap.floor, snap.act),
-            )
+            try:
+                place(rm, col, row)
+                if not spoils_quest and snap.act == SPOILS_MAP_ACT and _map_disagreements(rm, snap):
+                    raise ValueError("act 2's standard map is not the screen's")
+            except ValueError:
+                if spoils_quest or snap.act != SPOILS_MAP_ACT:
+                    raise
+                # The quest is done (the card left the deck) but its act keeps
+                # the hourglass map: rebuild with the card for the map, and
+                # keep that only if it is the screen's.
+                spoils_rm = new_run(True)
+                place(spoils_rm, col, row)
+                if _map_disagreements(spoils_rm, snap):
+                    raise
+                rm = spoils_rm
         except ValueError as exc:
             if not is_coop(state):
                 raise InstinctUnavailable(f"the map does not match this run ({exc})") from exc
-            # Co-op: the game's map has one room less per act
-            # (`ActModel.GetNumberOfRooms(isMultiplayer)`); the engine only
-            # builds the single-player one. Stand on the nearest node of the
-            # engine's map in the same act, so act, floor and the room's place
-            # in the act stay right; the map read itself is approximate.
+            # Co-op, and the co-op map still differs (not seen in 19
+            # recorded acts). A fight still has its answer: stand on the
+            # nearest node of the engine's map in the same act, so act, floor
+            # and the room's place in the act stay right. The map handler
+            # refuses to route on it (COOP_MAP_APPROX).
             _place_nearest(rm, snap.act, col, row, engine_total_floor(snap.floor, snap.act))
-            notes.append("co-op: the map is the single-player one")
+            notes.append(COOP_MAP_APPROX)
         else:
             notes.extend(_map_disagreements(rm, snap))
     else:
-        notes.append("no map position")
+        # Fight requests carry no map graph (GH #1212). Left unplaced, the run
+        # sat at act 1 / floor 0, and the student's combat row read every
+        # fight as the first room of the run with every boss ahead. Place by
+        # the screen's act and floor instead.
+        row = _place_by_floor(rm, snap.act, snap.floor, _graft_room(state))
+        notes.append(f"no map position: placed by floor on row {row}")
 
     # Deck emptied BEFORE the relics (on-obtain upgrades must not chew on it),
     # then set whole -- ids, upgrades AND enchantments, which the tokenizer
@@ -174,6 +225,10 @@ def graft_run(state: dict[str, Any]) -> tuple[Any, list[str]]:
         rm.force_remove_card(name)
     for relic_id in snap.relics:
         rm.force_add_relic(relic_id)
+    # The pickup hooks queue the choices the live run already made (Lead
+    # Paperweight's choose screen): left queued, the first one surfaces in
+    # place of the next real screen (GH #1183).
+    rm.debug_clear_pending_choices()
     import realgame_instinct_screens as screens
 
     deck = (state.get("run_state") or {}).get("master_deck") or []
@@ -220,6 +275,84 @@ def _place_nearest(rm: Any, act: int, col: int, row: int, total_floor: int) -> N
         except ValueError:
             continue
     raise InstinctUnavailable("no node of the engine's map takes this co-op position")
+
+
+#: Node types a map-less graft prefers for a room kind, best first. A ``?``
+#: room can hold a fight; any node of the row keeps the position right.
+_ROOM_NODE_TYPES = {
+    "monster": ("Monster", "Unknown"),
+    "elite": ("Elite", "Unknown"),
+}
+
+
+def _graft_room(state: dict[str, Any]) -> str | None:
+    """The fight's room kind (``monster`` / ``elite`` / ``boss``), if the request has one."""
+    for src in (state, state.get("combat")):
+        if isinstance(src, dict) and src.get("room_type"):
+            return _room_kind(src)
+    return None
+
+
+def _enter_act(rm: Any, act: int) -> dict[str, Any]:
+    """Advance ``rm`` to ``act`` and return the engine's map of it.
+
+    ``debug_place_on_map`` walks the acts (generating each map off its own
+    map RNG) before it checks the node, so an off-map coordinate advances the
+    run and is then refused.
+    """
+    try:
+        rm.debug_place_on_map(act, -1, -1, [], 0, 0)
+    except ValueError:
+        pass
+    return rm.full_map() or {}
+
+
+def _place_by_floor(rm: Any, act: int, floor: int, room: str | None) -> int:
+    """Place ``rm`` on a node of ``act`` in the row the game ``floor`` stands on.
+
+    The engine's total floor counts each earlier act's rows up to its boss
+    (``act 1 floor 17`` = its boss row 16, ``act 2 floor 18`` = row 0), and the
+    run is rebuilt from the live seed, so the engine's act maps are the
+    screen's. A fight's tokens read the act, the floors, the current row and
+    the boss rows -- not the column -- so any node of that row, of the room's
+    kind when the row has one, gives the position the screen is in.
+
+    Returns:
+        The act-local row placed on.
+
+    Raises:
+        InstinctUnavailable: no node of the act takes the placement.
+    """
+    from floors import engine_total_floor
+
+    total = engine_total_floor(floor, act)
+    before = 0
+    fm: dict[str, Any] = {}
+    for a in range(1, act + 1):
+        fm = _enter_act(rm, a)
+        if a < act:
+            before += int((fm.get("boss") or {}).get("row") or len(fm.get("rows") or []))
+    row = max(0, total - before)
+    boss = fm.get("boss") or {}
+    boss_row = int(boss.get("row") or len(fm.get("rows") or []))
+    second = fm.get("second_boss") or {}
+    if room == "boss" or row >= boss_row:
+        pt = second if row > boss_row and second.get("row") is not None else boss
+        if pt.get("row") is not None:
+            r = int(pt["row"])
+            rm.debug_place_on_map(act, int(pt["col"]), r, [], r + 1, total)
+            return r
+        row = boss_row - 1
+    nodes = [n for r in fm.get("rows") or [] for n in r if int(n.get("row", -1)) == row]
+    prefer = _ROOM_NODE_TYPES.get(room or "", ())
+    nodes.sort(key=lambda n: prefer.index(n["type"]) if n.get("type") in prefer else len(prefer))
+    for n in nodes:
+        try:
+            rm.debug_place_on_map(act, int(n["col"]), row, [], row + 1, total)
+            return row
+        except ValueError:
+            continue
+    raise InstinctUnavailable(f"no node of act {act}'s map stands on floor {floor}")
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +498,7 @@ def combat_advice(
                 "card_index": t.stable_idx if t.stable_idx >= 0 else None,
                 "target_index": t.target_index,
                 **({"ally_index": t.ally_index} if t.ally_index is not None else {}),
+                **ra.option_move(t, state),
                 "label": ra._tag_label(t, state),
                 "visit_share": round(t.win_prob, 4),
                 "prob": round(t.win_prob, 4),
@@ -599,36 +733,38 @@ class InstinctAdvisor:
         if advice_for == "combat_action":
             return self._advise_combat(state, cfg, mirror)
         if advice_for == "map_select":
-            nodes = [n for n in state.get("nodes") or [] if isinstance(n, dict)]
-            if len(nodes) == 1:
-                # One way on (an act's entrance, a corridor): no decision.
-                import realgame_instinct_screens as screens
-
-                return screens.lone_option({**nodes[0], "label": _node_label(nodes[0])})
             return self._advise_map(state, session)
         if advice_for == "card_select" and state.get("combat") is not None:
             return self._advise_combat_select(state, cfg, mirror, sims)
-        if (
-            advice_for == "card_reward"
-            and state.get("surface") == "choose_a_card"
-            and state.get("combat") is not None
-        ):
-            # A card generated into the fight (a Skill Potion's offer): the
-            # in-combat selection it is, on the fight mirror's park.
-            return self._advise_combat_select(
-                {
-                    **state,
-                    "advice_for": "card_select",
-                    "min_select": 1,
-                    "max_select": 1,
-                    "cancelable": bool(state.get("can_skip")),
-                    "source": "FromChooseACardScreen",
-                },
-                cfg,
-                mirror,
-                sims,
-            )
+        if advice_for == "card_reward":
+            import realgame_advisor as ra
+
+            if ra.is_fight_offer(state):
+                # A card generated into the fight (Discovery, a Skill
+                # Potion's offer): the in-combat selection it is, on the
+                # fight mirror's park.
+                return self._advise_combat_select(
+                    ra.fight_offer_as_select(state), cfg, mirror, sims
+                )
         if advice_for == "treasure":
+            offered = [
+                o
+                for o in state.get("options") or []
+                if isinstance(o, dict) and o.get("enabled", True)
+            ]
+            if len(offered) == 1:
+                # Single player's chest: one relic, taken, not chosen -- in
+                # Instinct's game too. Answered here rather than handed to the
+                # search, which only ever had the one answer as well. The
+                # reply says "choose", like every screen reply: the mod
+                # clicks a screen only for "choose" / "skip", and read the
+                # option's own "collect" as a fight move -- out of a fight,
+                # nothing happened and AI play sat at the chest.
+                import realgame_instinct_screens as screens
+
+                advice = screens.lone_option(offered[0])
+                advice["note"] = "Instinct (e2e net, no search) · the chest's one relic"
+                return advice
             raise InstinctUnavailable("the chest relic is taken, not chosen, in Instinct's game")
         handler = self._screen_handler(advice_for)
         if handler is None:
@@ -684,7 +820,83 @@ class InstinctAdvisor:
         self.last_room = _room_kind(state)
         rm.debug_enter_combat(cs, self.last_room)
         pick = self.evaluate(state, rm, ("COMBAT_TURN", "COMBAT_CHOICE"))
-        return combat_advice(pick, state, wire)
+        advice = combat_advice(pick, state, wire)
+        try:
+            plan = self._combat_plan(state, rm, wire, pick, advice.get("best"))
+        except Exception as exc:  # a drawing must never cost the advice
+            logger.warning("instinct: turn plan failed: %s", exc)
+            plan = []
+        if plan:
+            advice["plan"] = plan
+        return advice
+
+    def _combat_plan(
+        self,
+        state: dict[str, Any],
+        rm: Any,
+        wire: dict[str, Any],
+        pick: InstinctPick,
+        best: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """``advice.plan``: the student's greedy rollout through this turn.
+
+        Played on a clone of the grafted run with a copy of this run's driver,
+        the student deciding every later move exactly as it would live; mapped
+        onto the current hand and cut by :class:`realgame_turn_plan.PlanWalk`'s
+        rules (a draw, a choice, an unmappable move end it). Its first step
+        is ``best``; when ``best`` is not the student's own first move (the
+        mod's veto took it), the plan is ``best`` alone.
+        """
+        from realgame_turn_plan import MAX_PLAN_STEPS, PlanWalk, first_step, same_move
+
+        if not isinstance(best, dict):
+            return []
+        lone = first_step(best, state)
+        if pick.decision.get("decision_type") not in ("COMBAT_TURN", "FORCED"):
+            return [lone] if lone else []
+        walk = PlanWalk(wire, state)
+        sim = rm.clone()
+        probe = self._driver_for(state, rm).copy()
+        for ply in range(MAX_PLAN_STEPS):
+            peek = probe.peek(sim)
+            if peek.kind == "forced":
+                forced = peek.forced or {}
+                if forced.get("kind") != "combat":
+                    break
+                run_action, kind = forced["action"], forced["kind"]
+            elif peek.kind == "decision":
+                if peek.decision.get("decision_type") != "COMBAT_TURN":
+                    break
+                ci = pick.best if ply == 0 else int(self._student.decide(probe, peek, sim)["class"])
+                ca = peek.class_action(ci)
+                run_action, kind = ca["action"], ca["kind"]
+            else:
+                break
+            action = _combat_form(run_action)
+            step = walk.to_step(action)
+            if step is None or (ply == 0 and not same_move(step, best)):
+                break
+            walk.push(step)
+            if walk.done:
+                break
+            cs_before = sim.combat_state()
+            before = cs_before.get_state() if cs_before is not None else {}
+            try:
+                probe.apply(sim, run_action, kind)
+            except Exception as exc:
+                logger.debug("instinct: plan stopped at ply %d: %s", ply, exc)
+                walk.steps.pop()
+                break
+            cs_after = sim.combat_state()
+            if cs_after is None:
+                break  # the fight ended on this move
+            result = "pending_choice" if cs_after.pending_choice() is not None else None
+            walk.advance(action, before, cs_after.get_state(), result)
+            if walk.done:
+                break
+        if not walk.steps:
+            return [lone] if lone else []
+        return walk.steps
 
     def _advise_combat_select(
         self, state: dict[str, Any], cfg: Any, mirror: Any, sims: int | None
@@ -748,14 +960,129 @@ class InstinctAdvisor:
     def _advise_map(self, state: dict[str, Any], session: dict[str, Any] | None) -> dict[str, Any]:
         import realgame_ppo
 
-        if is_coop(state):
-            # The engine builds the single-player map; a co-op act is a room
-            # shorter, so its paths are not the ones on the screen.
-            raise InstinctUnavailable("co-op maps differ from the single-player map Instinct knows")
         state = realgame_ppo.apply_session_context(state, session)
-        rm, _notes = graft_run(state)
-        pick = self.evaluate(state, rm, ("MAP",))
-        return map_advice(pick, state)
+        nodes = [n for n in state.get("nodes") or [] if isinstance(n, dict)]
+        try:
+            rm, notes = graft_run(state)
+        except InstinctUnavailable:
+            if len(nodes) != 1:
+                raise
+            rm, notes = None, []  # a corridor still has its one answer, just no route
+        if COOP_MAP_APPROX in notes:
+            # Co-op runs are rebuilt on co-op sized maps (graft_run); this
+            # one still differs from the screen, so its paths are not real.
+            if len(nodes) != 1:
+                raise InstinctUnavailable("the rebuilt co-op map differs from the screen's")
+            rm = None
+        if len(nodes) == 1:
+            # One way on (an act's entrance, a corridor): no decision, but
+            # still the route from it. These are most of an act's map
+            # screens, and without coordinates and a path they drew no star
+            # and no line (live, 2026-11-08).
+            import realgame_instinct_screens as screens
+
+            node = nodes[0]
+            advice = screens.lone_option({**node, "label": _node_label(node)})
+            for o in advice["options"]:
+                o["col"], o["row"] = int(node["col"]), int(node["row"])
+        else:
+            pick = self.evaluate(state, rm, ("MAP",))
+            advice = map_advice(pick, state)
+        best = next((o for o in advice["options"] if o.get("is_best")), None)
+        if best is not None and rm is not None:
+            try:
+                path = self._map_route(state, rm, (int(best["col"]), int(best["row"])))
+            except Exception as exc:  # a drawing must never cost the advice
+                logger.warning("instinct: route projection failed: %s", exc)
+                path = []
+            if path:
+                import realgame_advisor as ra
+
+                advice["path"] = path
+                advice["note"] += ra._route_note(path)
+        return advice
+
+    def _map_route(
+        self, state: dict[str, Any], rm: Any, chosen: tuple[int, int]
+    ) -> list[dict[str, Any]]:
+        """``advice.path`` for Instinct: the student's own MAP choice, hop by hop.
+
+        The twin of the search's ``realgame_advisor._project_map_path``, same
+        schema and HP projection: from the chosen node, follow single-child
+        chains, and at every fork park a clone of the grafted run ON the hop's
+        node (``debug_place_on_map``, the projected HP set) and ask the student
+        for its MAP decision there. Deck, gold, relics and potions stay frozen,
+        as in the search's projection; the act's last row ends the walk.
+        """
+        import realgame_advisor as ra
+        from floors import engine_total_floor
+
+        m = state.get("map") or {}
+        by_coord = ra.route_graph(state)  # the act's start and boss included
+        if not by_coord:
+            return []
+        table = ra._projection_hp_table()
+        run_state = state.get("run_state") or {}
+        hp = float(run_state.get("hp") or 0)
+        max_hp = float(run_state.get("max_hp") or 0)
+        gold = int(run_state.get("gold") or 0)
+        act = int(state.get("act") or 1)
+        base_total = engine_total_floor(state.get("floor"), act)
+        visited = [
+            (int(v["col"]), int(v["row"]))
+            for v in m.get("visited") or []
+            if isinstance(v, dict)
+            and isinstance(v.get("col"), int)
+            and isinstance(v.get("row"), int)
+        ]
+        path: list[dict[str, Any]] = []
+        seen: set[tuple[int, int]] = set()
+        cur = chosen
+        for hop in range(ra.MAX_PROJECTED_HOPS):
+            node = by_coord.get(cur)
+            if node is None or cur in seen:
+                break
+            seen.add(cur)
+            room = node.get("type", "?")
+            step: dict[str, Any] = {"col": cur[0], "row": cur[1], "type": room, "hop": hop}
+            if table:
+                step["hp"] = round(hp)
+            path.append(step)
+            hp = ra._project_hp(hp, max_hp, room, act, table)
+            visited.append(cur)
+            children = []
+            for c in node.get("children") or []:
+                try:
+                    coord = (int(c["col"]), int(c["row"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if coord in by_coord:
+                    children.append(coord)
+            if not children:
+                break  # the act's last row
+            if len(children) == 1:
+                cur = children[0]
+                continue
+            hop_rm = rm.clone()
+            try:
+                hop_rm.debug_place_on_map(
+                    act, cur[0], cur[1], list(visited), cur[1] + 1, base_total + hop + 1
+                )
+            except ValueError as exc:
+                logger.debug("instinct: route stops at hop %d (%s)", hop, exc)
+                break
+            hop_rm.set_player(hp=max(1, round(hp)), max_hp=round(max_hp), gold=gold)
+            try:
+                pick = self.evaluate(state, hop_rm, ("MAP",))
+            except InstinctUnavailable as exc:
+                logger.debug("instinct: route stops at hop %d (%s)", hop, exc)
+                break
+            action = (pick.decision["classes"][pick.best].get("actions") or [{}])[0] or {}
+            nxt = next((c for c in children if c[0] == action.get("col")), None)
+            if nxt is None:
+                break
+            cur = nxt
+        return path
 
     # -- screens ------------------------------------------------------
 

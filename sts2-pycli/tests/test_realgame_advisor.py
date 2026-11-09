@@ -328,6 +328,39 @@ class TestProjectMapPath:
 
         assert [(p["col"], p["row"]) for p in path] == [(3, 6)]
 
+    def test_an_acts_entrance_routes_from_the_start_into_row_one(self) -> None:
+        # The mod's map graph leaves out the act's start (row 0, offered on
+        # its own) and the boss: the route at an act's entrance came back
+        # empty, and every route stopped a node short of the boss. The game
+        # links the start to every row-1 node and the last row to the boss
+        # (StandardActMap.cs:221-232).
+        graph = [
+            {"col": 1, "row": 1, "type": "Monster", "children": [{"col": 1, "row": 2}]},
+            {"col": 4, "row": 1, "type": "Event", "children": [{"col": 4, "row": 2}]},
+            {"col": 1, "row": 2, "type": "Shop", "children": [{"col": 2, "row": 15}]},
+            {"col": 4, "row": 2, "type": "RestSite", "children": [{"col": 2, "row": 15}]},
+        ]
+        state = _state([{"index": 0, "type": "Ancient", "row": 0, "col": 3}], graph)
+
+        path = ra._project_map_path(state, _RightmostPolicy(), 0)
+
+        assert [(p["col"], p["row"], p["type"]) for p in path] == [
+            (3, 0, "Ancient"),
+            (4, 1, "Event"),
+            (4, 2, "RestSite"),
+            (2, 15, "Boss"),
+        ]
+
+    def test_route_graph_adds_the_start_and_the_boss(self) -> None:
+        graph = [{"col": 1, "row": 1, "type": "Monster", "children": []}]
+        state = _state([{"index": 0, "type": "Ancient", "row": 0, "col": 3}], graph)
+
+        by_coord = ra.route_graph(state)
+
+        assert by_coord[3, 0]["children"] == [{"col": 1, "row": 1}]
+        assert by_coord[2, 15]["type"] == "Boss"
+        assert by_coord[2, 15]["children"] == []
+
     def test_cycles_and_missing_graphs_terminate(self) -> None:
         # A child that points back at its parent must not loop forever, and a
         # child that is not in the node list at all must not be walked into.

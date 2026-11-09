@@ -5,6 +5,8 @@ import { CARD_ASPECT, HAND_REST_MIN_F, HAND_REST_VISIBLE, fanLayout } from "../h
 import { fitScene } from "../scene";
 import CardFrame from "./CardFrame";
 import { useMediaQuery, TOUCH_QUERY } from "../useMediaQuery";
+import { useAdviceMarks } from "../advice/useAdviceMarks";
+import { cardKey } from "../advice/marks";
 
 /** A held card's height as a fraction of the combat stage's height.
  *
@@ -112,6 +114,9 @@ export default function Hand({
   // raises, second plays. Unplayable cards raise too — reading them is the
   // whole point.
   const touch = useMediaQuery(TOUCH_QUERY);
+  // The advice's marks (advice/marks.ts): which cards to play, numbered. The
+  // engine's own win % rides along only with "engine numbers" on.
+  const { marks, showNumbers } = useAdviceMarks();
   return (
     // `--gs-handmin` RESERVES the strip's height for the card boxes whether or
     // not any are in it. The hand is the arena's flex sibling and the arena is
@@ -124,7 +129,12 @@ export default function Hand({
       style={{ "--gs-handmin": `${cardBoxHeight(cw)}px`,
                "--gs-handshow": `${show}px` } as React.CSSProperties}>
       {cards.map((c, i) => {
-        const sc = scores?.find((s) => s.stable_idx === c.index);
+        const sc = showNumbers ? scores?.find((s) => s.stable_idx === c.index) : undefined;
+        const mark = marks.get(cardKey(c.index)) ?? null;
+        // The plan's cards are pulled part-way out of the fan, as the mod
+        // does (the game's own layout target, nudged): the move to make is
+        // visible before you go looking for it.
+        const pulled = mark != null && mark.order != null;
         const { overlap, dx, rot, drop } = slots[i];
         // Only a live hand has energy agency: there the game rims every
         // affordable card cyan and dims the rest. A replay frame has neither,
@@ -141,7 +151,7 @@ export default function Hand({
           <div
             key={c.index}
             className={`gs-handslot${clickable ? " gs-playable" : ""}`
-              + `${i === hover ? " gs-hovered" : ""}`}
+              + `${i === hover ? " gs-hovered" : ""}${pulled ? " gs-pulled" : ""}`}
             // Hover is React state rather than CSS `:hover` because the fan
             // reacts to it as a WHOLE (the neighbours step aside), and because
             // the state has to be read off the hitbox, not off the card that
@@ -180,7 +190,8 @@ export default function Hand({
                 played={c.index === playedIndex}
                 hotkey={onCardClick && i < 9 ? i + 1 : undefined}
                 winProb={sc?.win_prob}
-                best={sc?.is_best}
+                mark={mark?.tier}
+                step={mark?.order}
                 previewDamage={previewDamageFor?.(c)}
               />
             </div>
