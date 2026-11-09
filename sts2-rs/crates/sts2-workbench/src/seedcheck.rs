@@ -601,6 +601,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(workbench_game_data_v0_111_0)] // asserts on real v0.111.0 names (see build.rs)
     fn preview_reddit_seed() {
         let p = preview("1snvtcexkr0q", 10).unwrap();
         assert_eq!(p["seed"], "1SNVTCEXKR0Q");
