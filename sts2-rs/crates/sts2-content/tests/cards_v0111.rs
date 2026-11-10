@@ -1668,6 +1668,25 @@ fn sweeping_gaze_with_no_target_still_owes_bone_flute() {
     assert_eq!(state.player.block, 2);
 }
 
+/// The same no-hit Osty `AttackCommand` still runs `Hook.AfterAttack`, so
+/// `Flatten.AfterAttack` zeroes every Flatten for the turn. Random-loadout
+/// Necrobinder v0.111.0 seed 3233: a reviving Test Subject, hand Flatten
+/// C# 0, Rust 2.
+#[test]
+fn sweeping_gaze_with_no_target_still_zeroes_flatten() {
+    let mut state = fresh(V111, CharacterId::Necrobinder);
+    state.creatures[0].current_hp = 0;
+    let enemy = state.enemy_uids[0];
+    sts2_core::card_effects::apply_power_to_creature(&mut state, enemy, PowerKind::Adaptable, 1);
+    let _ = state.summon_osty(5);
+    let _ = push_hand(&mut state, CardId::Flatten, false);
+    let flatten = *state.player.hand.last().expect("flatten");
+    assert!(sts2_core::hooks::effective_card_cost(&state, flatten) > 0);
+    let i = push_hand(&mut state, CardId::SweepingGaze, false);
+    let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+    assert_eq!(sts2_core::hooks::effective_card_cost(&state, flatten), 0);
+}
+
 /// C# grants Escape Plan's block only for a drawn `CardType.Skill`; the Quest
 /// cards (modelled as Skills in Rust) are `CardType.Quest`, so drawing
 /// Byrdonis Egg grants nothing (act23 Silent:1017).

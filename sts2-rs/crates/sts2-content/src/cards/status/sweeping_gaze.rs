@@ -46,10 +46,13 @@ pub(crate) fn play_sweeping_gaze(
             deal_damage_from_osty_to_enemy(state, t, current_damage(state));
         } else {
             // No hittable enemy (an Adaptable corpse keeps the combat open):
-            // C# still executes the Osty's `AttackCommand` with no hit, and
-            // its `AfterAttack` owes BoneFlute's block (act23
-            // Necrobinder:1006). No damage lands to set the latch, so set it.
-            state.combat_log.bone_flute_latched = true;
+            // C# still executes the Osty's `AttackCommand` with no hit
+            // (`AttackCommand.cs` breaks the hit loop, then runs
+            // `Hook.AfterAttack`). That owes BoneFlute's block (act23
+            // Necrobinder:1006) and counts as an Osty attack, so every
+            // Flatten drops to 0 (`Flatten.AfterAttack`; loadout Necrobinder
+            // v0.111.0 3233). The empty command does both.
+            sts2_core::card_effects::osty_attack_command(state, |_| ());
         }
     }
     EffectResult::Resolved

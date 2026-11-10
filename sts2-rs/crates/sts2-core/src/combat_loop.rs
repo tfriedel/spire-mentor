@@ -9183,7 +9183,7 @@ pub(crate) fn check_for_empty_hand(state: &mut CombatState) {
 /// still sees them: a free-this-turn Skill's clone is free this turn
 /// (Ironclad-2184 act 3). The wire-cost bank and the free riders used to be
 /// cleared at `CardPlayFinished`, before the exhaust.
-fn clear_when_played_costs(state: &mut CombatState, card_idx: usize) {
+pub(crate) fn clear_when_played_costs(state: &mut CombatState, card_idx: usize) {
     // The wire-cost bank (a reconstruction's foreign `WhenPlayed` discount)
     // and the free riders; see `CombatState::restore_wire_cost_expiring_on_play`.
     let card_uid = state.cards[card_idx].uid;
@@ -9238,7 +9238,7 @@ fn clear_when_played_costs(state: &mut CombatState, card_idx: usize) {
     // not the stale roll (coverage seed 5880: a SneckoOil'd REND rolled to 1,
     // played, then BottledPotential redrew it; C# shows base 2, RS kept 1 →
     // LEGAL_ACTION divergence at energy 1).
-    state.cards[card_idx].expire_snecko_roll();
+    state.cards[card_idx].expire_snecko_roll_on_play();
 }
 
 /// FeralPower's result-location redirect, decided at play START and spending

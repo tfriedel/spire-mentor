@@ -477,6 +477,13 @@ pub const SNECKO_ROLL_RAISED_FLAG: i32 = 1;
 /// `SetThisCombat`) already owned `CostAbsolutelySet`, so the flag outlives
 /// the Snecko roll.
 pub const SNECKO_ROLL_FLAG_PREOWNED: i32 = 2;
+/// [`VarKey::SneckoRollLive`] bit, or-ed onto the owner value: the roll was
+/// appended after a `SetUntilPlayed(0)` ([`VarKey::FreeUntilPlayed`]). C#
+/// folds local modifiers in insertion order (`CardEnergyCost.cs:110-115`), so
+/// the roll owns the cost while it lives. The zero is `WhenPlayed` only and
+/// outlives a roll that expires at end of turn, so the expiry brings the zero
+/// back. A play drops both.
+pub const SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED: i32 = 4;
 
 // Bead sts2-rs-k2y (P6-8): persistent card enchantments (`Card::enchantments`).
 // Mirrors `sts2_env/cards/enchantments.py` at pin `01c094d` — these survive
@@ -1428,7 +1435,10 @@ impl Card {
             return;
         }
         self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, new_cost - capped_base);
-        self.set_combat_var(VarKey::SneckoRollLive, SNECKO_ROLL_FLAG_PREOWNED);
+        self.set_combat_var(
+            VarKey::SneckoRollLive,
+            SNECKO_ROLL_FLAG_PREOWNED | (live & SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED),
+        );
         self.set_combat_var(VarKey::CostAbsolutelySet, 1);
     }
 
@@ -1440,6 +1450,11 @@ impl Card {
     ///
     /// A bank without the [`VarKey::SneckoRollLive`] marker (a state that
     /// predates it) expires as a roll that raised the flag.
+    ///
+    /// A roll laid over a `SetUntilPlayed(0)`
+    /// ([`SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED`]) reveals that zero again: it is
+    /// `WhenPlayed` only, so it outlives the end-of-turn expiry. The play edge
+    /// drops both ([`Self::expire_snecko_roll_on_play`]).
     pub fn expire_snecko_roll(&mut self) {
         let live = self.combat_var(VarKey::SneckoRollLive);
         let banked = self.combat_var(VarKey::SneckoCostDeltaThisTurn);
@@ -1450,9 +1465,27 @@ impl Card {
         self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, 0);
         self.set_combat_var(VarKey::SneckoRollLive, 0);
         self.combat_vars.zero(VarKey::FlattenOstyAttacksAtRoll);
-        if live != SNECKO_ROLL_FLAG_PREOWNED {
+        if live & SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED != 0 {
+            self.set_combat_var(VarKey::FreeUntilPlayed, 1);
+        }
+        if live & !SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED != SNECKO_ROLL_FLAG_PREOWNED {
             self.set_combat_var(VarKey::CostAbsolutelySet, 0);
         }
+    }
+
+    /// [`Self::expire_snecko_roll`] on the play edge (C#
+    /// `AfterCardPlayedCleanup`, `CardEnergyCost.cs:341-345`): every
+    /// `WhenPlayed` modifier drops, so a `SetUntilPlayed(0)` under the roll
+    /// goes with it instead of coming back.
+    pub fn expire_snecko_roll_on_play(&mut self) {
+        let live = self.combat_var(VarKey::SneckoRollLive);
+        if live & SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED != 0 {
+            self.set_combat_var(
+                VarKey::SneckoRollLive,
+                live & !SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED,
+            );
+        }
+        self.expire_snecko_roll();
     }
 
     /// Look up an enchantment stack, returning the current amount or 0.
@@ -1765,12 +1798,14 @@ impl Card {
             // cost_delta >= 0: the absolute modifier still owns the
             // evaluated cost — leave `self.cost` untouched.
         } else if base.cost >= 0 {
-            // C# resolves `max(0, base + this-combat modifiers)`: upgrading a
-            // card its discounts already took to 0 keeps it at 0. A negative
-            // `cost` is the X-cost sentinel, so the sum must not go below 0
-            // (act23 Necrobinder:1014: Banshee's Cry at 0 upgraded to -2 and
-            // the play spent all 4 energy as an X cost).
-            self.cost = self.cost.saturating_add(cost_delta).max(0);
+            // C# `UpgradeBy` moves `_base` and keeps the Relative
+            // `AddThisCombat` modifiers, then resolves `max(0, base +
+            // modifiers)`: the shift lands on the unclamped sum, which the
+            // collapsed model holds as `cost - CostDebtThisCombat`. A
+            // negative `cost` is the X-cost sentinel, so it never goes below
+            // 0 (act23 Necrobinder:1014: Banshee's Cry at 0 upgraded to -2
+            // and the play spent all 4 energy as an X cost).
+            self.add_cost_this_combat(i32::from(cost_delta));
         } else {
             self.cost = self.cost.saturating_add(cost_delta);
         }
@@ -1847,19 +1882,16 @@ impl Card {
     }
 
     fn revert_upgrade_delta(&mut self, base: &Card, upgraded: &Card) {
-        if self.card_id == CardId::BansheesCry
-            && base.cost >= 0
-            && self.combat_var(VarKey::CostAbsolutelySet) == 0
-        {
+        if base.cost >= 0 && self.combat_var(VarKey::CostAbsolutelySet) == 0 {
             // C# `ResetForDowngrade` restores `_base = Canonical` and keeps the
-            // `AddThisCombat(-2)` modifiers, so the cost re-resolves to
-            // `max(0, 9 - 2n)` (CardEnergyCost.cs GetWithModifiers). The
-            // collapsed `cost` already floored at 0; adding the +2 delta back
-            // to that floor over-charged (loadout Necrobinder 1006, Dampen).
-            let shaved = self
-                .combat_var(VarKey::BansheesCryEtherealCounted)
-                .saturating_mul(2);
-            self.cost = i8::try_from((i32::from(base.cost) - shaved).max(0)).unwrap_or(0);
+            // Relative `AddThisCombat` modifiers, so the cost re-resolves to
+            // `max(0, base + modifiers)` (CardEnergyCost.cs GetWithModifiers).
+            // The shift lands on the unclamped sum, `cost - CostDebtThisCombat`:
+            // adding it to the floored `cost` alone over-charged a Banshee's
+            // Cry shaved below 0 (loadout Necrobinder 1006, Dampen), and
+            // resetting `cost` but keeping the debt under-charged it
+            // (v0.107.1 3241: 9 - 4 x 2 = 1 in C#, 0 in Rust).
+            self.add_cost_this_combat(i32::from(base.cost) - i32::from(upgraded.cost));
         } else {
             self.cost = self.cost.saturating_sub(upgraded.cost - base.cost);
         }
@@ -6801,7 +6833,8 @@ mod tests {
     /// C# `ResetForDowngrade` restores the base cost (9) under Banshee's Cry's
     /// `AddThisCombat(-2)` modifiers, so after 5 Ethereal plays a downgraded
     /// copy resolves to `max(0, 9 - 10) = 0`, not the floored 0 plus the
-    /// reverted +2 (loadout Necrobinder 1006).
+    /// reverted +2 (loadout Necrobinder 1006), and after 4 it is `9 - 8 = 1`,
+    /// not 0 with the old debt still subtracted (v0.107.1 3241).
     #[test]
     fn banshees_cry_downgrade_keeps_its_ethereal_discounts() {
         let factory = |id, up: bool| {
@@ -6818,8 +6851,10 @@ mod tests {
             ..Card::pod_defaults()
         };
         card.set_combat_var(VarKey::BansheesCryEtherealCounted, 5);
+        card.set_combat_var(VarKey::CostDebtThisCombat, 3);
         assert!(card.downgrade_with(factory));
         assert_eq!(card.cost, 0);
+        assert_eq!(card.combat_var(VarKey::CostDebtThisCombat), 1, "9 - 10");
 
         let mut card = Card {
             card_id: CardId::BansheesCry,
@@ -6828,8 +6863,20 @@ mod tests {
             ..Card::pod_defaults()
         };
         card.set_combat_var(VarKey::BansheesCryEtherealCounted, 4);
+        card.set_combat_var(VarKey::CostDebtThisCombat, 1);
         assert!(card.downgrade_with(factory));
         assert_eq!(card.cost, 1, "max(0, 9 - 8)");
+        assert_eq!(card.combat_var(VarKey::CostDebtThisCombat), 0);
+
+        // The upgrade shifts the same unclamped sum: 9 - 8 = 1, upgraded
+        // 7 - 8 = -1 shows 0, and the downgrade brings back 1.
+        assert!(card.upgrade_with(factory));
+        assert_eq!(
+            (card.cost, card.combat_var(VarKey::CostDebtThisCombat)),
+            (0, 1)
+        );
+        assert!(card.downgrade_with(factory));
+        assert_eq!(card.cost, 1);
     }
 
     /// GH #1150: Enlightenment+'s reduce-only cap over a live Snecko roll AND

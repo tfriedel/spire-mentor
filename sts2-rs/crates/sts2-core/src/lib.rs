@@ -10425,6 +10425,17 @@ impl CombatState {
                     card.set_combat_var(VarKey::StarCostFreeThisTurn, 1);
                 }
                 card.set_combat_var(VarKey::FreeThisTurn, 0);
+                // A `SetUntilPlayed(0)` (v0.107.1 RocketPunch, Eidolon) folds
+                // before the roll too, so the roll is the shown cost. The zero
+                // is `WhenPlayed` only and comes back when the roll expires at
+                // end of turn, so park it on the roll instead of dropping it
+                // (`expire_snecko_roll`).
+                let over_free = if card.combat_var(VarKey::FreeUntilPlayed) != 0 {
+                    card.set_combat_var(VarKey::FreeUntilPlayed, 0);
+                    crate::cards::SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED
+                } else {
+                    0
+                };
                 // A Flatten zeroed by an earlier Osty attack this turn takes
                 // the roll too (the later Absolute wins); a later attack
                 // zeroes it again (`hooks::card_cost_locally_zeroed`).
@@ -10437,14 +10448,15 @@ impl CombatState {
                 // the flag was already owned, so its expiry releases only what
                 // this roll raised (GH #759). A second roll this turn keeps
                 // the first roll's answer.
-                if card.combat_var(VarKey::SneckoRollLive) == 0 {
-                    let owner = if card.combat_var(VarKey::CostAbsolutelySet) != 0 {
-                        crate::cards::SNECKO_ROLL_FLAG_PREOWNED
-                    } else {
-                        crate::cards::SNECKO_ROLL_RAISED_FLAG
-                    };
-                    card.set_combat_var(VarKey::SneckoRollLive, owner);
-                }
+                let live = card.combat_var(VarKey::SneckoRollLive);
+                let owner = if live != 0 {
+                    live
+                } else if card.combat_var(VarKey::CostAbsolutelySet) != 0 {
+                    crate::cards::SNECKO_ROLL_FLAG_PREOWNED
+                } else {
+                    crate::cards::SNECKO_ROLL_RAISED_FLAG
+                };
+                card.set_combat_var(VarKey::SneckoRollLive, owner | over_free);
                 card.set_combat_var(VarKey::CostAbsolutelySet, 1);
             }
         }
@@ -19575,6 +19587,51 @@ mod tests {
             0,
             "an attack after the roll zeroes it again"
         );
+    }
+
+    /// v0.107.1 `SetUntilPlayed(0)` (RocketPunch, Eidolon) and a Snecko Oil
+    /// roll are both Absolute local modifiers folded in insertion order
+    /// (`CardEnergyCost.cs:110-115`): a roll after the zero is the shown cost.
+    /// The zero is `WhenPlayed` only, so it is back once the roll expires at
+    /// end of turn, and a play drops both. Rust kept showing 0 under the roll.
+    #[test]
+    fn snecko_roll_over_a_free_until_played_card_shows_the_roll() {
+        use crate::cards::VarKey;
+        let mut probe = snecko_hand_state(2);
+        while next_snecko_roll(&probe) == 0 {
+            let _ = probe.run_rng.combat_energy_costs.next_int(0, 3);
+        }
+        let uid = probe.player.hand[0];
+        probe.cards[0].set_locally_free(VarKey::FreeUntilPlayed);
+        assert_eq!(crate::hooks::effective_card_cost(&probe, uid), 0);
+
+        let mut end_of_turn = probe.clone();
+        end_of_turn.snecko_randomize_hand_costs();
+        let roll = i32::from(end_of_turn.cards[0].cost);
+        assert!(roll > 0);
+        assert_eq!(
+            crate::hooks::effective_card_cost(&end_of_turn, uid),
+            roll,
+            "the later roll beats the until-played zero"
+        );
+        let mut played = end_of_turn.clone();
+
+        end_of_turn.restore_snecko_costs_for_turn_start();
+        assert_eq!(
+            crate::hooks::effective_card_cost(&end_of_turn, uid),
+            0,
+            "the roll expired at end of turn; the until-played zero is back"
+        );
+
+        let idx = 0;
+        crate::combat_loop::clear_when_played_costs(&mut played, idx);
+        assert_eq!(
+            crate::hooks::effective_card_cost(&played, uid),
+            2,
+            "a play drops the roll and the zero: base cost"
+        );
+        played.restore_snecko_costs_for_turn_start();
+        assert_eq!(crate::hooks::effective_card_cost(&played, uid), 2);
     }
 
     /// GH #759: C# `SetThisTurnOrUntilPlayed` adds its Absolute modifier
