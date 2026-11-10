@@ -2950,7 +2950,9 @@ pub const SRC_HASH: &str = env!("STS2_PY_SRC_HASH");
 ///
 /// `version` is the feature version (1 = the deployed net's 32 / 24
 /// features, 2 = 96 / 32, 3 = v1's 32 / 24 with telegraphed attacks at their
-/// displayed number and form-aware "enemy HP removed"). Version 2 reads the
+/// displayed number and form-aware "enemy HP removed", 4 = v1 plus the
+/// character and affliction block, 44 / 29, 5 = v4 plus the orb / Osty card
+/// mechanics block, 56 / 43). Version 2 reads the
 /// act from `monster_act`
 /// (`{species: act}`) and `encounter_act` (`[[act, [species, ...]], ...]`),
 /// each by default the engine's encounter tables ([`monster_acts`],
@@ -2999,12 +3001,13 @@ fn feature_spec_for(
     encounter_act: Option<Vec<(u8, Vec<String>)>>,
 ) -> PyResult<sts2_mcts::rollout_net::FeatureSpec> {
     use sts2_mcts::rollout_net::{
-        FeatureSpec, FeatureVersion, FEATURES_V1, FEATURES_V3, FEATURES_V4,
+        FeatureSpec, FeatureVersion, FEATURES_V1, FEATURES_V3, FEATURES_V4, FEATURES_V5,
     };
     match FeatureVersion::from_number(version) {
         Some(FeatureVersion::V1) => Ok(FEATURES_V1),
         Some(FeatureVersion::V3) => Ok(FEATURES_V3),
         Some(FeatureVersion::V4) => Ok(FEATURES_V4),
+        Some(FeatureVersion::V5) => Ok(FEATURES_V5),
         Some(FeatureVersion::V2) => {
             let by_name: std::collections::HashMap<&str, sts2_core::MonsterKind> =
                 sts2_core::MonsterKind::ALL_KNOWN

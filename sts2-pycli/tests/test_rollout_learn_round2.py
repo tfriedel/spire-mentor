@@ -172,7 +172,7 @@ def _torch_logits(net: Any, ex: dict[str, Any]) -> np.ndarray:
 # ── feature versions and R4 parity ───────────────────────────────────────
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
 def test_feature_dims_match_the_engine(version: int) -> None:
     keys = ["<unk>", "end_turn"]
     net = _random_net(version, keys, None, 0)
@@ -858,6 +858,77 @@ def test_v4_zero_pads_a_v1_net_and_reads_the_character_block() -> None:
     # an Attack into the Hive.
     for i in (32, 40, 41, 42, 44 + 24, 44 + 26, 44 + 28):
         assert seen[i], i
+
+
+# An Ironclad holding other characters' orb and Osty cards (the cards a
+# generated pick or an event hands it), for the v5 card-mechanics block.
+OFFCOLOR_DECK = [
+    *["STRIKE_IRONCLAD", "DEFEND_IRONCLAD"] * 2,
+    *["ZAP", "ZAP", "BALL_LIGHTNING", "TEMPEST", "DUALCAST", "CHILL"],
+    *["POKE", "POKE", "SIC_EM", "BODYGUARD", "AFTERLIFE", "BASH"],
+]
+
+
+def _offcolor_states() -> list[Any]:
+    """Mid-fight positions of an Ironclad playing `OFFCOLOR_DECK`, random play
+    biased toward cards (so belts grow, orbs overflow and Osty comes and goes)."""
+    out = []
+    for enc, seed in (("NIBBITS_WEAK", 3), ("SLIMES_NORMAL", 4), ("BYGONE_EFFIGY_ELITE", 5)):
+        fight = _row("dddd000000000001.run.gz", 3, "monster", enc, deck=OFFCOLOR_DECK, potions=[])
+        cs = rollout_starts.build_fight(fight, seed).combat_state()
+        rng = random.Random(seed)
+        for i in range(120):
+            acts = cs.legal_actions()
+            if not acts:
+                break
+            if i % 2 == 0:
+                out.append(cs.clone())
+            cards = [a for a in acts if a.get("action") == "play"]
+            cs.apply(rng.choice(cards) if cards and rng.random() < 0.85 else rng.choice(acts))
+    return out
+
+
+def test_v5_zero_pads_v1_and_v4_nets_and_reads_off_color_cards() -> None:
+    """`upgrade_net(..., version=5)` zero-pads the shipped Ironclad net (and its
+    v4 form), so its logits are unchanged and torch matches Rust; v5's first
+    44 / 29 features are v4's, and the block past them lights the orb belt,
+    Osty, and every per-card mechanic on an Ironclad holding Defect and
+    Necrobinder cards."""
+    v1 = json.loads(IRONCLAD_NET.read_text())
+    up = rollout_learn.upgrade_net(v1, {}, version=5)
+    assert up["feature_version"] == 5
+    assert (up["state_dim"], up["action_dim"]) == rollout_learn.FEATURE_DIMS[5]
+    from_v4 = rollout_learn.upgrade_net(rollout_learn.upgrade_net(v1, {}, version=4), {}, version=5)
+    assert (from_v4["state_dim"], from_v4["action_dim"]) == rollout_learn.FEATURE_DIMS[5]
+    with pytest.raises(ValueError):
+        rollout_learn.upgrade_net(rollout_learn.upgrade_net(v1, {}, version=3), {}, version=5)
+    lp1 = sts2_rs.LearnedPlayout(json.dumps(v1))
+    lp5 = sts2_rs.LearnedPlayout(json.dumps(up))
+    lp5b = sts2_rs.LearnedPlayout(json.dumps(from_v4))
+    net5 = rollout_learn._load_playout_net(torch, up)
+    sd4, ad4 = rollout_learn.FEATURE_DIMS[4]
+    sd5, ad5 = rollout_learn.FEATURE_DIMS[5]
+    states = _offcolor_states()
+    seen = np.zeros(sd5 + ad5, dtype=bool)
+    for s in states:
+        e1, e5, e5b = lp1.explain(s), lp5.explain(s), lp5b.explain(s)
+        np.testing.assert_allclose(e5["logits"], e1["logits"], atol=1e-5, rtol=0)
+        np.testing.assert_allclose(e5b["logits"], e1["logits"], atol=1e-5, rtol=0)
+        np.testing.assert_allclose(_torch_logits(net5, e5), e5["logits"], atol=1e-4, rtol=0)
+        f4 = sts2_rs.rollout_features(s, version=4)
+        f5 = sts2_rs.rollout_features(s, version=5)
+        assert f5["state"][:sd4] == f4["state"]
+        assert [x[:ad4] for x in f5["x"]] == f4["x"]
+        seen[:sd5] |= np.asarray(f5["state"]) != 0
+        for x in f5["x"]:
+            seen[sd5:] |= np.asarray(x) != 0
+    # State: belt capacity, orbs held, a Lightning, a Frost, Osty alive and its
+    # HP, Lightning so far. Action: orbs channeled, Lightning, Frost, overflow,
+    # payoff, summon, Osty attack, Osty missing.
+    for i in (44, 45, 46, 47, 52, 53, 55):
+        assert seen[i], f"state {i}"
+    for i in (29, 30, 31, 36, 37, 39, 40, 41):
+        assert seen[sd5 + i], f"action {i}"
 
 
 def test_train_init_starts_exactly_at_the_init_net(tmp_path: Path) -> None:

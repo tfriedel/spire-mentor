@@ -53,6 +53,10 @@ pub mod blindfold;
 /// Bead `sts2-rs-96546` (7n7tb sub-1).
 pub mod card_afflictions;
 
+/// What a card does to the orb belt and to Osty, for the AI's features
+/// (any character can hold another character's orb and Osty cards).
+pub mod card_mechanics;
+
 // Phase 1 (bead sts2-rs-qai): 47 hook signatures + ListenerKind + HookId.
 // Phase 2 dispatcher (bead sts2-rs-73b) wires iter_power_listeners +
 // iter_relic_listeners through the per-hook match table.

@@ -101,6 +101,23 @@
 //!   cost, the Stars left after it, its Tainted stacks or other affliction,
 //!   and an Attack target's Personal Hive ([`V4_X_STAR_COST`] on). A v1
 //!   file zero-padded to these widths computes the v1 net's logits.
+//! - **v5** ([`STATE_DIM_V5`] × [`ACTION_DIM_V5`]): v4's features, then a
+//!   card-mechanics block read from [`sts2_core::card_mechanics`], the same
+//!   for every character. Every built-in net keys a card to its own row, so
+//!   another character's card — a generated Zap on an Ironclad, a Poke on a
+//!   Silent — lands on the `<unk>` row or a row trained on a handful of
+//!   plays, and v1's features describe it only by cost, type, base damage
+//!   and base block: Zap is a 1-cost Skill that does nothing, and Poke a
+//!   6-damage Attack scaled by the player's Strength even when no Osty is
+//!   there to deal it (it then does nothing). The state adds the orb belt
+//!   (capacity, orbs held, by kind), Focus, the player's own Osty (alive, HP,
+//!   block) and the Lightning channeled so far ([`V5_ORB_SLOTS`] on). A card
+//!   play adds the orbs it channels, by kind and resolved against X / the
+//!   enemies / the Lightning so far, the orbs it pushes off a full belt, a
+//!   belt-payoff flag with the orbs held, the Osty HP it summons, and
+//!   whether it is an Osty attack, needs an Osty the player lacks, or is an
+//!   Osty attack that kills through block ([`V5_X_CHANNELS`] on). A v1 or v4
+//!   file zero-padded to these widths computes its own logits.
 //!
 //! Which weights a playout uses ([`net_for`]):
 //! - `STS2_ROLLOUT_NET=<json>`, when set, for every character. This is the
@@ -131,6 +148,7 @@ use std::sync::OnceLock;
 use rand::Rng;
 use smallvec::SmallVec;
 use sts2_core::card_afflictions::CardAfflictionKind;
+use sts2_core::card_mechanics::{card_mechanics, resolve_channels, resolve_summon, ORB_KIND_ORDER};
 use sts2_core::cards::{CardId, CardType};
 use sts2_core::potions::PotionKind;
 use sts2_core::{
@@ -151,7 +169,8 @@ pub const ACTION_DIM_V2: usize = 32;
 /// The widest state vector any version computes (the buffer size).
 pub const STATE_DIM_MAX: usize = STATE_DIM_V2;
 /// The widest action vector any version computes (the buffer size).
-pub const ACTION_DIM_MAX: usize = ACTION_DIM_V2;
+pub const ACTION_DIM_MAX: usize = ACTION_DIM_V5;
+const _: () = assert!(ACTION_DIM_MAX >= ACTION_DIM_V2 && STATE_DIM_MAX >= STATE_DIM_V5);
 /// Living enemies whose species feed the v2 encounter embedding.
 pub const MONSTER_SLOTS: usize = 5;
 
@@ -220,6 +239,51 @@ pub const V4_X_TAINTED: usize = 26;
 pub const V4_X_AFFLICTED: usize = 27;
 /// An Attack's target's Personal Hive /3.
 pub const V4_X_TARGET_HIVE: usize = 28;
+
+/// Width of the version-5 state feature vector: v4's 44, then the orb and
+/// Osty block from [`V5_ORB_SLOTS`].
+pub const STATE_DIM_V5: usize = 56;
+/// Width of the version-5 per-action feature vector: v4's 29, then the card
+/// mechanics from [`V5_X_CHANNELS`].
+pub const ACTION_DIM_V5: usize = 43;
+
+// ── v5 state feature indices (after v4's 44) ─────────────────────────────
+/// The orb belt's capacity /3 (0 for a character with no slots until its
+/// first channel), then the orbs held /3.
+pub const V5_ORB_SLOTS: usize = 44;
+/// First of the five orbs-held-by-kind counts /3, in
+/// [`sts2_core::card_mechanics::ORB_KIND_ORDER`] (Lightning, Frost, Dark,
+/// Plasma, Glass).
+pub const V5_ORBS: usize = 46;
+/// The player's Focus /3.
+pub const V5_FOCUS: usize = 51;
+/// The player's own Osty is alive; then its HP /20 and its block /20 (0
+/// while missing).
+pub const V5_OSTY: usize = 52;
+/// Lightning channeled so far this combat /10 (what `Voltaic` channels).
+pub const V5_LIGHTNING_SO_FAR: usize = 55;
+/// v5 action features: orbs this play channels /3 (every kind, random ones
+/// included), resolved against the board (X, enemies, Lightning so far).
+pub const V5_X_CHANNELS: usize = 29;
+/// First of five per-kind channel counts /3 ([`V5_ORBS`] order), then the
+/// random-kind count /3 (`Chaos`).
+pub const V5_X_CHANNEL_KINDS: usize = 30;
+/// Orbs the play pushes off the front of a full belt /3: each is evoked.
+/// A character with no slots gets one on its first channel (C#
+/// `OrbCmd.Channel`), so a second channel there evokes the first.
+pub const V5_X_OVERFLOW: usize = 36;
+/// The card works the belt beyond channeling (evoke, orb-count scaling,
+/// Focus, slots, an orb Power); then, for such a card, the orbs held /3.
+pub const V5_X_ORB_PAYOFF: usize = 37;
+/// Osty HP the play summons /10.
+pub const V5_X_SUMMON: usize = 39;
+/// The card is an Osty attack (Osty deals its damage, not the player).
+pub const V5_X_OSTY_ATTACK: usize = 40;
+/// The card does nothing now: it needs a living Osty and the player has none.
+pub const V5_X_OSTY_MISSING: usize = 41;
+/// An Osty attack whose Osty-dealt damage (Osty's Strength, the target's
+/// Vulnerable) kills its target through block.
+pub const V5_X_OSTY_LETHAL: usize = 42;
 
 /// The player powers in the v4 block after the two Star counts, each /3.
 const PLAYER_V4_POWERS: [PowerKind; 5] = [
@@ -331,6 +395,11 @@ pub enum FeatureVersion {
     /// affliction block: 44 state / 29 action features (Regent's Stars and
     /// Star powers, Tainted, Personal Hive, Vital Spark, card afflictions).
     V4,
+    /// v4's 44 / 29 features, then the card-mechanics block: 56 state / 43
+    /// action features (the orb belt, Focus, the player's own Osty; per card
+    /// play the orbs it channels and evokes, whether it works the belt, the
+    /// Osty it summons, and whether it is an Osty attack with no Osty).
+    V5,
 }
 
 impl FeatureVersion {
@@ -342,6 +411,7 @@ impl FeatureVersion {
             2 => Some(Self::V2),
             3 => Some(Self::V3),
             4 => Some(Self::V4),
+            5 => Some(Self::V5),
             _ => None,
         }
     }
@@ -354,6 +424,7 @@ impl FeatureVersion {
             Self::V2 => 2,
             Self::V3 => 3,
             Self::V4 => 4,
+            Self::V5 => 5,
         }
     }
 
@@ -364,6 +435,7 @@ impl FeatureVersion {
             Self::V1 | Self::V3 => STATE_DIM,
             Self::V2 => STATE_DIM_V2,
             Self::V4 => STATE_DIM_V4,
+            Self::V5 => STATE_DIM_V5,
         }
     }
 
@@ -374,6 +446,7 @@ impl FeatureVersion {
             Self::V1 | Self::V3 => ACTION_DIM,
             Self::V2 => ACTION_DIM_V2,
             Self::V4 => ACTION_DIM_V4,
+            Self::V5 => ACTION_DIM_V5,
         }
     }
 
@@ -383,8 +456,15 @@ impl FeatureVersion {
     pub const fn incoming(self) -> IncomingDamage {
         match self {
             Self::V3 => IncomingDamage::Effective,
-            Self::V1 | Self::V2 | Self::V4 => IncomingDamage::Base,
+            Self::V1 | Self::V2 | Self::V4 | Self::V5 => IncomingDamage::Base,
         }
+    }
+
+    /// Whether this version carries v4's character and affliction block
+    /// (v5 is v4 plus its own block).
+    #[must_use]
+    pub const fn has_v4_block(self) -> bool {
+        matches!(self, Self::V4 | Self::V5)
     }
 
     /// Whether this version's "enemy HP removed" counts the forms still to
@@ -438,6 +518,15 @@ pub const FEATURES_V3: FeatureSpec = FeatureSpec {
 /// The v4 spec (no tables), shared by every v4 net.
 pub const FEATURES_V4: FeatureSpec = FeatureSpec {
     version: FeatureVersion::V4,
+    act_by_kind: Vec::new(),
+    row_by_kind: Vec::new(),
+    rosters: Vec::new(),
+    in_roster: Vec::new(),
+};
+
+/// The v5 spec (no tables), shared by every v5 net.
+pub const FEATURES_V5: FeatureSpec = FeatureSpec {
+    version: FeatureVersion::V5,
     act_by_kind: Vec::new(),
     row_by_kind: Vec::new(),
     rosters: Vec::new(),
@@ -634,6 +723,16 @@ pub struct StepCtx {
     /// v4: the Personal Hive on each `enemy_uids` slot (empty when none is
     /// in play).
     hive: SmallVec<[i32; 6]>,
+    /// v5: the player's own Osty is alive.
+    osty_alive: bool,
+    /// v5: that Osty's Strength (an Osty attack's damage reads it, not the
+    /// player's).
+    osty_strength: i32,
+    /// v5: orbs on the belt.
+    orbs_held: u32,
+    /// v5: the belt's capacity as the next channel finds it — a belt with no
+    /// slots grows one first (three for Defect, as `orbs::channel_orb` does).
+    orb_room: u32,
 }
 
 fn clampf(x: f32, lo: f32, hi: f32) -> f32 {
@@ -681,6 +780,10 @@ impl StepCtx {
         match spec.version {
             FeatureVersion::V2 => ctx.fill_v2(state, spec),
             FeatureVersion::V4 => ctx.fill_v4(state),
+            FeatureVersion::V5 => {
+                ctx.fill_v4(state);
+                ctx.fill_v5(state);
+            }
             FeatureVersion::V1 | FeatureVersion::V3 => {}
         }
         ctx
@@ -809,7 +912,58 @@ impl StepCtx {
             corruption: false,
             stars: 0,
             hive: SmallVec::new(),
+            osty_alive: false,
+            osty_strength: 0,
+            orbs_held: 0,
+            orb_room: 0,
         }
+    }
+
+    /// Append the v5 block (indices `V5_*`) to a v4 context: the orb belt and
+    /// the player's own Osty, read the same way for every character (a
+    /// generated Zap gives an Ironclad a one-slot belt; a Bodyguard gives it
+    /// an Osty).
+    fn fill_v5(&mut self, state: &CombatState) {
+        let p = &state.player;
+        let belt = &p.orbs;
+        let held = belt.filled_len();
+        let s = &mut self.state;
+        s[V5_ORB_SLOTS] = clampf(f32::from(belt.capacity) / 3.0, 0.0, 4.0);
+        s[V5_ORB_SLOTS + 1] = clampf(held as f32 / 3.0, 0.0, 4.0);
+        for orb in &belt.slots {
+            let kind = sts2_core::orbs::OrbKind::of(orb);
+            if let Some(i) = ORB_KIND_ORDER.iter().position(|k| *k == kind) {
+                s[V5_ORBS + i] += 1.0 / 3.0;
+            }
+        }
+        s[V5_FOCUS] = clampf(
+            state.player_power_amount(PowerKind::Focus) as f32 / 3.0,
+            -3.0,
+            3.0,
+        );
+        if let Some(osty) = p
+            .pet_uid
+            .and_then(|uid| sts2_core::creature_by_id(&state.creatures, uid.0))
+            .filter(|c| c.current_hp > 0)
+        {
+            s[V5_OSTY] = 1.0;
+            s[V5_OSTY + 1] = clampf(osty.current_hp as f32 / 20.0, 0.0, 3.0);
+            s[V5_OSTY + 2] = clampf(osty.block.max(0) as f32 / 20.0, 0.0, 3.0);
+            self.osty_alive = true;
+            self.osty_strength = creature_powers(state, osty).2;
+        }
+        s[V5_LIGHTNING_SO_FAR] = clampf(
+            state.combat_log.lightning_orbs_channeled_this_combat as f32 / 10.0,
+            0.0,
+            3.0,
+        );
+        self.orbs_held = u32::try_from(held).unwrap_or(u32::MAX);
+        self.orb_room = match belt.capacity {
+            0 if p.character == Some(CharacterId::Defect) => 3,
+            0 => 1,
+            n => u32::from(n),
+        };
+        self.version = FeatureVersion::V5;
     }
 
     /// Append the v4 block (indices `V4_*`) to a v1 context. The player
@@ -1174,7 +1328,7 @@ pub fn action_features(
                 };
                 target_facts(ctx, *target, &mut x);
             }
-            if ctx.version == FeatureVersion::V4 {
+            if ctx.version.has_v4_block() {
                 let stars = sts2_core::effective_star_cost_in_combat(state, card);
                 x[V4_X_STAR_COST] = stars as f32 / 3.0;
                 x[V4_X_STAR_COST + 1] = clampf((ctx.stars - stars).max(0) as f32 / 5.0, 0.0, 3.0);
@@ -1190,6 +1344,9 @@ pub fn action_features(
                         x[V4_X_TARGET_HIVE] = clampf(*h as f32 / 3.0, 0.0, 3.0);
                     }
                 }
+            }
+            if ctx.version == FeatureVersion::V5 {
+                mechanics_facts(state, ctx, card, *target, cost, &mut x);
             }
             ActionKey::Card {
                 id: card.card_id,
@@ -1235,6 +1392,64 @@ pub fn action_features(
         }
     };
     (key, x)
+}
+
+/// The v5 card-mechanics facts ([`V5_X_CHANNELS`] on) of playing `card` at
+/// enemy slot `target`, an X-cost card spending `x_value`.
+fn mechanics_facts(
+    state: &CombatState,
+    ctx: &StepCtx,
+    card: &sts2_core::cards::Card,
+    target: Option<u8>,
+    x_value: i32,
+    x: &mut [f32; ACTION_DIM_MAX],
+) {
+    let m = card_mechanics(card.card_id, card.upgraded);
+    if m.is_none() {
+        return;
+    }
+    let ch = resolve_channels(state, card, x_value, ctx.alive);
+    let total = ch.total();
+    x[V5_X_CHANNELS] = clampf(total as f32 / 3.0, 0.0, 3.0);
+    for (i, n) in ch.by_kind.iter().enumerate() {
+        x[V5_X_CHANNEL_KINDS + i] = clampf(*n as f32 / 3.0, 0.0, 3.0);
+    }
+    x[V5_X_CHANNEL_KINDS + 5] = clampf(ch.random as f32 / 3.0, 0.0, 3.0);
+    if total > 0 {
+        let overflow = (ctx.orbs_held + total).saturating_sub(ctx.orb_room);
+        x[V5_X_OVERFLOW] = clampf(overflow as f32 / 3.0, 0.0, 3.0);
+    }
+    if m.orb_interaction {
+        x[V5_X_ORB_PAYOFF] = 1.0;
+        x[V5_X_ORB_PAYOFF + 1] = clampf(ctx.orbs_held as f32 / 3.0, 0.0, 4.0);
+    }
+    x[V5_X_SUMMON] = clampf(resolve_summon(card, x_value) as f32 / 10.0, 0.0, 3.0);
+    if m.osty_attack {
+        x[V5_X_OSTY_ATTACK] = 1.0;
+    }
+    if m.needs_osty && !ctx.osty_alive {
+        x[V5_X_OSTY_MISSING] = 1.0;
+    }
+    if m.osty_attack && ctx.osty_alive && card.base_damage > 0 {
+        let Some(t) = target else { return };
+        let Some(c) = state
+            .enemy_uids
+            .get(usize::from(t))
+            .and_then(|u| sts2_core::creature_by_id(&state.creatures, u.0))
+        else {
+            return;
+        };
+        if c.is_beaten_sentinel() || c.current_hp <= 0 {
+            return;
+        }
+        let mut dmg = (card.base_damage + ctx.osty_strength).max(0) as f32;
+        if ctx.enemy_vuln.get(usize::from(t)).copied().unwrap_or(false) {
+            dmg *= 1.5;
+        }
+        if dmg >= (c.current_hp + c.block.max(0)) as f32 {
+            x[V5_X_OSTY_LETHAL] = 1.0;
+        }
+    }
 }
 
 /// The v2 target facts ([`V2_X_TARGET`]) of an action aimed at enemy slot
@@ -1408,7 +1623,7 @@ impl RolloutNet {
             }
         }
         let (spec, monster_emb) = match version {
-            FeatureVersion::V1 | FeatureVersion::V3 | FeatureVersion::V4 => {
+            FeatureVersion::V1 | FeatureVersion::V3 | FeatureVersion::V4 | FeatureVersion::V5 => {
                 if f.monster_act.is_some()
                     || f.encounter_act.is_some()
                     || f.monster_keys.is_some()
@@ -1421,7 +1636,8 @@ impl RolloutNet {
                 let spec = match version {
                     FeatureVersion::V1 => FEATURES_V1,
                     FeatureVersion::V3 => FEATURES_V3,
-                    _ => FEATURES_V4,
+                    FeatureVersion::V4 => FEATURES_V4,
+                    _ => FEATURES_V5,
                 };
                 (spec, Vec::new())
             }

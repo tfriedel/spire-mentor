@@ -35,11 +35,17 @@ telegraphed attack read at its displayed number (Strength, Weak, Vulnerable,
 back attacks) and a form-aware "enemy HP removed" (GH #830); v4 (44 / 29) is
 v1 read as v1 reads it plus a character and affliction block: Regent's Stars
 and Star powers, Tainted, Personal Hive, Vital Spark, card afflictions and
-each card's Star cost (GH #822 follow-up).
+each card's Star cost (GH #822 follow-up); v5 (56 / 43) is v4 plus a
+card-mechanics block read from `sts2_core::card_mechanics`, the same for every
+character: the orb belt, Focus and the player's own Osty, and per card play the
+orbs it channels and evokes, whether it works the belt, the Osty HP it summons,
+and whether it is an Osty attack with no Osty to deal it. It is how a net
+learns what another character's orb or Osty card does instead of reading it as
+an untrained `<unk>` row.
 `gen --feature-version N` records version-N data, `train` follows the data's
-version, and `rl --feature-version 2|3|4` upgrades a v1 `--init` net: to v2
-and v4 by zero-padding (the same policy at iteration 0), to v3 by relabeling
-(the same weights, read on the v3 inputs).
+version, and `rl --feature-version 2|3|4|5` upgrades a v1 `--init` net (a v4
+one too, for v5): to v2, v4 and v5 by zero-padding (the same policy at
+iteration 0), to v3 by relabeling (the same weights, read on the v3 inputs).
 
 Training rows exclude every run in `--holdout` (fight files whose runs are
 used to evaluate), so evaluation decks are never trained on. `gen`, `traj` and
@@ -78,7 +84,7 @@ ROOMS = {"monster": 0, "elite": 1, "boss": 2}
 # `state_dim` / `action_dim` are the source of truth (a test pins the match).
 # v3 reuses v1's layout (its inputs are read differently, not laid out
 # differently), so only v2 carries the act tables and the encounter embedding.
-FEATURE_DIMS = {1: (32, 24), 2: (96, 32), 3: (32, 24), 4: (44, 29)}
+FEATURE_DIMS = {1: (32, 24), 2: (96, 32), 3: (32, 24), 4: (44, 29), 5: (56, 43)}
 TABLE_VERSION = 2  # the one version with per-species tables
 STATE_DIM, ACTION_DIM = FEATURE_DIMS[1]
 MONSTER_SLOTS = 5
@@ -780,6 +786,9 @@ def upgrade_net(
     To v4: a v1 file gets the v4 columns of `w1`, `proj` and `lin` at zero,
     so the same policy until training moves them. No tables or embedding.
 
+    To v5: a v1 or v4 file gets the v5 columns at zero, likewise. v5 is v4
+    plus the card-mechanics block, so a v4 file keeps its trained v4 columns.
+
     To v3: a v1 file is relabeled, every weight unchanged. v3 is v1's layout
     read on the displayed incoming damage and the form-aware "removed", so
     the logits equal v1's wherever those two read the same and move where
@@ -790,6 +799,12 @@ def upgrade_net(
             with v3 or v4).
     """
     have = int(net.get("feature_version", 1))
+    if version == 5:
+        if have not in (1, 4, 5) or monster_keys:
+            raise ValueError(f"cannot turn a v{have} net into v5 (only v1 / v4 nets, no embedding)")
+        if have == 5:
+            return dict(net)
+        return _zero_pad(net, 5)
     if version == 4:
         if have not in (1, 4) or monster_keys:
             raise ValueError(f"cannot turn a v{have} net into v4 (only v1 nets, no embedding)")
@@ -1319,8 +1334,8 @@ def rl(args: argparse.Namespace) -> int:
       `B · |V* − V̂|` times a unit-variance advantage, REINFORCE's is a
       unit-variance advantage; each iteration logs both gradient norms
       (`g_rf`, `g_sb`).
-    - `--feature-version 2|3`: upgrade a v1 `--init` to the v2 features
-      (zero-padded) or the v3 ones (relabeled).
+    - `--feature-version 2|3|4|5`: upgrade a v1 `--init` to the v2, v4 or v5
+      features (zero-padded) or the v3 ones (relabeled); a v4 `--init` to v5.
 
     The engine env (`--env`, `--overrides`) is applied to this process before
     anything is scored, and every inherited engine seam is cleared: the
@@ -1356,9 +1371,10 @@ def rl(args: argparse.Namespace) -> int:
     init = json.load(open(args.init, encoding="utf-8"))
     init_version = int(init.get("feature_version", 1))
     version = args.feature_version or init_version
-    if version != init_version and init_version != 1:
+    if version != init_version and init_version != 1 and (init_version, version) != (4, 5):
         raise SystemExit(
-            f"--feature-version {version} from a v{init_version} --init: only a v1 net upgrades"
+            f"--feature-version {version} from a v{init_version} --init: only a v1 net upgrades "
+            "(and a v4 one to v5)"
         )
     if args.monster_emb and version != TABLE_VERSION:
         raise SystemExit(
@@ -1722,7 +1738,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument(
         "--feature-version",
         type=int,
-        choices=(1, 2, 3, 4),
+        choices=(1, 2, 3, 4, 5),
         default=1,
         help="playout features to record",
     )
@@ -1739,7 +1755,7 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("--out-dir", required=True)
     gr.add_argument("--sims", type=int, default=4000)
     gr.add_argument("--boss-sims", type=int, default=4000)
-    gr.add_argument("--feature-version", type=int, choices=(1, 2, 3, 4), default=1)
+    gr.add_argument("--feature-version", type=int, choices=(1, 2, 3, 4, 5), default=1)
     gr.add_argument("--env", action="append", default=[], metavar="K=V", help="engine env")
     gr.add_argument("--procs", type=int, default=24)
     gr.add_argument("--per-shard", type=int, default=20000)
@@ -1865,9 +1881,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument(
         "--feature-version",
         type=int,
-        choices=(1, 2, 3, 4),
-        help="upgrade a v1 --init to v2 or v4 (zero-padded: same policy at iteration 0) or to "
-        "v3 (relabeled: same weights on the displayed-incoming / form-aware inputs)",
+        choices=(1, 2, 3, 4, 5),
+        help="upgrade a v1 --init to v2, v4 or v5 (zero-padded: same policy at iteration 0) or "
+        "to v3 (relabeled: same weights on the displayed-incoming / form-aware inputs); a v4 "
+        "--init to v5",
     )
     r.add_argument(
         "--monster-emb",
