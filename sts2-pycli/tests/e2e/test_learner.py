@@ -2447,17 +2447,24 @@ def test_a_stop_with_an_unread_update_result_is_quick_and_frees_its_held_rows(
 
     monkeypatch.setattr(L, "_drop_held", drop)
 
+    failed_at: list[float] = []
+
     def gone(block: bool) -> bool:  # once the result is there, unread
-        deadline = time.time() + 60
+        # Generous: a loaded box (the full suite under `-n auto`) slows the spawn,
+        # the torch import and the update itself; none of that is what is timed.
+        deadline = time.time() + 300
         while not lr.updater._inbox.qsize() and time.time() < deadline:
             time.sleep(0.01)
+        failed_at.append(time.time())
         raise RuntimeError("the learner fails before it reads the result")
 
     lr._poll = gone  # type: ignore[method-assign]
-    t0 = time.time()
     with pytest.raises(RuntimeError, match="fails before"):
         lr.train()
-    assert time.time() - t0 < 50  # not the 60 s join deadline and a kill
+    # Time the stop alone, from the failure: timing from before `train()` also
+    # counted start-up and the update, which reached the bound under load (#1228).
+    assert failed_at
+    assert time.time() - failed_at[0] < 50  # not the 60 s join deadline and a kill
     assert not any(p.is_alive() for p in lr.updater.procs)
     assert drained, "the unread result was not drained at the stop"
     held = {r["held"]["shm"] for r in drained if isinstance(r, dict) and r.get("held")}
