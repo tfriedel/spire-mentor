@@ -563,6 +563,7 @@ fn rupture_strength_from_galvanic_after_a_power_play_is_not_lost() {
         affliction: None,
     });
     state.player.hand.push(card_uid);
+    sts2_core::monster_power_effects::galvanic_before_combat_start(&mut state);
     let hp_before = state.player.current_hp;
     let _ = play_card(&mut state, 0, None);
     assert_eq!(
@@ -624,6 +625,8 @@ fn rupture_strength_from_galvanic_in_a_cascade_auto_play_lands_before_the_next_c
         0,
         0,
     );
+    // GalvanicPower.BeforeCombatStart Galvanizes the Rupture.
+    sts2_core::monster_power_effects::galvanic_before_combat_start(&mut state);
     let raw = u32::try_from(state.cards.len() + 1).expect("fits");
     let cascade_uid = sts2_core::CardUid::new(raw).expect("non-zero");
     state.cards.push(Card {

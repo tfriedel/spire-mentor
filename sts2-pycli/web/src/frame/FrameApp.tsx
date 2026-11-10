@@ -6,7 +6,18 @@
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { isTextInput } from "../keys";
-import { hostLog, hotkeyAction, inHost, loadUiOutside, modAction, onHost, postHost, saveUiOutside, setUiOutside } from "./host";
+import {
+  hostLog,
+  hotkeyAction,
+  inHost,
+  loadUiOutside,
+  modAction,
+  onHost,
+  postHost,
+  saveUiOutside,
+  setFullscreen,
+  setUiOutside,
+} from "./host";
 import {
   DOCKS,
   loadLayout,
@@ -55,11 +66,22 @@ export default function FrameApp() {
     setUiOutside(outside);
   }, []);
 
-  // Host channel. Every mod (re)sync starts with `hello`: tell it our mode.
+  // Host channel. Every mod (re)sync starts with `hello`: tell it our mode,
+  // unless the hello names one -- the player just asked for this window
+  // ("Panels in their own window"), so the panels go around the game even
+  // when it was last left fullscreen.
   useEffect(() => {
     const off = onHost((m) => {
       if (m.type === "from_mod" && m.msg.type === "hello") {
-        hostLog(`mod hello; asking for panels ${uiOutsideRef.current ? "outside" : "inside"}`);
+        const asked = m.msg.ui_outside;
+        if (asked != null) {
+          hostLog(`mod hello; it asks for panels ${asked ? "outside" : "inside"}`);
+          setUiOutsideState(asked);
+          saveUiOutside(asked);
+          uiOutsideRef.current = asked;
+        } else {
+          hostLog(`mod hello; asking for panels ${uiOutsideRef.current ? "outside" : "inside"}`);
+        }
         pendingUiOutside.current = uiOutsideRef.current;
         setUiOutside(uiOutsideRef.current);
       }
@@ -70,9 +92,13 @@ export default function FrameApp() {
   }, []);
 
   // The in-game toolbar switched the mode: follow it (unless it is the echo
-  // of a switch we asked for that has not landed yet).
-  const modUiOutside = state.ui?.ui_outside;
+  // of a switch we asked for that has not landed yet). Checked on every `ui`
+  // message, not only when the mode changes: a re-sync's echo carries the
+  // mode unchanged, and must still clear the pending switch -- left set, it
+  // made the page ignore the next switch from the game.
+  const ui = state.ui;
   useEffect(() => {
+    const modUiOutside = ui?.ui_outside;
     if (modUiOutside == null) return;
     if (pendingUiOutside.current != null) {
       if (modUiOutside === pendingUiOutside.current) pendingUiOutside.current = null;
@@ -83,7 +109,17 @@ export default function FrameApp() {
       setUiOutsideState(modUiOutside);
       saveUiOutside(modUiOutside);
     }
-  }, [modUiOutside]);
+  }, [ui]);
+
+  // Fullscreen is the panels-in-the-game mode: the frame drops its border and
+  // covers the monitor, so the game fills the screen. Only with the mod
+  // connected: its in-game toolbar ("Exit fullscreen") is the way back, and
+  // without it a borderless window would have none.
+  // And only once the mod has said hello and sent its state (`ui`, right
+  // after the hello): the hello may name the mode, and going fullscreen on
+  // the remembered one first would flash.
+  const fullscreen = !uiOutside && state.host.mod_connected && ui != null;
+  useEffect(() => setFullscreen(fullscreen), [fullscreen]);
 
   // Chip timers.
   useEffect(() => {
@@ -189,7 +225,7 @@ export default function FrameApp() {
               shown: !layout.hidden.includes(q),
               toggle: () => togglePanel(q),
             }))}
-            onPanelsInside={() => chooseUiOutside(false)}
+            onFullscreen={() => chooseUiOutside(false)}
           />
         );
       case "advice":

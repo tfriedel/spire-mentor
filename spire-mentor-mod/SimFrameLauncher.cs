@@ -131,7 +131,9 @@ internal static class SimFrameLauncher
         _frame = frame;
         _closing = false;
         Logger.Log($"[SimFrameLauncher] started the frame ({source}): pid {frame.Id}, relay :{port}, page {url}");
-        FrameLink.Attach(port);
+        // Asked for just now (not the startup open): the panels go around
+        // the game even when the frame was last left fullscreen.
+        FrameLink.Attach(port, playerAsked: source != "startup");
     }
 
     private static void Close(string source)
@@ -176,6 +178,7 @@ internal static class SimFrameLauncher
         int code = SafeExitCode(frame);
         _frame = null;
         FrameLink.Detach();
+        FrameFullscreen.AfterFrameClosed();
         if (_closing)
         {
             _closing = false;

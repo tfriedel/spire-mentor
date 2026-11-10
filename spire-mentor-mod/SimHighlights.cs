@@ -336,12 +336,33 @@ internal sealed class SimHighlights
         _hooked = true;
     }
 
+    private string? _targetHoverFailure;
+
+    /// <summary>SimTargetHover rides this frame hook; its own guard, so a
+    /// failure there never costs the marks (logged once per message).</summary>
+    private void TickTargetHover()
+    {
+        try
+        {
+            SimTargetHover.Tick(_layer?.GetViewport());
+        }
+        catch (Exception ex)
+        {
+            if (ex.Message != _targetHoverFailure)
+            {
+                _targetHoverFailure = ex.Message;
+                Logger.Log($"[TargetHover] {ex.Message}");
+            }
+        }
+    }
+
     private void OnFrame()
     {
         if (_layer == null || !GodotObject.IsInstanceValid(_layer))
         {
             return;
         }
+        TickTargetHover();
         _frame++;
         bool visible = SpireMentorModConfig.ShowHud && SimRuntime.Mode != SimMode.Off && !SimUiHide.Hidden;
         _layer.Visible = visible;

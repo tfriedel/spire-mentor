@@ -2951,6 +2951,20 @@ pub struct PendingDrawResume {
     pub then_chains_bound: Option<CardUid>,
 }
 
+impl PendingDrawResume {
+    /// Whether nothing waits on this draw but its own remaining cards: no
+    /// turn-setup tail, no deferred rider, no caller continuation.
+    #[must_use]
+    pub(crate) fn is_plain(self) -> bool {
+        self == Self {
+            remaining: self.remaining,
+            from_hand_draw: self.from_hand_draw,
+            last_drawn: self.last_drawn,
+            ..Self::default()
+        }
+    }
+}
+
 /// A select opened inside a non-blocking hook walk (a kill's `AfterDeath`:
 /// Gremlin Horn's draw reshuffles into a Stratagem pick), parked until the
 /// flow around it finishes.
@@ -2965,23 +2979,29 @@ pub struct PendingDrawResume {
 /// next player turn's start. Only then does the screen open; the answer runs
 /// the rest of the listener (the pick to hand, the remaining draw).
 ///
-/// Everything before the select (the energy, the reshuffle, the option list)
-/// already happened. [`surface_parked_hook_choice`] puts the three parts back
-/// when the flow is done.
+/// Everything before the select (the energy, the reshuffle, the option list,
+/// an auto-played card's hits) already happened. [`surface_parked_hook_choice`]
+/// puts the parts back when the flow is done.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParkedHookChoice {
     pub choice: PendingChoice,
     pub draw: Option<PendingDrawResume>,
     pub after_shuffle_relics_deferred: Option<bool>,
+    /// The auto-play whose `OnPlay` opened the select: the horn's draw took a
+    /// Strike that Hellraiser auto-played (Seeker Strike's pick). Its tail (the
+    /// pick landing, `AfterCardPlayed`, the move to its result pile) runs when
+    /// the select resolves (Ironclad v0.111.0 3249).
+    pub autoplay: Option<PendingAutoplayResume>,
 }
 
 /// Run `walk`, a non-blocking hook walk (see [`ParkedHookChoice`]), and park a
 /// reshuffle select it opened so the surrounding flow goes on.
 ///
-/// Only the shape a draw's reshuffle leaves is parked: an
-/// [`ChoiceKind::AddFromDrawToHand`] choice whose only continuation is a plain
-/// suspended draw. Any other select (a Hellraiser auto-play's, say) keeps the
-/// blocking path.
+/// Two shapes are parked, each with a plain suspended draw at most: a draw's
+/// reshuffle select ([`ChoiceKind::AddFromDrawToHand`]), and a select opened
+/// by an auto-played card's `OnPlay` (a drawn Seeker Strike under Hellraiser),
+/// whose continuation [`PendingAutoplayResume`] fully captures. Any other
+/// select keeps the blocking path.
 pub(crate) fn run_nonblocking_hook(state: &mut CombatState, walk: impl FnOnce(&mut CombatState)) {
     let had_choice = state.pending_choice.is_some();
     state.combat_log.nonblocking_hook_depth =
@@ -3000,6 +3020,7 @@ pub(crate) fn run_nonblocking_hook(state: &mut CombatState, walk: impl FnOnce(&m
         choice,
         draw: state.pending_draw_resume.take(),
         after_shuffle_relics_deferred: state.combat_log.after_shuffle_relics_deferred.take(),
+        autoplay: state.pending_autoplay_resume.take(),
     };
     state
         .combat_log
@@ -3014,19 +3035,14 @@ pub(crate) fn parkable_hook_choice(state: &CombatState) -> bool {
     let Some(pc) = state.pending_choice.as_ref() else {
         return false;
     };
-    if pc.kind != ChoiceKind::AddFromDrawToHand {
+    let autoplay = state.pending_autoplay_resume.is_some();
+    if pc.kind != ChoiceKind::AddFromDrawToHand && !autoplay {
         return false;
     }
-    let plain_draw = state.pending_draw_resume.is_none_or(|p| {
-        p == PendingDrawResume {
-            remaining: p.remaining,
-            from_hand_draw: p.from_hand_draw,
-            last_drawn: p.last_drawn,
-            ..PendingDrawResume::default()
-        }
-    });
+    let plain_draw = state
+        .pending_draw_resume
+        .is_none_or(PendingDrawResume::is_plain);
     plain_draw
-        && state.pending_autoplay_resume.is_none()
         && state.pending_collect_resume.is_none()
         && state.pending_cluster_resume.is_none()
         && state.pending_potion_hook_resume.is_none()
@@ -3062,6 +3078,7 @@ pub(crate) fn surface_parked_hook_choice(state: &mut CombatState) -> bool {
     state.pending_choice = Some(parked.choice);
     state.pending_draw_resume = parked.draw;
     state.combat_log.after_shuffle_relics_deferred = parked.after_shuffle_relics_deferred;
+    state.pending_autoplay_resume = parked.autoplay;
     true
 }
 
@@ -8064,6 +8081,22 @@ impl CombatState {
     /// flips ONLY the hook timing + suspension, not rider coverage.
     /// Bead `sts2-rs-63mew`.
     pub(crate) fn draw_suspending(&mut self, n: i32, from_hand_draw: bool) -> usize {
+        // An earlier card-effect draw is suspended on a reshuffle select
+        // (Stratagem's grid). C# awaits that `CardPileCmd.Draw`, pick
+        // included, before its caller goes on, so a draw issued meanwhile
+        // (Vicious drawing on the next target's Vulnerable, Centennial
+        // Puzzle's next single draw) comes after the pick. Fold it into the
+        // suspended draw's remainder rather than drawing over the open select
+        // (loadout Ironclad v0.107.1 3290: Thunderclap + Vicious; v0.111.0
+        // 2006: Centennial Puzzle).
+        if !from_hand_draw && self.pending_choice.is_some() {
+            if let Some(pdr) = self.pending_draw_resume.as_mut() {
+                if !pdr.from_hand_draw && pdr.is_plain() {
+                    pdr.remaining = pdr.remaining.saturating_add(n.max(0));
+                    return 0;
+                }
+            }
+        }
         let mut remaining = n.max(0);
         let mut moved = 0usize;
         while remaining > 0 {
@@ -9992,6 +10025,21 @@ impl CombatState {
             if c.card_id != card_id {
                 continue;
             }
+            // A card zeroed by a local `Absolute(0)` (Bullet Time /
+            // `SetToFreeThisTurn`, `SetUntilPlayed(0)`) shows only what is
+            // appended after that zero ([`cards::VarKey::CostAddedAfterLocalZero`]).
+            // This `AddThisTurn(-1)` lands after it (local modifiers fold in
+            // insertion order, `CardEnergyCost.cs:110-115`), so the local cost
+            // goes to -1 and `Hook.ModifyEnergyCostInCombat` skips Tangled's
+            // surcharge on a negative cost (loadout Silent v0.111.0 1372:
+            // an Entangled Pinpoint after Bullet Time + a Skill, C# 0, Rust 1).
+            // The base bank below still carries the -1 once the zero expires.
+            if c.combat_var(cards::VarKey::FreeThisTurn) != 0
+                || c.combat_var(cards::VarKey::FreeUntilPlayed) != 0
+            {
+                let key = cards::VarKey::CostAddedAfterLocalZero;
+                c.set_combat_var(key, c.combat_var(key).saturating_sub(1));
+            }
             if c.cost > 0 {
                 c.cost -= 1;
                 let banked = c.combat_var(bank);
@@ -10349,8 +10397,19 @@ impl CombatState {
             }
             let roll = self.run_rng.combat_energy_costs.next_int(0, 3) as i8;
             if let Some(card) = self.cards.get_mut(idx) {
-                let delta = i32::from(roll) - i32::from(cur_cost);
-                card.cost = roll;
+                // An earlier `AddUntilPlayed(-n)` (v0.111.0 RocketPunch,
+                // Bookmark, SlumberingEssence) folds BEFORE this Absolute roll
+                // (local modifiers apply in insertion order,
+                // `CardEnergyCost.cs:110-115`), so the roll alone is the shown
+                // cost. The collapsed model subtracts the reduction after
+                // `cost`, so store `roll + reduction`; when the roll expires at
+                // turn end the reduction applies to the old cost again, as in
+                // C#. Loadout Defect v0.111.0 1307: a Gunk-Up'd RocketPunch
+                // rolled 2, C# 2, Rust 1.
+                let reduction = card.combat_var(VarKey::CostReductionUntilPlayed);
+                let new_cost = i32::from(roll) + reduction;
+                let delta = new_cost - i32::from(cur_cost);
+                card.cost = i8::try_from(new_cost).unwrap_or(i8::MAX);
                 let banked = card.combat_var(VarKey::SneckoCostDeltaThisTurn);
                 card.set_combat_var(
                     VarKey::SneckoCostDeltaThisTurn,
@@ -19302,6 +19361,55 @@ mod tests {
             1,
             "a floored play must not bank a further discount"
         );
+    }
+
+    /// A Skill played after a local `Absolute(0)` (Bullet Time's
+    /// `SetToFreeThisTurn`) appends Pinpoint's `AddThisTurn(-1)` after the
+    /// zero: the local cost is -1, so `Hook.ModifyEnergyCostInCombat` leaves
+    /// it alone and Tangled's +1 does not land. Once the zero expires (played,
+    /// or turn end) the base carries the -1. Loadout Silent v0.111.0 1372:
+    /// an Entangled Pinpoint, C# 0, Rust 1.
+    #[test]
+    fn pinpoint_discount_after_a_local_zero_absorbs_the_tangled_surcharge() {
+        let mut state = CombatState::default();
+        let uid = CardUid::new(1).expect("nz");
+        let mut pinpoint = Card {
+            card_id: crate::cards::CardId::Pinpoint,
+            card_type: crate::cards::CardType::Attack,
+            cost: 3,
+            ..Card::pod_defaults()
+        };
+        pinpoint.uid = uid;
+        pinpoint.affliction = Some(crate::card_afflictions::CardAffliction::new(
+            crate::card_afflictions::CardAfflictionKind::Entangled,
+            1,
+        ));
+        pinpoint.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        state.cards.push(pinpoint);
+        state.player.hand.push(uid);
+        let pid = std::num::NonZeroU32::new(1).unwrap();
+        state.powers.push(crate::Power {
+            id: pid,
+            kind: crate::PowerKind::Tangled,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(crate::PowerUid(pid));
+        assert_eq!(
+            crate::hooks::effective_card_cost(&state, uid),
+            1,
+            "free this turn, plus Tangled's +1"
+        );
+
+        state.discount_pinpoint_on_skill_played();
+        assert_eq!(
+            crate::hooks::effective_card_cost(&state, uid),
+            0,
+            "the -1 after the zero takes the local cost below 0"
+        );
+        assert_eq!(state.cards[0].cost, 2, "the base still carries the -1");
     }
 
     #[test]

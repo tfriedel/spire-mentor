@@ -250,8 +250,21 @@ fn galvanic_self_damage_lands_before_oblivion_shroud_block() {
     push_player_power(&mut state, PowerKind::Shroud, 3);
     state.player.block = 3;
 
+    // The played Power card is Galvanized (GalvanicPower.BeforeCombatStart).
+    let card_uid = CardUid::new(state.cards.len() as u32 + 1).expect("nonzero");
+    state.cards.push(Card {
+        uid: card_uid,
+        card_type: CardType::Power,
+        affliction: Some(sts2_core::card_afflictions::CardAffliction::new(
+            sts2_core::card_afflictions::CardAfflictionKind::Galvanized,
+            6,
+        )),
+        ..Card::pod_defaults()
+    });
+
     hooks::dispatch_before_card_played_powers(&mut state, 0, false);
     let ctx = CardCtx {
+        card_uid: Some(card_uid),
         card_type: Some(CardType::Power),
         ..CardCtx::default()
     };
@@ -617,8 +630,13 @@ fn veilpiercer_discounts_cards_made_ethereal_by_hex_or_this_combat() {
         .unwrap()
         .set_combat_var(sts2_core::cards::VarKey::EtherealThisCombat, 0);
 
-    // Hex makes every owned card Ethereal → free.
+    // Hex makes every Hexed card Ethereal → free.
     push_player_power(&mut state, PowerKind::Hex, 2);
+    state.cards[plain_uid.get() as usize - 1].affliction =
+        Some(sts2_core::card_afflictions::CardAffliction::new(
+            sts2_core::card_afflictions::CardAfflictionKind::Hexed,
+            2,
+        ));
     assert_eq!(
         hooks::dispatch_modify_card_cost(&state, &ctx),
         0,

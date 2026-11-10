@@ -291,6 +291,7 @@ fn hexed_burn_burns_then_exhausts() {
         let p = state.player.creature_uid.expect("player");
         give(&mut state, p, PowerKind::Hex, 1);
         let burn = add_to(&mut state, CardId::Burn, PileKind::Hand);
+        sts2_core::monster_power_effects::hex_after_applied(&mut state, 1);
         let hp_before = state.player.current_hp;
         state.phase = CombatPhase::PlayerEndTurnPhaseOne;
         let _ = sts2_core::combat_loop::end_player_turn_phase_two(&mut state);

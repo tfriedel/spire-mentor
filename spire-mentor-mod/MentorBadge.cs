@@ -160,3 +160,59 @@ internal static class MentorBadge
                     ? "AI fights — Stop (F7)"
                     : null;
 }
+
+/// <summary>
+/// Whether the badge says "thinking". Most thinks after a player's action
+/// take a few milliseconds; showing each one flashed "· thinking ●○○" on the
+/// badge, which widened it and shoved the buttons beside it (Exit
+/// fullscreen) left and back after every action (live, 2026-11-09). So a
+/// think shows only once it has run <see cref="ShowAfter"/>, and once shown
+/// it stays until the advisor has been idle <see cref="HideAfter"/>, so a
+/// run of back-to-back thinks (the AI playing) reads as one.
+/// </summary>
+public sealed class ThinkingIndicator
+{
+    public static readonly TimeSpan ShowAfter = TimeSpan.FromMilliseconds(600);
+    public static readonly TimeSpan HideAfter = TimeSpan.FromMilliseconds(400);
+
+    private DateTime? _thinkingSince;
+    private DateTime? _idleSince;
+    private bool _shown;
+
+    /// <summary>Feed the advisor's state now; returns whether to show it.</summary>
+    public bool Update(bool thinking, DateTime now)
+    {
+        if (thinking)
+        {
+            _idleSince = null;
+            _thinkingSince ??= now;
+            if (now - _thinkingSince.Value >= ShowAfter)
+            {
+                _shown = true;
+            }
+        }
+        else
+        {
+            _thinkingSince = null;
+            _idleSince ??= now;
+            if (now - _idleSince.Value >= HideAfter)
+            {
+                _shown = false;
+            }
+        }
+        return _shown;
+    }
+
+    /// <summary>The status the badge shows: Thinking only while
+    /// <see cref="Update"/> says so, Connected otherwise.</summary>
+    public AdvisorStatusLite Shown(AdvisorStatusLite status, DateTime now)
+    {
+        bool show = Update(status == AdvisorStatusLite.Thinking, now);
+        return status switch
+        {
+            AdvisorStatusLite.Thinking => show ? AdvisorStatusLite.Thinking : AdvisorStatusLite.Connected,
+            AdvisorStatusLite.Connected => show ? AdvisorStatusLite.Thinking : AdvisorStatusLite.Connected,
+            _ => status,
+        };
+    }
+}

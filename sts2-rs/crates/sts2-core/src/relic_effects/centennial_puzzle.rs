@@ -35,18 +35,11 @@ pub(crate) fn on_after_damage_received_centennial_puzzle(
     // card — not a single 3-card batch.
     // A draw can suspend on a reshuffle's player choice (StratagemPower's
     // `AfterShuffle` grid): C# `await`s that `Draw` before issuing the next
-    // one, so the remaining single draws run only after the pick. Fold them
-    // into the suspended draw's resume instead of drawing over (or dropping
-    // past) the open select (loadout Ironclad v0.111.0 2006: Rust ended the
-    // turn-4 hand one card short).
-    for i in 0..3 {
+    // one, so the remaining single draws run only after the pick.
+    // `draw_suspending` folds them into the suspended draw's resume (loadout
+    // Ironclad v0.111.0 2006: Rust ended the turn-4 hand one card short).
+    for _ in 0..3 {
         let _ = state.draw_into_hand_card_effect(1);
-        if state.pending_choice.is_some() {
-            if let Some(pdr) = state.pending_draw_resume.as_mut() {
-                pdr.remaining += 2 - i;
-                break;
-            }
-        }
     }
     EffectResult::Resolved
 }

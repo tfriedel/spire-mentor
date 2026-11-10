@@ -207,6 +207,25 @@ Check("badge hidden", MentorBadge.Text(Badge(MentorMode.Coach, hidden: true), 0,
 Check("badge crashed", MentorBadge.Text(Badge(MentorMode.Coach, AdvisorStatusLite.Crashed), 0, false), "Spire Mentor · Coach · offline");
 Check("badge waiting for the advisor", MentorBadge.Text(Badge(MentorMode.Coach, AdvisorStatusLite.None), 0, false), "Spire Mentor · Coach · starting");
 Check("badge AI playing", MentorBadge.Text(Badge(MentorMode.AiPlays), 0, false), "Spire Mentor · AI playing");
+{
+    // ThinkingIndicator: a millisecond think never reaches the badge; a long
+    // one does, and a short gap between thinks keeps it up.
+    DateTime t0 = new(2026, 11, 9, 12, 0, 0, DateTimeKind.Utc);
+    DateTime At(int ms) => t0.AddMilliseconds(ms);
+    var quick = new ThinkingIndicator();
+    Check("thinking: a quick think is hidden", quick.Shown(AdvisorStatusLite.Thinking, At(0)).ToString(), "Connected");
+    Check("thinking: still hidden at 0.5 s", quick.Shown(AdvisorStatusLite.Thinking, At(500)).ToString(), "Connected");
+    Check("thinking: done before it showed", quick.Shown(AdvisorStatusLite.Connected, At(520)).ToString(), "Connected");
+    Check("thinking: the next think starts the clock over", quick.Shown(AdvisorStatusLite.Thinking, At(700)).ToString(), "Connected");
+    var slow = new ThinkingIndicator();
+    slow.Shown(AdvisorStatusLite.Thinking, At(0));
+    Check("thinking: shows once it lasts", slow.Shown(AdvisorStatusLite.Thinking, At(600)).ToString(), "Thinking");
+    Check("thinking: lingers through a short gap", slow.Shown(AdvisorStatusLite.Connected, At(700)).ToString(), "Thinking");
+    Check("thinking: the next think keeps it up", slow.Shown(AdvisorStatusLite.Thinking, At(900)).ToString(), "Thinking");
+    slow.Shown(AdvisorStatusLite.Connected, At(1000));
+    Check("thinking: goes after a real pause", slow.Shown(AdvisorStatusLite.Connected, At(1400)).ToString(), "Connected");
+    Check("thinking: other states pass through", slow.Shown(AdvisorStatusLite.Crashed, At(1500)).ToString(), "Crashed");
+}
 Check("badge autobattle", MentorBadge.Text(Badge(MentorMode.Hints, battle: true), 0, false), "Spire Mentor · Autobattle");
 Check("badge autopilot", MentorBadge.Text(Badge(MentorMode.AiPlays, autopilot: true, engaged: true), 0, false), "Spire Mentor · Autopilot");
 Check("badge autopilot idle", MentorBadge.Text(Badge(MentorMode.AiPlays, autopilot: true), 0, false), "Spire Mentor · Autopilot (waiting)");

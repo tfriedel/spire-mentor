@@ -30,6 +30,7 @@ export type HostMessage =
   | { type: "game_rect"; x: number; y: number; w: number; h: number }
   | { type: "to_mod"; msg: unknown }
   | { type: "focus_game" }
+  | { type: "fullscreen"; on: boolean }
   | { type: "workbench"; run: string | null; step: number | null }
   | { type: "menu"; id: string; x: number; y: number; left: number; top: number; right: number; items: NativeMenuItem[] }
   | { type: "log"; text: string };
@@ -104,7 +105,12 @@ export function setUiOutside(outside: boolean): void {
   postHost({ type: "focus_game" });
 }
 
-const UI_OUTSIDE_KEY = "spirementor.frame.uiOutside";
+/** The frame window borderless over its whole monitor (true), or as it was. */
+export function setFullscreen(on: boolean): void {
+  postHost({ type: "fullscreen", on });
+}
+
+const UI_OUTSIDE_KEY ="spirementor.frame.uiOutside";
 
 /** The viewer's last choice (default: around the game). */
 export function loadUiOutside(): boolean {

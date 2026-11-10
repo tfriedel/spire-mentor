@@ -1685,10 +1685,9 @@ pub fn apply_effect(state: &mut CombatState, effect: Effect) {
             // a small list either way.
             if let ListenerRef::Power(uid) = listener {
                 let pid = uid.0;
-                let was_tangled = state
-                    .powers
-                    .get_by_id(pid)
-                    .is_some_and(|p| p.kind == PowerKind::Tangled);
+                let removed_kind = state.powers.get_by_id(pid).map(|p| p.kind);
+                let was_tangled = removed_kind == Some(PowerKind::Tangled);
+                let was_ringing = removed_kind == Some(PowerKind::Ringing);
                 state.powers.retain(|p| p.id != pid);
                 state.player.powers.retain(|u| u.0 != pid);
                 for c in &mut state.creatures {
@@ -1697,6 +1696,10 @@ pub fn apply_effect(state: &mut CombatState, effect: Effect) {
                 // C# `TangledPower.AfterRemoved` clears the Entangled cards.
                 if was_tangled && state.player_power_amount(PowerKind::Tangled) <= 0 {
                     crate::monster_power_effects::tangled_after_removed(state);
+                }
+                // C# `RingingPower.AfterRemoved` clears the Ringing cards.
+                if was_ringing && state.player_power_amount(PowerKind::Ringing) <= 0 {
+                    crate::monster_power_effects::ringing_after_removed(state);
                 }
             }
         }
@@ -16614,7 +16617,6 @@ fn dispatch_after_card_played_player_powers(
 /// the co-op teammates waiting in their seats (Sneaky). Card-owned listeners
 /// (enchantments) run after this, in the play pipeline.
 pub fn dispatch_after_card_played_other_creatures(state: &mut CombatState, ctx: &CardCtx) {
-    let is_power = ctx.card_type == Some(crate::cards::CardType::Power);
     // ── React: Sneaky (co-op) ──────────────────────────────────────────
     // C# `SneakyPower.AfterCardPlayed` (SneakyPower.cs:22-25): when ANOTHER
     // player plays an Attack, the owner gains `Amount` Unpowered block. The
@@ -16641,17 +16643,12 @@ pub fn dispatch_after_card_played_other_creatures(state: &mut CombatState, ctx: 
     //                           base.Amount, Unpowered | Move, …)`
     // (no `Unblockable` flag, so the player's own block absorbs — Burn-class).
     //
-    // Net-observable port (reference_card_affliction_powers_model_net_observable,
-    // the Tangled/Hex precedent): because *every* player Power card is
-    // Galvanized in C# (combat-start tagging + on-enter tagging), "the played
-    // card is Galvanized" is exactly equivalent to "the played card is a Power
-    // card, while a living GalvanicPower owner is in combat". We therefore gate
-    // the self-damage on `ctx.card_type == Power` + a living Galvanic owner,
-    // rather than threading the per-card `Galvanized` affliction (which would
-    // require a mutable `before_combat_start` tagging pass — a larger change).
-    // `dispatch_after_card_played` already fires AFTER the card body resolves,
-    // matching C#'s `AfterCardPlayed` timing. This is the directly-observable
-    // bug (DRUM_OF_BATTLE: player.hp 63 C# vs 69 Rust — the missing 6 self-damage).
+    // The cards are Galvanized at combat start / on entering combat
+    // (`monster_power_effects::galvanic_before_combat_start` and its
+    // card-entered handler), so the gate is the played card's own affliction:
+    // a Power card that already held another affliction is not Galvanized
+    // and deals no damage. `dispatch_after_card_played` fires AFTER the card
+    // body resolves, matching C#'s `AfterCardPlayed` timing.
     //
     // Galvanic only ever lives on a monster (GlobeHead applies it to self on
     // spawn, see `MonsterKind::on_spawn_self_buffs`); iterating the whole arena
@@ -16666,7 +16663,14 @@ pub fn dispatch_after_card_played_other_creatures(state: &mut CombatState, ctx: 
     // hit (loadout Necrobinder 1122-v0.107.1: Neurosurge, C# block 3 -> 0,
     // HP -3, then Shroud 0 -> 3; Rust 3 -> 6 -> 0, no HP lost).
     // present_kinds lane gate (perf): no live Galvanic ⇒ nothing to collect.
-    if is_power && power_kind_live(state, PowerKind::Galvanic) {
+    let played_galvanized = ctx.card_uid.is_some_and(|uid| {
+        crate::monster_power_effects::card_has_affliction(
+            state,
+            uid,
+            crate::card_afflictions::CardAfflictionKind::Galvanized,
+        )
+    });
+    if played_galvanized && power_kind_live(state, PowerKind::Galvanic) {
         let galvanic_owners = state
             .powers
             .iter()
@@ -17490,7 +17494,14 @@ fn tick_slumber_and_maybe_wake(
         };
         if let Some(c) = state.creatures.iter_mut().find(|c| c.id == creature_uid.0) {
             if let Some(ai) = c.ai.as_mut() {
-                ai.force_current_state(forced_state);
+                // The damage path is C# `CreatureCmd.Stun` → `SetMoveImmediate`,
+                // which never logs the stun. The turn-end force stands in for
+                // C#'s roll onto ROLL_OUT, which does log it (#1215).
+                if refresh_telegraph {
+                    ai.force_current_state(forced_state);
+                } else {
+                    ai.force_current_state_unlogged(forced_state);
+                }
                 // Re-point the telegraph at the forced move on BOTH paths.
                 // Turn-end wake: next phase must perform the rollout's
                 // damage, not the stale Sleep. Damage-path wake: C#
@@ -17745,7 +17756,8 @@ fn asleep_wake_on_unblocked_damage(state: &mut CombatState, creature_uid: Creatu
     // ForceMonsterMove/Flutter discipline.
     if let Some(c) = state.creatures.iter_mut().find(|c| c.id == creature_uid.0) {
         if let Some(ai) = c.ai.as_mut() {
-            if ai.force_current_state_by_name("WAKE_UP_MOVE") {
+            // A stun: C# never logs it (#1215).
+            if ai.force_current_state_by_name_unlogged("WAKE_UP_MOVE") {
                 c.intent = ai.current_move().intents.first().copied();
             }
         }
@@ -24359,6 +24371,34 @@ mod tests {
         assert!(damage_modifier_breakdown(&state, &ctx).is_empty());
     }
 
+    /// Push a card of `card_type` carrying `aff` and return the
+    /// `AfterCardPlayed` ctx for it.
+    fn played_card_ctx(
+        state: &mut CombatState,
+        card_type: crate::cards::CardType,
+        aff: Option<crate::card_afflictions::CardAffliction>,
+    ) -> CardCtx {
+        let uid = crate::CardUid::new(u32::try_from(state.cards.len() + 1).unwrap()).unwrap();
+        state.cards.push(crate::cards::Card {
+            uid,
+            card_type,
+            affliction: aff,
+            ..crate::cards::Card::pod_defaults()
+        });
+        CardCtx {
+            card_uid: Some(uid),
+            card_type: Some(card_type),
+            ..CardCtx::default()
+        }
+    }
+
+    fn galvanized(amount: i32) -> crate::card_afflictions::CardAffliction {
+        crate::card_afflictions::CardAffliction::new(
+            crate::card_afflictions::CardAfflictionKind::Galvanized,
+            amount,
+        )
+    }
+
     /// **GalvanicPower self-damage arm**: GlobeHead's `GalvanicPower(6)` deals
     /// 6 blockable self-damage to the player on every Power card played
     /// (C# `GalvanicPower.AfterCardPlayed`). A Power card triggers it; a Skill
@@ -24370,10 +24410,7 @@ mod tests {
         let (mut state, _enemy) = state_with_enemy_power(PowerKind::Galvanic, 6);
         state.player.current_hp = 69;
         state.player.max_hp = 80;
-        let ctx = CardCtx {
-            card_type: Some(CardType::Power),
-            ..CardCtx::default()
-        };
+        let ctx = played_card_ctx(&mut state, CardType::Power, Some(galvanized(6)));
         dispatch_after_card_played(&mut state, &ctx);
         assert_eq!(
             state.player.current_hp, 63,
@@ -24391,15 +24428,31 @@ mod tests {
         let (mut state, _enemy) = state_with_enemy_power(PowerKind::Galvanic, 6);
         state.player.current_hp = 69;
         state.player.max_hp = 80;
-        let ctx = CardCtx {
-            card_type: Some(CardType::Skill),
-            ..CardCtx::default()
-        };
+        let ctx = played_card_ctx(&mut state, CardType::Skill, None);
         dispatch_after_card_played(&mut state, &ctx);
         assert_eq!(
             state.player.current_hp, 69,
             "Galvanic must NOT fire on a non-Power card",
         );
+    }
+
+    /// **GalvanicPower gates on the affliction, not the card type**: C#
+    /// `GalvanicPower.AfterCardPlayed` checks `cardPlay.Card.Affliction is
+    /// Galvanized`. A Power card that already held another affliction when
+    /// Galvanic tried to afflict it is not Galvanized and deals no damage.
+    #[test]
+    fn galvanic_does_not_fire_for_a_power_card_with_another_affliction() {
+        use crate::cards::CardType;
+        let (mut state, _enemy) = state_with_enemy_power(PowerKind::Galvanic, 6);
+        state.player.current_hp = 69;
+        state.player.max_hp = 80;
+        let bound = Some(crate::card_afflictions::CardAffliction::new(
+            crate::card_afflictions::CardAfflictionKind::Bound,
+            1,
+        ));
+        let ctx = played_card_ctx(&mut state, CardType::Power, bound);
+        dispatch_after_card_played(&mut state, &ctx);
+        assert_eq!(state.player.current_hp, 69);
     }
 
     /// **GalvanicPower block absorbs**: the self-damage is Burn-class
@@ -24412,15 +24465,13 @@ mod tests {
         state.player.current_hp = 69;
         state.player.max_hp = 80;
         state.player.block = 6;
-        let ctx = CardCtx {
-            card_type: Some(CardType::Power),
-            ..CardCtx::default()
-        };
+        let ctx = played_card_ctx(&mut state, CardType::Power, Some(galvanized(6)));
         dispatch_after_card_played(&mut state, &ctx);
         assert_eq!(
             state.player.current_hp, 69,
             "6 block fully absorbs the 6 Galvanic self-damage",
         );
+        assert_eq!(state.player.block, 0, "the hit landed on the block");
     }
 
     /// **Enemy Strength** = same `PowerKind::Strength` mounted on an

@@ -378,10 +378,9 @@ fn turret_operator_reload_effect(state: &mut CombatState, owner: CreatureUid) {
 /// `SpectralKnight.cs:60-68` `HexMove`:
 /// `await PowerCmd.Apply<HexPower>(target, 2m, …)` to the player. The
 /// telegraph `DebuffIntent` applies nothing, so the Hex stack lands here.
-/// NOTE: `HexPower`'s card-affliction behavior (afflict all cards →
-/// Hexed/Ethereal on play) is NOT yet wired in the Rust engine — only the
-/// `PowerKind::Hex` stack is tracked here. Behavioral wiring is tracked by
-/// `sts2-rs-l7k3d`.
+/// A fresh Hex fires `HexPower.AfterApplied`: every player card with no
+/// affliction becomes `Hexed(2)`, i.e. Ethereal while the power lives
+/// (`monster_power_effects::hex_after_applied`).
 fn spectral_knight_hex_effect(state: &mut CombatState, owner: CreatureUid) {
     // Co-op: each player's Hex records this knight.
     sts2_core::coop::each_player(state, |state| {
@@ -391,7 +390,12 @@ fn spectral_knight_hex_effect(state: &mut CombatState, owner: CreatureUid) {
 
 /// [`spectral_knight_hex_effect`] for the seated player alone.
 fn spectral_knight_hex_effect_seated(state: &mut CombatState, owner: CreatureUid) {
+    let fresh = state.player_power_amount(PowerKind::Hex) <= 0;
     apply_power_to_player_via_legacy_surface(state, PowerKind::Hex, 2);
+    let amount = state.player_power_amount(PowerKind::Hex);
+    if fresh && amount > 0 {
+        sts2_core::monster_power_effects::hex_after_applied(state, amount);
+    }
     // C# `HexPower.AfterDeath` (`HexPower.cs:37-43`) removes the power when
     // its APPLIER dies — stamp the applier so the death path
     // (`remove_hex_from_dead_applier`) can drop it (sweep seed 4170:
@@ -1391,6 +1395,10 @@ pub fn create_frog_knight_ai() -> MonsterAi {
 /// `GlobeHead` — SHOCKING_SLAP → THUNDER_STRIKE → GALVANIC_BURST →
 /// SHOCKING_SLAP.
 pub fn create_globe_head_ai() -> MonsterAi {
+    // GalvanicPower's AfterCardEnteredCombat leg rides the monster-power
+    // registry; install it the first time a GlobeHead spawns (as VitalSpark).
+    static INSTALL_GALVANIC: std::sync::Once = std::sync::Once::new();
+    INSTALL_GALVANIC.call_once(sts2_core::monster_power_effects::install_galvanic_power_handlers);
     let mut s = BTreeMap::new();
     s.insert(
         "SHOCKING_SLAP",
@@ -2511,7 +2519,7 @@ fn queen_puppet_strings_effect(state: &mut CombatState, _owner: CreatureUid) {
 ///    `BURN_BRIGHT_FOR_ME_BRANCH` to the
 ///    OFF_WITH_YOUR_HEAD / EXECUTION / ENRAGE chain).
 /// 4. If Queen's current move is `BURN_BRIGHT_FOR_ME_MOVE`, we
-///    [`force_current_state`](sts2_core::monster_ai::MonsterAi::force_current_state)
+///    [`force_current_state_unlogged`](sts2_core::monster_ai::MonsterAi::force_current_state_unlogged)
 ///    to `ENRAGE_MOVE` — that is C# `SetMoveImmediate(EnragedState)`.
 ///    Otherwise we let the normal graph + flipped counter carry her
 ///    into the OFF_WITH_YOUR_HEAD chain on the next roll.
@@ -2547,7 +2555,9 @@ fn queen_after_death(
         //   turn start (CombatManager.cs:745) moves on from ENRAGE to its
         //   follow-up, so she skips ENRAGE and goes to OFF_WITH_YOUR_HEAD
         //   (Necrobinder act-3 checkpoint branch 1001#b3, v0.111.0).
-        ai.force_current_state("ENRAGE_MOVE");
+        // C# never logs a `SetMoveImmediate`d state; BURN_BRIGHT stays logged
+        // from its roll (#1215).
+        ai.force_current_state_unlogged("ENRAGE_MOVE");
         queen.intent = ai.current_move().intents.first().copied();
     }
 }
@@ -2929,10 +2939,13 @@ pub(crate) fn adaptable_after_death(state: &mut CombatState, owner: CreatureUid)
     // intent roll (`enemy_turn_end::roll_next_enemy_intents`, now that the
     // creature is alive) resolves the branch and telegraphs the post-revive
     // move. Bead `sts2-rs-jnf4a`.
+    //
+    // `SetMoveImmediate` never logs RESPAWN, and the move it displaces was
+    // logged when C# rolled it, so the force is the unlogged one (#1215).
     if let Some(c) = state.creatures.iter_mut().find(|c| c.id == owner.0) {
         if let Some(ai) = c.ai.as_mut() {
             ai.set_counter(respawns_after);
-            ai.force_current_state("RESPAWN");
+            ai.force_current_state_unlogged("RESPAWN");
             ai.on_move_performed();
         }
     }
@@ -3161,6 +3174,62 @@ mod tests {
         }
         // C# uses `% 3`, so idx 3 wraps back to CHOMP (idx 0).
         assert_eq!(create_scroll_of_biting_ai(3).current_state_id(), "CHOMP");
+    }
+
+    /// #1215: C# `TriggerDeadState` → `SetMoveImmediate(DeadState)`
+    /// (TestSubject.cs:171) never logs RESPAWN, and the BITE it displaces
+    /// stays logged from its roll: C#'s log reads `[…, SKULL_BASH, BITE,
+    /// MULTI_CLAW]`, not `[…, SKULL_BASH, RESPAWN, MULTI_CLAW]`.
+    #[test]
+    fn test_subject_respawn_logs_the_displaced_move_not_respawn() {
+        use std::num::NonZeroU32;
+
+        use smallvec::SmallVec;
+        use sts2_core::monsters::test_subject;
+        use sts2_core::{
+            Creature, CreatureUid, IntentHistory, MonsterId, MonsterKind, Power, PowerUid,
+        };
+
+        let mut ai = create_test_subject_ai();
+        ai.on_move_performed(); // BITE
+        ai.roll_move_seeded(0); // → SKULL_BASH
+        ai.on_move_performed();
+        ai.roll_move_seeded(0); // → BITE, telegraphed when it dies
+        assert_eq!(ai.current_state_id(), "BITE");
+
+        let mut state = CombatState::default();
+        let owner_raw = NonZeroU32::new(1).expect("nz");
+        let owner = CreatureUid(owner_raw);
+        let adaptable_pid = NonZeroU32::new(1).expect("nz");
+        let mut powers: SmallVec<[PowerUid; 8]> = SmallVec::new();
+        powers.push(PowerUid(adaptable_pid));
+        state
+            .powers
+            .push(Power::new(adaptable_pid, PowerKind::Adaptable, 1));
+        state.creatures.push(Creature {
+            id: owner_raw,
+            current_hp: 0,
+            max_hp: test_subject::FIRST_FORM_HP,
+            block: 0,
+            powers,
+            species: Some(MonsterKind::TestSubject),
+            monster_id: MonsterId("TestSubject"),
+            intent: None,
+            intent_history: IntentHistory::default(),
+            ai: Some(ai),
+        });
+        state.enemy_uids.push(owner);
+
+        adaptable_after_death(&mut state, owner);
+
+        let mut ai = state.creatures[0].ai.clone().expect("ai");
+        assert_eq!(ai.move_history(), ["BITE", "SKULL_BASH", "BITE"]);
+        ai.set_owner(owner);
+        assert_eq!(ai.roll_move_with_combat_seeded(0, &state).id, "MULTI_CLAW");
+        assert_eq!(
+            ai.wire_move_log().as_slice(),
+            ["BITE", "SKULL_BASH", "BITE", "MULTI_CLAW"]
+        );
     }
 
     fn run_three_moves(ai: &mut MonsterAi) -> Vec<&'static str> {
@@ -4602,6 +4671,17 @@ mod tests {
         let ai = queen.ai.as_ref().expect("queen has ai");
         assert_eq!(ai.current_state_id(), "ENRAGE_MOVE");
         assert_eq!(queen.intent, ai.current_move().intents.first().copied());
+        // #1215: C# logged BURN_BRIGHT at its roll and never logs the
+        // `SetMoveImmediate`d ENRAGE, not even after it runs.
+        let logged = [
+            "PUPPET_STRINGS_MOVE",
+            "YOURE_MINE_MOVE",
+            "BURN_BRIGHT_FOR_ME_MOVE",
+        ];
+        assert_eq!(ai.wire_move_log().as_slice(), logged);
+        let mut ai = ai.clone();
+        ai.on_move_performed();
+        assert_eq!(ai.move_history(), logged);
     }
 
     /// Negative path for `sts2-rs-6g4v4`: the listener ignores deaths of

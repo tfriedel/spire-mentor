@@ -211,7 +211,11 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
   `FrameLink.Attach` feeds it. The settings pages' tickbox and the Panels ▾
   entry turn it on, and it reopens on the next start; closing the frame window
   gives the game its window back, puts the panels in again and unticks it. A
-  fullscreen game goes windowed first. The workbench keys (g / p / h / f)
+  fullscreen game goes windowed first. Framed, fullscreen is the frame's
+  (`FrameFullscreen.cs`): its toolbar's **⛶ Fullscreen**, the game's Fullscreen
+  tickbox or Alt+Enter move the panels into the game and the frame covers the
+  monitor, borderless; the **⛶ Exit fullscreen** button beside the badge goes
+  back. The workbench keys (g / p / h / f)
   stay bound only for a game the frame launched (`--spire-mentor-frame-port`).
 - **Hotkeys** (`SimHotkeys.cs`) — `F1` help panel (the in-game documentation:
   current mode, every key, file locations), `Ctrl+L` action-log panel (it

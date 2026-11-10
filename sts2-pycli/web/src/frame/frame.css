@@ -659,3 +659,12 @@ body {
     animation: none;
   }
 }
+
+/* The way to a full-screen game, at the toolbar's right end: players asked
+   for "fullscreen" and did not find it under Panels. */
+.fr-fullscreen {
+  flex: none;
+  margin-left: 6px;
+  border-color: var(--accent-strong);
+  font-weight: 600;
+}

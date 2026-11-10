@@ -196,8 +196,12 @@ pub fn dispatch_after_card_entered_combat_on_monster_powers(
     let smoggy = smoggy_after_card_entered_combat(state, card_uid);
     // `TangledPower.AfterCardEnteredCombat` sits on the player too (same leg).
     let tangled = tangled_after_card_entered_combat(state, card_uid);
-    let player_legs = if tangled == EffectResult::Resolved {
-        tangled
+    // RingingPower / HexPower (+ the Hexed affliction's own hook) ride the same
+    // player-side leg.
+    let ringing = ringing_after_card_entered_combat(state, card_uid);
+    let hex = hex_after_card_entered_combat(state, card_uid);
+    let player_legs = if [tangled, ringing, hex].contains(&EffectResult::Resolved) {
+        EffectResult::Resolved
     } else {
         smoggy
     };
@@ -230,7 +234,7 @@ pub fn dispatch_after_card_entered_combat_on_monster_powers(
                 .map(|p| (owner, p.kind))
         })
         .collect();
-    let mut any_resolved = smoggy == EffectResult::Resolved;
+    let mut any_resolved = player_legs == EffectResult::Resolved;
     for (owner, kind) in pairs {
         if let Some(handler) = lookup_after_card_entered_combat_for_power(kind) {
             if handler(state, owner, card_uid) == EffectResult::Resolved {
@@ -941,6 +945,295 @@ pub fn tangled_after_removed(state: &mut CombatState) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared per-card affliction helpers (RingingPower / HexPower / GalvanicPower)
+// ---------------------------------------------------------------------------
+
+/// C# `CardCmd.Afflict<T>(card, amount)` (`CardCmd.cs:625-659`) through
+/// `AfflictionModel.CanAfflict` (`AfflictionModel.cs:190-205`):
+///
+/// * the card type must be afflictable (`CanAfflictCardType`);
+/// * an unafflicted card takes the affliction at `amount`;
+/// * a card already carrying the SAME stackable affliction (Tainted,
+///   Galvanized) adds `amount` to it;
+/// * any other existing affliction blocks the new one.
+///
+/// Returns `true` when the card was afflicted or stacked.
+pub(crate) fn afflict_card(
+    state: &mut CombatState,
+    card_uid: CardUid,
+    kind: crate::card_afflictions::CardAfflictionKind,
+    amount: i32,
+) -> bool {
+    use crate::card_afflictions::{CardAffliction, CardAfflictionKind};
+    let idx = (card_uid.0.get() as usize).saturating_sub(1);
+    let Some(card) = state.cards.get_mut(idx) else {
+        return false;
+    };
+    let stackable = matches!(
+        kind,
+        CardAfflictionKind::Tainted | CardAfflictionKind::Galvanized
+    );
+    match card.affliction.as_mut() {
+        None => card.set_affliction(CardAffliction::new(kind, amount)),
+        Some(a) if stackable && a.kind == kind => {
+            a.stacks += amount;
+            true
+        }
+        Some(_) => false,
+    }
+}
+
+/// `true` when the card at `card_uid` carries the `kind` affliction.
+pub(crate) fn card_has_affliction(
+    state: &CombatState,
+    card_uid: CardUid,
+    kind: crate::card_afflictions::CardAfflictionKind,
+) -> bool {
+    let idx = (card_uid.0.get() as usize).saturating_sub(1);
+    state
+        .cards
+        .get(idx)
+        .and_then(|c| c.affliction)
+        .is_some_and(|a| a.kind == kind)
+}
+
+/// Clear the `kind` affliction from every player card (C#
+/// `if (card.Affliction is T) CardCmd.ClearAffliction(card)` over `AllCards`).
+fn clear_player_affliction_kind(
+    state: &mut CombatState,
+    kind: crate::card_afflictions::CardAfflictionKind,
+) {
+    for uid in all_player_card_uids(state) {
+        let idx = (uid.0.get() as usize).saturating_sub(1);
+        if let Some(card) = state.cards.get_mut(idx) {
+            if card.affliction.is_some_and(|a| a.kind == kind) {
+                let _ = card.clear_affliction();
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RingingPower hook bodies
+// ---------------------------------------------------------------------------
+//
+// C# source: `RingingPower.cs` (v0.107.1). CeremonialBeast's BEAST_CRY
+// applies it to the player through the legacy player surface (as Tangled).
+// `Ringing` is a pure marker affliction; the power holds the logic:
+//
+//   * `AfterApplied` — every player card with no affliction gets Ringing(1).
+//     → [`ringing_after_applied`], called by the applier on a fresh instance.
+//   * `AfterCardEnteredCombat` — an unafflicted player card entering combat
+//     gets Ringing(1). → the card-entered bus.
+//   * `AfterSideTurnEnd` — the power removes itself (`hooks::after_turn_end`);
+//     `AfterRemoved` clears every Ringing card → [`ringing_after_removed`].
+//   * `ShouldPlay` — a Ringing card is blocked once any play has started this
+//     turn (`combat_loop::player_should_play_blocked`). A card that already
+//     held another affliction is never Ringing, so it stays playable.
+
+/// C# `RingingPower.AfterApplied` (`RingingPower.cs:21-31`).
+pub fn ringing_after_applied(state: &mut CombatState) {
+    use crate::card_afflictions::CardAfflictionKind;
+    for uid in all_player_card_uids(state) {
+        afflict_card(state, uid, CardAfflictionKind::Ringing, 1);
+    }
+}
+
+/// C# `RingingPower.AfterCardEnteredCombat` (`RingingPower.cs:33-39`).
+fn ringing_after_card_entered_combat(state: &mut CombatState, card_uid: CardUid) -> EffectResult {
+    use crate::card_afflictions::CardAfflictionKind;
+    if state.player_power_amount(PowerKind::Ringing) <= 0 {
+        return EffectResult::NotImplemented;
+    }
+    if afflict_card(state, card_uid, CardAfflictionKind::Ringing, 1) {
+        EffectResult::Resolved
+    } else {
+        EffectResult::NotImplemented
+    }
+}
+
+/// C# `RingingPower.AfterRemoved` (`RingingPower.cs:50-60`).
+pub fn ringing_after_removed(state: &mut CombatState) {
+    clear_player_affliction_kind(state, crate::card_afflictions::CardAfflictionKind::Ringing);
+}
+
+// ---------------------------------------------------------------------------
+// HexPower hook bodies
+// ---------------------------------------------------------------------------
+//
+// C# source: `HexPower.cs` (v0.107.1). SpectralKnight's HEX applies Hex(2) to
+// the player through the legacy player surface.
+//
+//   * `AfterApplied` / `AfterCardEnteredCombat` — every player card with no
+//     affliction gets Hexed(Amount). → [`hex_after_applied`] / the
+//     card-entered bus.
+//   * `TryModifyKeywordsInCombat` — a Hexed card is Ethereal while the power
+//     lives (`combat_loop::card_is_hexed_ethereal`).
+//   * `AfterDeath` of the applier removes the power
+//     (`damage::remove_hex_from_dead_applier`); `AfterRemoved` clears every
+//     Hexed card → [`hex_after_removed`].
+//   * `Hexed.AfterCardEnteredCombat` (the affliction's own hook) clears a
+//     Hexed card that enters combat once the owner has no HexPower.
+
+/// C# `HexPower.AfterApplied` (`HexPower.cs:37-43`): afflict every player card
+/// with no affliction with `Hexed(amount)`.
+pub fn hex_after_applied(state: &mut CombatState, amount: i32) {
+    use crate::card_afflictions::CardAfflictionKind;
+    for uid in all_player_card_uids(state) {
+        afflict_card(state, uid, CardAfflictionKind::Hexed, amount);
+    }
+}
+
+/// C# `HexPower.AfterCardEnteredCombat` (`HexPower.cs:45-51`) plus
+/// `Hexed.AfterCardEnteredCombat` (`Hexed.cs`).
+fn hex_after_card_entered_combat(state: &mut CombatState, card_uid: CardUid) -> EffectResult {
+    use crate::card_afflictions::CardAfflictionKind;
+    let amount = state.player_power_amount(PowerKind::Hex);
+    if amount <= 0 {
+        if card_has_affliction(state, card_uid, CardAfflictionKind::Hexed) {
+            let idx = (card_uid.0.get() as usize).saturating_sub(1);
+            if let Some(card) = state.cards.get_mut(idx) {
+                let _ = card.clear_affliction();
+            }
+            return EffectResult::Resolved;
+        }
+        return EffectResult::NotImplemented;
+    }
+    if afflict_card(state, card_uid, CardAfflictionKind::Hexed, amount) {
+        EffectResult::Resolved
+    } else {
+        EffectResult::NotImplemented
+    }
+}
+
+/// C# `HexPower.AfterRemoved` (`HexPower.cs:61-71`).
+pub fn hex_after_removed(state: &mut CombatState) {
+    clear_player_affliction_kind(state, crate::card_afflictions::CardAfflictionKind::Hexed);
+}
+
+// ---------------------------------------------------------------------------
+// GalvanicPower hook bodies
+// ---------------------------------------------------------------------------
+//
+// C# source: `GalvanicPower.cs` (v0.107.1), an enemy power (GlobeHead).
+//
+//   * `BeforeCombatStart` — every player Power card gets Galvanized(Amount).
+//     → [`galvanic_before_combat_start`].
+//   * `AfterCardEnteredCombat` — an unafflicted Power card entering combat
+//     gets Galvanized(Amount). → registry handler.
+//   * `AfterCardPlayed` — a Galvanized card deals Amount damage to its owner
+//     (`hooks::dispatch_after_card_played_other_creatures`).
+//
+// There is no `AfterRemoved`: the cards keep Galvanized after GlobeHead dies,
+// but the damage only fires while a living GalvanicPower listens.
+
+/// Each living creature's Galvanic amount.
+fn galvanic_amounts(state: &CombatState) -> smallvec::SmallVec<[i32; 2]> {
+    state
+        .creatures
+        .iter()
+        .filter(|c| c.current_hp > 0)
+        .flat_map(|c| c.powers.iter().copied())
+        .filter_map(|pu| {
+            state
+                .powers
+                .iter()
+                .find(|p| p.id == pu.0 && p.kind == PowerKind::Galvanic)
+                .map(|p| p.amount)
+        })
+        .collect()
+}
+
+/// C# `GalvanicPower.BeforeCombatStart` (`GalvanicPower.cs:27-40`).
+pub fn galvanic_before_combat_start(state: &mut CombatState) {
+    use crate::card_afflictions::CardAfflictionKind;
+    let amounts = galvanic_amounts(state);
+    if amounts.is_empty() {
+        return;
+    }
+    let uids = all_player_card_uids(state);
+    for amount in amounts {
+        for uid in uids.iter().copied() {
+            let is_power = state
+                .cards
+                .get((uid.0.get() as usize).saturating_sub(1))
+                .is_some_and(|c| c.card_type == crate::cards::CardType::Power);
+            if is_power {
+                afflict_card(state, uid, CardAfflictionKind::Galvanized, amount);
+            }
+        }
+    }
+}
+
+/// C# `GalvanicPower.AfterCardEnteredCombat` (`GalvanicPower.cs:42-48`).
+fn galvanic_after_card_entered_combat(
+    state: &mut CombatState,
+    owner: CreatureUid,
+    card_uid: CardUid,
+) -> EffectResult {
+    use crate::card_afflictions::CardAfflictionKind;
+    let amount = state
+        .creatures
+        .iter()
+        .find(|c| c.id == owner.0)
+        .and_then(|c| {
+            c.powers.iter().find_map(|pu| {
+                state
+                    .powers
+                    .iter()
+                    .find(|p| p.id == pu.0 && p.kind == PowerKind::Galvanic)
+                    .map(|p| p.amount)
+            })
+        })
+        .unwrap_or(0);
+    if amount <= 0 {
+        return EffectResult::NotImplemented;
+    }
+    let idx = (card_uid.0.get() as usize).saturating_sub(1);
+    let unafflicted_power = state
+        .cards
+        .get(idx)
+        .is_some_and(|c| c.affliction.is_none() && c.card_type == crate::cards::CardType::Power);
+    if unafflicted_power && afflict_card(state, card_uid, CardAfflictionKind::Galvanized, amount) {
+        EffectResult::Resolved
+    } else {
+        EffectResult::NotImplemented
+    }
+}
+
+/// Idempotent installer for the GalvanicPower registry hook body.
+pub fn install_galvanic_power_handlers() {
+    register_after_card_entered_combat_for_power(
+        PowerKind::Galvanic,
+        galvanic_after_card_entered_combat,
+    );
+}
+
+/// C# `VitalSparkPower.AfterPowerAmountChanged` (`VitalSparkPower.cs:76-95`):
+/// when `owner`'s VitalSpark amount changes, every player Tainted card's
+/// amount is set to the new amount. Infested Prism's PULSATE re-applies
+/// VitalSpark mid-combat, so the cards drawn afterwards show the raised amount.
+pub fn vital_spark_sync_tainted_amounts(state: &mut CombatState, owner: CreatureUid) {
+    use crate::card_afflictions::CardAfflictionKind;
+    let amount = vital_spark_amount(state, owner);
+    if amount <= 0 {
+        return;
+    }
+    crate::coop::each_player(state, |state| {
+        for uid in all_player_card_uids(state) {
+            let idx = (uid.0.get() as usize).saturating_sub(1);
+            if let Some(card) = state.cards.get_mut(idx) {
+                if let Some(a) = card.affliction.as_mut() {
+                    if a.kind == CardAfflictionKind::Tainted {
+                        a.stacks = amount;
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Test-support: clear all registries (for nextest's process-global state)
 // ---------------------------------------------------------------------------
 
@@ -1461,5 +1754,216 @@ mod tests {
             state.cards[skill.0.get() as usize - 1].affliction.is_none(),
             "no SmoggyPower ⇒ no Smog anywhere"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // RingingPower / HexPower / GalvanicPower / VitalSpark amount sync
+    // -----------------------------------------------------------------------
+
+    /// A player power on the legacy surface (as the monster appliers use);
+    /// returns its id.
+    fn give_player_power(
+        state: &mut CombatState,
+        kind: PowerKind,
+        amount: i32,
+    ) -> std::num::NonZeroU32 {
+        let id = std::num::NonZeroU32::new(
+            state
+                .powers
+                .iter()
+                .map(|p| p.id.get())
+                .max()
+                .map_or(1, |m| m + 1),
+        )
+        .unwrap();
+        state.powers.push(crate::Power {
+            id,
+            kind,
+            amount,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(crate::PowerUid(id));
+        id
+    }
+
+    fn stacks_of(state: &CombatState, uid: CardUid) -> i32 {
+        state.cards[uid.0.get() as usize - 1]
+            .affliction
+            .map_or(0, |a| a.stacks)
+    }
+
+    fn blocked(state: &CombatState, uid: CardUid) -> bool {
+        crate::combat_loop::player_should_play_blocked(
+            state,
+            &state.cards[uid.0.get() as usize - 1],
+        )
+    }
+
+    fn ethereal(state: &CombatState, uid: CardUid) -> bool {
+        crate::combat_loop::card_is_ethereal_at_play(state, &state.cards[uid.0.get() as usize - 1])
+    }
+
+    /// C# `RingingPower` (`RingingPower.cs`): `AfterApplied` rings every card
+    /// with no affliction; `ShouldPlay` blocks only a Ringing card once a play
+    /// has started this turn, so a card that already held another affliction
+    /// stays playable; `AfterRemoved` clears the Ringing cards. Round-4 sweep:
+    /// C# reported RINGING on every hand card, Rust none.
+    #[test]
+    fn ringing_rings_unafflicted_cards_and_blocks_only_those() {
+        let mut state = CombatState::default();
+        let attack = push_card(&mut state, 1, CardType::Attack);
+        let tainted = push_card(&mut state, 2, CardType::Skill);
+        state.cards[1].affliction = Some(CardAffliction::new(CardAfflictionKind::Tainted, 2));
+        let id = give_player_power(&mut state, PowerKind::Ringing, 1);
+        ringing_after_applied(&mut state);
+        assert_eq!(
+            affliction_of(&state, attack),
+            Some(CardAfflictionKind::Ringing)
+        );
+        assert_eq!(stacks_of(&state, attack), 1);
+        assert_eq!(
+            affliction_of(&state, tainted),
+            Some(CardAfflictionKind::Tainted)
+        );
+
+        assert!(!blocked(&state, attack), "the first play is free");
+        state.player.card_plays_started_this_turn = 1;
+        assert!(blocked(&state, attack), "a Ringing card after a play");
+        assert!(
+            !blocked(&state, tainted),
+            "a non-Ringing card stays playable"
+        );
+
+        // A card entering combat while Ringing lasts is rung too.
+        let late = push_card(&mut state, 3, CardType::Power);
+        let _ = dispatch_after_card_entered_combat_on_monster_powers(&mut state, late);
+        assert_eq!(
+            affliction_of(&state, late),
+            Some(CardAfflictionKind::Ringing)
+        );
+
+        crate::hooks::apply_effects(
+            &mut state,
+            &[crate::hooks::Effect::RemovePower {
+                listener: crate::hooks::ListenerRef::Power(crate::PowerUid(id)),
+            }],
+        );
+        assert_eq!(affliction_of(&state, attack), None);
+        assert_eq!(affliction_of(&state, late), None);
+        assert_eq!(
+            affliction_of(&state, tainted),
+            Some(CardAfflictionKind::Tainted)
+        );
+    }
+
+    /// C# `HexPower` (`HexPower.cs`): every card with no affliction becomes
+    /// `Hexed(Amount)` and is Ethereal while the power lives; a card with
+    /// another affliction is not. The applier dying removes the power and
+    /// `AfterRemoved` clears the Hexed cards; a Hexed card entering combat
+    /// afterwards is cleared by `Hexed.AfterCardEnteredCombat`.
+    #[test]
+    fn hex_hexes_unafflicted_cards_and_the_appliers_death_clears_them() {
+        let mut state = CombatState::default();
+        let strike = push_card(&mut state, 1, CardType::Attack);
+        let tainted = push_card(&mut state, 2, CardType::Skill);
+        state.cards[1].affliction = Some(CardAffliction::new(CardAfflictionKind::Tainted, 2));
+        let knight = CreatureUid(std::num::NonZeroU32::new(77).unwrap());
+        let id = give_player_power(&mut state, PowerKind::Hex, 2);
+        state
+            .powers
+            .iter_mut()
+            .find(|p| p.id == id)
+            .unwrap()
+            .applier = Some(knight);
+        hex_after_applied(&mut state, 2);
+        assert_eq!(
+            affliction_of(&state, strike),
+            Some(CardAfflictionKind::Hexed)
+        );
+        assert_eq!(stacks_of(&state, strike), 2);
+        assert!(ethereal(&state, strike));
+        assert!(!ethereal(&state, tainted), "a Tainted card is not Hexed");
+
+        crate::damage::remove_hex_from_dead_applier(&mut state, knight);
+        assert_eq!(state.player_power_amount(PowerKind::Hex), 0);
+        assert_eq!(affliction_of(&state, strike), None);
+        assert!(!ethereal(&state, strike));
+
+        let stale = push_card(&mut state, 3, CardType::Attack);
+        state.cards[2].affliction = Some(CardAffliction::new(CardAfflictionKind::Hexed, 2));
+        let _ = dispatch_after_card_entered_combat_on_monster_powers(&mut state, stale);
+        assert_eq!(affliction_of(&state, stale), None);
+    }
+
+    /// C# `GalvanicPower` (`GalvanicPower.cs`): `BeforeCombatStart` Galvanizes
+    /// every player Power card (but cannot replace another affliction), and an
+    /// unafflicted Power card entering combat is Galvanized too. Round-4
+    /// sweep: C# reported GALVANIZED(6) on a hand Power card, Rust none.
+    #[test]
+    fn galvanic_galvanizes_power_cards_at_combat_start_and_on_entry() {
+        clear_all_for_test();
+        install_galvanic_power_handlers();
+        let mut state = CombatState::default();
+        let _ = state.init_player_creature();
+        let _globe = state.spawn_enemy(crate::MonsterKind::GlobeHead);
+        let base = u32::try_from(state.cards.len()).unwrap();
+        let power = push_card(&mut state, base + 1, CardType::Power);
+        let attack = push_card(&mut state, base + 2, CardType::Attack);
+        let bound = push_card(&mut state, base + 3, CardType::Power);
+        state.cards[(base + 2) as usize].affliction =
+            Some(CardAffliction::new(CardAfflictionKind::Bound, 1));
+        galvanic_before_combat_start(&mut state);
+        assert_eq!(
+            affliction_of(&state, power),
+            Some(CardAfflictionKind::Galvanized)
+        );
+        assert_eq!(stacks_of(&state, power), 6);
+        assert_eq!(affliction_of(&state, attack), None);
+        assert_eq!(
+            affliction_of(&state, bound),
+            Some(CardAfflictionKind::Bound)
+        );
+
+        let late = push_card(&mut state, base + 4, CardType::Power);
+        let _ = dispatch_after_card_entered_combat_on_monster_powers(&mut state, late);
+        assert_eq!(
+            affliction_of(&state, late),
+            Some(CardAfflictionKind::Galvanized)
+        );
+    }
+
+    /// C# `VitalSparkPower.AfterPowerAmountChanged` (`VitalSparkPower.cs`):
+    /// when the PULSATE move raises VitalSpark 2 to 4, every Tainted card
+    /// follows. Round-4 sweep: C# Tainted 4, Rust Tainted 2.
+    #[test]
+    fn vital_spark_amount_change_resyncs_tainted_cards() {
+        let mut state = CombatState::default();
+        let _ = state.init_player_creature();
+        let prism = state.spawn_enemy(crate::MonsterKind::InfestedPrism);
+        let base = u32::try_from(state.cards.len()).unwrap();
+        let skill = push_card(&mut state, base + 1, CardType::Skill);
+        vital_spark_before_combat_start(&mut state);
+        assert_eq!(
+            affliction_of(&state, skill),
+            Some(CardAfflictionKind::Tainted)
+        );
+        let start = stacks_of(&state, skill);
+        assert!(start > 0);
+        let pid = state
+            .powers
+            .iter()
+            .find(|p| p.kind == PowerKind::VitalSpark)
+            .unwrap()
+            .id;
+        state
+            .powers
+            .iter_mut()
+            .find(|p| p.id == pid)
+            .unwrap()
+            .amount = start + 2;
+        vital_spark_sync_tainted_amounts(&mut state, prism);
+        assert_eq!(stacks_of(&state, skill), start + 2);
     }
 }

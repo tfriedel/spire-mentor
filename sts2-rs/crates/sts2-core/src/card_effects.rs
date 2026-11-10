@@ -3090,13 +3090,61 @@ pub(crate) fn fire_card_generated_for_combat_powers(
     if crate::combat_loop::combat_is_ending(state) {
         return;
     }
-    fire_smokestack_on_status_generation(state, uid, added_by_player);
-    fire_arsenal_strength_on_card_generation(state, uid, added_by_player);
-    fire_pillar_of_creation_block_on_card_generation(state, uid, added_by_player);
-    fire_trash_to_treasure_orbs_on_status_generation(state, uid, added_by_player);
+    // The player's power listeners run in the order the powers sit on the
+    // player (C# `IterateHookListeners` walks `Creature.Powers`, i.e.
+    // application order), not in a fixed order. With TrashToTreasure applied
+    // before Smokestack, a Burn's orb channel evokes a Dark orb into the
+    // 3-HP Eye before Smokestack's 5 kills it; the other way round the evoke
+    // lands on Fogmog (loadout Defect v0.107.1 1378: Fogmog C# 27, Rust 21).
+    for kind in generation_power_listener_order(state) {
+        match kind {
+            crate::PowerKind::Smokestack => {
+                fire_smokestack_on_status_generation(state, uid, added_by_player);
+            }
+            crate::PowerKind::Arsenal => {
+                fire_arsenal_strength_on_card_generation(state, uid, added_by_player);
+            }
+            crate::PowerKind::PillarOfCreation => {
+                fire_pillar_of_creation_block_on_card_generation(state, uid, added_by_player);
+            }
+            crate::PowerKind::TrashToTreasure => {
+                fire_trash_to_treasure_orbs_on_status_generation(state, uid, added_by_player);
+            }
+            _ => {}
+        }
+    }
     fire_rocketpunch_free_on_status_generation(state, uid, added_by_player);
     fire_soulbound_on_soul_generation(state, uid, added_by_player);
     match_generated_wither_to_aeonglass(state, uid);
+}
+
+/// The player-power `AfterCardGeneratedForCombat` listeners (Smokestack,
+/// Arsenal, PillarOfCreation, TrashToTreasure) the player holds, each once,
+/// in the order the powers sit on the player.
+fn generation_power_listener_order(
+    state: &CombatState,
+) -> smallvec::SmallVec<[crate::PowerKind; 4]> {
+    use crate::PowerKind;
+    const KINDS: [PowerKind; 4] = [
+        PowerKind::Smokestack,
+        PowerKind::Arsenal,
+        PowerKind::PillarOfCreation,
+        PowerKind::TrashToTreasure,
+    ];
+    let mut out: smallvec::SmallVec<[PowerKind; 4]> = smallvec::SmallVec::new();
+    // Perf: no live listener kind anywhere ⇒ nothing to order.
+    let present = state.powers.present_kinds();
+    if !KINDS.iter().any(|k| present.contains(*k)) {
+        return out;
+    }
+    for puid in state.player_power_uids() {
+        if let Some(p) = state.powers.get_by_id(puid.0) {
+            if KINDS.contains(&p.kind) && !out.contains(&p.kind) {
+                out.push(p.kind);
+            }
+        }
+    }
+    out
 }
 
 /// C# `Aeonglass.AfterCardGeneratedForCombat`: every Wither generated for
@@ -6843,6 +6891,35 @@ mod tests {
             state.player.orbs.filled_len(),
             2,
             "TrashToTreasure(2) channels 2 orbs on a player-generated Status"
+        );
+    }
+
+    /// C# `IterateHookListeners` runs the player's powers in the order they
+    /// sit on the player, so the `AfterCardGeneratedForCombat` listeners fire
+    /// in application order. Loadout Defect v0.107.1 1378: TrashToTreasure
+    /// before Smokestack evokes a Dark orb into the low-HP enemy before
+    /// Smokestack's damage kills it.
+    #[test]
+    fn generated_card_power_listeners_fire_in_application_order() {
+        let (mut state, _enemy) = fresh_state_with_one_enemy();
+        grant_player_power(&mut state, PowerKind::TrashToTreasure, 1);
+        grant_player_power(&mut state, PowerKind::Smokestack, 5);
+        assert_eq!(
+            generation_power_listener_order(&state).as_slice(),
+            [PowerKind::TrashToTreasure, PowerKind::Smokestack]
+        );
+
+        let (mut state, _enemy) = fresh_state_with_one_enemy();
+        grant_player_power(&mut state, PowerKind::Smokestack, 5);
+        grant_player_power(&mut state, PowerKind::Arsenal, 1);
+        grant_player_power(&mut state, PowerKind::TrashToTreasure, 1);
+        assert_eq!(
+            generation_power_listener_order(&state).as_slice(),
+            [
+                PowerKind::Smokestack,
+                PowerKind::Arsenal,
+                PowerKind::TrashToTreasure
+            ]
         );
     }
 

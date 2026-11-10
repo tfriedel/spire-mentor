@@ -175,7 +175,7 @@ function mentorMode(ui: FrameState["ui"]): string | undefined {
 export function ToolbarPanel(props: {
   state: FrameState;
   framePanels: { label: string; shown: boolean; toggle: () => void }[];
-  onPanelsInside: () => void;
+  onFullscreen: () => void;
 }) {
   const { ui, host } = props.state;
   const connected = host.mod_connected && ui != null;
@@ -277,9 +277,9 @@ export function ToolbarPanel(props: {
               onClick: () => openWorkbenchWindow(),
             },
             {
-              label: "Move the panels into the game",
-              title: "Full-size game with the panels drawn over it, as without the frame (the in-game Panels menu brings them back out)",
-              onClick: props.onPanelsInside,
+              label: "Fullscreen",
+              title: FULLSCREEN_TITLE,
+              onClick: props.onFullscreen,
               separatorBefore: true,
             },
             {
@@ -323,10 +323,19 @@ export function ToolbarPanel(props: {
             </>
           )}
         </span>
+        {/* Last, at the row's right end, where a window's own controls sit:
+            players looked for "fullscreen" and did not find it in Panels. */}
+        <button type="button" className="fr-btn fr-fullscreen" title={FULLSCREEN_TITLE} disabled={!connected} onClick={props.onFullscreen}>
+          ⛶ Fullscreen
+        </button>
       </div>
     </div>
   );
 }
+
+const FULLSCREEN_TITLE =
+  "The game fills the whole screen, with the panels drawn over it as without the frame. " +
+  "Back: Exit fullscreen, beside the in-game badge";
 
 // ---------------------------------------------------------------------------
 // Advice (SimHud's advice panel)

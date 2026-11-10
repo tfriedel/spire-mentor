@@ -2018,6 +2018,8 @@ fn hexed_auto_played_card_counts_as_an_ethereal_play() {
     strike.uid = sts2_core::CardUid::new(raw).expect("nz");
     state.player.draw.push(strike.uid);
     state.cards.push(strike);
+    // HexPower.AfterApplied afflicts every card already in combat.
+    sts2_core::monster_power_effects::hex_after_applied(&mut state, 1);
     let step = sts2_core::combat_loop::play_card(&mut state, 0, None);
     assert_eq!(step, sts2_core::StepResult::Advanced);
     assert_eq!(state.combat_log.ethereal_cards_played_this_combat, 2);

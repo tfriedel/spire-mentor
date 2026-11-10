@@ -69,6 +69,9 @@ internal static class FrameLink
     public static bool Connected => _connected;
 
     private static volatile bool _uiOutside = true;
+    // The welcome's hello tells the page the mode to take (Attach,
+    // playerAsked) until the page answers with its set_ui_outside.
+    private static volatile bool _announceUiOutside;
 
     /// <summary>Framed AND the player wants the panels around the game, not
     /// over it: the in-game toolbar, advice panel, chips, recap and log hide.
@@ -100,6 +103,9 @@ internal static class FrameLink
             Guard(SimCoachChip.Instance.OnFrameUiModeChanged);
             Guard(SimCoachPanel.Instance.OnFrameUiModeChanged);
             Guard(SimActionLog.OnFrameUiModeChanged);
+            // Panels in the game = the frame fullscreen: the game's own
+            // Fullscreen setting says so (FrameFullscreen).
+            Guard(FrameFullscreen.Sync);
         }).CallDeferred();
     }
 
@@ -134,8 +140,13 @@ internal static class FrameLink
 
     /// <summary>The mod started the frame next to the running game
     /// (SimFrameLauncher): connect to its relay on <paramref name="port"/>
-    /// and move the panels out. False when already framed.</summary>
-    public static bool Attach(int port)
+    /// and move the panels out. False when already framed.
+    /// <paramref name="playerAsked"/>: the player asked for the panels'
+    /// window just now (not the startup open), so the page puts them around
+    /// the game rather than restoring the mode it remembers -- left
+    /// fullscreen, it would come back fullscreen and the click look like it
+    /// did nothing.</summary>
+    public static bool Attach(int port, bool playerAsked = false)
     {
         if (Framed || port <= 0)
         {
@@ -143,6 +154,7 @@ internal static class FrameLink
         }
         _linkCts = new CancellationTokenSource();
         _uiOutside = true;
+        _announceUiOutside = playerAsked;
         _port = port;
         _started = true;
         Logger.Log($"[FrameLink] frame started by the mod: connecting on 127.0.0.1:{port}");
@@ -471,6 +483,7 @@ internal static class FrameLink
             case "set_ui_outside":
                 if (root.TryGetProperty("value", out JsonElement v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
+                    _announceUiOutside = false;
                     SetUiOutside(v.GetBoolean());
                 }
                 break;
@@ -541,7 +554,9 @@ internal static class FrameLink
         }
         List<string> lines = new()
         {
-            Serialize(new { type = "hello", protocol = ProtocolVersion, actions = ActionNames }),
+            _announceUiOutside
+                ? Serialize(new { type = "hello", protocol = ProtocolVersion, actions = ActionNames, ui_outside = _uiOutside })
+                : Serialize(new { type = "hello", protocol = ProtocolVersion, actions = ActionNames }),
         };
         lock (_lock)
         {

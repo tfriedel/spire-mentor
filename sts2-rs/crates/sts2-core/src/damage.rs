@@ -75,8 +75,13 @@ pub(crate) fn remove_hex_from_dead_applier(state: &mut CombatState, dead: Creatu
         .filter(|p| p.kind == crate::PowerKind::Hex && p.applier == Some(dead))
         .map(|p| p.id)
         .collect();
+    let removed_any = !ids.is_empty();
     for pid in ids {
         state.drop_power(pid);
+    }
+    // C# `HexPower.AfterRemoved` (`HexPower.cs:61-71`): clear every Hexed card.
+    if removed_any && state.player_power_amount(crate::PowerKind::Hex) <= 0 {
+        crate::monster_power_effects::hex_after_removed(state);
     }
 }
 
@@ -264,7 +269,9 @@ fn arm_reattach_dead_state(state: &mut CombatState, dead: CreatureUid) {
     let Some(ai) = creature.ai.as_mut() else {
         return;
     };
-    if ai.force_current_state_by_name("DEAD") {
+    // `SetMoveImmediate` (ReattachPower.cs:62): DEAD is never logged, and the
+    // move it displaces stays logged from its roll (#1215).
+    if ai.force_current_state_by_name_unlogged("DEAD") {
         // C# builds `DEAD_MOVE` with an empty `params AbstractIntent[]`
         // (`DecimillipedeSegment.cs:152`), so the corpse telegraphs NOTHING —
         // clear whatever it was telegraphing when it died. It still takes its

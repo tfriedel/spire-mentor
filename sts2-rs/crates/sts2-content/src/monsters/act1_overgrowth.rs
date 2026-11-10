@@ -436,8 +436,15 @@ fn ceremonial_beast_plow_effect(state: &mut CombatState, owner: CreatureUid) {
 /// NOTE: the C# move uses a generic `DebuffIntent()` and the applied power
 /// is **RingingPower**, not Weak — the prior Rust intent metadata
 /// (`Weak,1`) was a fabrication.
+///
+/// `RingingPower.AfterApplied` (fresh instance only) rings every player card
+/// with no affliction; the turn-end removal clears them again.
 fn ceremonial_beast_beast_cry_effect(state: &mut CombatState, _owner: CreatureUid) {
+    let fresh = state.player_power_amount(PowerKind::Ringing) <= 0;
     apply_power_to_player_via_legacy_surface(state, PowerKind::Ringing, 1);
+    if fresh && state.player_power_amount(PowerKind::Ringing) > 0 {
+        sts2_core::monster_power_effects::ringing_after_applied(state);
+    }
 }
 
 /// Bead `sts2-rs-pdsdl`: CeremonialBeast CRUSH applies +3 Strength to self

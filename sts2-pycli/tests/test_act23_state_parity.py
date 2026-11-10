@@ -323,22 +323,10 @@ def test_an_a10_run_walks_on_to_the_second_boss_in_lockstep() -> None:
 
 
 #: Monsters whose ENGINE move log differs from C#'s StateLog (#1181 lockstep
-#: check), so a log restored from C# rightly differs from the engine's own:
-#: the revive / death / enrage moves are forced (unlogged) in C# but logged by
-#: the engine (TestSubject RESPAWN, the Decimillipede segments' DEAD, the
-#: Queen's ENRAGE_MOVE), and a summoned EyeWithTeeth / Parafright carries one
-#: entry fewer. CeremonialBeast's STUN is the engine's real state, whose
-#: follow-up C# sends as the resume.
-_ENGINE_LOG_DIVERGES = {
-    "TestSubject",
-    "DecimillipedeSegmentFront",
-    "DecimillipedeSegmentMiddle",
-    "DecimillipedeSegmentBack",
-    "Queen",
-    "EyeWithTeeth",
-    "Parafright",
-    "CeremonialBeast",
-}
+#: check), so a log restored from C# rightly differs from the engine's own.
+#: Only CeremonialBeast is left (#1215): its STUN is the engine's real state,
+#: whose follow-up C# sends as the resume. Both roll identically.
+_ENGINE_LOG_DIVERGES = {"CeremonialBeast"}
 
 
 @pytest.mark.slow

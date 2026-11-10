@@ -30,7 +30,7 @@ public static class MainFile
     // and refuses to stage when they differ; tests/run_all.sh checks it too).
     // It drifted once: beta.4 to beta.6 shipped saying "beta.3" in the toolbar,
     // F1 help, bug reports and every envelope's mod_version.
-    public const string ModVersion = "0.10.4";
+    public const string ModVersion = "0.10.6-beta.1";
 
     private static Harmony? _patcher;
     private static SimAutoSlayer? _autoSlayer;
@@ -61,6 +61,8 @@ public static class MainFile
             ShieldBaseLibDamagePreview();
             ApplyPatch(typeof(HitStopTimeScalePatch));
             ApplyPatch(typeof(GameQuitPatch));
+            ApplyPatch(typeof(FrameFullscreenPatch));
+            ApplyPatch(typeof(FrameWindowedDisplayPatch));
             ApplyPatch(typeof(HotkeyResetPatch));
             // Coach capture (PROTOCOL.md v5 human_action): the human's end
             // turn and their event / campfire picks.

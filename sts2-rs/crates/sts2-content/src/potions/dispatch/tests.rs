@@ -1603,6 +1603,44 @@ fn snecko_oil_keeps_a_free_this_turn_star_cost_free() {
     );
 }
 
+/// An `AddUntilPlayed(-1)` banked BEFORE the roll (v0.111.0 RocketPunch after
+/// a player-made Status) folds first, and the roll is an Absolute modifier
+/// appended after it, so the shown cost is the roll alone. Once the roll
+/// expires at turn end, the -1 applies to the base again. Loadout Defect
+/// v0.111.0 1307: RocketPunch rolled 2, C# 2, Rust 1.
+#[test]
+fn snecko_oil_roll_owns_the_cost_over_an_earlier_until_played_reduction() {
+    use sts2_core::cards::{Card, VarKey};
+    ensure_installed();
+    let mut state = fresh_state_with_player(50, 50);
+    let uid = sts2_core::CardUid::new(1).expect("nz");
+    let mut card = Card::pod_defaults();
+    card.uid = uid;
+    card.cost = 2;
+    card.set_combat_var(VarKey::CostReductionUntilPlayed, 1);
+    state.cards.push(card);
+    state.player.hand.push(uid);
+    assert_eq!(
+        sts2_core::hooks::local_card_cost(&state, &state.cards[0]),
+        1
+    );
+    let before = state.run_rng.combat_energy_costs.clone();
+    state.snecko_randomize_hand_costs();
+    let mut replay = before;
+    let roll = replay.next_int(0, 3);
+    assert_eq!(
+        sts2_core::hooks::local_card_cost(&state, &state.cards[0]),
+        roll,
+        "the roll is the shown cost"
+    );
+    state.cards[0].expire_snecko_roll();
+    assert_eq!(
+        sts2_core::hooks::local_card_cost(&state, &state.cards[0]),
+        1,
+        "past the roll the until-played -1 applies to the base 2 again"
+    );
+}
+
 #[test]
 fn snecko_oil_preserves_x_cost_sentinel() {
     use sts2_core::cards::Card;

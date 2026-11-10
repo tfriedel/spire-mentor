@@ -4654,14 +4654,26 @@ fn kusarigama_skill_and_power_do_not_increment() {
     assert_eq!(hp, 30);
 }
 
+/// C# `Kusarigama.AfterSideTurnEnd` zeroes the count only when the owner's
+/// side ends its turn (Kusarigama.cs, both builds). An Attack auto-played on
+/// the enemy turn (Centennial Puzzle's draw into a Hellraiser Strike) still
+/// counts toward the next player turn. Random-loadout Ironclad v0.107.1 seed
+/// 3299: Rust reset it at the player-turn start and missed the 6 damage.
 #[test]
 #[serial_test::serial(global_registry)]
-fn kusarigama_before_side_turn_start_resets_counter() {
+fn kusarigama_counter_resets_when_the_player_turn_ends() {
     ensure_installed();
     let mut state = fresh_state_with_player(70, 70);
     give_player_relic(&mut state, RelicKind::Kusarigama);
     set_kusarigama_counter(&mut state, 2);
+    let _ = dispatch_after_turn_end(&mut state, Side::Enemy);
     let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+    assert_eq!(
+        kusarigama_counter(&state),
+        2,
+        "enemy turn end, player turn start"
+    );
+    let _ = dispatch_after_turn_end(&mut state, Side::Player);
     assert_eq!(kusarigama_counter(&state), 0);
 }
 

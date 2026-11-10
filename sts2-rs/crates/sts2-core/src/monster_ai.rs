@@ -712,14 +712,41 @@ impl MonsterAi {
             );
             return;
         }
+        self.log_displaced_current();
+        self.force_current_state(target);
+        self.current_forced = true;
+    }
+
+    /// [`Self::force_current_state_unlogged`] by name: `false` (and no change)
+    /// when this AI has no move state `target`.
+    #[must_use]
+    pub fn force_current_state_by_name_unlogged(&mut self, target: &str) -> bool {
+        let Some(sid) = self.states.keys().copied().find(|k| *k == target) else {
+            return false;
+        };
+        if !self.states.get(sid).is_some_and(MonsterState::is_move) {
+            return false;
+        }
+        self.force_current_state_unlogged(sid);
+        true
+    }
+
+    /// The `StateLog` half of a C# `SetMoveImmediate` that displaces the
+    /// current move: C# logged that move when it ROLLED it, the engine logs
+    /// at perform time, so a rolled move that has not started yet is logged
+    /// now. A move already performed is logged already, and a forced one
+    /// (a stun) never is.
+    ///
+    /// [`Self::force_current_state_unlogged`] calls it. Call it directly where
+    /// the engine models the forced state without installing one: an
+    /// `IllusionPower` revive heals in place of C#'s `REVIVE_MOVE` (#1215).
+    pub fn log_displaced_current(&mut self) {
         if !self.current_forced
             && !self.performed_at_least_once
             && self.cur().should_appear_in_logs()
         {
             self.state_log.push(self.current);
         }
-        self.force_current_state(target);
-        self.current_forced = true;
     }
 
     /// Restore the current move-state from a serialized [`current_state_id`]
@@ -1725,6 +1752,27 @@ mod tests {
             }),
         );
         MonsterAi::new(states, "A")
+    }
+
+    /// #1215: a by-name `SetMoveImmediate` logs the rolled move it displaces
+    /// (C# logged it at its roll) and never the forced state, even once that
+    /// state has run. An unknown name changes nothing.
+    #[test]
+    fn force_by_name_unlogged_keeps_the_displaced_move_and_skips_the_forced_one() {
+        let mut ai = make_linear_chain();
+        ai.on_move_performed(); // A
+        ai.roll_move_seeded(0); // → B, rolled, not yet run
+        assert!(!ai.force_current_state_by_name_unlogged("NOPE"));
+        assert_eq!(ai.move_history(), ["A"]);
+        assert_eq!(ai.current_state_id(), "B");
+
+        assert!(ai.force_current_state_by_name_unlogged("A"));
+        assert_eq!(ai.current_state_id(), "A");
+        assert!(ai.current_forced());
+        assert_eq!(ai.move_history(), ["A", "B"], "the displaced B is logged");
+        assert_eq!(ai.wire_move_log().as_slice(), ["A", "B"]);
+        ai.on_move_performed();
+        assert_eq!(ai.move_history(), ["A", "B"], "the forced A is not");
     }
 
     /// A machine with no prebuilt stun gets C#'s synthesized must-perform

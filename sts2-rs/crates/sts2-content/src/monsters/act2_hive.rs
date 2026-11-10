@@ -467,6 +467,9 @@ fn infested_prism_pulsate_effect(state: &mut CombatState, owner: CreatureUid) {
         2,
     );
     apply_power_to_creature(state, owner, PowerKind::VitalSpark, amount);
+    // C# `VitalSparkPower.AfterPowerAmountChanged`: every Tainted card takes
+    // the new amount.
+    sts2_core::monster_power_effects::vital_spark_sync_tainted_amounts(state, owner);
 }
 
 /// `DecimillipedeSegment` BULK — `DecimillipedeSegment.cs:194`

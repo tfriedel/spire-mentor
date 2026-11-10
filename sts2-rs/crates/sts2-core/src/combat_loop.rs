@@ -477,6 +477,12 @@ pub fn start_combat(state: &mut CombatState) -> StepResult {
         state,
         crate::monster_power_effects::vital_spark_before_combat_start,
     );
+    // GalvanicPower (GlobeHead) `BeforeCombatStart`: Galvanize every player
+    // Power card, same shape as VitalSpark.
+    crate::coop::each_player(
+        state,
+        crate::monster_power_effects::galvanic_before_combat_start,
+    );
     // Bead `sts2-rs-j87`: parallel relic-effects bus drain. The
     // `hooks::*` registry above carries the legacy power+relic
     // walk; the `relic_effects::*` channel carries the per-relic
@@ -3350,15 +3356,12 @@ pub fn end_player_turn_phase_two(state: &mut CombatState) -> StepResult {
     // exclusion is structurally empty here. Add the cross-check at the
     // same time as registering an ETHEREAL+turn-end-in-hand card.
     //
-    // Bead `sts2-rs-l7k3d`: HexPower (C# `HexPower.AfterApplied`) afflicts
-    // every player card with `Hexed`, which makes the card Ethereal. We
-    // model the NET OBSERVABLE rather than per-card afflictions (per the
-    // Tangled/Entangled precedent in `hooks.rs` — per-card afflictions are
-    // not parity-tracked): while the player has an active `Hex` stack,
-    // EVERY hand card is treated as Ethereal and expelled here at turn end.
-    // `HexPower` is a Single-stack Debuff that persists until the applier
-    // dies, so the deck progressively exhausts each turn the player ends
-    // with cards in hand. Source-of-truth: `HexPower.cs`.
+    // HexPower (C# `HexPower.AfterApplied` / `AfterCardEnteredCombat`)
+    // afflicts every player card that had no affliction with `Hexed`, and
+    // `TryModifyKeywordsInCombat` makes a Hexed card Ethereal while the power
+    // lives. A card that already carried another affliction (Tainted, Bound,
+    // ...) is never Hexed and is not expelled. `HexPower` is a Single-stack
+    // Debuff that persists until the applier dies. Source: `HexPower.cs`.
     // Perf 2026-07-04: `present_kinds` superset gate — no live Hex anywhere
     // proves the uid walk below could never match (bit-identical skip).
     let player_has_hex = state.powers.present_kinds().contains(crate::PowerKind::Hex)
@@ -3416,7 +3419,7 @@ pub fn end_player_turn_phase_two(state: &mut CombatState) -> StepResult {
                 // falling back to the CardId registry.
                 crate::card_effects::card_ethereal_inst(c)
                     || c.combat_var(crate::cards::VarKey::EtherealThisCombat) != 0
-                    || player_has_hex
+                    || (player_has_hex && card_is_hexed(c))
             })
         })
         .collect();
@@ -4835,7 +4838,17 @@ pub fn enemy_turn_exec(state: &mut CombatState) -> StepResult {
             })
             .collect();
         for idx in reviving_indices {
-            state.creatures[idx].current_hp = state.creatures[idx].max_hp;
+            let c = &mut state.creatures[idx];
+            c.current_hp = c.max_hp;
+            // C#'s `REVIVE_MOVE` is a `SetMoveImmediate`: never logged
+            // itself, it displaced a move C# logged when it rolled it, and its
+            // follow-up is that move (`StateLog.Last()`, IllusionPower.cs:85),
+            // rolled and logged again after the revive. The engine skips the
+            // REVIVE state and keeps the displaced move current, so only the
+            // displaced move's log entry is missing (#1215).
+            if let Some(ai) = c.ai.as_mut() {
+                ai.log_displaced_current();
+            }
         }
     }
 
@@ -8883,15 +8896,23 @@ fn play_card_resolved(state: &mut CombatState, hand_index: u8, target: Option<u8
 /// order is unchanged from the former inline body, so driving a surfaced
 /// choice first-legal reproduces the prior behavior byte-for-byte.
 /// Play-time Ethereal predicate for a card being played: its static/override
-/// keyword, the per-instance `EtherealThisCombat` flag, OR the player being
-/// Hexed (C# `HexPower.TryModifyKeywordsInCombat` grants Ethereal to every card
-/// while Hex is active). Shared by the manual (`play_card`) and auto-play
+/// keyword, the per-instance `EtherealThisCombat` flag, OR the card being
+/// Hexed while the player holds HexPower (C# `HexPower.TryModifyKeywordsInCombat`
+/// grants Ethereal to each `Hexed` card). Shared by the manual (`play_card`) and auto-play
 /// (`finish_auto_played_card`) SpiritOfAsh gate so both agree with the
 /// end-of-turn ethereal expel. Reads the Hex stack off the mirror+legacy union.
 pub fn card_is_ethereal_at_play(state: &CombatState, card: &crate::cards::Card) -> bool {
     crate::card_effects::card_ethereal_inst(card)
         || card.combat_var(crate::cards::VarKey::EtherealThisCombat) != 0
-        || state.player_power_amount(crate::PowerKind::Hex) > 0
+        || (card_is_hexed(card) && state.player_power_amount(crate::PowerKind::Hex) > 0)
+}
+
+/// `true` when `card` carries the `Hexed` affliction (C# `card.Affliction is
+/// Hexed`, the `HexPower.TryModifyKeywordsInCombat` gate).
+#[must_use]
+pub fn card_is_hexed(card: &crate::cards::Card) -> bool {
+    card.affliction
+        .is_some_and(|a| a.kind == crate::card_afflictions::CardAfflictionKind::Hexed)
 }
 
 /// Does a live `ReboundPower` redirect this play's Discard-bound result to the
@@ -11069,16 +11090,17 @@ pub fn player_should_play_blocked(state: &CombatState, card: &crate::cards::Card
     {
         return true;
     }
-    if state.player.card_plays_started_this_turn >= 1 {
-        let player_has_ringing = state.player.powers.iter().any(|puid| {
-            state
-                .powers
-                .get_by_id(puid.0)
-                .is_some_and(|p| p.kind == crate::powers::PowerKind::Ringing)
-        });
-        if player_has_ringing {
-            return true;
-        }
+    // C# `RingingPower.ShouldPlay` (`RingingPower.cs:62-73`): only a card
+    // carrying the `Ringing` affliction is blocked, once any play has started
+    // this turn. A card that already held another affliction when Ringing was
+    // applied is not Ringing and stays playable.
+    if state.player.card_plays_started_this_turn >= 1
+        && card
+            .affliction
+            .is_some_and(|a| a.kind == crate::card_afflictions::CardAfflictionKind::Ringing)
+        && state.player_power_amount(crate::powers::PowerKind::Ringing) > 0
+    {
+        return true;
     }
     false
 }
@@ -17458,12 +17480,13 @@ mod tests {
         assert_eq!(state.player.exhaust.len(), 0, "no ethereal cards");
     }
 
-    /// Bead `sts2-rs-l7k3d`: while the player has an active `HexPower`
-    /// stack, the end-of-turn ethereal sweep treats EVERY hand card as
-    /// ethereal — non-ethereal cards expel to exhaust instead of flushing
-    /// to discard. Models the C# `HexPower` net observable (Hexed → all
-    /// cards Ethereal). Contrast with `end_turn_phase_two_flushes_hand_to_discard`,
-    /// where the same non-ethereal cards flush to discard absent Hex.
+    /// While the player has an active `HexPower`, the end-of-turn ethereal
+    /// sweep expels every `Hexed` hand card to exhaust instead of flushing it
+    /// to discard (C# `HexPower.TryModifyKeywordsInCombat`). A card that
+    /// already carried another affliction when Hex was applied is not Hexed
+    /// and flushes normally. Contrast with
+    /// `end_turn_phase_two_flushes_hand_to_discard`, where the same
+    /// non-ethereal cards flush to discard absent Hex.
     #[test]
     fn end_turn_phase_two_hex_expels_all_hand_cards_to_exhaust() {
         use std::num::NonZeroU32;
@@ -17477,8 +17500,9 @@ mod tests {
         // A living player: a dead one makes the combat "ending", where
         // `CardCmd.Exhaust` is refused (`exhaust_may_begin`).
         state.player.current_hp = 80;
-        // Two plain (non-ethereal) Strike cards in hand.
-        for i in 1..=2u32 {
+        // Three plain (non-ethereal) Strike cards in hand; the third is
+        // already Tainted, so Hex cannot afflict it.
+        for i in 1..=3u32 {
             let uid = CardUid::new(i).expect("non-zero");
             state.cards.push(crate::cards::Card {
                 uid,
@@ -17495,7 +17519,12 @@ mod tests {
                 energy_spent: 0,
                 base_replay_count: 0,
                 keyword_override: None,
-                affliction: None,
+                affliction: (i == 3).then(|| {
+                    crate::card_afflictions::CardAffliction::new(
+                        crate::card_afflictions::CardAfflictionKind::Tainted,
+                        2,
+                    )
+                }),
             });
             state.player.hand.push(uid);
         }
@@ -17510,6 +17539,7 @@ mod tests {
             skip_next_tick: false,
         });
         state.player.powers.push(crate::PowerUid(pow_uid));
+        crate::monster_power_effects::hex_after_applied(&mut state, 2);
 
         let result = end_player_turn_phase_two(&mut state);
 
@@ -17518,12 +17548,12 @@ mod tests {
         assert_eq!(
             state.player.exhaust.len(),
             2,
-            "Hex makes both cards ethereal → exhaust"
+            "Hex makes both unafflicted cards ethereal → exhaust"
         );
         assert_eq!(
-            state.player.discard.len(),
-            0,
-            "Hexed cards must NOT flush to discard"
+            state.player.discard.to_vec(),
+            vec![CardUid::new(3).unwrap()],
+            "the Tainted card is not Hexed and flushes to discard"
         );
     }
 
@@ -17571,6 +17601,7 @@ mod tests {
             skip_next_tick: false,
         });
         state.player.powers.push(crate::PowerUid(pow_uid));
+        crate::monster_power_effects::hex_after_applied(&mut state, 2);
 
         let res = play_card(&mut state, 0, Some(0));
         assert_eq!(res, StepResult::Advanced);
@@ -19846,6 +19877,66 @@ mod tests {
             state.player.current_hp, 44,
             "only the primary's 6 damage should land; the revived illusion must not also attack"
         );
+    }
+
+    /// #1215: C#'s illusion revive is an unlogged `SetMoveImmediate(REVIVE)`
+    /// that displaces a move C# logged at its roll, then rolls that move again
+    /// (logging it). A summon killed before it ever acted has C# log
+    /// `[DISTRACT (construction), DISTRACT (post-revive roll)]`; the engine
+    /// skips the REVIVE state, so the revive must log the displaced move.
+    #[test]
+    fn illusion_revive_logs_the_displaced_move() {
+        fn noop(_: &mut CombatState, _: CreatureUid) {}
+        let mut states = std::collections::BTreeMap::new();
+        states.insert(
+            "DISTRACT",
+            crate::monster_ai::MonsterState::Move(crate::monster_ai::MoveState {
+                id: "DISTRACT",
+                effect: noop,
+                intents: smallvec::smallvec![Intent::Unknown],
+                follow_up: Some("DISTRACT"),
+                must_perform_once: false,
+            }),
+        );
+        let mut ai = crate::monster_ai::MonsterAi::new(states, "DISTRACT");
+        assert_eq!(ai.wire_move_log().as_slice(), ["DISTRACT"]);
+
+        let mut state = state_for_enemy_turn_exec(0, MonsterKind::ShrinkerBeetle, Intent::Unknown);
+        let illusion_id = NonZeroU32::new(1).expect("non-zero");
+        let illusion_power = PowerUid::new(100).expect("non-zero");
+        state.powers.push(Power {
+            id: illusion_power.0,
+            kind: PowerKind::Illusion,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        ai.set_owner(CreatureUid(illusion_id));
+        state.creatures.push(Creature {
+            id: illusion_id,
+            current_hp: 0,
+            max_hp: 6,
+            block: 0,
+            powers: smallvec::smallvec![illusion_power],
+            species: Some(MonsterKind::EyeWithTeeth),
+            intent: Some(Intent::Unknown),
+            intent_history: IntentHistory::default(),
+            monster_id: crate::MonsterId("EyeWithTeeth"),
+            ai: Some(ai),
+        });
+        state.enemy_uids.push(CreatureUid(illusion_id));
+
+        enemy_turn_exec(&mut state);
+
+        let ai = state
+            .creatures
+            .iter()
+            .find(|c| c.id == illusion_id)
+            .and_then(|c| c.ai.as_ref())
+            .expect("illusion ai");
+        assert_eq!(ai.move_history(), ["DISTRACT"]);
+        assert_eq!(ai.wire_move_log().as_slice(), ["DISTRACT", "DISTRACT"]);
     }
 
     // ── P3-6 (sts2-rs-p1n) enemy_turn_end ───────────────────────────────

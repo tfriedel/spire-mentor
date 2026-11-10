@@ -192,7 +192,7 @@ export type Incoming =
   | { type: "menu_closed"; id: string };
 
 export type ModMessage =
-  | { type: "hello"; protocol: number; actions: string[] }
+  | { type: "hello"; protocol: number; actions: string[]; ui_outside?: boolean }
   | { type: "ui"; ui: Ui }
   | { type: "advice"; advice: Advice | null; peek: string | null }
   | { type: "chip"; chip: Chip; age_ms?: number }

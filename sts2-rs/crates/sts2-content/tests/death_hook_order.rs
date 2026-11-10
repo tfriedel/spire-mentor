@@ -330,6 +330,106 @@ fn after_death_select_waits_for_the_play_to_finish() {
     }
 }
 
+/// Breakthrough kills one of two Nibbits. Gremlin Horn's `AfterDeath` draws a
+/// Seeker Strike, which Hellraiser auto-plays inline
+/// (`HellraiserPower.AfterCardDrawnEarly`): its hit lands, then its
+/// `CardSelectCmd.FromCombatPile` signals a player choice. That pauses the
+/// horn's listener under its `HookPlayerChoiceContext`. The comment on
+/// `_gameActionType` names exactly this chain: "Hellraiser triggers Seeker
+/// Strike / Seeker Strike causes a player choice". Breakthrough's play
+/// finishes and goes to the discard before the grid shows. Only then does the
+/// pick land and Seeker Strike follow it into the discard. Random-loadout
+/// Ironclad v0.111.0 seed 3249 step 383.
+#[test]
+fn hellraiser_auto_play_select_in_after_death_waits_for_the_play() {
+    for v in BOTH {
+        let (mut state, dying, _) = horn_stratagem_fixture(v, 5, &[]);
+        let p = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(&mut state, p, PowerKind::Hellraiser, 1);
+        let seeker = new_card(&mut state, CardId::SeekerStrike);
+        state.player.draw.push(seeker);
+        for id in [CardId::DefendIronclad, CardId::Bash, CardId::Anger] {
+            let uid = new_card(&mut state, id);
+            state.player.draw.push(uid);
+        }
+        let breakthrough = new_card(&mut state, CardId::Breakthrough);
+        state.player.hand.push(breakthrough);
+
+        let r = sts2_core::combat_loop::play_card(&mut state, 0, None);
+
+        let hp = state.creatures.iter().find(|c| c.id == dying.0).expect("c");
+        assert_eq!(hp.current_hp, 0, "{v:?}: Breakthrough killed the Nibbit");
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{v:?}");
+        assert!(
+            state.pending_choice.is_some(),
+            "{v:?}: Seeker Strike's pick"
+        );
+        assert_eq!(
+            state.player.discard.as_slice(),
+            &[breakthrough],
+            "{v:?}: Breakthrough's play finished before the pick opened"
+        );
+
+        resolve(&mut state, 0);
+        assert!(state.pending_choice.is_none(), "{v:?}");
+        assert!(state.pending_autoplay_resume.is_none(), "{v:?}");
+        assert!(state.combat_log.parked_hook_choices.is_none(), "{v:?}");
+        assert_eq!(
+            state.player.discard.as_slice(),
+            &[breakthrough, seeker],
+            "{v:?}: Seeker Strike follows once its pick resolves"
+        );
+        assert_eq!(state.player.hand.len(), 1, "{v:?}: the pick");
+        assert_eq!(state.player.draw.len(), 2, "{v:?}");
+    }
+}
+
+/// Thunderclap applies Vulnerable to both Nibbits, and Vicious draws on each
+/// (`ViciousPower.AfterPowerAmountChanged`, under the card's own context). The
+/// first draw finds the draw pile empty: it reshuffles and Stratagem opens
+/// its grid. `PowerCmd.Apply` awaits that draw, pick included, before the
+/// second Nibbit's Vulnerable, so the second draw comes after the pick. Hand:
+/// pick, the first draw, the second draw. Random-loadout Ironclad v0.107.1
+/// seed 3290 step 708 (Rust drew ahead of the open grid).
+#[test]
+fn a_draw_behind_an_open_reshuffle_pick_waits_for_it() {
+    for v in BOTH {
+        let (mut state, _, reshuffled) = horn_stratagem_fixture(
+            v,
+            50,
+            &[
+                CardId::DefendIronclad,
+                CardId::Bash,
+                CardId::Anger,
+                CardId::Inflame,
+            ],
+        );
+        let p = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(&mut state, p, PowerKind::Vicious, 1);
+        let clap = new_card(&mut state, CardId::Thunderclap);
+        state.player.hand.push(clap);
+
+        let r = sts2_core::combat_loop::play_card(&mut state, 0, None);
+
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{v:?}");
+        assert!(state.player.hand.is_empty(), "{v:?}: nothing drawn yet");
+        let pick = state.pending_choice.as_ref().expect("the grid").options[0]
+            .card_uid
+            .expect("a card");
+
+        resolve(&mut state, 0);
+        assert!(state.pending_choice.is_none(), "{v:?}");
+        assert!(state.pending_draw_resume.is_none(), "{v:?}");
+        assert_eq!(state.player.hand.len(), 3, "{v:?}: pick + two draws");
+        assert_eq!(state.player.hand[0], pick, "{v:?}: the pick comes first");
+        assert!(
+            state.player.hand.iter().all(|c| reshuffled.contains(c)),
+            "{v:?}"
+        );
+        assert_eq!(state.player.discard.as_slice(), &[clap], "{v:?}");
+    }
+}
+
 /// Poison kills one Nibbit at the enemy-side turn start. Gremlin Horn's draw
 /// reshuffles the five-card discard into a Stratagem select that is enqueued
 /// behind the running enemy-turn action (HookPlayerChoiceContext), so the

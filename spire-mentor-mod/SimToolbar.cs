@@ -119,6 +119,7 @@ internal sealed class SimToolbar
     private Button? _aiAuto;
     private Label? _speedLabel;
     private HBoxContainer? _moreRow;
+    private Button? _exitFullscreen;
     private readonly List<MenuButton> _menus = new();
     private readonly Dictionary<string, Button> _extensions = new();
 
@@ -142,6 +143,8 @@ internal sealed class SimToolbar
     private string? _note;
     private int _ticks;
     private int _dotFrame;
+    /// <summary>Hides the advisor's millisecond thinks (MentorBadge.cs).</summary>
+    private readonly ThinkingIndicator _thinking = new();
 
     // Grip drag state (same click-vs-drag threshold idiom as SimActionLog's
     // header). _undockedAnchor -- the badge row's top-RIGHT corner -- is null
@@ -380,7 +383,7 @@ internal sealed class SimToolbar
         }
     }
 
-    /// <summary>[Partner go] [AI is playing — Stop] [grip] [badge].</summary>
+    /// <summary>[Partner go] [AI is playing — Stop] [Exit fullscreen] [grip] [badge].</summary>
     private HBoxContainer BuildRow()
     {
         var row = new HBoxContainer
@@ -406,6 +409,17 @@ internal sealed class SimToolbar
         SimUiKit.SetLit(_stop, AiColor);
         _stop.Visible = false;
         row.AddChild(_stop);
+
+        // Framed fullscreen (the panels in the game): the way back to the
+        // panels around the game, beside the badge like the frame's own
+        // Fullscreen button -- in the badge's menu, players went hunting
+        // through Panels for it.
+        _exitFullscreen = SimUiKit.MakeButton("⛶ Exit fullscreen",
+            "Back to the window with the panels around the game: advice, coach and log beside it " +
+            "(the game's Fullscreen setting and Alt+Enter switch it too)",
+            () => SimFrameLauncher.SetWanted(true, "Exit fullscreen"), SetHint);
+        _exitFullscreen.Visible = false;
+        row.AddChild(_exitFullscreen);
 
         // The drag handle: a Stop region of its own, so the badge keeps plain
         // click semantics.
@@ -849,10 +863,15 @@ internal sealed class SimToolbar
             Autopilot: mode == SimMode.Autopilot,
             AutopilotEngaged: SimRuntime.AutopilotEngaged,
             Autobattle: autobattle,
-            Advisor: (AdvisorStatusLite)(int)_advisorStatus,
+            Advisor: ShownAdvisorStatus(),
             BuildElapsed: BuildElapsed(),
             Hidden: SimUiHide.Hidden);
     }
+
+    /// <summary>The advisor's status as the badge and the frame show it: a
+    /// think shows only once it lasts (ThinkingIndicator).</summary>
+    private AdvisorStatusLite ShownAdvisorStatus() =>
+        _thinking.Shown((AdvisorStatusLite)(int)_advisorStatus, DateTime.UtcNow);
 
     /// <summary>The AI itself is playing: F7, autobattle, or an engaged Autopilot.</summary>
     private static bool AiPlaying(in BadgeState s) =>
@@ -903,6 +922,10 @@ internal sealed class SimToolbar
         if (Valid(_aiFrame))
         {
             SetVisible(_aiFrame!, aiPlaying);
+        }
+        if (Valid(_exitFullscreen))
+        {
+            SetVisible(_exitFullscreen!, FrameLink.Framed && !FrameLink.UiOutside);
         }
         if (Valid(_partnerGo))
         {
@@ -1258,7 +1281,7 @@ internal sealed class SimToolbar
                 waiting = waiting != null,
                 seconds = waiting?.Brain.HoldSecondsLeft ?? 0,
             },
-            advisor_status = _advisorStatus.ToString().ToLowerInvariant(),
+            advisor_status = ShownAdvisorStatus().ToString().ToLowerInvariant(),
             build_elapsed = _advisorStatus == SimAdvisorStatus.Building ? BuildElapsed() : null,
             hud_shown = SpireMentorModConfig.ShowHud,
             hidden = SimUiHide.Hidden,
