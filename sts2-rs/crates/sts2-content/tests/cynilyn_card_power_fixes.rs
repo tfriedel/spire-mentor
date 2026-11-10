@@ -411,6 +411,61 @@ fn echoing_slash_rewave_after_killing_the_dampen_caster_is_upgraded() {
     }
 }
 
+/// `ConsumingShadow.cs` re-reads `DynamicVars.Repeat` on every pass of its
+/// channel loop, so an overflow evoke that kills the Dampen caster
+/// re-upgrades the card and the loop runs to the upgraded 3 channels.
+/// Random-loadout Defect v0.111.0 seed 3398: C# evoked a third orb.
+#[test]
+fn consuming_shadow_after_killing_the_dampen_caster_channels_three() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Defect);
+        let caster = add_enemy(&mut state, 2, 5);
+        let survivor = add_enemy(&mut state, 3, 100);
+        state.player.orbs.ensure_defect_base();
+        for _ in 0..3 {
+            sts2_core::orbs::channel_orb(&mut state, sts2_core::orbs::Orb::dark());
+        }
+        let card = new_card(&mut state, CardId::ConsumingShadow, true);
+        state.player.hand.push(card);
+        let ci = card.0.get() as usize - 1;
+        sts2_core::monster_power_effects::install_dampen_power_handlers();
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+        let pid = state
+            .powers
+            .iter()
+            .find(|p| p.kind == PowerKind::Dampen)
+            .map(|p| p.id)
+            .expect("Dampen applied");
+        state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+        let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+            Some(caster),
+        );
+        assert!(!state.cards[ci].upgraded, "{v:?}: Dampen downgraded");
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+        let hp = |s: &CombatState, u: CreatureUid| {
+            s.creatures
+                .iter()
+                .find(|c| c.id == u.0)
+                .expect("enemy")
+                .current_hp
+        };
+        assert!(
+            hp(&state, caster) <= 0,
+            "{v:?}: the first evoke killed the caster"
+        );
+        assert_eq!(
+            hp(&state, survivor),
+            88,
+            "{v:?}: two more Dark evokes after the card re-upgraded"
+        );
+    }
+}
+
 /// `BoneShards.cs:35-40` reads `DynamicVars.Block` for its `GainBlock` only
 /// AFTER the Osty attack, so an attack that kills the Dampen caster
 /// re-upgrades the card (`DampenPower.AfterDeath` -> `AfterRemoved`) and the

@@ -437,3 +437,36 @@ fn pendulum_draws_on_third_turn_start_v0107() {
     assert_eq!(state.relics[0].counter, 0);
     assert_eq!(state.player.hand.len(), 6, "5 hand draw + 1 Pendulum card");
 }
+
+/// A HistoryCourse dupe ends in `OnPlayWrapper`'s `CheckForEmptyHand`
+/// (CardModel.cs:1993 v0.107.1, :2006 v0.111.0) like any top-level play: an
+/// Eidolon dupe that exhausts the hand lets Unceasing Top draw (loadout
+/// Necrobinder 3373 v0.107.1). v0.107.1 only: v0.111.0 HistoryCourse replays
+/// Attacks alone, and Eidolon is a Skill.
+#[test]
+fn history_course_eidolon_dupe_emptying_the_hand_fires_unceasing_top_v0107() {
+    let version = GameVersion::V0_107_1;
+    let mut state = fresh(
+        version,
+        &[RelicKind::HistoryCourse, RelicKind::UnceasingTop],
+    );
+    push_hand_card(&mut state, CardId::DefendIronclad, CardType::Skill);
+    push_hand_card(&mut state, CardId::StrikeIronclad, CardType::Attack);
+    let top = state.player.hand.pop().expect("strike");
+    state.player.draw.push(top);
+    state.round = 2;
+    state.combat_log.prev_round_last_attack_skill_played = Some((CardId::Eidolon, false, None));
+    let _ = sts2_core::relic_effects::dispatch_before_play_phase_start(&mut state);
+    let hand: Vec<CardId> = state
+        .player
+        .hand
+        .iter()
+        .map(|&u| {
+            sts2_core::card_by_uid(&state.cards, u)
+                .expect("card")
+                .card_id
+        })
+        .collect();
+    assert_eq!(hand, vec![CardId::StrikeIronclad], "{version:?}");
+    assert!(state.player.draw.is_empty(), "{version:?}");
+}

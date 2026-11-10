@@ -11024,7 +11024,20 @@ pub fn auto_play_card_on_play(
     uid: crate::CardUid,
     target: Option<CreatureUid>,
 ) -> bool {
-    resolve_auto_played_card_at_target(state, uid, target, false)
+    let played = resolve_auto_played_card_at_target(state, uid, target, false);
+    // The dupe's `OnPlayWrapper` ends with `CheckForEmptyHand`
+    // (CardModel.cs:1993 v0.107.1, :2006 v0.111.0), and a turn-start
+    // HistoryCourse play is outside any card or potion effect: an Eidolon dupe
+    // that exhausts the hand lets Unceasing Top draw (loadout Necrobinder 3373
+    // v0.107.1: C# drew Shockwave, Rust left the hand empty).
+    if played
+        && !state.is_over
+        && state.pending_choice.is_none()
+        && state.pending_autoplay_resume.is_none()
+    {
+        check_for_empty_hand(state);
+    }
+    played
 }
 
 /// Auto-play one **specific** card (by uid) that currently lives in the

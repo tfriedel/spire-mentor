@@ -13,11 +13,17 @@ pub(crate) fn play_consuming_shadow(
     state: &mut CombatState,
     _t: Option<CreatureUid>,
 ) -> EffectResult {
-    apply_power_to_player(state, PowerKind::ConsumingShadow, 1);
-    let channels = if current_card_upgraded(state) { 3 } else { 2 };
-    for _ in 0..channels {
+    // C# re-reads `DynamicVars.Repeat` every pass of its `for`, so a channel
+    // whose overflow evoke kills the Dampen caster re-upgrades the card
+    // (`DampenPower.AfterRemoved`) and lifts the count to 3 mid-loop
+    // (random-loadout Defect v0.111.0 seed 3398). The power comes after the
+    // channels, as `ConsumingShadow.OnPlay` orders them.
+    let mut channeled = 0;
+    while channeled < if current_card_upgraded(state) { 3 } else { 2 } {
         orbs::channel_orb(state, Orb::dark());
+        channeled += 1;
     }
+    apply_power_to_player(state, PowerKind::ConsumingShadow, 1);
     EffectResult::Resolved
 }
 
