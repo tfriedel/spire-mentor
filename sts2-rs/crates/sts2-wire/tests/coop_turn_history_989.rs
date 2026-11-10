@@ -130,8 +130,8 @@ fn a_seats_turn_so_far_round_trips() {
 }
 
 /// A board emitted mid-play sends only the earlier plays' block gains: the
-/// resolving play's own gains carry the current play count as their tag, and
-/// seeded back they would read as an earlier play's (PR #1023 review).
+/// resolving play's own gains carry its card's uid as their tag, and seeded
+/// back they would read as an earlier play's (PR #1023 review).
 #[test]
 fn a_resolving_plays_own_block_gains_are_not_emitted() {
     let mut st = coop_board(
@@ -139,8 +139,7 @@ fn a_resolving_plays_own_block_gains_are_not_emitted() {
         &json!({"card_block_gains_this_turn": 1}),
         &json!({}),
     );
-    let now = st.combat_log.player_card_plays_this_combat;
-    st.combat_log.unmovable_card_block_plays.push(now);
+    st.combat_log.unmovable_card_block_plays.push(1);
     let back = combat_state_to_value(&st).expect("emits");
     assert_eq!(back["player"]["card_block_gains_this_turn"], json!(1));
     let rebuilt = state_from_json(&back).expect("re-parses");

@@ -33,6 +33,8 @@ use super::types::CardKeywords;
 /// calls here.
 pub fn install_default_registry() {
     card_effects::install_default_registry();
+    // Card tails awaited behind a suspended draw (Big Bang, …).
+    sts2_core::register_draw_then_runner(super::draw_then::run);
     // Bead `sts2-rs-63mew`: C#-discriminant rarity ranks for core-side
     // sorts (Stratagem's `after_shuffle` draw-pile grid-select orders
     // its options `orderby c.Rarity, c.Id`).

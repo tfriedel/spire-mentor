@@ -272,6 +272,32 @@ fn player_doom_after_legacy_constrict_v0111() {
     assert!(hp_after <= 0 && over, "hp {hp_after}, over {over}");
 }
 
+/// v0.107.1: Regen ticks in `AfterSideTurnEnd` (RegenPower.cs:17-24) beside
+/// Constrict (ConstrictPower.cs:15), and C# walks them in application order
+/// (Hook.cs:1411-1426). Constrict 9 lands on the legacy surface FIRST, then
+/// Regen 5 on the mirror: 80 -> 71 -> 76. Walking the mirror first heals
+/// at full HP (no-op), then hits: 71 (random-loadout Necrobinder 5777 @59).
+#[test]
+fn legacy_constrict_before_mirror_regen_v0107() {
+    let (mut state, _) = fresh(GameVersion::V0_107_1);
+    let p = player_uid(&state);
+    let next = state.powers.iter().map(|pw| pw.id.get()).max().unwrap_or(0) + 1;
+    let id = std::num::NonZeroU32::new(next).expect("non-zero");
+    state.powers.push(sts2_core::Power {
+        id,
+        kind: PowerKind::Constrict,
+        amount: 9,
+        counter: 0,
+        applier: None,
+        skip_next_tick: false,
+    });
+    state.player.powers.push(sts2_core::PowerUid(id));
+    give(&mut state, p, PowerKind::Regen, 5);
+    hooks::dispatch_before_turn_end(&mut state, &TurnSideCtx { side: Side::Player });
+    hooks::dispatch_after_turn_end(&mut state, &TurnSideCtx { side: Side::Player });
+    assert_eq!(hp(&state, p), 76);
+}
+
 /// Disintegration applied BEFORE Doom still damages AFTER the Doom check:
 /// it rides `AfterSideTurnEndLate` (DisintegrationPower.cs:15), which C# runs
 /// after every `AfterSideTurnEnd` listener. 80 HP, Disintegration 9, Doom 75:
@@ -500,8 +526,8 @@ fn well_laid_plans_keeps_whole_hand_v0111() {
 }
 
 // ── FeralPower ────────────────────────────────────────────────────────────
-// The IsDupe guard (`FeralPower.cs:51`) only matters on the auto-play path:
-// the hand-play path excludes dupes in both builds (see `finish_card_play`).
+// The IsDupe guard (`FeralPower.cs:51`) is new in v0.111.0, on every play
+// path: v0.107.1's `ModifyCardPlayResultPileTypeAndPosition` redirects a dupe.
 
 fn add_zero_cost_to_hand(state: &mut CombatState, card_id: CardId) -> CardUid {
     let uid = add_to_hand(state, card_id);
@@ -537,6 +563,35 @@ fn feral_slot_goes_to_the_outer_card_of_a_nested_auto_play() {
     );
     assert!(state.player.discard.contains(&ftl), "FTL discarded");
     assert!(!state.player.hand.contains(&ftl), "FTL not returned");
+}
+
+/// v0.107.1 `FeralPower.ModifyCardPlayResultPileTypeAndPosition` has no
+/// `IsDupe` check, so a hand-played 0-cost dupe Attack returns to the hand top
+/// instead of leaving combat. v0.111.0 added `!card.IsDupe` (FeralPower.cs:51)
+/// and the dupe is removed (Defect random loadout v0.107.1 seed 5354).
+#[test]
+fn feral_dupe_check_is_new_in_v0111() {
+    for version in [GameVersion::V0_107_1, GameVersion::V0_111_0] {
+        let (mut state, _) = fresh(version);
+        let p = player_uid(&state);
+        give(&mut state, p, PowerKind::Feral, 1);
+        let dupe = add_zero_cost_to_hand(&mut state, CardId::StrikeIronclad);
+        state.cards[dupe.get() as usize - 1].set_combat_var(sts2_core::cards::VarKey::IsDupe, 1);
+        let _ = add_to_hand(&mut state, CardId::DefendIronclad);
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+
+        let in_hand = state.player.hand.first() == Some(&dupe);
+        let anywhere = state.player.hand.contains(&dupe)
+            || state.player.discard.contains(&dupe)
+            || state.player.play.contains(&dupe)
+            || state.player.exhaust.contains(&dupe);
+        if version == GameVersion::V0_107_1 {
+            assert!(in_hand, "{version:?}: the dupe returns to hand[0]");
+        } else {
+            assert!(!anywhere, "{version:?}: the dupe leaves combat");
+        }
+    }
 }
 
 /// Feral returns the card to (Hand, Top); with a full hand `CardPileCmd.Add`

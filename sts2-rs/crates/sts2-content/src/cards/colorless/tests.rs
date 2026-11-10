@@ -2886,6 +2886,54 @@ fn calamity_conjures_nothing_when_before_card_played_was_skipped() {
     assert_eq!(state.run_rng.combat_card_generation.counter(), gen);
 }
 
+/// C# `CardPileCmd.Add` returns `success = false` before touching a combat
+/// pile once `CombatManager.IsEnding` (CardPileCmd.cs:312 v0.107.1, :379
+/// v0.111.0). So a Calamity Attack conjured after the play killed the last
+/// enemy never reaches the hand; its generation roll still happens. Loadout
+/// Ironclad 5625 v0.111.0: Stampede's next pick saw an empty hand in C# and
+/// rolled nothing.
+#[test]
+fn calamity_attack_conjured_after_the_last_kill_stays_out_of_the_hand() {
+    use sts2_core::card_effects::apply_power_to_creature;
+    crate::cards::dispatch::ensure_installed();
+    for version in [
+        sts2_core::GameVersion::V0_107_1,
+        sts2_core::GameVersion::V0_111_0,
+    ] {
+        let (mut state, enemy) = fresh_state(CardId::StrikeIronclad, 6, 0);
+        state.game_version = version;
+        state.player.play.clear();
+        add_player_creature(&mut state);
+        state.player.character = Some(sts2_core::CharacterId::Ironclad);
+        let puid = state.player.creature_uid.expect("player mirror");
+        apply_power_to_creature(&mut state, puid, sts2_core::powers::PowerKind::Calamity, 1);
+        let ctx = sts2_core::hooks::CardCtx {
+            card_type: Some(CardType::Attack),
+            ..Default::default()
+        };
+        sts2_core::hooks::dispatch_before_card_played_powers(&mut state, 1, false);
+        // The play kills the last enemy.
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id == enemy.0) {
+            c.current_hp = 0;
+        }
+        assert!(sts2_core::combat_loop::combat_is_ending(&state));
+        let gen_before = state.run_rng.combat_card_generation.counter();
+        let hand_before = state.player.hand.len();
+        sts2_core::hooks::dispatch_after_card_played(&mut state, &ctx);
+        assert_eq!(
+            state.run_rng.combat_card_generation.counter(),
+            gen_before + 1,
+            "{version:?}: the Attack is still generated"
+        );
+        assert_eq!(
+            state.player.hand.len(),
+            hand_before,
+            "{version:?}: not added"
+        );
+        assert!(state.player.discard.is_empty(), "{version:?}");
+    }
+}
+
 /// C# `Hook.AfterCardPlayed` walks `CombatState.IterateHookListeners`
 /// (CombatState.cs:115-170): the player's Powers first, then the player's
 /// relics, then each enemy's Powers. So the player's `CalamityPower` card
@@ -7076,5 +7124,39 @@ fn entropy_transforms_when_turn_start_inferno_leaves_the_enemy_alive() {
         state.run_rng.combat_card_selection.counter(),
         counter_before + 1,
         "a live combat transforms exactly one card"
+    );
+}
+
+/// v0.111.0 changed the Chaos rider to `CardPileCmd.AddGeneratedCardToCombat`
+/// (MadScience.cs:286), so the card IS generated there: Regalite grants its
+/// v0.111.0 4 block (Regalite.cs:22) and `History.CardGenerated` counts it for Supermassive (loadout
+/// Regent 5045 v0.111.0: Rust's Supermassive was one card short).
+#[test]
+fn mad_science_chaos_card_is_generated_on_v0111() {
+    use sts2_core::potions::CharacterId;
+    install_pool();
+    crate::relics::dispatch::ensure_installed();
+    let (mut state, enemy) = fresh_state(CardId::MadScience, 12, 0);
+    state.game_version = sts2_core::GameVersion::V0_111_0;
+    state.player.character = Some(CharacterId::Ironclad);
+    state.player.current_hp = 70;
+    state.player.max_hp = 70;
+    let _ = state.init_player_creature();
+    state.relics.push(sts2_core::Relic {
+        id: std::num::NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::Regalite,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    });
+    set_mad_science_variant(&mut state.cards[0], CardType::Skill, TinkerTimeRider::Chaos);
+    let generated_before = state.player.generated_cards_this_combat;
+    let f = lookup(CardId::MadScience).expect("registered");
+    f(&mut state, Some(enemy));
+    assert_eq!(state.player.block, 12, "Skill block + Regalite's 4");
+    assert_eq!(
+        state.player.generated_cards_this_combat,
+        generated_before + 1,
+        "a generated card"
     );
 }

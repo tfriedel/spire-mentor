@@ -315,7 +315,9 @@ def enumerate_choices(g: Any, cs_view: dict[str, Any]) -> list[tuple[str, dict[s
 
     if dec == "event_choice" or dec == "rest_site":
         for o in cs_view.get("options") or []:
-            if not o.get("is_locked") and o.get("enabled", True):
+            # Rest options report `is_enabled` (RunSimulator.RestSiteState); a
+            # disabled one (e.g. Smith with nothing upgradable) is not a choice.
+            if not o.get("is_locked") and o.get("is_enabled", o.get("enabled", True)):
                 out.append(("choose_option", {"option_index": o["index"]}))
         # MiniatureTent: after one option the rest site stays open and the
         # player may leave with the rest unused (C# BeforeLocalRestSiteExited).

@@ -16,6 +16,7 @@
 //! table only; nothing reads it.
 
 pub mod dispatch;
+pub mod draw_then;
 // What a card face shows for a value the card only knows at play time.
 pub mod preview;
 pub mod types;

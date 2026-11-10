@@ -41,12 +41,8 @@
 
 use sts2_core::card_effects::{apply_power_to_creature, EffectResult};
 use sts2_core::cards::{Card, CardType};
-use sts2_core::hooks::{CreatureRef, DamageCtx, DamageMul};
 use sts2_core::powers::PowerKind;
-use sts2_core::relic_effects::{
-    register_after_card_played, register_modify_damage_multiplicative, AfterCardPlayedFn,
-    CardEventCtx, ModifyDamageMultiplicativeFn,
-};
+use sts2_core::relic_effects::{register_after_card_played, AfterCardPlayedFn, CardEventCtx};
 use sts2_core::relics::RelicId;
 use sts2_core::run_effects::{
     register_after_obtained, register_before_combat_reward_offered,
@@ -259,15 +255,8 @@ pub fn install_pool() {
         RelicId::ToxicEgg,
         listener_toxic_egg_merchant as ModifyMerchantCardCreationResultsRunFn,
     );
-    // PaperKrane — additional multiplier on Weak-attack damage when
-    // the player is targeted. Python pin
-    // `sts2-rl-agent@01c094d:sts2_env/relics/rare.py::PaperKrane`
-    // (`EXTRA_WEAK = 0.15`). Combat-side `on_trigger_paper_krane`
-    // stays a `resolved_marker`.
-    register_modify_damage_multiplicative(
-        RelicId::PaperKrane,
-        listener_paper_krane as ModifyDamageMultiplicativeFn,
-    );
+    // PaperKrane has no listener: C# `WeakPower` reads it from the target
+    // (`hooks::dispatch_modify_damage_multiplicative`'s `PowerKind::Weak` arm).
 }
 
 // ---------------------------------------------------------------------------
@@ -767,98 +756,6 @@ pub const TUNGSTEN_ROD_REDUCTION: i32 = 1;
 // Typed-channel listener bodies
 // ---------------------------------------------------------------------------
 
-/// `PaperKrane::modify_damage_multiplicative` — when the player is
-/// taking a powered attack from a dealer that has Weak, contribute an
-/// additional `(WEAK - EXTRA_WEAK) / WEAK` multiplier on top of the
-/// power-side `Weak` arm's `3/4`. With Debilitate on the dealer the
-/// effective Weak multiplier doubles in strength (Python:
-/// `weak_multiplier -= 1.0 - weak_multiplier` → `2W - 1 = 0.5`), and
-/// PaperKrane contributes `(0.5 - 0.15) / 0.5 = 7/10`.
-///
-/// Mirrors Python pin
-/// `sts2-rl-agent@01c094d:sts2_env/relics/rare.py::PaperKrane`:
-///
-/// ```python
-/// def modify_damage_multiplicative(self, owner, dealer, target, props, card=None):
-///     if target is not owner or dealer is None or not props.is_powered_attack():
-///         return 1.0
-///     if dealer.get_power_amount(PowerId.WEAK) <= 0:
-///         return 1.0
-///     weak_multiplier = WEAK_MULTIPLIER
-///     if dealer.has_power(PowerId.DEBILITATE):
-///         weak_multiplier -= 1.0 - weak_multiplier
-///     return max(0.0, round((weak_multiplier - self.EXTRA_WEAK) / weak_multiplier, ...))
-/// ```
-///
-/// **Rational composition.** Python's float result is rationalized so
-/// it composes cleanly with [`DamageMul`]. With `WEAK = 3/4` and
-/// `EXTRA = 3/20` (15/100), `(W - E) / W = (12/20) / (15/20) = 12/15 = 4/5`.
-/// With Debilitate active the base becomes `1/2`, so
-/// `(1/2 - 3/20) / (1/2) = (7/20) / (10/20) = 7/10`. Both rationals
-/// are exact — no float drift across composition.
-///
-/// **Targeting model.** PaperKrane is a Silent rare; owner is the
-/// player. The Rust port reads the dealer's Weak amount via
-/// [`CombatState::player.powers`] / [`CombatState::creatures`] (we
-/// can't call the private `hooks::creature_power_amount` from
-/// content, so the body walks powers inline).
-fn listener_paper_krane(state: &CombatState, ctx: &DamageCtx) -> DamageMul {
-    // Ownership gate — registry walks every registered listener without
-    // pre-filtering by owned relics, so each body must check.
-    if !state.relics.owns(RelicKind::PaperKrane) {
-        return DamageMul::ONE;
-    }
-    // Target must be the player.
-    if !matches!(ctx.target, CreatureRef::Player) {
-        return DamageMul::ONE;
-    }
-    // Self-damage path: Python's `dealer is None` collapses to
-    // `dealer == target == Player` in the Rust ctx. If the dealer is
-    // also Player, this is a self-hit (e.g. retaliation card) and
-    // should not engage PaperKrane.
-    if matches!(ctx.dealer, CreatureRef::Player) {
-        return DamageMul::ONE;
-    }
-    if !ctx.props.is_powered() {
-        return DamageMul::ONE;
-    }
-    // Walk dealer's powers for Weak + Debilitate.
-    let dealer_powers: &[sts2_core::PowerUid] = match ctx.dealer {
-        CreatureRef::Enemy(uid) => {
-            let Some(c) = state.creatures.iter().find(|c| c.id == uid.0) else {
-                return DamageMul::ONE;
-            };
-            &c.powers
-        }
-        CreatureRef::Ally(idx) => &state.allies[idx as usize].powers,
-        CreatureRef::Player => unreachable!("filtered above"),
-        // The null-target sentinel is never a dealer; it holds no powers.
-        CreatureRef::Nobody => return DamageMul::ONE,
-    };
-    let mut has_weak = false;
-    let mut has_debilitate = false;
-    for puid in dealer_powers {
-        if let Some(p) = state.powers.get_by_id(puid.0) {
-            if p.kind == PowerKind::Weak && p.amount > 0 {
-                has_weak = true;
-            }
-            if p.kind == PowerKind::Debilitate {
-                has_debilitate = true;
-            }
-        }
-    }
-    if !has_weak {
-        return DamageMul::ONE;
-    }
-    // (W - E) / W where W is either 3/4 (no Debilitate) or 1/2 (with
-    // Debilitate). 4/5 and 7/10 respectively (see doc above).
-    if has_debilitate {
-        DamageMul::new(7, 10)
-    } else {
-        DamageMul::new(4, 5)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // RelicSpec factories — L–Z wave (bead `sts2-rs-6ynt.5.8`)
 //
@@ -998,6 +895,7 @@ rare_factory!(pub white_star, WhiteStar, "WHITE_STAR", RelicEffect::Noop);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sts2_core::hooks::{CreatureRef, DamageCtx, DamageMul};
 
     /// C# `VexingPuzzlebox.AfterPlayerTurnStart` calls `SetToFreeThisTurn()`
     /// (`SetThisTurnOrUntilPlayed(0)`): the generated card is free only until
@@ -2104,11 +2002,21 @@ mod tests {
         power_mul.compose(relic_mul)
     }
 
-    /// **PaperKrane #1** — happy path: enemy with Weak attacking the
-    /// player, owner has PaperKrane → power-side Weak 3/4 composed
-    /// with PaperKrane's 4/5 = 12/20.
+    /// The composed multiplier as an exact fraction `(num, den)`, reduced.
+    #[cfg(test)]
+    fn reduced(m: DamageMul) -> (i64, i64) {
+        let (mut a, mut b) = (m.num.abs(), m.den.abs());
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        (m.num / a, m.den / a)
+    }
+
+    /// **PaperKrane #1** — C# `WeakPower.ModifyDamageMultiplicative`
+    /// (WeakPower.cs:25-47) starts at 0.75 and lets the target's
+    /// `PaperKrane.ModifyWeakMultiplier` subtract 0.15: 0.6 = 3/5.
     #[test]
-    fn listener_paper_krane_weak_dealer_returns_four_fifths() {
+    fn listener_paper_krane_weak_dealer_returns_three_fifths() {
         use sts2_core::hooks::ValueProps;
         crate::relics::dispatch::ensure_installed();
         let mut state = CombatState::default();
@@ -2118,18 +2026,15 @@ mod tests {
             target: CreatureRef::Player,
             props: ValueProps::MOVE,
         };
-        assert_eq!(dispatch_combined_mul(&state, &ctx), DamageMul::new(12, 20));
+        assert_eq!(reduced(dispatch_combined_mul(&state, &ctx)), (3, 5));
     }
 
-    /// **PaperKrane #2** — with Debilitate on the dealer, the power-side Weak
-    /// arm deepens to `1/2` (Debilitate: `2W - 1`), and PaperKrane returns its
-    /// `(W - E)/W = 7/10` ratio. Composed: `1/2 × 7/10 = 7/20` (= the C# final
-    /// `W - E = 0.5 - 0.15 = 0.35`). Before the DebilitatePower power-side arm
-    /// was wired (`sts2-rs` Necrobinder non-Osty powers), the power side
-    /// returned `3/4` and this composed to a too-high `21/40 = 0.525`; the relic
-    /// listener's 7/10 ratio was always authored to pair with a `1/2` base.
+    /// **PaperKrane #2** — Krane subtracts before the dealer's Debilitate
+    /// doubles the reduction (`amount - (1 - amount)`, DebilitatePower.cs):
+    /// 0.75 - 0.15 = 0.6, then 0.6 - 0.4 = 0.2 = 1/5 (Silent v0.111.0 5505;
+    /// Rust composed 1/2 x 7/10 = 0.35).
     #[test]
-    fn listener_paper_krane_debilitate_dealer_returns_seven_tenths() {
+    fn listener_paper_krane_debilitate_dealer_returns_one_fifth() {
         use sts2_core::hooks::ValueProps;
         crate::relics::dispatch::ensure_installed();
         let mut state = CombatState::default();
@@ -2139,8 +2044,24 @@ mod tests {
             target: CreatureRef::Player,
             props: ValueProps::MOVE,
         };
-        // 1/2 (Debilitate-deepened Weak) × 7/10 (PaperKrane) = 7/20.
-        assert_eq!(dispatch_combined_mul(&state, &ctx), DamageMul::new(7, 20));
+        assert_eq!(reduced(dispatch_combined_mul(&state, &ctx)), (1, 5));
+    }
+
+    /// **PaperKrane #2b** — `Player.GetRelic<PaperKrane>()` reads the raw
+    /// relic list, so a melted Krane still applies.
+    #[test]
+    fn listener_paper_krane_applies_while_melted() {
+        use sts2_core::hooks::ValueProps;
+        crate::relics::dispatch::ensure_installed();
+        let mut state = CombatState::default();
+        let enemy_uid = paper_krane_setup(&mut state, true, true, false);
+        state.relics.set_melted(0, true);
+        let ctx = DamageCtx {
+            dealer: CreatureRef::Enemy(enemy_uid),
+            target: CreatureRef::Player,
+            props: ValueProps::MOVE,
+        };
+        assert_eq!(reduced(dispatch_combined_mul(&state, &ctx)), (3, 5));
     }
 
     /// **PaperKrane #3** — dealer without Weak: identity composed mul.
@@ -2428,132 +2349,5 @@ mod tests {
             let _ = dispatch_modify_rewards(&mut rs, &mut rewards, rt);
             assert!(rewards.is_empty(), "WhiteStar silent on {rt:?}");
         }
-    }
-
-    // ─── PaperKrane Weak-detection boundary ───
-    /// Push a Weak power of the given `amount` onto a fresh enemy and
-    /// return the combat ctx, owner equipped with PaperKrane. Used to
-    /// pin the `kind == Weak && amount > 0` guard.
-    #[cfg(test)]
-    fn paper_krane_weak_amount_setup(
-        state: &mut CombatState,
-        weak_amount: i32,
-    ) -> sts2_core::CreatureUid {
-        use smallvec::SmallVec;
-        use std::num::NonZeroU32;
-        use sts2_core::powers::PowerKind;
-        use sts2_core::{Creature, MonsterId, MonsterKind, Power, PowerUid, Relic};
-        state.relics.push(Relic {
-            id: NonZeroU32::new(1).expect("non-zero"),
-            kind: RelicKind::PaperKrane,
-            counter: 0,
-            is_wax: false,
-            is_melted: false,
-        });
-        let mut enemy_powers: SmallVec<[PowerUid; 8]> = SmallVec::new();
-        let pid = NonZeroU32::new(10).expect("non-zero");
-        state.powers.push(Power {
-            id: pid,
-            kind: PowerKind::Weak,
-            amount: weak_amount,
-            counter: 0,
-            applier: None,
-            skip_next_tick: false,
-        });
-        enemy_powers.push(PowerUid(pid));
-        let enemy_uid = sts2_core::CreatureUid::new(1).expect("non-zero");
-        state.creatures.push(Creature {
-            id: NonZeroU32::new(1).expect("non-zero"),
-            current_hp: 50,
-            max_hp: 50,
-            block: 0,
-            powers: enemy_powers,
-            species: Some(MonsterKind::Nibbit),
-            intent: None,
-            intent_history: sts2_core::IntentHistory::default(),
-            monster_id: MonsterId("Nibbit"),
-            ai: None,
-        });
-        state.enemy_uids.push(enemy_uid);
-        enemy_uid
-    }
-
-    /// **PaperKrane boundary `amount > 0`** — a Weak power with `amount
-    /// == 0` must NOT engage PaperKrane (no Weak in effect). A `>=`
-    /// mutation would treat a 0-stack Weak as live and apply the 4/5.
-    #[test]
-    fn listener_paper_krane_weak_amount_zero_is_no_op() {
-        use sts2_core::hooks::ValueProps;
-        crate::relics::dispatch::ensure_installed();
-        let mut state = CombatState::default();
-        let enemy_uid = paper_krane_weak_amount_setup(&mut state, 0);
-        let ctx = DamageCtx {
-            dealer: CreatureRef::Enemy(enemy_uid),
-            target: CreatureRef::Player,
-            props: ValueProps::MOVE,
-        };
-        assert_eq!(
-            sts2_core::relic_effects::dispatch_modify_damage_multiplicative(&state, &ctx),
-            DamageMul::ONE,
-            "Weak(0) does not engage PaperKrane"
-        );
-    }
-
-    /// **PaperKrane `&&` join** — a dealer carrying ONLY a non-Weak
-    /// power with `amount > 0` (Debilitate) must NOT engage PaperKrane:
-    /// the guard requires `kind == Weak AND amount > 0`. A `||` mutation
-    /// would fire on any positive-amount power.
-    #[test]
-    fn listener_paper_krane_non_weak_positive_power_is_no_op() {
-        use smallvec::SmallVec;
-        use std::num::NonZeroU32;
-        use sts2_core::hooks::ValueProps;
-        use sts2_core::powers::PowerKind;
-        use sts2_core::{Creature, MonsterId, MonsterKind, Power, PowerUid, Relic};
-        crate::relics::dispatch::ensure_installed();
-        let mut state = CombatState::default();
-        state.relics.push(Relic {
-            id: NonZeroU32::new(1).expect("non-zero"),
-            kind: RelicKind::PaperKrane,
-            counter: 0,
-            is_wax: false,
-            is_melted: false,
-        });
-        // Debilitate(1): a non-Weak power with positive amount, no Weak.
-        let mut enemy_powers: SmallVec<[PowerUid; 8]> = SmallVec::new();
-        let pid = NonZeroU32::new(10).expect("non-zero");
-        state.powers.push(Power {
-            id: pid,
-            kind: PowerKind::Debilitate,
-            amount: 1,
-            counter: 0,
-            applier: None,
-            skip_next_tick: false,
-        });
-        enemy_powers.push(PowerUid(pid));
-        let enemy_uid = sts2_core::CreatureUid::new(1).expect("non-zero");
-        state.creatures.push(Creature {
-            id: NonZeroU32::new(1).expect("non-zero"),
-            current_hp: 50,
-            max_hp: 50,
-            block: 0,
-            powers: enemy_powers,
-            species: Some(MonsterKind::Nibbit),
-            intent: None,
-            intent_history: sts2_core::IntentHistory::default(),
-            monster_id: MonsterId("Nibbit"),
-            ai: None,
-        });
-        state.enemy_uids.push(enemy_uid);
-        let ctx = DamageCtx {
-            dealer: CreatureRef::Enemy(enemy_uid),
-            target: CreatureRef::Player,
-            props: ValueProps::MOVE,
-        };
-        assert_eq!(
-            sts2_core::relic_effects::dispatch_modify_damage_multiplicative(&state, &ctx),
-            DamageMul::ONE,
-            "non-Weak positive power must not engage PaperKrane"
-        );
     }
 }

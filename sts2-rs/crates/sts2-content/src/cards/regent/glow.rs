@@ -10,8 +10,9 @@ use super::prelude::*;
 pub(crate) fn play_glow(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let stars = if current_card_upgraded(state) { 2 } else { 1 };
     gain_stars(state, stars);
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, 1);
-    apply_power_to_player(state, PowerKind::DrawCardsNextTurn, 1);
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, sts2_core::DrawThen::Glow);
     EffectResult::Resolved
 }
 

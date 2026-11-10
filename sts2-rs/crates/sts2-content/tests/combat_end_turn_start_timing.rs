@@ -284,6 +284,80 @@ fn imbued_auto_plays_after_turn_start_hooks() {
     }
 }
 
+/// C# awaits each Imbued card's `CardCmd.AutoPlay` (Imbued.cs:20-27), so an
+/// Imbued Hidden Daggers' discard select resolves before the next Imbued card
+/// plays, and the play phase opens only after the last one. Rust played the
+/// second Hidden Daggers while the first one's select was still open, so its
+/// select read a hand the first discard had not touched yet (Silent random
+/// loadout v0.111.0 seed 5447).
+#[test]
+#[serial_test::serial(global_registry)]
+fn imbued_selects_resolve_one_card_at_a_time() {
+    for version in VERSIONS {
+        let mut state = at_turn_start(version, 200, &[CardId::DefendIronclad; 5]);
+        state.round = 1;
+        let mut daggers = Vec::new();
+        for _ in 0..2 {
+            let uid = mint(&mut state, CardId::HiddenDaggers);
+            state.cards[uid.0.get() as usize - 1]
+                .add_enchantment(sts2_core::cards::EnchantmentId::Imbued, 1);
+            state.player.draw.push(uid);
+            daggers.push(uid);
+        }
+        let r = sts2_core::combat_loop::start_player_turn(&mut state);
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{version:?}");
+        assert_eq!(state.player.hand.len(), 5, "{version:?}: the opening hand");
+        assert!(
+            state.player.draw.contains(&daggers[1]),
+            "{version:?}: the second Hidden Daggers waits for the first's select"
+        );
+        assert_ne!(
+            state.phase,
+            CombatPhase::PlayerPlayPhase,
+            "{version:?}: the play phase waits for the Imbued plays"
+        );
+
+        let _ = resolve(&mut state, &[0, 1]);
+        let pc = state
+            .pending_choice
+            .as_ref()
+            .unwrap_or_else(|| panic!("{version:?}: the second select prompts"));
+        assert_eq!(pc.kind, sts2_core::ChoiceKind::DiscardFromHand);
+        assert_eq!(
+            pc.options.len(),
+            5,
+            "{version:?}: three Defends and the first card's two Shivs"
+        );
+        assert!(state.player.discard.contains(&daggers[0]), "{version:?}");
+        assert_ne!(state.phase, CombatPhase::PlayerPlayPhase, "{version:?}");
+
+        let _ = resolve(&mut state, &[0, 1]);
+        assert!(state.pending_choice.is_none(), "{version:?}");
+        assert!(state.pending_autoplay_resume.is_none(), "{version:?}");
+        assert_eq!(state.phase, CombatPhase::PlayerPlayPhase, "{version:?}");
+        let shivs = state
+            .player
+            .hand
+            .iter()
+            .filter(|u| state.cards[u.0.get() as usize - 1].card_id == CardId::Shiv)
+            .count();
+        assert_eq!(shivs, 4, "{version:?}");
+        assert_eq!(
+            state.player.discard.len(),
+            6,
+            "{version:?}: 4 discards + 2 daggers"
+        );
+        for uid in &daggers {
+            assert!(state.player.discard.contains(uid), "{version:?}");
+        }
+    }
+}
+
+fn resolve(state: &mut CombatState, picks: &[u8]) -> sts2_core::StepResult {
+    let selection = picks.iter().copied().collect();
+    sts2_core::apply(state, sts2_core::Action::ResolveChoice { selection })
+}
+
 // ── Item 4: a targetless AnyEnemy auto-play is not played ─────────────────
 
 /// `CardCmd.AutoPlay` (CardCmd.cs:74-85, both builds): an `AnyEnemy` card

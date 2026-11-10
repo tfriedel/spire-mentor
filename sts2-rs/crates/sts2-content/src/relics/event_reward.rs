@@ -587,13 +587,11 @@ fn install_listeners() {
         listener_hand_drill as AfterDamageGivenFn,
     );
     // PollinousCore — +2 hand-draw every `POLLINOUS_CORE_TURNS = 4`
-    // player turns. State (`_turns_seen` in Python) lives on the
-    // relic's `counter` (i32). The `before_side_turn_start` listener
-    // ticks the counter on player-side starts using a `(counter %
-    // TURNS) + 1` cycle so the counter reaches `TURNS` exactly once
-    // per 4 turns; the `modify_hand_draw` listener returns `+EXTRA`
-    // when `counter == TURNS`. Python pin
-    // `sts2-rl-agent@01c094d:sts2_env/relics/shop_event.py::PollinousCore`.
+    // player turns. `TurnsSeen` lives on the relic's `counter` (i32). In
+    // v0.107.1 the `before_side_turn_start` listener ticks it on player-side
+    // starts, the `modify_hand_draw` listener returns `+EXTRA` when
+    // `counter == TURNS`, and the turn setup resets it after the hand-draw
+    // count (`AfterModifyingHandDraw`).
     register_before_side_turn_start(
         RelicId::PollinousCore,
         listener_pollinous_core_tick as BeforeSideTurnStartFn,
@@ -1844,13 +1842,10 @@ fn listener_lava_lamp_card_reward(rs: &mut RunState, cards: &mut Vec<Card>) -> E
     // the `?` room's `Event` type through it, but `finish_event_combat` tears
     // the event down (`current_event = None`) before rolling the room
     // rewards, so only a live event counts as a non-combat room. A room-less
-    // RunState (unit fixtures) still passes.
-    let non_combat_room = match rs.current_room.map(|r| r.room_type) {
-        Some(RoomType::Shop | RoomType::RestSite | RoomType::Treasure) => true,
-        Some(RoomType::Event) => rs.current_event.is_some(),
-        _ => false,
-    };
-    if non_combat_room {
+    // RunState (unit fixtures) still passes. The act-opening Ancient is an
+    // `EventRoom` too, though Rust keeps the boss room through it (Silent
+    // v0.111.0 seed 5451: Sea Glass's slate after a clean boss fight).
+    if rs.in_non_combat_room() {
         return EffectResult::NotImplemented;
     }
     let took_damage = rs
@@ -2256,15 +2251,15 @@ pub const POLLINOUS_CORE_EXTRA_CARDS: i32 = 2;
 /// (`shop_event.py::PollinousCore`).
 pub const POLLINOUS_CORE_TURNS: i32 = 4;
 
-/// `PollinousCore::before_side_turn_start` — increment the
-/// per-turn counter on the player's side using a `(counter % TURNS) + 1`
-/// cycle so the counter equals `TURNS` exactly once every `TURNS`
-/// player turns. Mirrors Python's `_turns_seen += 1` +
-/// `after_modifying_hand_draw` reset, but uses a single modular
-/// increment because there is no `after_modifying_hand_draw` channel
-/// in the Rust port; the cycle is observationally identical (fires on
-/// turns 4, 8, 12, … starting from a fresh combat). Counter
-/// persistence lives on the relic's `Relic.counter` field.
+/// v0.107.1 `PollinousCore.BeforeSideTurnStart` (PollinousCore.cs:90-97):
+/// `TurnsSeen++` on every turn start the owner takes part in, with no wrap.
+/// Only `AfterModifyingHandDraw` resets it to 0, and only on a turn whose
+/// `ModifyHandDraw` it raised (`TurnsSeen == 4`); Rust runs that reset after
+/// the turn-start `BeforeHandDraw` walk
+/// (`sts2_core::relic_effects::pendulum::pollinous_core_after_modifying_hand_draw_v0107`).
+/// A combat that ends after the tick to 4 but before the hand draw leaves
+/// 4, and the relic never fires again (loadout Defect 5189 v0.107.1). The
+/// count persists across combats on `Relic.counter`.
 fn listener_pollinous_core_tick(state: &mut CombatState, side: Side) -> EffectResult {
     if side != Side::Player {
         return EffectResult::NotImplemented;
@@ -2280,8 +2275,7 @@ fn listener_pollinous_core_tick(state: &mut CombatState, side: Side) -> EffectRe
     else {
         return EffectResult::NotImplemented;
     };
-    let cur = state.relics[idx].counter;
-    state.relics[idx].counter = (cur % POLLINOUS_CORE_TURNS) + 1;
+    state.relics[idx].counter = state.relics[idx].counter.saturating_add(1);
     EffectResult::Resolved
 }
 
@@ -4962,11 +4956,16 @@ mod tests {
         }
     }
 
-    /// **PollinousCore #1** — counter cycles 1→2→3→4→1 across four
-    /// player-side `before_side_turn_start` dispatches.
+    /// **PollinousCore #1** — v0.107.1 `BeforeSideTurnStart` is a plain
+    /// `TurnsSeen++` (PollinousCore.cs:90-97); only `AfterModifyingHandDraw`
+    /// resets it. A counter left at 4 by a combat that ended before its hand
+    /// draw climbs past 4 and the +2 never fires again (loadout Defect 5189
+    /// v0.107.1).
     #[test]
-    fn listener_pollinous_core_tick_cycles_modulo_turns() {
-        use sts2_core::relic_effects::dispatch_before_side_turn_start;
+    fn listener_pollinous_core_tick_never_wraps() {
+        use sts2_core::relic_effects::{
+            dispatch_before_side_turn_start, dispatch_modify_hand_draw,
+        };
         crate::relics::dispatch::ensure_installed();
         let mut state = CombatState::default();
         pollinous_core_setup(&mut state, true);
@@ -4977,16 +4976,16 @@ mod tests {
                 .map(|r| r.counter)
                 .expect("pollinous owned")
         };
-        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
-        assert_eq!(read_counter(&state), 1);
-        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
-        assert_eq!(read_counter(&state), 2);
-        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
-        assert_eq!(read_counter(&state), 3);
-        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
-        assert_eq!(read_counter(&state), 4);
-        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
-        assert_eq!(read_counter(&state), 1, "cycle wraps to 1");
+        for expected in 1..=4 {
+            let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+            assert_eq!(read_counter(&state), expected);
+        }
+        // No hand draw consumed the 4 (the combat ended): it keeps climbing.
+        for expected in 5..=12 {
+            let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+            assert_eq!(read_counter(&state), expected);
+            assert_eq!(dispatch_modify_hand_draw(&state, 5), 5, "turn {expected}");
+        }
     }
 
     /// **PollinousCore #2** — modify_hand_draw fires +EXTRA on the
@@ -5013,10 +5012,10 @@ mod tests {
             5 + POLLINOUS_CORE_EXTRA_CARDS,
             "turn 4: +{POLLINOUS_CORE_EXTRA_CARDS}"
         );
-        // Turn 5: cycle wrapped, no extra.
+        // Turn 5 without the hand draw's reset: 5, no extra.
         let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
         let draw = dispatch_modify_hand_draw(&state, 5);
-        assert_eq!(draw, 5, "turn 5: counter wrapped to 1, no extra");
+        assert_eq!(draw, 5, "turn 5: counter 5, no extra");
     }
 
     /// **PollinousCore #3** — Monster-side ticks do not advance the

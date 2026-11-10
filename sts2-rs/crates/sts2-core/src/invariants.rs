@@ -242,7 +242,10 @@ pub fn check_combat_invariants(state: &CombatState, ctx: &str) -> Result<(), Str
                 state.pending_enemy_exec_resume.is_some(),
             ),
             ("pending_turn_setup_resume", state.pending_turn_setup_resume),
-            ("pending_play_phase_tail", state.pending_play_phase_tail),
+            (
+                "pending_play_phase_tail",
+                state.pending_play_phase_tail.is_some(),
+            ),
             ("enemy_side_capture", state.enemy_side_capture.is_some()),
             ("enemy_side_replay", state.enemy_side_replay.is_some()),
             (

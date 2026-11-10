@@ -43,6 +43,10 @@ pub(crate) fn play_echoing_slash(state: &mut CombatState, _t: Option<CreatureUid
             ValueProps::MOVE,
             Some(CardId::EchoingSlash),
         );
+        // A wave that threw (`CombatLog::card_play_faulted`) ends the `OnPlay`.
+        if state.combat_log.card_play_faulted {
+            break;
+        }
         attack_count = attack_count.saturating_add(i32::try_from(kills).unwrap_or(i32::MAX));
     }
     EffectResult::Resolved

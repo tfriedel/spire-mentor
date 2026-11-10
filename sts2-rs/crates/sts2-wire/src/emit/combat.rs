@@ -609,14 +609,14 @@ fn emit_seat_history(
             log.extra_turns_taken_this_combat,
         );
     }
-    // Earlier plays' gains only, as the mod sends them: a gain tagged with
-    // the current play count is the resolving play's own (the count bumps when
-    // a play finishes), which C# Unmovable never counts against that play and
-    // which a rebuilt board could not tell from an earlier play's.
+    // Earlier plays' gains only, as the mod sends them: a gain still tagged
+    // with its card's uid is a resolving play's own (the tag is retired when
+    // the play finishes), which C# Unmovable never counts against that play
+    // and which a rebuilt board could not tell from an earlier play's.
     let earlier = log
         .unmovable_card_block_plays
         .iter()
-        .filter(|&&tag| tag != log.player_card_plays_this_combat)
+        .filter(|&&tag| tag == sts2_core::UNMOVABLE_EARLIER_PLAY)
         .count();
     if earlier > 0 {
         set(m, "card_block_gains_this_turn", earlier);

@@ -1952,6 +1952,10 @@ fn thrash_folds_upgraded_osty_damage() {
     for (card_id, base, upgraded) in [
         (CardId::BoneShards, 9, 12),
         (CardId::Fetch, 3, 6),
+        // Poke / Snap: `OstyDamageVar(6)` / `(7)`, +3 on upgrade (Poke.cs:40,
+        // Snap.cs:49). Loadout Ironclad 5215 v0.107.1 folded Poke+ as 6.
+        (CardId::Poke, 6, 9),
+        (CardId::Snap, 7, 10),
         (CardId::Flatten, 12, 16),
         (CardId::HighFive, 11, 13),
         (CardId::Rattle, 7, 9),

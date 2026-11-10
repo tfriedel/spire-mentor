@@ -553,6 +553,8 @@ fn push_ethereal_card(state: &mut CombatState) -> CardUid {
 fn veilpiercer_makes_owned_ethereal_card_cost_zero() {
     let mut state = CombatState::default();
     let eth = push_ethereal_card(&mut state);
+    // Veilpiercer frees only a Hand/Play card (VeilpiercerPower.cs).
+    state.player.hand.push(eth);
     push_player_power(&mut state, PowerKind::Veilpiercer, 2);
 
     let eth_ctx = CardCostCtx {
@@ -601,6 +603,7 @@ fn veilpiercer_discounts_cards_made_ethereal_by_hex_or_this_combat() {
         uid: plain_uid,
         ..Card::pod_defaults()
     });
+    state.player.hand.push(plain_uid);
     let ctx = CardCostCtx {
         owner: CreatureRef::Player,
         card_id: Some(CardId::StrikeIronclad),
@@ -692,6 +695,8 @@ fn danse_macabre_reads_live_cost_after_veilpiercer_runs_out() {
     state.player.max_hp = 50;
     let _ = state.init_player_creature();
     let eth = push_ethereal_card(&mut state);
+    // Veilpiercer frees only a Hand/Play card (VeilpiercerPower.cs).
+    state.player.hand.push(eth);
     state.cards[0].cost = 3;
     push_player_power(&mut state, PowerKind::Veilpiercer, 1);
     push_player_power(&mut state, PowerKind::DanseMacabre, 6);
@@ -724,6 +729,8 @@ fn danse_macabre_before_veilpiercer_sees_the_free_cost() {
     state.player.max_hp = 50;
     let _ = state.init_player_creature();
     let eth = push_ethereal_card(&mut state);
+    // Veilpiercer frees only a Hand/Play card (VeilpiercerPower.cs).
+    state.player.hand.push(eth);
     state.cards[0].cost = 3;
     push_player_power(&mut state, PowerKind::DanseMacabre, 6);
     push_player_power(&mut state, PowerKind::Veilpiercer, 1);
@@ -1554,4 +1561,58 @@ fn chains_applied_first_goes_first_wherever_its_uid_is_listed() {
             .is_some_and(|af| af.kind == sts2_core::card_afflictions::CardAfflictionKind::Bound)
     });
     assert_eq!(bound, [true, true, true, false, false]);
+}
+
+/// Draw pile `[A, Status, X, Y]` drawn 2 by the hand draw under Iteration(2) +
+/// ChainsOfBinding(2), the powers applied in `order`. Returns which of
+/// `[A, Status, X, Y]` ended up `Bound`.
+fn bound_after_iteration_chains_draw(order: [PowerKind; 2]) -> [bool; 4] {
+    let mut state = CombatState::default();
+    state.player.current_hp = 80;
+    for kind in order {
+        push_player_power(&mut state, kind, 2);
+    }
+    let mut card = |card_type: CardType| {
+        let uid = CardUid::new(state.cards.len() as u32 + 1).expect("nonzero");
+        state.cards.push(Card {
+            uid,
+            card_type,
+            ..Card::pod_defaults()
+        });
+        state.player.draw.push(uid);
+        uid
+    };
+    let a = card(CardType::Attack);
+    let status = card(CardType::Status);
+    let (x, y) = (card(CardType::Attack), card(CardType::Attack));
+
+    state.draw_into_hand(2);
+    assert_eq!(state.player.hand.as_slice(), &[a, status, x, y]);
+    [a, status, x, y].map(|uid| {
+        state.cards[uid.get() as usize - 1]
+            .affliction
+            .is_some_and(|af| af.kind == sts2_core::card_afflictions::CardAfflictionKind::Bound)
+    })
+}
+
+/// Iteration applied before Chains of Binding: its nested draw on the turn's
+/// first Status card (IterationPower.cs:18-29) runs to completion before
+/// `ChainsOfBindingPower.AfterCardDrawn` checks the Status card, so X takes
+/// the second `Bound` and the Status card finds the cap reached (Defect
+/// v0.107.1 5533 @595: C# bound the Void Iteration drew, Rust the Dazed).
+#[test]
+fn iteration_applied_before_chains_binds_its_nested_draw_first() {
+    assert_eq!(
+        bound_after_iteration_chains_draw([PowerKind::Iteration, PowerKind::ChainsOfBinding]),
+        [true, false, true, false],
+    );
+}
+
+/// The other order: Chains binds the Status card before Iteration draws.
+#[test]
+fn chains_applied_before_iteration_binds_the_status_card() {
+    assert_eq!(
+        bound_after_iteration_chains_draw([PowerKind::ChainsOfBinding, PowerKind::Iteration]),
+        [true, true, false, false],
+    );
 }

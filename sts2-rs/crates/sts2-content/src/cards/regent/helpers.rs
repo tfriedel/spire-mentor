@@ -272,7 +272,8 @@ pub(crate) fn forge_from_card(state: &mut CombatState, amount: i32) -> usize {
 /// Direct-arena push matches what Vigor / Strength on player do in
 /// the ironclad pool.
 pub(crate) fn apply_power_to_player(state: &mut CombatState, kind: PowerKind, amount: i32) {
-    if amount <= 0 {
+    // C# `PowerCmd.Apply` returns while the combat `IsEnding` (PowerCmd.cs:69).
+    if amount <= 0 || state.is_over || sts2_core::combat_loop::enemy_side_is_ending(state) {
         return;
     }
     // Bead `sts2-rs-au4l2`: route through the canonical creature surface

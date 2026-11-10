@@ -625,6 +625,90 @@ fn scrape_discard_waits_for_a_stratagem_suspended_draw() {
     }
 }
 
+/// A Scrape draw resumed after a Stratagem pick still discards only its own
+/// cards: the resumed draw's first Status fires Iteration, whose nested draw
+/// lands in hand between Scrape's cards and is not part of Scrape's result
+/// (Defect v0.107.1 5679 @553: Rust discarded the Uproar Iteration drew).
+#[test]
+fn resumed_scrape_draw_keeps_the_card_iteration_drew() {
+    install_pool();
+    for version in [
+        sts2_core::GameVersion::V0_107_1,
+        sts2_core::GameVersion::V0_111_0,
+    ] {
+        let (mut state, euid) = fresh_state(CardId::Scrape, 7, 0);
+        state.game_version = version;
+        let mut uids = Vec::new();
+        for (n, id) in [CardId::Zap, CardId::Dazed, CardId::Dazed, CardId::Leap]
+            .into_iter()
+            .enumerate()
+        {
+            let uid = sts2_core::CardUid(NonZeroU32::new(n as u32 + 2).expect("nz"));
+            let status = id == CardId::Dazed;
+            state.cards.push(Card {
+                uid,
+                card_id: id,
+                cost: if status { -1 } else { 1 },
+                card_type: if status {
+                    CardType::Status
+                } else {
+                    CardType::Skill
+                },
+                target_type: TargetType::None,
+                ..Card::pod_defaults()
+            });
+            uids.push(uid);
+        }
+        let (zap, leap) = (uids[0], uids[3]);
+        state.player.draw.push(zap);
+        state.player.discard.extend([uids[1], uids[2], leap]);
+        for (n, kind) in [
+            sts2_core::PowerKind::Stratagem,
+            sts2_core::PowerKind::Iteration,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let pid = NonZeroU32::new(90 + n as u32).expect("nz");
+            state.powers.push(sts2_core::Power::new(pid, kind, 1));
+            state.player.powers.push(sts2_core::PowerUid(pid));
+        }
+
+        let f = lookup(CardId::Scrape).expect("registered");
+        assert_eq!(f(&mut state, Some(euid)), EffectResult::Resolved);
+        let choice = state.pending_choice.as_ref().expect("Stratagem pick open");
+        let at = choice
+            .options
+            .iter()
+            .position(|o| o.card_uid == Some(leap))
+            .expect("Leap offered");
+        let mut sel: SmallVec<[u8; 4]> = SmallVec::new();
+        sel.push(u8::try_from(at).expect("small"));
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::ResolveChoice { selection: sel },
+        );
+        assert!(state.pending_choice.is_none(), "{version:?}: pick resolved");
+        // Scrape's resumed draw took one Dazed (firing Iteration), Iteration
+        // drew the other, then the pile ran dry.
+        let in_hand: Vec<_> = uids[1..3]
+            .iter()
+            .copied()
+            .filter(|u| state.player.hand.contains(u))
+            .collect();
+        assert_eq!(
+            in_hand.len(),
+            1,
+            "{version:?}: Iteration's Dazed stays, Scrape's is discarded"
+        );
+        assert!(state.player.discard.contains(&zap), "{version:?}");
+        assert!(
+            state.player.hand.contains(&leap),
+            "{version:?}: the pick stays"
+        );
+    }
+}
+
 /// An auto-played card runs its `Enchantment.OnPlay` like a hand play
 /// (CardModel.cs:1930-1943): Uproar auto-playing a Sown(1) Strike gains 1
 /// energy, once. Defect QX189.
@@ -1911,8 +1995,10 @@ fn gh639_trash_to_treasure_power_channels_an_orb_on_a_generated_status() {
 /// GH #1054 (Defect seed 1016): C# `Hook.AfterCardGeneratedForCombat` runs
 /// through `IterateCombatHookListeners`, which yields no listeners once combat
 /// is ending (`Hook.cs:177-207`, `:395-402`). A Gunk Up whose hits kill the
-/// last primary enemy still adds its Slimed (`CardPileCmd.cs:281-313` only
-/// checks `!IsInProgress`), but TrashToTreasure must NOT roll
+/// last primary enemy still generates its Slimed (`AddGeneratedCardsToCombat`
+/// only checks `!IsInProgress`), but the `CardPileCmd.Add` it calls fails on
+/// `IsEnding` (CardPileCmd.cs:312), so the Slimed reaches no pile. And
+/// TrashToTreasure must NOT roll
 /// `GetRandomOrb(CombatOrbGeneration)`. The run-level `combat_orbs` read
 /// would otherwise carry into the next combat.
 #[test]
@@ -1936,12 +2022,16 @@ fn gh1054_trash_to_treasure_skips_orb_when_gunk_up_ends_combat() {
     let before = state.run_rng.combat_orbs.counter();
     let _ = f(&mut state, Some(euid));
     assert!(
-        state
+        state.cards.iter().any(|c| c.card_id == CardId::Slimed),
+        "the Slimed is still generated"
+    );
+    assert!(
+        !state
             .player
             .discard
             .iter()
             .any(|u| state.cards[u.0.get() as usize - 1].card_id == CardId::Slimed),
-        "the Slimed is still generated into the discard pile"
+        "but `CardPileCmd.Add` fails once combat is ending"
     );
     assert_eq!(
         state.player.orbs.filled_len(),

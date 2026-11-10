@@ -272,7 +272,7 @@ pub fn resolve_channels(
         // Tempest: X Lightning on top of its flat upgrade bonus.
         ChannelRule::PerX => by_kind[L] += u32::try_from(x_value.max(0)).unwrap_or(0),
         ChannelRule::PerLightningSoFar => {
-            by_kind[L] = state.combat_log.lightning_orbs_channeled_this_combat;
+            by_kind[L] = u32::from(state.combat_log.lightning_orbs_channeled_this_combat);
         }
     }
     OrbChannels {

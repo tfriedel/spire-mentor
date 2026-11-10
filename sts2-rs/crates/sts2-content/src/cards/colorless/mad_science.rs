@@ -117,9 +117,20 @@ pub(crate) fn play_mad_science(
                 if let Some(&card_id) = ids.first() {
                     if let Some(mut card) = card_pod_from_id(card_id, false) {
                         card.set_combat_var(VarKey::FreeThisTurn, 1);
-                        // A plain `CardPileCmd.Add(cardModel, Hand)`, not
-                        // `AddGeneratedCardToCombat`: no generation hooks.
-                        sts2_core::card_effects::add_new_card_to_hand(state, card);
+                        if state.game_version >= sts2_core::GameVersion::V0_111_0 {
+                            // v0.111.0 MadScience.cs:286 —
+                            // `AddGeneratedCardToCombat(card, Hand, Owner)`:
+                            // recorded in `History.CardGenerated` (Supermassive's
+                            // count, loadout Regent 5045) and fires
+                            // `AfterCardGeneratedForCombat` (Regalite, Arsenal, ...).
+                            let _ = sts2_core::card_effects::spawn_card_into_hand_with_origin(
+                                state, card, true,
+                            );
+                        } else {
+                            // v0.107.1 MadScience.cs:288 — a plain
+                            // `CardPileCmd.Add(cardModel, Hand)`: no generation hooks.
+                            sts2_core::card_effects::add_new_card_to_hand(state, card);
+                        }
                     }
                 }
             }

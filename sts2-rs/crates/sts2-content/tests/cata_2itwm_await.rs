@@ -249,11 +249,14 @@ fn history_course_dupe_replay_awaits_its_nested_auto_play() {
         StepResult::PendingChoice,
         "the ARMAMENTS select prompts"
     );
-    assert!(state.pending_play_phase_tail, "the turn-start tail waits");
+    assert!(
+        state.pending_play_phase_tail.is_some(),
+        "the turn-start tail waits"
+    );
     assert!(state.player.play.contains(&armaments));
     let _ = answer_choice(&mut state);
     assert!(state.pending_choice.is_none());
-    assert!(!state.pending_play_phase_tail, "the tail ran");
+    assert!(state.pending_play_phase_tail.is_none(), "the tail ran");
     assert!(
         state.player.play.is_empty(),
         "neither the dupe nor its nested auto-plays may be left on the Play \

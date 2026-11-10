@@ -4,10 +4,11 @@ use super::prelude::*;
 /// `BigBang` — draw 1, +1 energy, +1 star, Forge 5. All four
 /// effects real (forge wired by `sts2-rs-5o9w`).
 pub(crate) fn play_big_bang(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    // C# awaits the draw (a reshuffle's Stratagem select included) before
+    // GainStars, GainEnergy and Forge (BigBang.cs:41-45, both builds).
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, 1);
-    state.player.energy = state.player.energy.saturating_add(1);
-    gain_stars(state, 1);
-    let _ = forge_from_card(state, 5);
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, sts2_core::DrawThen::BigBang);
     EffectResult::Resolved
 }
 

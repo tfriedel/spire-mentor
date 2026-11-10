@@ -8,8 +8,13 @@ pub(crate) fn play_chaos(state: &mut CombatState, _t: Option<CreatureUid>) -> Ef
     // (RunRngSet.cs:41) → salt `"combat_orbs"`. Bead `sts2-rs-sr3ql` (943w7).
     // Bead `sts2-rs-2kuv9`: C# `Chaos.cs` `RepeatVar(1)` with `OnUpgrade
     // UpgradeValueBy(1m)` → 1 random orb base / 2 upgraded.
-    let channels = if current_card_upgraded(state) { 2 } else { 1 };
-    for _ in 0..channels {
+    // The loop re-reads `DynamicVars.Repeat` every iteration (Chaos.cs:25):
+    // a channel that evokes a full slot can kill the Dampen caster, and the
+    // re-upgrade then adds an iteration.
+    let channels = |state: &CombatState| if current_card_upgraded(state) { 2 } else { 1 };
+    let mut i = 0;
+    while i < channels(state) {
+        i += 1;
         // sts2-rs-dh30e: C# OrbModel._validOrbs is 5-entry incl
         // GlassOrb (OrbModel.cs:27-34); the prior 4-roll dropped Glass. The
         // roll lives in `orbs::random_combat_orb` so it stays shared with

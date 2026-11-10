@@ -36,7 +36,7 @@ pub(crate) fn preview_memento_mori(
     _target: Option<CreatureUid>,
 ) -> i32 {
     let extra: i32 = if card.upgraded { 5 } else { 4 };
-    let discarded = i32::try_from(state.combat_log.cards_discarded_this_turn).unwrap_or(i32::MAX);
+    let discarded = i32::from(state.combat_log.cards_discarded_this_turn);
     card.base_damage
         .saturating_add(extra.saturating_mul(discarded))
 }

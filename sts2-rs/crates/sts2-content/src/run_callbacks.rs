@@ -498,7 +498,10 @@ fn roll_out_of_combat_potion_kind(rs: &mut RunState) -> Option<sts2_core::potion
 /// `RollRarity` off `Rewards`) is appended separately by the run loop
 /// AFTER the card reward, matching C#'s populate order. Bead
 /// `sts2-rs-jenwp` (M4 live reward stream).
-fn apply_combat_gold_and_potion(rs: &mut RunState, room_type: RoomType) {
+///
+/// Returns whether the potion dropped: the set's `PotionReward` takes a slot
+/// in `RewardsSet`'s sort, which picks the card reward offered first.
+fn apply_combat_gold_and_potion(rs: &mut RunState, room_type: RoomType) -> bool {
     // (1) potion-odds NextFloat + pity update; `true` ⇒ a potion drops.
     let potion_drops = rs.roll_potion_reward(room_type);
     // (2) gold NextInt → apply immediately, scaled by the escaped-creature
@@ -555,6 +558,7 @@ fn apply_combat_gold_and_potion(rs: &mut RunState, room_type: RoomType) {
     if bonus_gold > 0 {
         rs.gain_gold(bonus_gold);
     }
+    potion_drops
 }
 
 /// Seeded encounter picker for Acts 1–3. Mirrors Python
@@ -1680,7 +1684,7 @@ mod tests {
 
         // Control: no AmethystAubergine ⇒ base Monster gold only.
         rs.gold = 0;
-        apply_combat_gold_and_potion(rs, RoomType::Monster);
+        let _ = apply_combat_gold_and_potion(rs, RoomType::Monster);
         let base_only = rs.gold;
         assert!(
             (10..=20).contains(&base_only),
@@ -1690,7 +1694,7 @@ mod tests {
         // With the relic ⇒ base + 15.
         rs.relics.push(RelicId::AmethystAubergine);
         rs.gold = 0;
-        apply_combat_gold_and_potion(rs, RoomType::Monster);
+        let _ = apply_combat_gold_and_potion(rs, RoomType::Monster);
         assert!(
             (25..=35).contains(&rs.gold),
             "base+15 bonus in [25,35], got {}",

@@ -768,7 +768,12 @@ fn apply_damage_with_final_impl(
     // (Ironclad fuzz seeds 3516, 4853; Defect full 1405 / 5656 via Gunk Up and
     // an echoed Gold Axe; Necrobinder full 1503 Rattle → SicEm, 3909 Eradicate
     // → Thorns). Returning here also skips `AfterDamageGiven` (SicEm).
-    if !bypass_hp_loss_cap && state.creatures[creature_index_for(state, target)].current_hp <= 0 {
+    // A faulted card play (`CombatLog::card_play_faulted`) has unwound: the
+    // rest of its `OnPlay` (Echoing Slash's next wave) never runs.
+    if state.combat_log.card_play_faulted
+        || (!bypass_hp_loss_cap
+            && state.creatures[creature_index_for(state, target)].current_hp <= 0)
+    {
         return DamageOutcome {
             hp_loss: 0,
             blocked: 0,
@@ -861,42 +866,17 @@ fn apply_damage_with_final_impl(
             // UNBLOCKABLE prop zeroes block absorption) is written straight down.
             unblocked
         } else {
-            let after_hooks = hooks::modify_hp_lost(state, unblocked, &hp_lost_ctx);
-            // Bead `sts2-rs-6jk` (j87-a): apply the relic_effects-family
-            // `modify_hp_lost` fold AFTER the hooks-family pipeline so relic-side
-            // listeners see the post-cap/post-clamp amount and transform it
-            // left-to-right. `relic_effects::dispatch_modify_hp_lost` is a fold
-            // returning the new amount; the BTreeMap walk order is deterministic
-            // by `RelicId`. J01b: a dead channel leaves the amount unchanged.
-            if relic_channel_live(state, PlannedChannel::ModifyHpLost) {
-                let ml_ctx = crate::relic_effects::ModifyHpLostCtx {
-                    target,
-                    dealer: dealer.to_creature_uid(state),
-                    props,
-                };
-                crate::relic_effects::dispatch_modify_hp_lost(state, &ml_ctx, after_hooks)
-            } else {
-                after_hooks
-            }
+            // `BeforeOsty` power stage, then the shared `AfterOsty` stages
+            // (relic fold, then Buffer — which spends a stack only when the
+            // amount is still positive). See [`hp_lost_after_osty`].
+            let pre_osty = hooks::modify_hp_lost_pre_osty(state, unblocked, &hp_lost_ctx);
+            hp_lost_after_osty(state, hp_lost_ctx.target, dealer, props, pre_osty)
         }
     } else {
         0
     };
 
-    // Bead `sts2-rs-q6bix.6` (Lucky Tonic): BufferPower consumes one stack
-    // per HP-loss EVENT it absorbs. C# splits this across two hooks —
-    // `BufferPower.ModifyHpLostAfterOstyLate` returns `0m` (the absorb,
-    // wired into `modify_hp_lost_multiplicative` as `DamageMul::ZERO`) and
-    // `AfterModifyingHpLostAfterOsty` does `PowerCmd.Decrement(this)`. The
-    // Rust `modify_hp_lost` pipeline is read-only and cannot mutate, so the
-    // decrement happens here, post-pipeline, gated on the SAME condition
-    // the multiplicative arm uses (an active Buffer owned by the target).
-    // The enclosing `unblocked > 0` guard mirrors C#: Buffer only fires
-    // when an HP-loss event actually reaches the modify stage (block alone
-    // does not consume a Buffer stack). Removal-at-zero matches the
-    // Counter-power teardown used by `try_consume_artifact_for_debuff`.
     if unblocked > 0 && !bypass_hp_loss_cap {
-        decrement_buffer_on_target(state, hp_lost_ctx.target);
         flash_intangible_on_target(state, hp_lost_ctx.target);
         flash_hardened_shell_on_target(state, hp_lost_ctx.target);
     }
@@ -1232,6 +1212,19 @@ pub struct HitTail {
 }
 
 fn finish_hit_tail(state: &mut CombatState, tail: &HitTail) {
+    // A player's attack hit: its reactions run inside the `AttackCommand`,
+    // before `Hook.AfterAttack` grants Skittish (see
+    // `CombatLog::player_attack_hit_open`).
+    if tail.dealer == CreatureRef::Player && tail.props.contains(ValueProps::MOVE) {
+        let outer = std::mem::replace(&mut state.combat_log.player_attack_hit_open, true);
+        finish_hit_tail_body(state, tail);
+        state.combat_log.player_attack_hit_open = outer;
+    } else {
+        finish_hit_tail_body(state, tail);
+    }
+}
+
+fn finish_hit_tail_body(state: &mut CombatState, tail: &HitTail) {
     let HitTail {
         dealer,
         target,
@@ -1542,8 +1535,9 @@ fn kill_relic_after_death(state: &mut CombatState, target: CreatureUid, dead_sid
 /// kills one crab hits its sibling before `CrabRagePower` reacts to the death
 /// (Regent act23 seed 1010), and Envenom's Poison on the first target (and an
 /// Outbreak it sets off) waits for the last target's HP loss (Silent loadout
-/// 1000, 1037). A nested call flushes its own hooks; its kills join the outer
-/// batch's.
+/// 1000, 1037). A nested call flushes its own hooks and kills its own
+/// targets; one it removes from the combat then receives no power from the
+/// outer call's tails (Silent loadout 5093).
 pub fn with_deferred_enemy_deaths<R>(
     state: &mut CombatState,
     body: impl FnOnce(&mut CombatState) -> R,
@@ -1552,25 +1546,54 @@ pub fn with_deferred_enemy_deaths<R>(
         .combat_log
         .deferred_hit_tails
         .replace(smallvec::SmallVec::new());
-    let own_deaths = state.combat_log.deferred_enemy_deaths.is_none();
-    if own_deaths {
-        state.combat_log.deferred_enemy_deaths = Some(smallvec::SmallVec::new());
-    }
+    // Every call kills ITS OWN felled targets at its end, nested or not
+    // (CreatureCmd.cs:409 v0.107.1): Outbreak's AoE set off by an outer AoE's
+    // Envenom tail kills its victims before the outer tails reach them
+    // (loadout Silent 5093 v0.107.1). Their deaths run with the outer batch
+    // restored, so a kill they cause joins it.
+    let outer_deaths = state
+        .combat_log
+        .deferred_enemy_deaths
+        .replace(smallvec::SmallVec::new());
+    let nested = outer_deaths.is_some();
     let out = body(state);
     let tails = std::mem::replace(&mut state.combat_log.deferred_hit_tails, outer_tails)
         .unwrap_or_default();
     for tail in &tails {
+        // A fault (see below), here or in a nested call, unwinds the rest.
+        if state.combat_log.card_play_faulted {
+            break;
+        }
+        // C# `Hook.AfterBlockBroken(originalTarget.CombatState, ...)` reads
+        // the TARGET's combat (CreatureCmd.cs:378 v0.107.1, :400 v0.111.0),
+        // which `RemoveCreature` nulled when a nested call killed it; the
+        // listener walk then throws (Hook.cs:253). Echoing Slash broke the
+        // Forgotten's block without killing it, the Lost's Envenom tail set
+        // off Outbreak, and Outbreak's own call killed the Forgotten
+        // (loadout Silent 1037 v0.107.1).
+        if tail.was_block_broken && removed_mid_call(state, tail.target) {
+            state.combat_log.card_play_faulted = true;
+            break;
+        }
         finish_hit_tail(state, tail);
     }
-    if !own_deaths {
+    let killed = std::mem::replace(&mut state.combat_log.deferred_enemy_deaths, outer_deaths)
+        .unwrap_or_default();
+    // The throw skips this call's `Kill(killedCreatures)` (CreatureCmd.cs:409
+    // v0.107.1): its felled targets stay at 0 HP without dying.
+    if state.combat_log.card_play_faulted {
+        end_damage_scope(state, nested);
         return out;
     }
-    let killed = state
-        .combat_log
-        .deferred_enemy_deaths
-        .take()
-        .unwrap_or_default();
     for target in killed {
+        // `RemoveCreature` takes the corpse out of the combat unless a
+        // retaining power keeps it; the outer call's later tails see it gone.
+        if nested && state.should_remove_from_combat_on_death(target) {
+            let bit = target.0.get() - 1;
+            if bit < u16::BITS {
+                state.combat_log.removed_in_damage_scope |= 1 << bit;
+            }
+        }
         kill_before_death(state, target);
         kill_after_death_powers(state, target, crate::Side::Enemy);
         kill_relic_after_death(state, target, crate::Side::Enemy);
@@ -1579,7 +1602,43 @@ pub fn with_deferred_enemy_deaths<R>(
             crate::enemy_death_effects::finish_kill(state, target, kind);
         }
     }
+    end_damage_scope(state, nested);
     out
+}
+
+/// The outermost damage call's end clears the nested-removal mask, and a
+/// fault no card play is there to take: the throw ends some other action,
+/// which this call stands in for.
+fn end_damage_scope(state: &mut CombatState, nested: bool) {
+    if !nested {
+        state.combat_log.removed_in_damage_scope = 0;
+        if state.resolving_card.is_none() {
+            state.combat_log.card_play_faulted = false;
+        }
+    }
+}
+
+/// Whether `target`, hit by the running multi-target damage call, has since
+/// been killed and removed from the combat by something else (a nested call,
+/// which [`with_deferred_enemy_deaths`] marks in
+/// `CombatLog::removed_in_damage_scope`, or a nested single kill): dead, not
+/// among this call's own felled targets, and not kept by a retaining power.
+/// C# `RemoveCreature` then nulls its `CombatState` (CombatState.cs:559).
+fn removed_mid_call(state: &CombatState, target: CreatureUid) -> bool {
+    let bit = target.0.get() - 1;
+    if bit < u16::BITS && state.combat_log.removed_in_damage_scope & (1 << bit) != 0 {
+        return true;
+    }
+    let dead = state
+        .creatures
+        .iter()
+        .any(|c| c.id == target.0 && c.current_hp <= 0);
+    dead && !state
+        .combat_log
+        .deferred_enemy_deaths
+        .as_ref()
+        .is_some_and(|own| own.contains(&target))
+        && state.should_remove_from_combat_on_death(target)
 }
 
 /// Single-hit entry point: [`compute_modified_damage`] then
@@ -1673,7 +1732,9 @@ pub fn apply_damage_full_frac(
 /// HP loss outside [`apply_damage_full`] (the latter hardcodes
 /// `CreatureRef::Enemy`), so the Lucky-Tonic Buffer decrement has to fire
 /// from both sites.
-pub(crate) fn decrement_buffer_on_target(state: &mut CombatState, target: CreatureRef) {
+///
+/// Returns whether a stack was spent (the target owned a live Buffer).
+pub(crate) fn decrement_buffer_on_target(state: &mut CombatState, target: CreatureRef) -> bool {
     // Perf gate: this runs on every hit that reaches the modify-hp stage;
     // with no live Buffer power the candidate collect below is provably
     // empty, so skip the arena walk entirely.
@@ -1682,7 +1743,7 @@ pub(crate) fn decrement_buffer_on_target(state: &mut CombatState, target: Creatu
         .present_kinds()
         .contains(crate::PowerKind::Buffer)
     {
-        return;
+        return false;
     }
     // Collect candidate Buffer power ids first to avoid borrowing
     // `state.powers` across the `owner_of_listener` resolution.
@@ -1696,7 +1757,7 @@ pub(crate) fn decrement_buffer_on_target(state: &mut CombatState, target: Creatu
         hooks::owner_of_listener(state, hooks::ListenerRef::Power(crate::PowerUid(pid)))
             == Some(target)
     }) else {
-        return;
+        return false;
     };
     let mut remove = false;
     if let Some(p) = state.powers.get_mut_by_id(pid) {
@@ -1710,6 +1771,47 @@ pub(crate) fn decrement_buffer_on_target(state: &mut CombatState, target: Creatu
             c.powers.retain(|u| u.0 != pid);
         }
     }
+    true
+}
+
+/// The `AfterOsty` stages of C# `Hook.ModifyHpLost` (Hook.cs:1886-1905
+/// v0.107.1) on an HP loss already past the `BeforeOsty` stage
+/// ([`hooks::modify_hp_lost_pre_osty`]) and any Osty redirect: first the
+/// relic `ModifyHpLostAfterOsty` fold (TungstenRod -1, BeatingRemnant cap,
+/// TheBoot), then Buffer's `ModifyHpLostAfterOstyLate` (BufferPower.cs:20-32).
+///
+/// Buffer spends a stack only when it CHANGES the amount: C# adds a listener to
+/// the `modifiers` list (whose `AfterModifyingHpLostAfterOsty` runs Buffer's
+/// `PowerCmd.Decrement`) only when `Truncate(before) != Truncate(after)`. A hit
+/// that TungstenRod already reduced to 0 leaves Buffer untouched (Defect seed
+/// 5941 v0.107.1: a 1-HP self-hit spent Rust's Buffer, so the next real hit
+/// landed in Rust and not in C#).
+///
+/// Every HP-loss path runs this one staged order: the player's damage pipeline
+/// (`combat_loop::apply_damage_to_player`), the player's self-damage shortcut
+/// (`hooks::apply_dealhploss`) and the creature path below.
+pub(crate) fn hp_lost_after_osty(
+    state: &mut CombatState,
+    target: CreatureRef,
+    dealer: CreatureRef,
+    props: ValueProps,
+    amount: i32,
+) -> i32 {
+    let mut amount = amount;
+    if amount > 0 && relic_channel_live(state, PlannedChannel::ModifyHpLost) {
+        if let Some(target_uid) = target.to_creature_uid(state) {
+            let ml_ctx = crate::relic_effects::ModifyHpLostCtx {
+                target: target_uid,
+                dealer: dealer.to_creature_uid(state),
+                props,
+            };
+            amount = crate::relic_effects::dispatch_modify_hp_lost(state, &ml_ctx, amount);
+        }
+    }
+    if amount > 0 && decrement_buffer_on_target(state, target) {
+        amount = 0;
+    }
+    amount
 }
 
 /// C# `IntangiblePower.AfterModifyingHpLostAfterOsty` (`IntangiblePower.cs:37`)

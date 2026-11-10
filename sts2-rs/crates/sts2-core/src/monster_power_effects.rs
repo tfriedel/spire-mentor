@@ -486,11 +486,10 @@ fn dampen_after_applied(
     // re-upgrade them when the power is removed.
     let uids = all_player_card_uids(state);
     for uid in uids {
-        if let Some(card) = state.cards.iter_mut().find(|c| c.uid == uid) {
-            if card.upgraded {
-                card.downgrade_for(state.game_version);
-                // Mark this card as downgraded by Dampen so we can re-upgrade
-                // it when Dampen is removed.
+        if crate::card_effects::downgrade_card_in_combat(state, uid) {
+            // Mark this card as downgraded by Dampen so we can re-upgrade
+            // it when Dampen is removed.
+            if let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) {
                 card.set_combat_var(crate::cards::VarKey::DampenDowngradedMarker, 1);
             }
         }

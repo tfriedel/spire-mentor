@@ -10220,3 +10220,83 @@ fn lunar_pastry_star_triggers_black_hole() {
         "Black Hole fires on the gained star"
     );
 }
+
+/// C# `Hook.BeforeSideTurnEnd`'s normal walk (Hook.cs:1376-1409 v0.107.1,
+/// :1388-1417 v0.111.0) visits relics in equip order. Stone Calendar
+/// (equipped first) kills the last enemy before Ripple Basin's block, so
+/// Juggernaut finds no enemy and rolls nothing. Rust walked RelicId order:
+/// Ripple Basin's block came first and Juggernaut rolled `CombatTargets`
+/// (random-loadout Ironclad 5724 v0.107.1 @392: combat_targets C# 135,
+/// Rust 136).
+#[test]
+#[serial_test::serial(global_registry)]
+fn before_turn_end_relics_run_in_equip_order() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 80);
+    state.round = 7;
+    give_player_relic(&mut state, RelicKind::StoneCalendar);
+    give_player_relic(&mut state, RelicKind::RippleBasin);
+    let enemy = state.spawn_enemy(crate::MonsterKind::Nibbit);
+    if let Some(c) = state.creatures.iter_mut().find(|c| c.id == enemy.0) {
+        c.max_hp = 30;
+        c.current_hp = 30;
+    }
+    let player = state.player.creature_uid.expect("player");
+    crate::card_effects::apply_power_to_creature(
+        &mut state,
+        player,
+        crate::PowerKind::Juggernaut,
+        5,
+    );
+    let rolls = state.run_rng.combat_targets.counter();
+
+    let _ = dispatch_before_turn_end(&mut state, Side::Player);
+
+    assert_eq!(state.player.block, 4, "Ripple Basin still grants");
+    assert_eq!(
+        state.run_rng.combat_targets.counter(),
+        rolls,
+        "no Juggernaut roll after Stone Calendar's kill"
+    );
+}
+
+/// C# `Hook.ModifyHpLost` (Hook.cs:1886-1905 v0.107.1) adds a listener to the
+/// `modifiers` list only when it changes the truncated amount, and Buffer's
+/// stack is spent from that list (`BufferPower.AfterModifyingHpLostAfterOsty`).
+/// Tungsten Rod (`ModifyHpLostAfterOsty`) runs before Buffer
+/// (`ModifyHpLostAfterOstyLate`), so a 1-HP self-hit it reduces to 0 leaves
+/// Buffer untouched (Defect seed 5941 v0.107.1 @446). The self-damage shortcut
+/// folded Buffer first and spent the stack on every unblocked hit.
+#[test]
+#[serial_test::serial(global_registry)]
+fn a_hit_tungsten_rod_zeroes_keeps_the_buffer_stack() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(100, 100);
+    give_player_relic(&mut state, RelicKind::TungstenRod);
+    let player_uid = state.player.creature_uid.unwrap();
+    crate::card_effects::apply_power_to_creature(
+        &mut state,
+        player_uid,
+        crate::PowerKind::Buffer,
+        1,
+    );
+    let self_hit = |amount| crate::hooks::Effect::DealHpLoss {
+        dealer: crate::hooks::CreatureRef::Player,
+        target: crate::hooks::CreatureRef::Player,
+        amount,
+        props: crate::hooks::ValueProps::UNPOWERED,
+    };
+    crate::hooks::apply_effect(&mut state, self_hit(1));
+    assert_eq!(state.player.current_hp, 100, "Tungsten Rod takes the 1");
+    assert_eq!(
+        state.player_power_amount(crate::PowerKind::Buffer),
+        1,
+        "Buffer did not change the amount, so it keeps its stack"
+    );
+    crate::hooks::apply_effect(&mut state, self_hit(3));
+    assert_eq!(
+        state.player.current_hp, 100,
+        "Buffer absorbs the 2 the Rod left"
+    );
+    assert_eq!(state.player_power_amount(crate::PowerKind::Buffer), 0);
+}

@@ -5157,6 +5157,10 @@ mod tests {
             PowerKind::PossessStrength,
             1,
         );
+        // A second, living enemy (TheForgotten in the real encounter): with
+        // TheLost the last one, its death would leave the combat `IsEnding`
+        // and C#'s `PowerCmd.Apply` would return nothing (PowerCmd.cs:69).
+        let _ = combat.spawn_enemy(MonsterKind::Nibbit);
         (combat, lost)
     }
 

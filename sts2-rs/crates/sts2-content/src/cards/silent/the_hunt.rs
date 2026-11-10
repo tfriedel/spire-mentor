@@ -25,9 +25,11 @@ use super::prelude::*;
 /// they do not block the fatal trigger.
 ///
 /// The 3-card `AddExtraReward` is granted run-side: `CombatState` has no
-/// reward surface, so the [`PowerKind::TheHunt`] stack (one per Fatal kill)
-/// is the record, and `RunManager::populate_fixed_extra_gold_rewards` rolls
-/// one extra card reward per stack when the room's rewards are populated.
+/// reward surface, so `combat_log.extra_card_rewards_this_combat` (one per
+/// Fatal kill) is the record, and `RunManager::populate_fixed_extra_gold_rewards`
+/// rolls one extra card reward per count when the room's rewards are
+/// populated. Not the [`PowerKind::TheHunt`] stack: that apply is dropped when
+/// the kill ends the combat (random-loadout Silent 5307 v0.107.1).
 /// Bead `sts2-rs-mtjox` (was `sts2-rs-oac`: card was misclassified as
 /// hand-search).
 pub(crate) fn play_the_hunt(state: &mut CombatState, target: Option<CreatureUid>) -> EffectResult {
@@ -45,9 +47,13 @@ pub(crate) fn play_the_hunt(state: &mut CombatState, target: Option<CreatureUid>
         sts2_core::card_effects::deal_damage_player_to_enemy_full(state, t, base).was_target_killed;
 
     if should_trigger_fatal && killed {
-        // C# also calls `combatRoom.AddExtraReward(owner, new CardReward(...,
-        // 3, owner))` (TheHunt.cs:47). The power stack stands in for it: the
-        // run manager grants one extra card reward per stack at room end.
+        // C# `combatRoom.AddExtraReward(owner, new CardReward(..., 3, owner))`
+        // (TheHunt.cs:47), recorded on the combat log and rolled at room end.
+        // Unlike the power apply below it lands while the combat is ending.
+        state.combat_log.extra_card_rewards_this_combat = state
+            .combat_log
+            .extra_card_rewards_this_combat
+            .saturating_add(1);
         apply_power_to_player(state, PowerKind::TheHunt, 1);
     }
     EffectResult::Resolved

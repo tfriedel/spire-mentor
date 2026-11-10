@@ -15,9 +15,15 @@ pub(crate) fn play_restlessness(state: &mut CombatState, _t: Option<CreatureUid>
     }
     let upgraded = current_upgraded(state);
     let draws = if upgraded { 3 } else { 2 };
-    let energy = if upgraded { 3 } else { 2 };
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, draws);
-    state.gain_energy(energy);
+    // Energy 2 (3 upgraded) after the draws: `DrawThen::Restlessness*`.
+    let tail = if upgraded {
+        sts2_core::DrawThen::RestlessnessPlus
+    } else {
+        sts2_core::DrawThen::Restlessness
+    };
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, tail);
     EffectResult::Resolved
 }
 

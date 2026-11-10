@@ -462,8 +462,10 @@ pub enum VarKey {
     SlyOwedAfterDraw,
     /// On a Nightmare snapshot only: the single-turn flags C#'s
     /// `CardModel.CreateClone` copied from the picked card
-    /// (`HasSingleTurnRetain` = 1, `HasSingleTurnSly` = 2). The player's
-    /// `retain_this_turn` / `sly_this_turn` lists hold them for live cards;
+    /// (`HasSingleTurnRetain` = 1, `HasSingleTurnSly` = 2, a Local Sly keyword
+    /// = 4: [`crate::CombatState::clone_flags_of`]). The player's
+    /// `retain_this_turn` / `sly_this_turn` / `sly_this_combat` lists hold
+    /// them for live cards;
     /// the snapshot is in no pile, so the flush's `EndOfTurnCleanup` never
     /// clears them and the next-turn copies inherit them. Appended so no
     /// existing discriminant moves.
@@ -1369,7 +1371,11 @@ impl Card {
         if self.is_x_cost() {
             return;
         }
-        let reduction = self.combat_var(VarKey::CostReductionUntilPlayed);
+        // The below-zero debts of earlier Relative shaves fold before it too
+        // (see `CombatState::snecko_randomize_hand_costs`).
+        let reduction = self.combat_var(VarKey::CostReductionUntilPlayed)
+            + self.combat_var(VarKey::CostDebtThisCombat)
+            + self.combat_var(VarKey::CostDebtThisTurn);
         if i32::from(self.cost) - reduction <= i32::from(cost) {
             return;
         }
@@ -1427,11 +1433,21 @@ impl Card {
         let capped_base = base.min(cap);
         let new_reduction = capped_base - (base - reduction).min(cap);
         let new_cost = (i32::from(self.cost) - reduction).min(cap) + new_reduction;
+        let lowered = new_cost < i32::from(self.cost);
         self.cost = i8::try_from(new_cost).unwrap_or(i8::MAX);
         if reduction != 0 || new_reduction != 0 {
             self.set_combat_var(VarKey::CostReductionUntilPlayed, new_reduction);
         }
         if live == 0 && banked == 0 {
+            // A cap that lowered the card owns its cost like any Absolute
+            // modifier: a later in-combat upgrade lowers only `_base`
+            // (`CardEnergyCost.UpgradeBy`, CardEnergyCost.cs:351-370) and the
+            // cap keeps `min(new base, cap)` (`GetWithModifiers` :110-121).
+            // Enlightenment+ then Armaments+ on a 2-cost card is 1, not 0
+            // (Ironclad 5915 v0.107.1 @637).
+            if lowered {
+                self.set_combat_var(VarKey::CostAbsolutelySet, 1);
+            }
             return;
         }
         self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, new_cost - capped_base);
@@ -1461,7 +1477,16 @@ impl Card {
         if live == 0 && banked == 0 {
             return;
         }
-        self.cost = self.cost.saturating_sub(banked as i8);
+        let restored = i32::from(self.cost) - banked;
+        if restored < 0 {
+            // A Relative shave taken below the roll (`AddThisCombat(-1)` while
+            // it was live) outlives it: its below-zero part stays a debt.
+            self.cost = 0;
+            let debt = self.combat_var(VarKey::CostDebtThisCombat);
+            self.set_combat_var(VarKey::CostDebtThisCombat, debt - restored);
+        } else {
+            self.cost = i8::try_from(restored).unwrap_or(i8::MAX);
+        }
         self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, 0);
         self.set_combat_var(VarKey::SneckoRollLive, 0);
         self.combat_vars.zero(VarKey::FlattenOstyAttacksAtRoll);
@@ -3599,36 +3624,40 @@ pub(crate) fn card_effect_draw_blocked(state: &crate::CombatState) -> bool {
 /// Rust analogue of C# `Hook.ShouldDraw(fromHandDraw = false)`
 /// (`CardPileCmd.cs:753`), shared with
 /// [`crate::CombatState::draw_into_hand_card_effect`].
-/// The cards a [`draw_via_state`] call returned (C# `CardPileCmd.Draw`'s
-/// result), given the hand length and draw-pile length before it and the
-/// count it reported. The hand's new tail also holds a Stratagem pick the
-/// reshuffle resolved without a prompt (a single option): it lands between
-/// the cards drawn before the pile ran out and the next drawn card
-/// (`ShuffleIfNecessary` runs before each card, CardPileCmd.cs:860) and is not
-/// part of the result, so a card filtering what it drew (Scrape, v0.111.0
-/// Expertise) leaves it alone (loadout Defect 1167 v0.107.1).
+pub fn draw_via_state(state: &mut crate::CombatState, n: i32) -> usize {
+    draw_via_state_collecting(state, n, None)
+}
+
+/// The cards ONE `CardPileCmd.Draw` call returned, and how many it still owes.
+///
+/// C# `CardPileCmd.Draw` returns the cards its own loop took. A nested draw
+/// started by a card's `AfterCardDrawn` rider (Iteration on the first Status,
+/// Pagestorm on an Ethereal card), a Hellraiser auto-play's own draw, or a
+/// Stratagem pick the reshuffle put in hand is not part of it, though all of
+/// them land in hand between its cards. A card that filters what it drew
+/// (Scrape, v0.111.0 Expertise) reads this.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnDraw {
+    /// The cards this draw took, in draw order (even if a rider moved one on).
+    pub cards: smallvec::SmallVec<[CardUid; 10]>,
+    /// The cards it still owes when it suspended on an open select: they
+    /// continue once the select resolves ([`crate::PendingDrawResume`]).
+    pub rest: i32,
+}
+
+/// [`draw_via_state`], reporting the draw's own cards ([`OwnDraw`]).
 #[must_use]
-pub fn cards_returned_by_draw(
-    state: &crate::CombatState,
-    hand_before: usize,
-    pile_before: usize,
-    drawn: usize,
-) -> smallvec::SmallVec<[CardUid; 10]> {
-    let mut own: smallvec::SmallVec<[CardUid; 10]> = state
-        .player
-        .hand
-        .get(hand_before..)
-        .unwrap_or_default()
-        .iter()
-        .copied()
-        .collect();
-    if own.len() == drawn + 1 && pile_before < own.len() {
-        own.remove(pile_before);
-    }
+pub fn draw_own_via_state(state: &mut crate::CombatState, n: i32) -> OwnDraw {
+    let mut own = OwnDraw::default();
+    let _ = draw_via_state_collecting(state, n, Some(&mut own));
     own
 }
 
-pub fn draw_via_state(state: &mut crate::CombatState, n: i32) -> usize {
+fn draw_via_state_collecting(
+    state: &mut crate::CombatState,
+    n: i32,
+    own: Option<&mut OwnDraw>,
+) -> usize {
     // Reset the single-card draw report (bead `sts2-rs-pillage-hellraiser`);
     // the per-card / batch branches below set it to the drawn card when one
     // moves, leaving it `None` when nothing is drawn (NoDraw veto, empty
@@ -3666,7 +3695,7 @@ pub fn draw_via_state(state: &mut crate::CombatState, n: i32) -> usize {
     // C# auto-plays drawn Strikes mid-draw on EVERY draw path, so the
     // played Strike can reshuffle back into the same draw.
     if state.per_card_draw_loop_required() || state.reshuffle_reorders_mid_draw(n) {
-        return state.draw_suspending(n, false);
+        return state.draw_suspending_collecting(n, false, own);
     }
     let hand_len_before = state.player.hand.len();
     let moved = draw(
@@ -3675,6 +3704,19 @@ pub fn draw_via_state(state: &mut crate::CombatState, n: i32) -> usize {
         &state.cards,
         &mut state.run_rng.shuffle,
     );
+    // No rider draws mid-batch here (those force the per-card loop above), so
+    // the batch's own cards are the hand's new tail.
+    if let Some(own) = own {
+        own.cards.extend(
+            state
+                .player
+                .hand
+                .get(hand_len_before..hand_len_before + moved)
+                .unwrap_or_default()
+                .iter()
+                .copied(),
+        );
+    }
     // Report the last card drawn for the single-card path (bead
     // `sts2-rs-pillage-hellraiser`). This batch branch is only taken when no
     // per-card on-draw remover (Hellraiser) is active, so the drawn cards are
@@ -3727,11 +3769,11 @@ pub fn draw_via_state(state: &mut crate::CombatState, n: i32) -> usize {
     // `!FromHandDraw`). Only the BATCH path lands here; the per-card loop
     // early-returns through `draw_suspending(n, false)` above, which tallies
     // each drawn card itself (so resumed-after-shuffle cards are not missed).
-    if let Ok(moved_u32) = u32::try_from(moved) {
+    if let Ok(moved_u16) = u16::try_from(moved) {
         state.combat_log.cards_drawn_by_effect_this_turn = state
             .combat_log
             .cards_drawn_by_effect_this_turn
-            .saturating_add(moved_u32);
+            .saturating_add(moved_u16);
     }
     moved
 }
@@ -6833,8 +6875,9 @@ mod tests {
     /// C# `ResetForDowngrade` restores the base cost (9) under Banshee's Cry's
     /// `AddThisCombat(-2)` modifiers, so after 5 Ethereal plays a downgraded
     /// copy resolves to `max(0, 9 - 10) = 0`, not the floored 0 plus the
-    /// reverted +2 (loadout Necrobinder 1006), and after 4 it is `9 - 8 = 1`,
-    /// not 0 with the old debt still subtracted (v0.107.1 3241).
+    /// reverted +2 (loadout Necrobinder 1006), and after 4 to `9 - 8 = 1`
+    /// with no debt left over (loadout Necrobinder 5439, v0.107.1: the stale
+    /// debt read the cost as 0).
     #[test]
     fn banshees_cry_downgrade_keeps_its_ethereal_discounts() {
         let factory = |id, up: bool| {
@@ -6844,26 +6887,25 @@ mod tests {
                 ..Card::pod_defaults()
             })
         };
-        let mut card = Card {
-            card_id: CardId::BansheesCry,
-            cost: 0,
-            upgraded: true,
-            ..Card::pod_defaults()
+        let shaved = |plays: i32| {
+            let mut card = Card {
+                card_id: CardId::BansheesCry,
+                cost: 7,
+                upgraded: true,
+                ..Card::pod_defaults()
+            };
+            for _ in 0..plays {
+                card.add_cost_this_combat(-2);
+            }
+            card.set_combat_var(VarKey::BansheesCryEtherealCounted, plays);
+            card
         };
-        card.set_combat_var(VarKey::BansheesCryEtherealCounted, 5);
-        card.set_combat_var(VarKey::CostDebtThisCombat, 3);
+        let mut card = shaved(5);
         assert!(card.downgrade_with(factory));
         assert_eq!(card.cost, 0);
         assert_eq!(card.combat_var(VarKey::CostDebtThisCombat), 1, "9 - 10");
 
-        let mut card = Card {
-            card_id: CardId::BansheesCry,
-            cost: 0,
-            upgraded: true,
-            ..Card::pod_defaults()
-        };
-        card.set_combat_var(VarKey::BansheesCryEtherealCounted, 4);
-        card.set_combat_var(VarKey::CostDebtThisCombat, 1);
+        let mut card = shaved(4);
         assert!(card.downgrade_with(factory));
         assert_eq!(card.cost, 1, "max(0, 9 - 8)");
         assert_eq!(card.combat_var(VarKey::CostDebtThisCombat), 0);

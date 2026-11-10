@@ -466,8 +466,8 @@ pub struct SeatHistory {
 
 /// The play tag a board's earlier card block gains carry in
 /// `TurnEvents::unmovable_card_block_plays`: a play of a rebuilt board's own
-/// past, never the one resolving (whose tag is a play count).
-pub const EARLIER_PLAY_TAG: u32 = u32::MAX;
+/// past, never the one resolving (whose tag is its card's uid).
+pub const EARLIER_PLAY_TAG: u32 = sts2_core::UNMOVABLE_EARLIER_PLAY;
 
 fn parse_seat_history<V: WireValue>(d: &V, path: &str) -> WireResult<SeatHistory> {
     let unblocked_hits_this_combat = match extract_optional(d, "unblocked_hits_this_combat") {

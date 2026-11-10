@@ -26,6 +26,7 @@ dispatch_before_damage_received
 dispatch_before_hand_draw_powers
 dispatch_before_side_turn_start
 dispatch_before_turn_end
+dispatch_before_turn_end_pass
 dispatch_modify_card_play_count
 dispatch_modify_hand_draw
 dispatch_modify_max_energy

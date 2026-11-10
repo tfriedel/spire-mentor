@@ -14,8 +14,13 @@ pub(crate) fn play_battle_trance(state: &mut CombatState, _t: Option<CreatureUid
     // hardcoded 3 (Python-pin port drift). NoDrawPower stays at 1.
     // Bead `sts2-rs-80kuy`.
     let cards = if current_upgraded(state) { 4 } else { 3 };
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, cards);
-    apply_power_to_player(state, PowerKind::NoDraw, 1);
+    crate::cards::draw_then::after_draw(
+        state,
+        draw_was_suspended,
+        sts2_core::DrawThen::BattleTrance,
+    );
     EffectResult::Resolved
 }
 

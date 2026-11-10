@@ -22,7 +22,7 @@ use super::prelude::*;
 /// `DrumOfBattlePower` no longer exists in 0.107.1. The on-exhaust energy gain
 /// is a card-level `AfterCardExhausted` effect keyed on this card's identity;
 /// the Rust engine has no per-card on-exhaust registry, so it is wired by a
-/// card-id-keyed arm in `dispatch_after_card_exhausted` (hooks.rs). The old
+/// card-id-keyed arm in `after_card_exhausted_card_listeners` (hooks.rs). The old
 /// `PowerKind::DrumOfBattle` + `BeforeHandDrawLate` exhaust machinery was
 /// removed in v0.107.1 (bead `sts2-rs-v0107-content-port-wb8lk.13`).
 pub(crate) fn play_drum_of_battle(

@@ -130,7 +130,7 @@ fn make_nibbit_combat(seed: u64) -> CombatState {
         pending_snecko_cost_randomize: false,
         pending_cluster_resume: None,
         pending_collect_resume: None,
-        pending_play_phase_tail: false,
+        pending_play_phase_tail: None,
         pending_hand_draw_resume: None,
         pending_relic_hand_draw_resume: None,
         pending_wlp_retain_resume: false,

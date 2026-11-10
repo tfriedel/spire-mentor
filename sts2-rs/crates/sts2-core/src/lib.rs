@@ -770,13 +770,15 @@ pub struct Relic {
     /// this flag inside every ownership *guard* and keeping it out of
     /// everything that *counts* or *serializes* relics.
     ///
-    /// C# reads `Player.Relics` raw — melt-blind — in three places, all
+    /// C# reads `Player.Relics` raw — melt-blind — in four places, all
     /// deliberate: `ILikeShiny.cs:24` (`Relics.Count >= 25` badge, not
     /// modelled here), `PaelsEye.cs:152`
     /// (`Relics.Any(r => r is WhisperingEarring)`,
-    /// `hooks::paels_eye_any_cards_played_this_turn`) and
+    /// `hooks::paels_eye_any_cards_played_this_turn`),
     /// `TouchOfOrobas.cs:156` (`Relics.First(r => r.Rarity == Starter)` —
-    /// starters are never wax). The relic-trade events look melt-blind but
+    /// starters are never wax) and `WeakPower.cs:36`
+    /// (`target.Player.GetRelic<PaperKrane>()`, the `PowerKind::Weak` arm of
+    /// the damage multiplier). The relic-trade events look melt-blind but
     /// are not: they filter on `RelicModel.IsTradable`, which itself returns
     /// false when `IsMelted` (`RelicModel.cs:188`).
     pub is_melted: bool,
@@ -2911,7 +2913,14 @@ pub struct PendingDrawResume {
     /// before `CreatureCmd.LoseMaxHp(…, isFromCard: true)`
     /// (BrightestFlame.cs:29-31, both builds), so the player's max HP drops
     /// once the resumed draw finishes. `0` = no deferred loss.
-    pub then_lose_max_hp_from_card: i32,
+    pub then_lose_max_hp_from_card: i16,
+    /// Set by Escape Plan when its `Draw(1)` suspended: C# gains the block
+    /// only after the awaited draw, and only if the card that draw RETURNED is
+    /// a Skill (EscapePlan.cs:24-29, both builds). The Stratagem pick is not
+    /// that card; the one drawn after it is. `0` = no deferred block. One
+    /// byte: an `i32` grew `CombatState`, which holds this struct twice,
+    /// toward clippy's 8 KiB large-type limit.
+    pub then_escape_plan_block: u8,
     /// The rest of an exhaust's `Hook.AfterCardExhausted` walk, owed because
     /// Dark Embrace's draw (a power, so ahead of these in the walk) suspended
     /// on a reshuffle's Stratagem pick. C# awaits that draw before the walk
@@ -2925,7 +2934,7 @@ pub struct PendingDrawResume {
     /// Strength owed by the code that awaited the exhaust: v0.107.1 Toasty
     /// Mittens gains it only after `CardCmd.Exhaust` returns
     /// (ToastyMittens.cs:48-50). `0` = none.
-    pub then_gain_strength: i32,
+    pub then_gain_strength: i16,
     /// [`CombatState::last_drawn_card`] when the draw suspended, restored
     /// before the resume: a draw that suspended AFTER taking its card (an
     /// on-draw Hellraiser auto-play that opened a select) still reports that
@@ -2953,6 +2962,100 @@ pub struct PendingDrawResume {
     /// included, before Chains checks the card against this turn's `Bound`
     /// count (GH #1150).
     pub then_chains_bound: Option<CardUid>,
+    /// Thunderclap's Vulnerable still owed to these enemies (bit `id - 1` of
+    /// the creature's arena id): an earlier target's apply opened a select
+    /// (Vicious drew Seeker Strike, which Hellraiser auto-played) while this
+    /// draw was suspended. C# awaits each target's `PowerCmd.Apply`
+    /// (PowerCmd.cs:36-48, both builds), so the rest are applied once the
+    /// draw finishes — [`CombatState::thunderclap_vulnerable`]. `0` = none.
+    pub then_thunderclap_vulnerable: u16,
+    /// The draw suspended inside `ShuffleIfNecessary` (the reshuffle's
+    /// `AfterShuffle` select): C# `CardPileCmd.Draw` resumes at
+    /// `drawPile.FirstOrDefault()` for the current card, with no second
+    /// shuffle, and ends the draw when that finds nothing (CardPileCmd.cs:
+    /// 857-866 v0.107.1). A pick parked while a card play emptied the pile
+    /// meanwhile must not reshuffle again (Defect random loadout v0.107.1
+    /// seed 5393). Applies to the first take of the resume only.
+    pub post_shuffle_take: bool,
+    /// The rest of the card's `OnPlay` that C# awaits behind this draw
+    /// (Big Bang's stars, energy and Forge; Battle Trance's No Draw; …): it
+    /// runs once the resumed draw finishes. See [`DrawThen`].
+    pub then_card_tail: DrawThen,
+}
+
+/// A card's `OnPlay` code that follows its awaited `CardPileCmd.Draw`, owed
+/// while that draw is suspended on a reshuffle select (Stratagem). The tails
+/// live in `sts2-content`, which registers the runner
+/// ([`register_draw_then_runner`]). Two bytes: `CombatState` holds
+/// [`PendingDrawResume`] in place and has no room to spare.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum DrawThen {
+    #[default]
+    None,
+    /// BigBang.cs:41-45 (both builds): GainStars(1), GainEnergy(1), Forge(5).
+    BigBang,
+    /// Restlessness.cs: GainEnergy(2) after its draws.
+    Restlessness,
+    /// Restlessness+: GainEnergy(3).
+    RestlessnessPlus,
+    /// BattleTrance.cs: Apply<NoDrawPower>(1) after the draw.
+    BattleTrance,
+    /// Glow.cs: Apply<DrawCardsNextTurnPower>(1) after the draw.
+    Glow,
+    /// Neurosurge.cs: Apply<NeurosurgePower>(3) after the draw.
+    Neurosurge,
+    /// Overclock.cs: a Burn into the discard pile after the draw.
+    Overclock,
+    /// Stoke.cs:28-33: generate this many cards into the hand after the
+    /// exhausts' draws.
+    Stoke(u8),
+    /// Stoke+: the same, upgraded.
+    StokePlus(u8),
+}
+
+/// Runs a [`DrawThen`] tail; registered by `sts2-content`.
+pub type DrawThenRunner = fn(&mut CombatState, DrawThen);
+
+static DRAW_THEN_RUNNER: std::sync::OnceLock<std::sync::RwLock<Option<DrawThenRunner>>> =
+    std::sync::OnceLock::new();
+
+/// Register the [`DrawThen`] runner. Called by the content crate's card
+/// registry installer.
+pub fn register_draw_then_runner(f: DrawThenRunner) {
+    *DRAW_THEN_RUNNER
+        .get_or_init(|| std::sync::RwLock::new(None))
+        .write()
+        .expect("draw-then runner registry poisoned") = Some(f);
+}
+
+impl CombatState {
+    /// Park `tail` behind the suspended draw when the card's own draw just
+    /// suspended on a reshuffle select. Returns `true` when parked; the
+    /// caller then returns without running the tail.
+    pub fn park_draw_then(&mut self, draw_was_suspended: bool, tail: DrawThen) -> bool {
+        if draw_was_suspended || self.pending_choice.is_none() {
+            return false;
+        }
+        let Some(pdr) = self.pending_draw_resume.as_mut() else {
+            return false;
+        };
+        debug_assert_eq!(pdr.then_card_tail, DrawThen::None);
+        pdr.then_card_tail = tail;
+        true
+    }
+
+    fn run_draw_then(&mut self, tail: DrawThen) {
+        if tail == DrawThen::None {
+            return;
+        }
+        let runner = *DRAW_THEN_RUNNER
+            .get_or_init(|| std::sync::RwLock::new(None))
+            .read()
+            .expect("draw-then runner registry poisoned");
+        if let Some(run) = runner {
+            run(self, tail);
+        }
+    }
 }
 
 impl PendingDrawResume {
@@ -2964,6 +3067,7 @@ impl PendingDrawResume {
             remaining: self.remaining,
             from_hand_draw: self.from_hand_draw,
             last_drawn: self.last_drawn,
+            post_shuffle_take: self.post_shuffle_take,
             ..Self::default()
         }
     }
@@ -2996,6 +3100,14 @@ pub struct ParkedHookChoice {
     /// pick landing, `AfterCardPlayed`, the move to its result pile) runs when
     /// the select resolves (Ironclad v0.111.0 3249).
     pub autoplay: Option<PendingAutoplayResume>,
+    /// Parked by a listener of a walk that awaits its paused listeners at its
+    /// end (`Task.WhenAll` over `tasksToAwait`: `BeforeSideTurnEnd`,
+    /// `AfterSideTurnEnd`, `AfterSideTurnEndLate`), so it opens there
+    /// ([`surface_when_all_hook_choice`]). Otherwise (`AfterDeath`,
+    /// `AfterDiedToDoom`, `BeforeSideTurnStart`: no `WhenAll`) C# leaves the
+    /// listener paused on its queued hook action, and it opens once the flow
+    /// is done ([`surface_parked_hook_choice`]).
+    pub when_all: bool,
 }
 
 /// Run `walk`, a non-blocking hook walk (see [`ParkedHookChoice`]), and park a
@@ -3007,13 +3119,52 @@ pub struct ParkedHookChoice {
 /// whose continuation [`PendingAutoplayResume`] fully captures. Any other
 /// select keeps the blocking path.
 pub(crate) fn run_nonblocking_hook(state: &mut CombatState, walk: impl FnOnce(&mut CombatState)) {
+    run_hook_walk(state, false, walk);
+}
+
+/// [`run_nonblocking_hook`] for a walk that collects its paused listeners and
+/// awaits them at its end (`Task.WhenAll(tasksToAwait)`): `BeforeSideTurnEnd`
+/// (Hook.cs:1377-1405 v0.107.1), `AfterSideTurnEnd` and
+/// `AfterSideTurnEndLate` (:1411-1435). Its parked selects are tagged
+/// [`ParkedHookChoice::when_all`], and the caller opens them right after the
+/// walk with [`surface_when_all_hook_choice`].
+pub(crate) fn run_when_all_hook(state: &mut CombatState, walk: impl FnOnce(&mut CombatState)) {
+    run_hook_walk(state, true, walk);
+}
+
+fn run_hook_walk(state: &mut CombatState, when_all: bool, walk: impl FnOnce(&mut CombatState)) {
     let had_choice = state.pending_choice.is_some();
+    let outer = std::mem::replace(&mut state.combat_log.when_all_hook, when_all);
     state.combat_log.nonblocking_hook_depth =
         state.combat_log.nonblocking_hook_depth.saturating_add(1);
     walk(state);
     state.combat_log.nonblocking_hook_depth =
         state.combat_log.nonblocking_hook_depth.saturating_sub(1);
-    if had_choice || !parkable_hook_choice(state) {
+    if !had_choice {
+        park_hook_choice(state);
+    }
+    state.combat_log.when_all_hook = outer;
+}
+
+/// After one listener of a non-blocking hook walk: park the select it opened
+/// (`had_choice`: one was open before it ran), so the next listener runs with
+/// none open, as C#'s does once the paused listener releases the walk
+/// (`HookPlayerChoiceContext.AssignTaskAndWaitForPauseOrCompletion`). Its
+/// own later draws already folded behind its pick. Outside a non-blocking
+/// walk, a no-op.
+#[inline]
+pub(crate) fn park_listener_choice(state: &mut CombatState, had_choice: bool) {
+    if !had_choice && state.combat_log.nonblocking_hook_depth > 0 {
+        park_hook_choice(state);
+    }
+}
+
+/// Inside a non-blocking hook walk, park the reshuffle select a listener just
+/// opened (see [`run_nonblocking_hook`]) so the walk's later listeners run
+/// with no select open, as C#'s do once the paused listener releases it. A
+/// no-op for any other open choice.
+pub(crate) fn park_hook_choice(state: &mut CombatState) {
+    if !parkable_hook_choice(state) {
         return;
     }
     let choice = state
@@ -3025,6 +3176,7 @@ pub(crate) fn run_nonblocking_hook(state: &mut CombatState, walk: impl FnOnce(&m
         draw: state.pending_draw_resume.take(),
         after_shuffle_relics_deferred: state.combat_log.after_shuffle_relics_deferred.take(),
         autoplay: state.pending_autoplay_resume.take(),
+        when_all: state.combat_log.when_all_hook,
     };
     state
         .combat_log
@@ -3053,7 +3205,7 @@ pub(crate) fn parkable_hook_choice(state: &CombatState) -> bool {
         && state.pending_end_turn_resume.is_none()
         && state.pending_enemy_exec_resume.is_none()
         && !state.pending_turn_setup_resume
-        && !state.pending_play_phase_tail
+        && state.pending_play_phase_tail.is_none()
         && state.pending_hand_draw_resume.is_none()
         && state.pending_relic_hand_draw_resume.is_none()
 }
@@ -3063,6 +3215,17 @@ pub(crate) fn parkable_hook_choice(state: &CombatState) -> bool {
 /// `ActionQueueSet.CombatEnded` cancels the queued hook action. Returns
 /// whether a choice was surfaced.
 pub(crate) fn surface_parked_hook_choice(state: &mut CombatState) -> bool {
+    surface_parked(state, false)
+}
+
+/// [`surface_parked_hook_choice`] at a walk's `Task.WhenAll`: the first select
+/// one of its listeners parked ([`ParkedHookChoice::when_all`]). Selects a
+/// kill's `AfterDeath` parked meanwhile stay queued.
+pub(crate) fn surface_when_all_hook_choice(state: &mut CombatState) -> bool {
+    surface_parked(state, true)
+}
+
+fn surface_parked(state: &mut CombatState, when_all_only: bool) -> bool {
     if state.combat_log.parked_hook_choices.is_none() || state.pending_choice.is_some() {
         return false;
     }
@@ -3075,7 +3238,10 @@ pub(crate) fn surface_parked_hook_choice(state: &mut CombatState) -> bool {
         .parked_hook_choices
         .as_mut()
         .expect("checked above");
-    let parked = queue.remove(0);
+    let Some(at) = queue.iter().position(|p| p.when_all || !when_all_only) else {
+        return false;
+    };
+    let parked = queue.remove(at);
     if queue.is_empty() {
         state.combat_log.parked_hook_choices = None;
     }
@@ -3100,6 +3266,12 @@ pub struct ScrapeDiscardOwed {
     pub retain: bool,
     /// The cards its draw returned before suspending, in draw order.
     pub drawn: [Option<CardUid>; 10],
+    /// Where the waiting draw's remaining cards sit in what the resume draws
+    /// next (the resumed draw's own cards, then the outer draw's): `skip`
+    /// cards belong to draws ahead of it (a nested draw that suspended inside
+    /// it), then `take` are its own.
+    pub skip: u8,
+    pub take: u8,
 }
 
 impl ScrapeDiscardOwed {
@@ -3122,6 +3294,49 @@ impl ScrapeDiscardOwed {
     #[must_use]
     pub fn cards(&self) -> smallvec::SmallVec<[CardUid; 10]> {
         self.drawn.iter().flatten().copied().collect()
+    }
+
+    /// Whether a card is waiting on this draw.
+    #[must_use]
+    pub const fn waiting(&self) -> bool {
+        self.owed || self.retain
+    }
+
+    /// Wait on a draw that suspended having returned `own`: its `own.rest`
+    /// cards are the last of the `upcoming` cards the resume draws.
+    pub fn await_rest(&mut self, own: &crate::cards::OwnDraw, upcoming: i32) {
+        self.push_cards(&own.cards);
+        self.skip = u8::try_from((upcoming - own.rest).max(0)).unwrap_or(u8::MAX);
+        self.take = u8::try_from(own.rest.max(0)).unwrap_or(u8::MAX);
+    }
+
+    /// Take this draw's cards out of `drawn`, the next own cards a resumed
+    /// draw took.
+    pub fn take_from(&mut self, drawn: &[CardUid]) {
+        for &uid in drawn {
+            if self.skip > 0 {
+                self.skip -= 1;
+            } else if self.take > 0 {
+                self.take -= 1;
+                self.push_cards(&[uid]);
+            }
+        }
+    }
+
+    /// The next `n` upcoming cards will never be drawn (a resumed draw that
+    /// found the pile empty ends, CardPileCmd.cs:857-866).
+    pub fn drop_upcoming(&mut self, n: i32) {
+        let n = u8::try_from(n.max(0)).unwrap_or(u8::MAX);
+        let skipped = n.min(self.skip);
+        self.skip -= skipped;
+        self.take = self.take.saturating_sub(n - skipped);
+    }
+
+    /// A draw that re-suspended put `n` cards of its own ahead of the rest.
+    pub fn defer_behind(&mut self, n: i32) {
+        self.skip = self
+            .skip
+            .saturating_add(u8::try_from(n.max(0)).unwrap_or(u8::MAX));
     }
 }
 
@@ -3149,6 +3364,19 @@ pub struct PendingCollectResume {
     /// Mark collected cards batch-pending (Cascade / Distilled Chaos), as
     /// [`combat_loop::auto_play_n_from_draw_top`] does; Havoc doesn't.
     pub batch: bool,
+}
+
+/// Where the turn-start tail resumes once the select holding it is answered;
+/// see [`CombatState::pending_play_phase_tail`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PlayPhaseTail {
+    /// After the Imbued AutoPrePlay walk: Whispering Earring, the phase
+    /// advance, `before_play_phase_start` and the rest
+    /// ([`combat_loop::finish_turn_start_after_imbued`]).
+    AfterImbued,
+    /// After `before_play_phase_start`
+    /// ([`combat_loop::finish_play_phase_start`]).
+    AfterPlayPhaseStart,
 }
 
 /// The turn-start auto-play cluster suspended by a forced card-select. Three
@@ -3329,15 +3557,25 @@ pub enum EndTurnResume {
     /// Dark Embrace draw's reshuffle opened a Stratagem select. The relic
     /// turn end, the late powers, the end-of-turn checks and the rest of the
     /// chain are owed.
-    AfterTurnEndPowers {
-        /// ConsumingShadow already evoked ahead of the power walk.
-        consuming_shadow_early: bool,
-    },
+    AfterTurnEndPowers,
     /// Suspended after phase two's player `AfterSideTurnEnd` relic walk: a
     /// Joss Paper draw's reshuffle opened a Stratagem select. The teammates'
     /// turn end, the late powers, the end-of-turn checks and the rest of the
     /// chain (the enemy turn) are owed.
     AfterTurnEndRelics,
+    /// Suspended after the player's whole `AfterSideTurnEnd` walk on a select
+    /// a listener parked in it (a Dark Embrace or Joss Paper draw's reshuffle
+    /// into a Stratagem pick): C# runs the rest of the walk past a paused
+    /// listener, then awaits it before `AfterSideTurnEndLate`. Any further
+    /// parked select, the late powers, the end-of-turn checks and the rest of
+    /// the chain are owed.
+    AfterTurnEndWalk,
+    /// Suspended after the player's `AfterSideTurnEndLate` walk on a select a
+    /// listener parked in it (a Disintegration hit's Centennial Puzzle draw
+    /// into a Stratagem pick), C#'s `WhenAll` at Hook.cs:1435 (v0.107.1). Any
+    /// further parked select, the end-of-turn checks and the rest of the chain
+    /// are owed.
+    AfterTurnEndLate,
     /// Suspended after phase one (`DoTurnEnd`) on a select a kill's
     /// `AfterDeath` parked there (a turn-end Lightning kill whose Gremlin Horn
     /// draw reshuffled into a Stratagem pick). C# queues that hook's action
@@ -3345,6 +3583,15 @@ pub enum EndTurnResume {
     /// waits for the queue, so the pick and its draw land before the flush.
     /// Phase two and the rest of the chain are owed.
     AfterPhaseOne,
+    /// Suspended inside phase two's turn-end-in-hand walk (`DoTurnEnd`'s
+    /// `OnTurnEndInHandWrapper` loop): an effect opened a select (Toxic's
+    /// self-hit -> Centennial Puzzle's draw -> a Stratagem pick). The card is
+    /// still on Play awaiting disposal; `remaining` later turn-end cards, the
+    /// rest of phase two and the chain are owed.
+    TurnEndInHand {
+        /// Turn-end-in-hand cards after the suspended one.
+        remaining: u8,
+    },
 }
 
 /// Continuation that re-enters a re-selection auto-play loop for its
@@ -3578,7 +3825,25 @@ pub struct TurnEvents {
     /// `moved` count. The turn-start hand draw routes through
     /// [`CombatState::draw_into_hand`] (`from_hand_draw == true`) and is
     /// NOT counted. Cleared each player turn in [`Self::reset_per_turn`].
-    pub cards_drawn_by_effect_this_turn: u32,
+    pub cards_drawn_by_effect_this_turn: u16,
+    /// Extra `CardReward`s the fight added to its room
+    /// (`CombatRoom.AddExtraReward`): one per Fatal kill by The Hunt
+    /// (TheHunt.cs:47, both builds). Counted here, not by the `TheHuntPower`
+    /// stacks applied alongside: that apply no-ops once the combat is ending
+    /// (the kill of the last enemy), while `AddExtraReward` does not. Rolled
+    /// by `RunManager::populate_fixed_extra_gold_rewards`. Per combat, never
+    /// reset per turn; `u16` (with `cards_drawn_by_effect_this_turn`) to keep
+    /// `CombatState` within clippy's large-array budget.
+    pub extra_card_rewards_this_combat: u16,
+    /// A hand-played card whose result location Feral claimed at play start
+    /// while a choice was still open at its disposal: it waits on Play, and
+    /// `combat_loop::flush_played_cards_after_choice` sends it to the hand top
+    /// once the choice closes. `None` at rest.
+    pub feral_claimed_in_play: Option<CardUid>,
+    /// The `Hook.AfterCardPlayed` walk running now is an auto-play's (C#
+    /// `cardPlay.IsAutoPlay`): Brilliant Scarf's listener skips it
+    /// (BrilliantScarf.cs:95-98, both builds). `false` at rest.
+    pub after_played_is_auto_play: bool,
     /// Number of `CardType::Status` cards the player has drawn this turn.
     /// Mirrors C# `IterationPower.AfterCardDrawn`'s history count
     /// (`History.Entries.OfType<CardDrawnEntry>().Count(e =>
@@ -3587,8 +3852,11 @@ pub struct TurnEvents {
     /// (i.e. on the FIRST status card drawn each turn — including the
     /// turn-start hand draw, since C# ignores `fromHandDraw`). Incremented
     /// per drawn Status card in [`Self::invoke_card_drawn_for_newly_drawn`];
-    /// cleared each player turn in [`Self::reset_per_turn`].
-    pub status_cards_drawn_this_turn: u32,
+    /// cleared each player turn in [`Self::reset_per_turn`] and at the enemy
+    /// turn start (`HappenedThisTurn` matches the side too). A `u16`, which
+    /// makes room for `removed_in_damage_scope` within clippy's large-array
+    /// budget for `CombatState`.
+    pub status_cards_drawn_this_turn: u16,
     /// `true` once the PLAYER has applied `DoomPower` to any creature during
     /// the current player turn. C# Necrobinder `DeathsDoor.cs`'s
     /// `WasDoomAppliedThisTurn` scans `History.Entries.OfType<PowerReceivedEntry>()`
@@ -3633,6 +3901,12 @@ pub struct TurnEvents {
     /// and [`crate::card_effects::osty_attack_command`] adds the one entry.
     /// Not hashed (never set between actions).
     pub osty_attack_command_open: bool,
+    /// Engine-private scratch: a player's powered hit (an `AttackCommand`
+    /// hit, `ValueProp.Move`) is running its after-hit hooks. A reaction
+    /// there (Reaper Form's Doom -> Sleight of Flesh) is still inside the
+    /// command, before its `Hook.AfterAttack` (AttackCommand.cs:551-673).
+    /// Not hashed (never set between actions).
+    pub player_attack_hit_open: bool,
     /// Engine-private scratch: stars the resolving HAND play spent in
     /// `SpendResources`, owed to `BlackHolePower.AfterCardPlayed`. C# deals the
     /// BlackHole AoE after the card resolves, not at the spend — "stars are
@@ -3705,7 +3979,7 @@ pub struct TurnEvents {
     /// pre-Feral 0-cost attack still counts against the budget (it incremented
     /// the tally) even though it wasn't redirected. Reads the energy ACTUALLY
     /// spent (`resolved_cost`/`ResourceInfo.EnergyValue`), not printed cost.
-    pub zero_cost_attacks_played_this_turn: u32,
+    pub zero_cost_attacks_played_this_turn: u16,
     /// Count of player card plays FINISHED this player-turn (incl. auto-plays),
     /// bumped at the same sites as [`Self::player_card_plays_this_combat`].
     /// Snapshotted into [`Self::card_plays_finished_last_player_turn`] at the
@@ -3727,7 +4001,7 @@ pub struct TurnEvents {
     /// Bead `sts2-rs-cdwi3` (restored under `sts2-rs-76kjk` — the
     /// original cdwi3 lib.rs delta dropped out of an upstream
     /// rebase, leaving hooks.rs referencing a phantom field).
-    pub cards_discarded_this_turn: u32,
+    pub cards_discarded_this_turn: u16,
     /// Creatures that transitioned from `current_hp > 0` to
     /// `current_hp <= 0` since the start of the current turn (player
     /// or enemy turn — same buffer). Drives the cross-creature
@@ -3748,6 +4022,26 @@ pub struct TurnEvents {
     /// `killedCreatures` and calls `Kill` after the loop (CreatureCmd.cs:
     /// 351-409). `None` at rest. See `damage::with_deferred_enemy_deaths`.
     pub deferred_enemy_deaths: Option<smallvec::SmallVec<[crate::CreatureUid; 4]>>,
+    /// Enemies a NESTED multi-target `CreatureCmd.Damage` killed and removed
+    /// from the combat while an outer one is still resolving (bit `id - 1` of
+    /// the arena id). C# `RemoveCreature` clears their `CombatState`, so
+    /// `CanReceivePowers` is false (Creature.cs:308-321): the outer call's
+    /// later tails (Envenom) give them nothing. `0` at rest; see
+    /// `damage::with_deferred_enemy_deaths`.
+    pub removed_in_damage_scope: u16,
+    /// The running card play threw, as the real game does when a
+    /// multi-target `CreatureCmd.Damage` reaches a block-broken target that a
+    /// nested call already killed and removed from the combat:
+    /// `Hook.AfterBlockBroken(target.CombatState /*null*/)` dereferences null
+    /// (CreatureCmd.cs:378 v0.107.1, :400 v0.111.0; Hook.cs:253). The
+    /// exception unwinds every enclosing damage call (their remaining tails
+    /// and their `Kill`s) and the card's `OnPlay`; only the `finally` blocks
+    /// run (`AttackContext.DisposeAsync`'s `AfterAttack`,
+    /// `EndCardOrPotionEffect`), so the card stays in the Play pile and
+    /// `AfterCardPlayed` never fires. Set by
+    /// `damage::with_deferred_enemy_deaths`; taken by the play's tail
+    /// (`combat_loop::finish_faulted_card_play`). `false` at rest.
+    pub card_play_faulted: bool,
     /// `Some` while a multi-target `CreatureCmd.Damage` is applying its hits:
     /// each hit's after-hit hooks (`AfterBlockBroken`, `AfterDamageGiven`,
     /// `AfterDamageReceived`) queue here and run once every target has lost
@@ -3786,7 +4080,7 @@ pub struct TurnEvents {
     /// `Orb::Lightning`. Combat-wide (NOT cleared in
     /// [`Self::reset_per_turn`]); resets via `TurnEvents::default()`
     /// at the start of each combat. Bead `sts2-rs-7y9vg`.
-    pub lightning_orbs_channeled_this_combat: u32,
+    pub lightning_orbs_channeled_this_combat: u16,
 
     /// C# `GoldAxe.cs` `CalculatedDamageVar.WithMultiplier(_ =>
     /// History.CardPlaysFinished.Count(e => e.CardPlay.Card.Owner ==
@@ -3831,7 +4125,7 @@ pub struct TurnEvents {
     /// `JossPaper.cs:74-85`): ethereal-caused exhausts bank here during the
     /// sweep and fold into the relic counter at `AfterTurnEnd(Player)`,
     /// where the threshold draw fires post-flush.
-    pub joss_paper_ethereal_count: u32,
+    pub joss_paper_ethereal_count: u16,
 
     /// `CardId` of the last Attack/Skill the player played during the
     /// round that is currently in progress. Read at the start of the
@@ -3909,6 +4203,10 @@ pub struct TurnEvents {
     /// inside one does not halt the surrounding flow, so the enemy side's
     /// capture mode (GH #1129) must not drain it inline. `0` at rest.
     pub nonblocking_hook_depth: u8,
+    /// The innermost non-blocking hook walk running now awaits its paused
+    /// listeners at its end ([`run_when_all_hook`]); a select parked in it is
+    /// [`ParkedHookChoice::when_all`]. `false` at rest.
+    pub when_all_hook: bool,
     /// Selects opened inside a non-blocking hook walk, waiting for the
     /// surrounding flow (the card play, or the enemy turn and the next player
     /// turn start) to finish before they surface. See [`ParkedHookChoice`].
@@ -3932,22 +4230,24 @@ pub struct TurnEvents {
     /// (Lightning kill -> GremlinHorn draw) does not inflate Regret. Consumed
     /// by `end_player_turn_phase_two`; `None` falls back to the live hand.
     pub hand_count_at_side_turn_end: Option<i32>,
-    /// Bead `sts2-rs-xk9yo` (Unmovable): the play-sequence tag
-    /// ([`Self::player_card_plays_this_combat`] at gain time) of each
-    /// card-sourced (powered) player block-gain THIS turn, in order, one entry
-    /// per gain. C# `UnmovablePower.ModifyBlockMultiplicative` doubles a card's
-    /// block while the number of this-turn card/monster-move block-gain history
-    /// entries *from a different `CardPlay`* is below the power's `Amount`. The
-    /// play tag is the `CardPlay` identity: constant across a single card's
-    /// multiple block-gains (so they double together) but distinct between
-    /// separate plays — including two plays of the SAME card (which a card-uid
-    /// key wrongly merged, over-doubling the replay; fuzz seed 2898). When
-    /// block is gained, `num = count(tags where tag != current play tag)`;
-    /// double if `num < Amount`. Populated once per gain (post-walk) in
-    /// `hooks::dispatch_after_block_gained`, only when the player owns
-    /// Unmovable. Cleared each player turn start. Power-sourced block
-    /// (FeelNoPain / CrimsonMantle, `card_source == None`) is neither doubled
-    /// nor recorded — matching C#'s `props.IsCardOrMonsterMove()` gate.
+    /// The `CardPlay` of each card-sourced player block gain THIS turn, in
+    /// order, one entry per gain: the gaining card's uid while that play is
+    /// resolving, then [`UNMOVABLE_EARLIER_PLAY`] once the play iteration
+    /// finishes ([`Self::retire_unmovable_play`] at each `CardPlayFinished`).
+    /// C# `UnmovablePower.ModifyBlockMultiplicative` (UnmovablePower.cs:21-42)
+    /// doubles a card's block while the number of this-turn card/monster-move
+    /// block-gain history entries *from a different `CardPlay`* is below the
+    /// power's `Amount`; when block is gained, `num = count(tags != the gaining
+    /// card's uid)`. A single play's gains share a tag (so they double
+    /// together), two plays of the SAME card do not (the first is retired
+    /// before the replay; fuzz seed 2898), and a play nested inside another
+    /// (a Hellraiser auto-play inside Second Wind) retires only its own gains —
+    /// a combat-wide play counter used as the tag changed under the outer play
+    /// and split its gains (Ironclad 5918 v0.111.0). Populated once per gain
+    /// (post-walk) in `hooks::dispatch_after_block_gained`. Cleared each player
+    /// turn start. Power-sourced block (FeelNoPain / CrimsonMantle,
+    /// `card_source == None`) is neither doubled nor recorded — matching C#'s
+    /// `props.IsCardOrMonsterMove()` gate.
     pub unmovable_card_block_plays: smallvec::SmallVec<[u32; 8]>,
     /// C# `PenNib.AttackToDouble`: the Attack whose `BeforeCardPlayed` wrapped
     /// PenNib's counter to 0. Only that card's damage is doubled; PenNib's
@@ -4023,7 +4323,21 @@ pub struct TurnEvents {
     pub fur_coat_one_hp: bool,
 }
 
+/// The [`TurnEvents::unmovable_card_block_plays`] tag of a block gain whose
+/// card play has finished: never a live card uid.
+pub const UNMOVABLE_EARLIER_PLAY: u32 = u32::MAX;
+
 impl TurnEvents {
+    /// C# `CardPlayFinished`: `card`'s gains this iteration now belong to an
+    /// earlier `CardPlay` for Unmovable's count.
+    pub fn retire_unmovable_play(&mut self, card: CardUid) {
+        for tag in &mut self.unmovable_card_block_plays {
+            if *tag == card.0.get() {
+                *tag = UNMOVABLE_EARLIER_PLAY;
+            }
+        }
+    }
+
     /// Clear per-turn counters. Combat-wide counters (e.g.
     /// `unblocked_damage_received_this_combat`) are preserved.
     /// Called from `start_player_turn` instead of
@@ -4474,12 +4788,12 @@ pub struct CombatState {
     /// goes on after the pick. The resolver runs it before any auto-play tail
     /// parked around it. `None` at rest. GH #1131.
     pub pending_collect_resume: Option<PendingCollectResume>,
-    /// The turn-start tail after `before_play_phase_start` waits for a select
-    /// the HistoryCourse dupe opened (GH #1131): C# awaits the dupe's
-    /// `CardCmd.AutoPlay` inside `BeforePlayPhaseStart`. The resolver runs
-    /// [`combat_loop::finish_play_phase_start`] once the dupe is done.
-    /// `false` at rest.
-    pub pending_play_phase_tail: bool,
+    /// The turn-start tail waits for a select a turn-start auto-play opened:
+    /// an Imbued card's (C# awaits each `CardCmd.AutoPlay` in
+    /// `Imbued.AfterAutoPrePlayPhaseEntered`) or the HistoryCourse dupe's
+    /// inside `BeforePlayPhaseStart` (GH #1131). The resolver runs the rest of
+    /// the tail once nothing is left waiting. `None` at rest.
+    pub pending_play_phase_tail: Option<PlayPhaseTail>,
     /// Turn-start hand draw suspended by a `ForegoneConclusionPower.BeforeHandDraw`
     /// surfacing card-select. C# `ForegoneConclusionPower.BeforeHandDraw` is
     /// awaited by the turn-start sequence: the FromSimpleGrid select runs +
@@ -4840,7 +5154,7 @@ impl Default for CombatState {
             pending_snecko_cost_randomize: false,
             pending_cluster_resume: None,
             pending_collect_resume: None,
-            pending_play_phase_tail: false,
+            pending_play_phase_tail: None,
             pending_hand_draw_resume: None,
             pending_relic_hand_draw_resume: None,
             pending_wlp_retain_resume: false,
@@ -6070,10 +6384,17 @@ impl CombatState {
         if self.player.powers.is_empty() {
             return out;
         }
+        let mirror_len = out.len();
         for uid in &self.player.powers {
             if !out.contains(uid) {
                 out.push(*uid);
             }
+        }
+        // Legacy-only powers (monster debuffs such as Constrict) interleave
+        // with the mirror's in application order, the one list C# walks
+        // (`hooks::iter_power_listeners`).
+        if out.len() > mirror_len {
+            out.sort_by_key(|u| u.0);
         }
         out
     }
@@ -7872,11 +8193,11 @@ impl CombatState {
         // CalculatedDamageVar), as the per-card loop and `draw_via_state` do
         // (Necrobinder full seed 2072).
         if !from_hand_draw {
-            if let Ok(moved_u32) = u32::try_from(moved) {
+            if let Ok(moved_u16) = u16::try_from(moved) {
                 self.combat_log.cards_drawn_by_effect_this_turn = self
                     .combat_log
                     .cards_drawn_by_effect_this_turn
-                    .saturating_add(moved_u32);
+                    .saturating_add(moved_u16);
             }
         }
         if shuffles > 0 {
@@ -8085,6 +8406,37 @@ impl CombatState {
     /// flips ONLY the hook timing + suspension, not rider coverage.
     /// Bead `sts2-rs-63mew`.
     pub(crate) fn draw_suspending(&mut self, n: i32, from_hand_draw: bool) -> usize {
+        self.draw_suspending_collecting(n, from_hand_draw, None)
+    }
+
+    /// [`Self::draw_suspending`], recording the cards its own loop takes and
+    /// what it still owes on suspending ([`crate::cards::OwnDraw`]).
+    pub(crate) fn draw_suspending_collecting(
+        &mut self,
+        n: i32,
+        from_hand_draw: bool,
+        mut own: Option<&mut crate::cards::OwnDraw>,
+    ) -> usize {
+        let mut remaining = n.max(0);
+        let mut moved = 0usize;
+        // A draw started while an earlier draw is suspended on an open select
+        // (a rider's auto-play, a reshuffle pick): C# is still awaiting that
+        // select, so none of this draw's cards are taken over it. They wait
+        // behind the suspended draw's own remainder (loadout Ironclad 5130
+        // v0.107.1: a second Vicious draw took Taunt over Seeker Strike's
+        // draw-pile select, which still offered it).
+        if remaining > 0
+            && self.pending_choice.is_some()
+            && !(self.combat_log.nonblocking_hook_depth > 0 && parkable_hook_choice(self))
+        {
+            if let Some(pdr) = self.pending_draw_resume.as_mut() {
+                pdr.outer_draw = pdr.outer_draw.plus(remaining, from_hand_draw);
+                if let Some(own) = own.as_deref_mut() {
+                    own.rest = remaining;
+                }
+                return 0;
+            }
+        }
         // An earlier card-effect draw is suspended on a reshuffle select
         // (Stratagem's grid). C# awaits that `CardPileCmd.Draw`, pick
         // included, before its caller goes on, so a draw issued meanwhile
@@ -8093,16 +8445,17 @@ impl CombatState {
         // suspended draw's remainder rather than drawing over the open select
         // (loadout Ironclad v0.107.1 3290: Thunderclap + Vicious; v0.111.0
         // 2006: Centennial Puzzle).
-        if !from_hand_draw && self.pending_choice.is_some() {
+        if !from_hand_draw && remaining > 0 && self.pending_choice.is_some() {
             if let Some(pdr) = self.pending_draw_resume.as_mut() {
                 if !pdr.from_hand_draw && pdr.is_plain() {
-                    pdr.remaining = pdr.remaining.saturating_add(n.max(0));
+                    pdr.remaining = pdr.remaining.saturating_add(remaining);
+                    if let Some(own) = own.as_deref_mut() {
+                        own.rest = remaining;
+                    }
                     return 0;
                 }
             }
         }
-        let mut remaining = n.max(0);
-        let mut moved = 0usize;
         while remaining > 0 {
             if crate::cards::is_hand_full(&self.player) {
                 break;
@@ -8162,10 +8515,14 @@ impl CombatState {
                     }
                     if self.pending_choice.is_some() {
                         // Suspend: the current card has NOT been drawn.
+                        if let Some(own) = own.as_deref_mut() {
+                            own.rest = remaining;
+                        }
                         self.pending_draw_resume = Some(PendingDrawResume {
                             remaining,
                             from_hand_draw,
                             last_drawn: self.last_drawn_card,
+                            post_shuffle_take: true,
                             ..PendingDrawResume::default()
                         });
                         return moved;
@@ -8189,6 +8546,9 @@ impl CombatState {
             // the caller (Pillage's attack-draw loop). Bead
             // `sts2-rs-pillage-hellraiser`.
             self.last_drawn_card = Some(uid);
+            if let Some(own) = own.as_deref_mut() {
+                own.cards.push(uid);
+            }
             moved += 1;
             remaining -= 1;
             self.cards_drawn = self.cards_drawn.saturating_add(1);
@@ -8227,6 +8587,9 @@ impl CombatState {
             // `apply(Action::ResolveChoice)` finishes the parked auto-play (card
             // → discard) BEFORE continuing this draw via `pending_draw_resume`.
             if self.pending_choice.is_some() {
+                if let Some(own) = own.as_deref_mut() {
+                    own.rest = remaining;
+                }
                 match self.pending_draw_resume.as_mut() {
                     None => {
                         self.pending_draw_resume = Some(PendingDrawResume {
@@ -8358,21 +8721,26 @@ impl CombatState {
 
     pub(crate) fn resume_suspended_draw(&mut self, pdr: PendingDrawResume) -> Option<StepResult> {
         self.last_drawn_card = pdr.last_drawn;
-        let hand_before = self.player.hand.len();
-        let _ = self.draw_suspending(pdr.remaining, pdr.from_hand_draw);
-        // The cards the resumed draw returned, for a Scrape waiting on it.
         let mut scrape = pdr.then_scrape_discard;
-        if scrape.owed || scrape.retain {
-            let resumed: smallvec::SmallVec<[CardUid; 10]> = self
-                .player
-                .hand
-                .get(hand_before..)
-                .unwrap_or_default()
-                .iter()
-                .copied()
-                .collect();
-            scrape.push_cards(&resumed);
-        }
+        // Resumed right after the reshuffle's select: C# takes
+        // `drawPile.FirstOrDefault()` with no second `ShuffleIfNecessary`, and
+        // an empty pile ends the draw (CardPileCmd.cs:857-866).
+        let remaining = if pdr.post_shuffle_take && self.player.draw.is_empty() {
+            scrape.drop_upcoming(pdr.remaining);
+            0
+        } else {
+            pdr.remaining
+        };
+        let mut own = crate::cards::OwnDraw::default();
+        let _ = self.draw_suspending_collecting(remaining, pdr.from_hand_draw, Some(&mut own));
+        // The card the resumed draw returned, for an Escape Plan waiting on it
+        // (a later outer draw or tail may draw more before its test runs).
+        let returned = self.last_drawn_card;
+        // The cards the waiting Scrape's draw returned: this draw's own cards,
+        // not a nested draw's (Iteration on a drawn Status, Defect v0.107.1
+        // 5679), nor the Stratagem pick.
+        scrape.take_from(&own.cards);
+        self.defer_scrape_behind_resuspension(&mut scrape, &own);
         let pdr = PendingDrawResume {
             then_scrape_discard: scrape,
             ..pdr
@@ -8388,10 +8756,18 @@ impl CombatState {
         }
         // The rider's draw is done: the outer draw it interrupted goes on.
         let pdr = if pdr.outer_draw.remaining() > 0 {
-            let _ =
-                self.draw_suspending(pdr.outer_draw.remaining(), pdr.outer_draw.from_hand_draw());
+            let mut own = crate::cards::OwnDraw::default();
+            let _ = self.draw_suspending_collecting(
+                pdr.outer_draw.remaining(),
+                pdr.outer_draw.from_hand_draw(),
+                Some(&mut own),
+            );
+            let mut scrape = pdr.then_scrape_discard;
+            scrape.take_from(&own.cards);
+            self.defer_scrape_behind_resuspension(&mut scrape, &own);
             let rest = PendingDrawResume {
                 outer_draw: OuterDraw::default(),
+                then_scrape_discard: scrape,
                 ..pdr
             };
             if self.carry_into_resuspended_draw(&rest) {
@@ -8414,6 +8790,26 @@ impl CombatState {
                 }
             }
         }
+        // Discharged: a later step that re-suspends must not carry it on.
+        let pdr = PendingDrawResume {
+            then_scrape_discard: ScrapeDiscardOwed::default(),
+            ..pdr
+        };
+        // Likewise Escape Plan's Skill test reads the card its draw returned
+        // (`None` when the pick left nothing to draw).
+        if pdr.then_escape_plan_block > 0 {
+            let drawn_skill = returned.is_some_and(|uid| {
+                self.cards
+                    .get(uid.0.get() as usize - 1)
+                    .is_some_and(|c| c.card_type == crate::cards::CardType::Skill)
+            });
+            if drawn_skill {
+                crate::card_effects::gain_block_player(self, i32::from(pdr.then_escape_plan_block));
+            }
+        }
+        // The rest of the drawing card's `OnPlay` (Big Bang's stars, energy
+        // and Forge), awaited behind its draw.
+        self.run_draw_then(pdr.then_card_tail);
         // Likewise a `DiscardAndDraw`'s Sly auto-plays follow its draw.
         if pdr.then_play_sly {
             let sly = crate::card_effects::take_sly_owed_after_draw(self);
@@ -8430,6 +8826,11 @@ impl CombatState {
         }
         if let Some(ctx) = pdr.then_relic_after_card_exhausted {
             let _ = crate::relic_effects::dispatch_after_card_exhausted(self, &ctx);
+            crate::hooks::after_card_exhausted_card_listeners(
+                self,
+                Some(ctx.card_id),
+                ctx.card_uid,
+            );
             let rest = PendingDrawResume {
                 then_block_unpowered: 0,
                 then_relic_after_card_exhausted: None,
@@ -8442,7 +8843,9 @@ impl CombatState {
         if pdr.then_gain_strength != 0 {
             apply_post_choice_effect(
                 self,
-                Some(PostChoiceEffect::GainStrength(pdr.then_gain_strength)),
+                Some(PostChoiceEffect::GainStrength(i32::from(
+                    pdr.then_gain_strength,
+                ))),
             );
         }
         if pdr.then_pillage_loop {
@@ -8470,7 +8873,7 @@ impl CombatState {
             if let Some(player_uid) = self.player.creature_uid {
                 let _ = self.creature_lose_max_hp_from(
                     player_uid,
-                    pdr.then_lose_max_hp_from_card,
+                    i32::from(pdr.then_lose_max_hp_from_card),
                     true,
                 );
             }
@@ -8496,6 +8899,20 @@ impl CombatState {
                 return Some(StepResult::PendingChoice);
             }
         }
+        // Thunderclap's later targets wait on the draw an earlier target's
+        // Vulnerable started (Vicious), the select inside it included.
+        if pdr.then_thunderclap_vulnerable != 0 {
+            self.thunderclap_vulnerable(pdr.then_thunderclap_vulnerable);
+            // Everything above has run; only the turn setup is still owed.
+            let rest = PendingDrawResume {
+                resume_turn_setup: pdr.resume_turn_setup,
+                turn_setup_side_fired: pdr.turn_setup_side_fired,
+                ..PendingDrawResume::default()
+            };
+            if self.carry_into_resuspended_draw(&rest) || self.pending_choice.is_some() {
+                return Some(StepResult::PendingChoice);
+            }
+        }
         if pdr.resume_turn_setup {
             // The suspended draw was the turn-start hand draw: run the
             // remaining setup steps (after-energy hooks, side-turn-start, …).
@@ -8509,6 +8926,21 @@ impl CombatState {
             self.snecko_randomize_hand_costs();
         }
         None
+    }
+
+    /// A resumed draw that took `own` suspended again: the cards it still owes
+    /// now come after whatever the new suspension draws first (a nested
+    /// draw's), so the waiting Scrape's cards move back by that much.
+    fn defer_scrape_behind_resuspension(
+        &self,
+        scrape: &mut ScrapeDiscardOwed,
+        own: &crate::cards::OwnDraw,
+    ) {
+        if let Some(again) = self.pending_draw_resume.as_ref() {
+            if scrape.waiting() {
+                scrape.defer_behind(again.remaining + again.outer_draw.remaining() - own.rest);
+            }
+        }
     }
 
     /// If the draw just driven suspended again (a fresh
@@ -8528,9 +8960,20 @@ impl CombatState {
             .outer_draw
             .plus(pdr.outer_draw.remaining(), pdr.outer_draw.from_hand_draw());
         again.then_pillage_loop |= pdr.then_pillage_loop;
-        again.then_lose_max_hp_from_card += pdr.then_lose_max_hp_from_card;
-        again.then_gain_strength += pdr.then_gain_strength;
-        if pdr.then_scrape_discard.owed || pdr.then_scrape_discard.retain {
+        again.then_lose_max_hp_from_card = again
+            .then_lose_max_hp_from_card
+            .saturating_add(pdr.then_lose_max_hp_from_card);
+        again.then_escape_plan_block = again
+            .then_escape_plan_block
+            .saturating_add(pdr.then_escape_plan_block);
+        again.then_gain_strength = again
+            .then_gain_strength
+            .saturating_add(pdr.then_gain_strength);
+        if pdr.then_scrape_discard.waiting() {
+            if !again.then_scrape_discard.waiting() {
+                again.then_scrape_discard.skip = pdr.then_scrape_discard.skip;
+                again.then_scrape_discard.take = pdr.then_scrape_discard.take;
+            }
             let cards = pdr.then_scrape_discard.cards();
             again.then_scrape_discard.push_cards(&cards);
             again.then_scrape_discard.owed |= pdr.then_scrape_discard.owed;
@@ -8546,11 +8989,76 @@ impl CombatState {
         if again.then_chains_bound.is_none() {
             again.then_chains_bound = pdr.then_chains_bound;
         }
+        again.then_thunderclap_vulnerable |= pdr.then_thunderclap_vulnerable;
+        // The card that owns the tail awaits this whole draw, nested draws
+        // included; a nested draw carries no card tail of its own here.
+        if again.then_card_tail == DrawThen::None {
+            again.then_card_tail = pdr.then_card_tail;
+        }
         true
     }
 
+    /// The arena-id bit mask of Thunderclap's Vulnerable targets: the living
+    /// enemies, C# `CombatState.HittableEnemies` snapshotted after the damage
+    /// (`ToList`, CombatState.cs:400). `None` when an id does not fit the
+    /// mask; the caller then applies without awaiting selects.
+    #[must_use]
+    pub fn thunderclap_vulnerable_targets(&self) -> Option<u16> {
+        let mut mask = 0u16;
+        for uid in &self.enemy_uids {
+            if !self
+                .creatures
+                .iter()
+                .any(|c| c.id == uid.0 && c.current_hp > 0)
+            {
+                continue;
+            }
+            let bit = uid.0.get() - 1;
+            if bit >= u16::BITS {
+                return None;
+            }
+            mask |= 1 << bit;
+        }
+        Some(mask)
+    }
+
+    /// Thunderclap's `PowerCmd.Apply<VulnerablePower>(HittableEnemies, 1)`
+    /// over the enemies in `targets` (see
+    /// [`Self::thunderclap_vulnerable_targets`]), in enemy order. C# awaits
+    /// each target's apply (PowerCmd.cs:36-48, both builds): when one opens a
+    /// select inside a suspended draw (Vicious drawing Seeker Strike, which
+    /// Hellraiser auto-plays), the remaining targets wait on that draw and are
+    /// applied once it finishes (loadout Ironclad 5130 v0.107.1). A target
+    /// that died in the meantime gets nothing.
+    pub fn thunderclap_vulnerable(&mut self, targets: u16) {
+        let mut rest = targets;
+        let order: smallvec::SmallVec<[CreatureUid; 8]> = self.enemy_uids.clone();
+        for uid in order {
+            let bit = uid.0.get() - 1;
+            if bit >= u16::BITS || rest & (1 << bit) == 0 {
+                continue;
+            }
+            rest &= !(1 << bit);
+            if self
+                .creatures
+                .iter()
+                .any(|c| c.id == uid.0 && c.current_hp > 0)
+            {
+                crate::card_effects::apply_power_to_enemy(self, uid, PowerKind::Vulnerable, 1);
+            }
+            if rest != 0 && self.pending_choice.is_some() {
+                if let Some(pdr) = self.pending_draw_resume.as_mut() {
+                    pdr.then_thunderclap_vulnerable |= rest;
+                    return;
+                }
+            }
+        }
+    }
+
     /// The relic half of an exhaust's `Hook.AfterCardExhausted`, run after
-    /// the power half ([`crate::hooks::dispatch_after_card_exhausted`]).
+    /// the power half ([`crate::hooks::dispatch_after_card_exhausted`]), and
+    /// with it the card half
+    /// ([`crate::hooks::after_card_exhausted_card_listeners`]).
     /// `draw_was_suspended` is whether [`Self::pending_draw_resume`] was set
     /// BEFORE the power half: if the power half suspended a draw (Dark
     /// Embrace reshuffling into a Stratagem pick), C# is still awaiting it,
@@ -8570,6 +9078,10 @@ impl CombatState {
             }
         }
         let _ = relic_effects::dispatch_after_card_exhausted(self, ctx);
+        // The card listeners follow the relics in the same walk. A relic draw
+        // that suspends here (Joss Paper into a Stratagem pick) does not hold
+        // them back: they run now, ahead of the pick.
+        crate::hooks::after_card_exhausted_card_listeners(self, Some(ctx.card_id), ctx.card_uid);
     }
 
     /// Pillage's attack-draw loop, after its hit. C# `Pillage.OnPlay`
@@ -8756,6 +9268,13 @@ impl CombatState {
     /// The player's Chains of Binding stack count (0 = none), the cap
     /// [`Self::afflict_bound_from_chains`] checks this turn's `Bound`s against.
     fn chains_of_binding_stacks(&self) -> u32 {
+        // `CombatState.CurrentSide == Owner.Side` (ChainsOfBindingPower.cs:38,
+        // both builds): a draw on the enemy turn (Centennial Puzzle on a hit)
+        // binds nothing (random-loadout Regent 5776 v0.111.0). Like
+        // Speedster's gate in `invoke_card_drawn_for_newly_drawn`.
+        if self.side != Side::Player {
+            return 0;
+        }
         if self
             .powers
             .present_kinds()
@@ -9104,20 +9623,35 @@ impl CombatState {
         // Necrobinder v0.107.1 1019: C# Chains first, Rust walked Pagestorm
         // first). New ids are `max + 1`, so among live powers id order is
         // application order.
-        let pagestorm_before_chains = chains_stacks > 0 && pagestorm_amount > 0 && {
-            let kind_id = |kind: PowerKind| {
-                self.player_power_uids()
-                    .iter()
-                    .filter_map(|u| self.powers.get_by_id(u.0))
-                    .find(|p| p.kind == kind)
-                    .map(|p| p.id)
+        //
+        // Iteration's nested draw on the turn's first Status card is the same
+        // shape (IterationPower.cs:18-29): applied before Chains of Binding,
+        // its drawn cards take their `Bound`s before the Status card is
+        // checked (Defect v0.107.1 5533 @595: C# bound the Void Iteration
+        // drew, Rust the Dazed that triggered it).
+        let (pagestorm_id, iteration_id, chains_id) =
+            if chains_stacks > 0 && (pagestorm_amount > 0 || iteration_amount > 0) {
+                let kind_id = |kind: PowerKind| {
+                    self.player_power_uids()
+                        .iter()
+                        .filter_map(|u| self.powers.get_by_id(u.0))
+                        .find(|p| p.kind == kind)
+                        .map(|p| p.id.get())
+                };
+                (
+                    kind_id(PowerKind::Pagestorm),
+                    kind_id(PowerKind::Iteration),
+                    kind_id(PowerKind::ChainsOfBinding),
+                )
+            } else {
+                (None, None, None)
             };
-            matches!(
-                (kind_id(PowerKind::Pagestorm), kind_id(PowerKind::ChainsOfBinding)),
-                (Some(p), Some(c)) if p < c
-            )
-        };
-        let mut chains_after_pagestorm: smallvec::SmallVec<[CardUid; 1]> =
+        let listens_before_chains =
+            |listener: Option<u32>| matches!((listener, chains_id), (Some(l), Some(c)) if l < c);
+        let pagestorm_before_chains = pagestorm_amount > 0 && listens_before_chains(pagestorm_id);
+        let iteration_before_chains = iteration_amount > 0 && listens_before_chains(iteration_id);
+        // Drawn cards whose Chains check waits for a nested draw.
+        let mut chains_after_nested_draw: smallvec::SmallVec<[CardUid; 1]> =
             smallvec::SmallVec::new();
 
         for uid in drawn {
@@ -9236,8 +9770,8 @@ impl CombatState {
             }
             // Regent KinglyKick (`KinglyKick.cs::AfterCardDrawn`, bead
             // `sts2-rs-8z4u4`): every draw reduces this card's energy cost
-            // by 1 for the rest of combat (`EnergyCost.AddThisCombat(-1)`),
-            // clamped at 0. MUST run AFTER the Confused re-roll above: C#
+            // by 1 for the rest of combat (`EnergyCost.AddThisCombat(-1)`).
+            // MUST run AFTER the Confused re-roll above: C#
             // `CombatState.IterateHookListeners` fires powers (Confused) BEFORE
             // pile cards (KinglyKick), and `CardEnergyCost` applies its local
             // modifiers chronologically. Confused's `SetThisCombat(roll)` is an
@@ -9246,10 +9780,11 @@ impl CombatState {
             // Running KinglyKick first (the old order) let Confused's absolute
             // overwrite clobber the -1 (regent-hand-cost part B, seeds
             // 4113/4597/5402). When not Confused the block above is skipped, so
-            // ordering is behavior-neutral.
+            // ordering is behavior-neutral. `AddThisCombat` is unclamped: a
+            // shave below 0 stays as cost debt (like Midnight's).
             if card_id == crate::cards::CardId::KinglyKick {
                 if let Some(c) = self.cards.get_mut(idx) {
-                    c.cost = c.cost.saturating_sub(1).max(0);
+                    c.add_cost_this_combat(-1);
                 }
             }
             // Bead `sts2-rs-kese5` (f933s sub-1): ChainsOfBindingPower
@@ -9278,8 +9813,13 @@ impl CombatState {
             // first, so that nested draw's cards take their `Bound`s before
             // this one is checked against the cap (see
             // `pagestorm_before_chains`).
-            if pagestorm_before_chains && is_ethereal {
-                chains_after_pagestorm.push(uid);
+            // Iteration fires on the turn's first Status card (the count
+            // below, before this card is added).
+            let fires_iteration = iteration_before_chains
+                && card_type == crate::cards::CardType::Status
+                && self.combat_log.status_cards_drawn_this_turn == 0;
+            if (pagestorm_before_chains && is_ethereal) || fires_iteration {
+                chains_after_nested_draw.push(uid);
             } else {
                 self.afflict_bound_from_chains(uid, chains_stacks);
             }
@@ -9469,41 +10009,64 @@ impl CombatState {
             }
         }
         let draw_was_suspended = self.pending_draw_resume.is_some();
-        if pagestorm_draws > 0 {
-            crate::cards::draw_via_state(self, pagestorm_draws);
+        // The nested draws and the deferred Chains check run in the powers'
+        // application order (C# `Hook.AfterCardDrawn` walks powers in list
+        // order and awaits each). Without a deferred check, Pagestorm then
+        // Iteration, as before.
+        #[derive(Clone, Copy)]
+        enum AfterDrawn {
+            Pagestorm,
+            Iteration,
+            Chains,
         }
-        // Pagestorm's draw suspended on a reshuffle select (Stratagem): Chains
-        // checks the Ethereal card only after the pick (GH #1150). With
-        // Stratagem live, card-effect draws run one card per call, so one card
-        // waits; any other is checked now.
-        let mut chains_after_pagestorm = chains_after_pagestorm.into_iter();
-        if !draw_was_suspended && self.pending_choice.is_some() {
-            if let Some(pdr) = self.pending_draw_resume.as_mut() {
-                if pdr.then_chains_bound.is_none() {
-                    pdr.then_chains_bound = chains_after_pagestorm.next();
+        let mut steps: smallvec::SmallVec<[(u32, AfterDrawn); 3]> = smallvec::SmallVec::new();
+        if pagestorm_draws > 0 {
+            steps.push((pagestorm_id.unwrap_or(0), AfterDrawn::Pagestorm));
+        }
+        if iteration_draws > 0 {
+            steps.push((iteration_id.unwrap_or(u32::MAX), AfterDrawn::Iteration));
+        }
+        if !chains_after_nested_draw.is_empty() {
+            steps.push((chains_id.unwrap_or(u32::MAX), AfterDrawn::Chains));
+            steps.sort_by_key(|&(id, _)| id);
+        }
+        for (_, step) in steps {
+            match step {
+                AfterDrawn::Pagestorm => {
+                    crate::cards::draw_via_state(self, pagestorm_draws);
+                }
+                // Defect Iteration extra draws (deferred past the per-card
+                // `self.cards` borrow). Routed through `draw_via_state` (the
+                // card-effect draw chokepoint) to match C#
+                // `IterationPower.AfterCardDrawn`'s `CardPileCmd.Draw(..,
+                // Amount, player)` (default `fromHandDraw=false`). The
+                // recursion re-enters this fn for the newly-drawn suffix; the
+                // status counter is already >= 1, so an extra-drawn status
+                // card does not re-trigger Iteration (C#'s `num <= 1` gate).
+                AfterDrawn::Iteration => {
+                    // C# `IterationPower.cs:25` flashes inside the same gate,
+                    // immediately before `CardPileCmd.Draw(Amount)`.
+                    crate::event_log::flash_player_power(self, PowerKind::Iteration);
+                    crate::cards::draw_via_state(self, iteration_draws);
+                }
+                AfterDrawn::Chains => {
+                    // A nested draw suspended on a reshuffle select
+                    // (Stratagem): Chains checks the card only after the pick
+                    // (GH #1150). With Stratagem live, draws run one card per
+                    // call, so one card waits; any other is checked now.
+                    let mut deferred = core::mem::take(&mut chains_after_nested_draw).into_iter();
+                    if !draw_was_suspended && self.pending_choice.is_some() {
+                        if let Some(pdr) = self.pending_draw_resume.as_mut() {
+                            if pdr.then_chains_bound.is_none() {
+                                pdr.then_chains_bound = deferred.next();
+                            }
+                        }
+                    }
+                    for uid in deferred {
+                        self.afflict_bound_from_chains(uid, chains_stacks);
+                    }
                 }
             }
-        }
-        for uid in chains_after_pagestorm {
-            self.afflict_bound_from_chains(uid, chains_stacks);
-        }
-        // Defect Iteration extra draws (deferred past the per-card `self.cards`
-        // borrow). Routed through `draw_via_state` (the card-effect draw
-        // chokepoint) to match C# `IterationPower.AfterCardDrawn`'s
-        // `CardPileCmd.Draw(.., Amount, player)` (default `fromHandDraw=false`).
-        // The recursion re-enters this fn for the newly-drawn suffix; the
-        // status counter is already >= 1, so an extra-drawn status card does
-        // not re-trigger Iteration (matches C#'s `num <= 1` gate).
-        if iteration_draws > 0 {
-            // C# `IterationPower.cs:25` calls `Flash()` inside
-            // `card.Owner.Creature == Owner && card.Type == Status` AND
-            // `num <= 1` (status cards drawn this turn, counting this one),
-            // immediately before `CardPileCmd.Draw(Amount)`. `iteration_draws`
-            // is set only under exactly that gate, once per turn, so this is
-            // the same clause — deferred past the per-card `self.cards` borrow
-            // the same way the CorrosiveWave flash above is.
-            crate::event_log::flash_player_power(self, PowerKind::Iteration);
-            crate::cards::draw_via_state(self, iteration_draws);
         }
     }
 
@@ -9566,7 +10129,19 @@ impl CombatState {
     pub fn shuffle_then_draw(&mut self, count: i32) {
         let had_choice = self.pending_choice.is_some();
         self.shuffle_draw_pile();
-        if !had_choice && self.pending_choice.is_some() && self.pending_draw_resume.is_none() {
+        // The draw C# awaits after the pick starts with its entry gates
+        // (`IsOverOrEnding`, `Hook.ShouldDraw`: NoDraw, Fiddle;
+        // CardPileCmd.cs:822-828). Nothing the pick does changes them, so a
+        // vetoed draw is settled now (no card moves, the NoDraw flash is
+        // logged) instead of parked: the resume would skip the gates
+        // (loadout Defect 5061 v0.107.1: Reboot+ drew under Fiddle).
+        let vetoed = crate::combat_loop::combat_is_ending(self)
+            || crate::cards::card_effect_draw_blocked(self);
+        if !had_choice
+            && self.pending_choice.is_some()
+            && self.pending_draw_resume.is_none()
+            && !vetoed
+        {
             self.pending_draw_resume = Some(PendingDrawResume {
                 remaining: count,
                 from_hand_draw: false,
@@ -10150,10 +10725,57 @@ impl CombatState {
     /// when its owner plays an Ethereal card. Costs floor at 0
     /// (CardEnergyCost.cs:120). Necrobinder act23 seeds 1001/1011.
     pub fn discount_banshees_cry_on_ethereal_play(&mut self) {
-        if !self.cards.holds_id(crate::cards::CardId::BansheesCry) {
-            return;
+        for uid in self.banshees_cry_uids() {
+            self.shave_banshees_cry(uid);
+            // Keeps the entered-combat catch-up from re-applying this play
+            // to a copy of this card (`banshees_cry_entered_combat`).
+            if let Some(c) = self.cards.get_mut(uid.get() as usize - 1) {
+                let key = crate::cards::VarKey::BansheesCryEtherealCounted;
+                c.set_combat_var(key, c.combat_var(key).saturating_add(1));
+            }
         }
-        let uids: SmallVec<[CardUid; 4]> = [
+    }
+
+    /// Banshee's Cry's `AfterCardPlayed` slot in the hook walk, after the
+    /// player's relics (C# `IterateHookListeners` lists a player's powers,
+    /// relics, potions, orbs, then the cards in every pile; CombatState.cs:
+    /// 101-160). It reads the played card's LIVE `Keywords`
+    /// (BansheesCry.cs:56-67), so a Razor Tooth that just upgraded an
+    /// Apparition (whose `OnUpgrade` removes Ethereal, Apparition.cs:37)
+    /// leaves the cost alone, while the play still counts in the
+    /// `WasEthereal` tally (CardPlayFinishedEntry.cs:45) recorded before the
+    /// hook.
+    ///
+    /// Every Banshee's Cry that has not yet counted the tallied plays syncs to
+    /// the tally and is shaved when `played_is_ethereal`. One that a listener
+    /// created during this walk already caught up on entering combat
+    /// (`banshees_cry_entered_combat`) and is not a listener of this walk, so
+    /// the sync skips it.
+    pub fn banshees_cry_after_card_played(&mut self, played_is_ethereal: bool) {
+        let total =
+            i32::try_from(self.combat_log.ethereal_cards_played_this_combat).unwrap_or(i32::MAX);
+        let key = crate::cards::VarKey::BansheesCryEtherealCounted;
+        for uid in self.banshees_cry_uids() {
+            let Some(c) = self.cards.get_mut(uid.get() as usize - 1) else {
+                continue;
+            };
+            if c.combat_var(key) >= total {
+                continue;
+            }
+            c.set_combat_var(key, total);
+            if played_is_ethereal {
+                self.shave_banshees_cry(uid);
+            }
+        }
+    }
+
+    /// Every Banshee's Cry in the owner's combat piles (card hooks listen
+    /// from every pile, CombatState.cs:150-157).
+    fn banshees_cry_uids(&self) -> SmallVec<[CardUid; 4]> {
+        if !self.cards.holds_id(crate::cards::CardId::BansheesCry) {
+            return SmallVec::new();
+        }
+        [
             &self.player.hand[..],
             &self.player.draw[..],
             &self.player.discard[..],
@@ -10168,26 +10790,24 @@ impl CombatState {
                 .get(u.get() as usize - 1)
                 .is_some_and(|c| c.card_id == crate::cards::CardId::BansheesCry)
         })
-        .collect();
-        for uid in uids {
-            // An `AddThisCombat(-2)` appended while a local zero is live (a
-            // generated free-this-turn copy) folds after it: `0 - 2`, so a
-            // global surcharge (Borrowed Time) skips the negative cost
-            // (loadout Necrobinder 3109 v0.111.0: C# 0, Rust 1).
-            let zeroed = self
-                .cards
-                .get(uid.get() as usize - 1)
-                .is_some_and(|c| crate::hooks::card_cost_locally_zeroed(self, c));
-            if let Some(c) = self.cards.get_mut(uid.get() as usize - 1) {
-                c.add_cost_this_combat(-2);
-                if zeroed {
-                    let key = crate::cards::VarKey::CostAddedAfterLocalZero;
-                    c.set_combat_var(key, c.combat_var(key) - 2);
-                }
-                // Keeps the entered-combat catch-up from re-applying this play
-                // to a copy of this card (`banshees_cry_entered_combat`).
-                let key = crate::cards::VarKey::BansheesCryEtherealCounted;
-                c.set_combat_var(key, c.combat_var(key).saturating_add(1));
+        .collect()
+    }
+
+    /// One Banshee's Cry `EnergyCost.AddThisCombat(-2)` (BansheesCry.cs:10).
+    fn shave_banshees_cry(&mut self, uid: CardUid) {
+        // An `AddThisCombat(-2)` appended while a local zero is live (a
+        // generated free-this-turn copy) folds after it: `0 - 2`, so a
+        // global surcharge (Borrowed Time) skips the negative cost
+        // (loadout Necrobinder 3109 v0.111.0: C# 0, Rust 1).
+        let zeroed = self
+            .cards
+            .get(uid.get() as usize - 1)
+            .is_some_and(|c| crate::hooks::card_cost_locally_zeroed(self, c));
+        if let Some(c) = self.cards.get_mut(uid.get() as usize - 1) {
+            c.add_cost_this_combat(-2);
+            if zeroed {
+                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
+                c.set_combat_var(key, c.combat_var(key) - 2);
             }
         }
     }
@@ -10411,7 +11031,15 @@ impl CombatState {
                 // C#. Loadout Defect v0.111.0 1307: a Gunk-Up'd RocketPunch
                 // rolled 2, C# 2, Rust 1.
                 let reduction = card.combat_var(VarKey::CostReductionUntilPlayed);
-                let new_cost = i32::from(roll) + reduction;
+                // The same holds for the below-zero part of earlier Relative
+                // `AddThisCombat` / `AddThisTurn` shaves (Midnight, Kingly
+                // Kick, Pinpoint per Skill): folded before the roll, so the
+                // roll supersedes them, and they apply again once it expires
+                // (loadout Silent v0.111.0 5629: a Pinpoint 2 Skills below 0
+                // rolled 1, C# 1, Rust 0).
+                let debts = card.combat_var(VarKey::CostDebtThisCombat)
+                    + card.combat_var(VarKey::CostDebtThisTurn);
+                let new_cost = i32::from(roll) + reduction + debts;
                 let delta = new_cost - i32::from(cur_cost);
                 card.cost = i8::try_from(new_cost).unwrap_or(i8::MAX);
                 let banked = card.combat_var(VarKey::SneckoCostDeltaThisTurn);
@@ -10876,9 +11504,30 @@ fn apply_action(state: &mut CombatState, action: Action) -> StepResult {
             if let Some(replay) = state.enemy_side_replay.take() {
                 return crate::combat_loop::replay_enemy_side(state, *replay, selection, false);
             }
-            resolve_choice_action(state, &selection, /*flush_played=*/ true)
+            let result = resolve_choice_action(state, &selection, /*flush_played=*/ true);
+            end_combat_after_pick(state, result)
         }
     }
+}
+
+/// A top-level pick resumed a draw (or a tail) that downed the last enemy:
+/// Iron Club's `AfterCardPlayed` draw reshuffled into a Stratagem pick after
+/// the play's own combat-end check had run, and the resumed draw's Speedster
+/// hit killed the Queen. C# awaits that draw inside the play action, so the
+/// combat ends when it returns (random-loadout Silent 5759 v0.107.1). Every
+/// return path of [`resolve_choice_atomic`] reaches the two top-level
+/// callers, which check here once. A flow that already settled its own end
+/// returns something other than `Advanced`.
+fn end_combat_after_pick(state: &mut CombatState, result: StepResult) -> StepResult {
+    if matches!(result, StepResult::Advanced)
+        && state.pending_choice.is_none()
+        && !state.is_over
+        && state.phase == CombatPhase::PlayerPlayPhase
+        && crate::combat_loop::enemy_side_is_ending(state)
+    {
+        return crate::combat_loop::check_combat_end(state);
+    }
+    result
 }
 
 /// Drink the potion in `potion_slot` ([`Action::DrinkPotion`]), or throw it
@@ -11117,6 +11766,7 @@ pub fn resolve_choice_atomic_apply(state: &mut CombatState, selection: &[u8]) ->
         return StepResult::Advanced;
     };
     let result = resolve_choice_atomic(state, pc, selection, /*flush_played=*/ true);
+    let result = end_combat_after_pick(state, result);
     if surface_parked_hook_choice(state) {
         return StepResult::PendingChoice;
     }
@@ -11166,16 +11816,22 @@ fn resume_suspended_end_turn(state: &mut CombatState) -> Option<StepResult> {
         EndTurnResume::AfterBeforeTurnEnd => Some(
             crate::combat_loop::resume_end_turn_after_before_turn_end(state),
         ),
-        EndTurnResume::AfterTurnEndPowers {
-            consuming_shadow_early,
-        } => Some(crate::combat_loop::resume_end_turn_after_turn_end_powers(
-            state,
-            consuming_shadow_early,
-        )),
+        EndTurnResume::AfterTurnEndPowers => Some(
+            crate::combat_loop::resume_end_turn_after_turn_end_powers(state),
+        ),
         EndTurnResume::AfterTurnEndRelics => Some(
             crate::combat_loop::resume_end_turn_after_turn_end_relics(state),
         ),
+        EndTurnResume::AfterTurnEndWalk => Some(
+            crate::combat_loop::resume_end_turn_after_turn_end_walk(state),
+        ),
+        EndTurnResume::AfterTurnEndLate => Some(
+            crate::combat_loop::resume_end_turn_after_turn_end_late(state),
+        ),
         EndTurnResume::AfterPhaseOne => Some(crate::combat_loop::end_turn_dispatch_from(state, 1)),
+        EndTurnResume::TurnEndInHand { remaining } => Some(
+            crate::combat_loop::resume_end_turn_in_hand(state, remaining),
+        ),
     }
 }
 
@@ -11241,10 +11897,10 @@ pub(crate) fn resolve_choice_action(
     resolve_choice_atomic(state, pc, &owned, flush_played)
 }
 
-/// The turn-start tail a HistoryCourse dupe's select held back, once nothing is
-/// left waiting in front of it (GH #1131).
+/// The turn-start tail an Imbued card's or a HistoryCourse dupe's select held
+/// back, once nothing is left waiting in front of it (GH #1131).
 fn resume_play_phase_tail(state: &mut CombatState) -> Option<StepResult> {
-    if !state.pending_play_phase_tail
+    if state.pending_play_phase_tail.is_none()
         || state.pending_choice.is_some()
         || state.pending_autoplay_resume.is_some()
         || state.pending_collect_resume.is_some()
@@ -11252,8 +11908,10 @@ fn resume_play_phase_tail(state: &mut CombatState) -> Option<StepResult> {
     {
         return None;
     }
-    state.pending_play_phase_tail = false;
-    Some(crate::combat_loop::finish_play_phase_start(state))
+    Some(match state.pending_play_phase_tail.take()? {
+        PlayPhaseTail::AfterImbued => crate::combat_loop::finish_turn_start_after_imbued(state),
+        PlayPhaseTail::AfterPlayPhaseStart => crate::combat_loop::finish_play_phase_start(state),
+    })
 }
 
 /// What a resumed auto-play still owes after the suspended card's tail ran.
@@ -11945,6 +12603,20 @@ fn resolve_choice_atomic(
                         return r;
                     }
                 }
+            }
+            // A HAND play whose `AfterCardPlayed` listener (Iron Club's draw)
+            // auto-played the card that just finished deferred its own
+            // Play→result-pile move while this select was open. Nothing else is
+            // parked behind it, so it leaves Play now, as C# does once
+            // `Hook.AfterCardPlayed` returns (CardModel.cs:1963-2002; loadout
+            // Ironclad 5605 v0.111.0: Expect a Fight stranded on Play).
+            if flush_played
+                && state.pending_choice.is_none()
+                && state.pending_autoplay_resume.is_none()
+                && state.pending_play.is_none()
+                && state.pending_draw_resume.is_none()
+            {
+                crate::combat_loop::flush_played_cards_after_choice(state);
             }
             if let Some(r) = resume_play_phase_tail(state) {
                 return r;
@@ -12689,6 +13361,43 @@ impl CombatState {
     /// stash the card uid in its `counter` and keep an affliction-free clone
     /// taken NOW (NightmarePower.cs:57-63, both builds), so later changes to
     /// the original do not reach the next-turn copies.
+    /// The per-instance flags C# `CardModel.CreateClone` copies that Rust keeps
+    /// in uid-keyed side tables, packed: bit 1 single-turn Retain
+    /// (`retain_this_turn`), bit 2 single-turn Sly (`sly_this_turn`), bit 4 a
+    /// Local Sly keyword (`sly_this_combat`, Master Planner). C# clones by
+    /// `MemberwiseClone` + `DeepCloneFields` (AbstractModel.cs:171-178,
+    /// CardModel.cs:1194-1201), which keeps `_hasSingleTurnRetain`,
+    /// `_hasSingleTurnSly` (cleared only in `EndOfTurnCleanup`,
+    /// CardModel.cs:1612-1615) and the Local keywords; only
+    /// `ExhaustOnNextPlay` is reset (CardModel.cs:2191).
+    #[must_use]
+    pub fn clone_flags_of(&self, uid: CardUid) -> i32 {
+        i32::from(self.player.retain_this_turn.contains(&uid))
+            | (i32::from(self.player.sly_this_turn.contains(&uid)) << 1)
+            | (i32::from(self.player.sly_this_combat.contains(&uid)) << 2)
+    }
+
+    /// Give `uid` the side-table flags packed by [`Self::clone_flags_of`].
+    pub fn apply_clone_flags(&mut self, uid: CardUid, flags: i32) {
+        if flags & 1 != 0 && !self.player.retain_this_turn.contains(&uid) {
+            self.player.retain_this_turn.push(uid);
+        }
+        if flags & 2 != 0 && !self.player.sly_this_turn.contains(&uid) {
+            self.player.sly_this_turn.push(uid);
+        }
+        if flags & 4 != 0 && !self.player.sly_this_combat.contains(&uid) {
+            self.player.sly_this_combat.push(uid);
+        }
+    }
+
+    /// A `CreateClone` copy `dst` of `src` inherits `src`'s single-turn Retain,
+    /// single-turn Sly and Master Planner Sly (see [`Self::clone_flags_of`];
+    /// loadouts Silent 5229 / 5235 v0.111.0: Burning Sticks' copy lost them).
+    pub fn inherit_clone_flags(&mut self, src: CardUid, dst: CardUid) {
+        let flags = self.clone_flags_of(src);
+        self.apply_clone_flags(dst, flags);
+    }
+
     pub fn set_nightmare_selected_card(&mut self, uid: CardUid) {
         let stash = i32::try_from(uid.0.get()).unwrap_or(i32::MAX);
         let mut stashed_in = None;
@@ -12706,8 +13415,7 @@ impl CombatState {
             // they outlive the flush on this pile-less clone (loadout Silent
             // 1264 v0.111.0: an Expertise-drawn Untouchable's three copies were
             // retained next turn).
-            let flags = i32::from(self.player.retain_this_turn.contains(&uid))
-                | (i32::from(self.player.sly_this_turn.contains(&uid)) << 1);
+            let flags = self.clone_flags_of(uid);
             snapshot.set_combat_var(crate::cards::VarKey::CloneTurnFlags, flags);
             let snaps = &mut self.combat_log.nightmare_snapshots;
             snaps.retain(|(p, _)| *p != puid);
@@ -19558,6 +20266,35 @@ mod tests {
             "the free-this-turn zero clears on play, and the +1 with it"
         );
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 3, "2 + 1");
+    }
+
+    /// Snecko Oil's `SetThisTurnOrUntilPlayed(roll)` is appended after the
+    /// Relative shaves that took a card below 0 (`AddThisTurn` per Skill,
+    /// `AddThisCombat`), and `GetWithModifiers` folds local modifiers in order
+    /// (CardEnergyCost.cs:94-115), so the roll alone is the cost. A shave
+    /// appended after the roll lands on it, and every shave applies again once
+    /// the roll expires (loadout Silent v0.111.0 5629: a Pinpoint below 0 rolled
+    /// 1, C# 1, Rust 0; Necrobinder v0.111.0 5644).
+    #[test]
+    fn snecko_roll_supersedes_earlier_cost_debts_and_restores_them() {
+        use crate::cards::VarKey;
+        let mut state = snecko_hand_state(0);
+        let roll = i32::from(next_snecko_roll(&state));
+        state.cards[0].set_combat_var(VarKey::CostDebtThisTurn, 2);
+        state.cards[0].set_combat_var(VarKey::CostDebtThisCombat, 1);
+        let local = |state: &CombatState| crate::hooks::local_card_cost(state, &state.cards[0]);
+        assert_eq!(local(&state), -3);
+
+        state.snecko_randomize_hand_costs();
+        assert_eq!(local(&state), roll, "the roll supersedes the debts");
+
+        // `AddThisCombat(-1)` after the roll: roll - 1.
+        state.cards[0].add_cost_this_combat(-1);
+        assert_eq!(local(&state), roll - 1);
+
+        state.cards[0].expire_snecko_roll();
+        assert_eq!(local(&state), -4, "every shave applies again: 0 - 3 - 1");
+        assert!(state.cards[0].cost >= 0, "never reads as X-cost");
     }
 
     /// Flatten's `SetThisTurn(0)` (Osty attacked) and a Snecko roll are both

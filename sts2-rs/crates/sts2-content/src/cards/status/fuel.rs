@@ -14,8 +14,12 @@ pub(crate) fn play_fuel(state: &mut CombatState, _t: Option<CreatureUid>) -> Eff
         state.gain_energy(if upgraded { 2 } else { 1 });
         return EffectResult::Resolved;
     }
+    // v0.107.1 Fuel.OnPlay: GainEnergy, THEN Draw (Fuel.cs). A drawn Void's
+    // LoseEnergy then takes the energy just gained (Defect random loadout
+    // v0.107.1 seed 5496). A draw suspended on a reshuffle select owes
+    // nothing after it.
+    state.gain_energy(1);
     let draws = if upgraded { 2 } else { 1 };
     let _ = sts2_core::cards::draw_via_state(state, draws);
-    state.gain_energy(1);
     EffectResult::Resolved
 }

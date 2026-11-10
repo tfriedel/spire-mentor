@@ -14,9 +14,15 @@ pub(crate) fn play_bouncing_flask(
 ) -> EffectResult {
     // Bead `sts2-rs-qr4jh`: C# `BouncingFlask.cs` `RepeatVar(3)` with
     // `OnUpgrade UpgradeValueBy(1m)` → 3 base / 4 upgraded poison hits.
-    let hits = if current_card_upgraded(state) { 4 } else { 3 };
+    // The loop re-reads `DynamicVars.Repeat` every iteration
+    // (BouncingFlask.cs:43, both builds): an Outbreak AoE that kills the
+    // Dampen caster mid-play re-upgrades the flask on Play, so Repeat goes
+    // 3 -> 4 and C# throws a 4th time (loadout Silent 5522 v0.107.1).
+    let hits = |state: &CombatState| if current_card_upgraded(state) { 4 } else { 3 };
     let poison_amt = 3;
-    for _ in 0..hits {
+    let mut i = 0;
+    while i < hits(state) {
+        i += 1;
         let Some(t) = state.get_random_enemy() else {
             break;
         };

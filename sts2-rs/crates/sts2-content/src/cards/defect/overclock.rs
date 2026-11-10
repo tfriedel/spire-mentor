@@ -6,8 +6,9 @@ pub(crate) fn play_overclock(state: &mut CombatState, _t: Option<CreatureUid>) -
     // Bead `sts2-rs-phsdn`: C# `Overclock.cs` `CardsVar(2)` with `OnUpgrade
     // UpgradeValueBy(1m)` → draw 2 base / 3 upgraded. Burn rider unaffected.
     let draws = if current_card_upgraded(state) { 3 } else { 2 };
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, draws);
-    let _ = spawn_burn(state, PileKind::Discard);
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, sts2_core::DrawThen::Overclock);
     EffectResult::Resolved
 }
 

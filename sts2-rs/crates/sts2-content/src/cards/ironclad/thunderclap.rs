@@ -22,6 +22,12 @@ pub(crate) fn play_thunderclap(state: &mut CombatState, _t: Option<CreatureUid>)
     // Re-snapshot AFTER damage: C# applies Vulnerable to `HittableEnemies`
     // evaluated post-damage, so death-spawned minions are included and dead
     // enemies excluded.
+    // Each target's apply is awaited (PowerCmd.cs:36-48): one that opens a
+    // select inside a suspended draw parks the rest on that draw.
+    if let Some(targets) = state.thunderclap_vulnerable_targets() {
+        state.thunderclap_vulnerable(targets);
+        return EffectResult::Resolved;
+    }
     let vuln_uids: Vec<CreatureUid> = state.enemy_uids.iter().copied().collect();
     for uid in vuln_uids {
         if state

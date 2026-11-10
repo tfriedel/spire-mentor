@@ -404,13 +404,14 @@ pub fn install_pool() {
         RelicKind::BiiigHug,
         listener_biiig_hug_shuffle as AfterShuffleFn,
     );
-    // Bead `sts2-rs-70anj.4` — NinjaScroll: round-1 player side-turn
-    // start spawns 3 Shivs into the player's hand. Uses
-    // `before_side_turn_start` channel + standard hand-cap overflow
-    // semantics via `spawn_card_into_hand`.
-    register_before_side_turn_start(
+    // Bead `sts2-rs-70anj.4` — NinjaScroll: turn 1, before the hand draw,
+    // spawns 3 Shivs into the player's hand. C# `NinjaScroll.BeforeHandDraw`
+    // (NinjaScroll.cs:23, both builds): it rides the equip-ordered relic
+    // before-hand-draw walk with Toolbox (loadout Silent 5189 v0.111.0).
+    register_owned_before_hand_draw(
         RelicId::NinjaScroll,
-        listener_ninja_scroll as BeforeSideTurnStartFn,
+        RelicKind::NinjaScroll,
+        listener_ninja_scroll as BeforeHandDrawFn,
     );
     // Bead `sts2-rs-70anj.4` — ElectricShrymp: enchant 1 Skill card
     // with Imbued(1) on obtain. Same helper as the prior wave.
@@ -418,12 +419,13 @@ pub fn install_pool() {
         RelicId::ElectricShrymp,
         listener_electric_shrymp as AfterObtainedRunFn,
     );
-    // Bead `sts2-rs-70anj.4` — RadiantPearl: round-1 player side-turn
-    // start spawns 1 Luminesce into hand. Same channel + idiom as
-    // NinjaScroll, but 1 card and CardType::Skill (Luminesce).
-    register_before_side_turn_start(
+    // Bead `sts2-rs-70anj.4` — RadiantPearl: turn 1, before the hand draw,
+    // spawns 1 Luminesce into hand. C# `RadiantPearl.BeforeHandDraw`
+    // (RadiantPearl.cs:32, both builds); same channel as NinjaScroll.
+    register_owned_before_hand_draw(
         RelicId::RadiantPearl,
-        listener_radiant_pearl as BeforeSideTurnStartFn,
+        RelicKind::RadiantPearl,
+        listener_radiant_pearl as BeforeHandDrawFn,
     );
     // Bead `sts2-rs-70anj.4` (Wave 4 body-fill, batch 5):
     // ToyBox / PaelsClaw / WingCharm.
@@ -754,14 +756,17 @@ pub fn install_pool() {
     );
     // `BrilliantScarf`: the relic's `counter` is C#'s `CardsPlayedThisTurn`,
     // reset here at the player's side-turn start
-    // (`BrilliantScarf.BeforeSideTurnStart`). It is incremented in sts2-core
-    // `combat_loop::finish_card_play`, once per hand-play iteration, because
-    // C# `AfterCardPlayed` skips auto-plays (`cardPlay.IsAutoPlay`) and this
-    // bus cannot tell them apart. The "fifth card costs 0" hooks read it in
-    // sts2-core `hooks::brilliant_scarf_makes_free`.
+    // (`BrilliantScarf.BeforeSideTurnStart`) and counted by its own
+    // `AfterCardPlayed` listener, in its equip slot of the relic walk. The
+    // "fifth card costs 0" hooks read it in sts2-core
+    // `hooks::brilliant_scarf_makes_free`.
     register_before_side_turn_start(
         RelicId::BrilliantScarf,
         listener_brilliant_scarf_turn_reset as BeforeSideTurnStartFn,
+    );
+    register_after_card_played(
+        RelicId::BrilliantScarf,
+        listener_brilliant_scarf_card_played as AfterCardPlayedFn,
     );
     // `BlessedAntler`. C# v0.107.1 `BlessedAntler.BeforeHandDraw`
     // (`TurnNumber == 1`): add `BLESSED_ANTLER_DAZED_COUNT = 3` Dazed to the
@@ -1726,7 +1731,9 @@ fn listener_toasty_mittens(state: &mut CombatState) -> EffectResult {
     // draw that reshuffled into a Stratagem pick: the Strength waits for it.
     if !draw_was_suspended && state.pending_choice.is_some() {
         if let Some(pdr) = state.pending_draw_resume.as_mut() {
-            pdr.then_gain_strength += TOASTY_MITTENS_STRENGTH;
+            pdr.then_gain_strength = pdr
+                .then_gain_strength
+                .saturating_add(i16::try_from(TOASTY_MITTENS_STRENGTH).unwrap_or(i16::MAX));
             return EffectResult::Resolved;
         }
     }
@@ -1923,7 +1930,10 @@ fn listener_burning_sticks(state: &mut CombatState, ctx: &CardEventCtx) -> Effec
     // C# `AddGeneratedCardToCombat(card2, Hand, base.Owner)` (BurningSticks.cs:50):
     // player-created even when the exhaust happens outside a card play (Play
     // pile empty), so pass `added_by_player = true` explicitly.
-    spawn_card_into_hand_with_origin(state, cloned, true);
+    let copy = spawn_card_into_hand_with_origin(state, cloned, true);
+    // The clone keeps Master Planner's Sly and the single-turn Retain / Sly
+    // (loadouts Silent 5229 / 5235 v0.111.0).
+    state.inherit_clone_flags(card_uid, copy);
     EffectResult::Resolved
 }
 
@@ -2193,6 +2203,31 @@ fn listener_brilliant_scarf_turn_reset(state: &mut CombatState, side: Side) -> E
     EffectResult::NotImplemented
 }
 
+/// C# `BrilliantScarf.AfterCardPlayed` (BrilliantScarf.cs:89-105, both
+/// builds): `CardsPlayedThisTurn++` for each play iteration that is not an
+/// auto-play (`cardPlay.IsAutoPlay` returns). It is a relic listener in the
+/// player's relic walk, so a relic equipped after it (Mummified Hand) already
+/// sees the count: with the fourth play a Power, every hand card is globally
+/// free when Mummified Hand rolls (Defect random loadout v0.111.0 seed 5416).
+/// Hand-play replays (One-Two Punch, Echo Form) are not auto-plays and count.
+fn listener_brilliant_scarf_card_played(
+    state: &mut CombatState,
+    _ctx: &sts2_core::relic_effects::CardEventCtx,
+) -> EffectResult {
+    if state.combat_log.after_played_is_auto_play {
+        return EffectResult::NotImplemented;
+    }
+    let Some(relic) = state
+        .relics
+        .iter_mut()
+        .find(|r| !r.is_melted && r.kind == RelicKind::BrilliantScarf)
+    else {
+        return EffectResult::NotImplemented;
+    };
+    relic.counter = relic.counter.saturating_add(1);
+    EffectResult::Resolved
+}
+
 /// `BlessedAntler::before_hand_draw` — on the turn-1 hand draw, add
 /// `BLESSED_ANTLER_DAZED_COUNT = 3` Dazed to the owner's draw pile at RANDOM
 /// depths. C# `BlessedAntler.BeforeHandDraw` (`BlessedAntler.cs:46-58`), gated
@@ -2362,6 +2397,8 @@ fn listener_music_box_card_played(state: &mut CombatState, ctx: &CardEventCtx) -
     // C# `AddGeneratedCardToCombat(card, Hand, base.Owner)` (MusicBox.cs:80):
     // player-created regardless of Play-pile occupancy.
     let new_uid = spawn_card_into_hand_with_origin(state, cloned, true);
+    // `CreateClone` keeps the played card's Retain / Sly flags.
+    state.inherit_clone_flags(state.cards[idx].uid, new_uid);
     set_card_var(state, new_uid, VarKey::EtherealThisCombat, 1);
     EffectResult::Resolved
 }
@@ -2915,9 +2952,14 @@ fn listener_kaleidoscope(rs: &mut RunState) -> EffectResult {
     }
     let owner = rs.character_id;
     let rewards = crate::cards::spec_index::roll_kaleidoscope_card_rewards(rs, owner);
+    // `RewardsSet.Offer` populates each reward; a manually-set CardReward's
+    // `Populate` runs `TryModifyCardRewardOptions` over its slate with
+    // `IsCardReward` set (`CardReward.cs:136,148-156`), so SilkenTress /
+    // SilverCrucible / the eggs reach Kaleidoscope's cards too.
     for reward in rewards {
+        let cards = rs.offer_card_slate(reward, true);
         rs.pending_rewards
-            .push(Reward::Card(CardReward::from_options(reward)));
+            .push(Reward::Card(CardReward::from_cards(&cards)));
     }
     EffectResult::Resolved
 }
@@ -3448,10 +3490,7 @@ fn listener_electric_shrymp(rs: &mut RunState) -> EffectResult {
 /// `combat.create_card_in_hand(owner, "Luminesce")`). Luminesce is
 /// `CardType::Skill`, cost 0, target Self_, EXHAUST+RETAIN — pinned
 /// from `status_specs_generated::luminesce`. Bead `sts2-rs-70anj.4`.
-fn listener_radiant_pearl(state: &mut CombatState, side: Side) -> EffectResult {
-    if side != Side::Player {
-        return EffectResult::NotImplemented;
-    }
+fn listener_radiant_pearl(state: &mut CombatState) -> EffectResult {
     if state.turn_number() != 1 {
         return EffectResult::NotImplemented;
     }
@@ -4283,10 +4322,7 @@ fn listener_biiig_hug_shuffle(state: &mut CombatState, _ctx: &ShuffleCtx) -> Eff
 /// [`crate::card_effects::spawn_card_into_hand`] so hand-cap overflow
 /// (>10 cards) sends Shivs to discard instead of crashing. Bead
 /// `sts2-rs-70anj.4`.
-fn listener_ninja_scroll(state: &mut CombatState, side: Side) -> EffectResult {
-    if side != Side::Player {
-        return EffectResult::NotImplemented;
-    }
+fn listener_ninja_scroll(state: &mut CombatState) -> EffectResult {
     if state.turn_number() != 1 {
         return EffectResult::NotImplemented;
     }
@@ -8303,6 +8339,44 @@ mod tests {
         }
     }
 
+    /// Kaleidoscope's rewards are manually-set `CardReward`s whose `Populate`
+    /// runs `TryModifyCardRewardOptions` with `IsCardReward`
+    /// (`CardReward.cs:136,148-156`): an unused SilkenTress Glams the first
+    /// slate and latches, so the second slate stays plain. Defect / Ironclad
+    /// 5626 v0.107.1 (Neow SilkenTress, then Kaleidoscope).
+    #[test]
+    fn kaleidoscope_slates_run_the_card_reward_hooks() {
+        use sts2_core::cards::EnchantmentId;
+        use sts2_core::runstate::{Reward, RunState};
+        crate::relics::dispatch::ensure_installed();
+        let mut rs = RunState::new();
+        rs.relics.push(RelicId::SilkenTress);
+        rs.relics.push(RelicId::Kaleidoscope);
+        rs.last_obtained_relic = Some(RelicId::Kaleidoscope);
+        let _ = sts2_core::run_effects::dispatch_after_obtained(&mut rs);
+        let slates: Vec<_> = rs
+            .pending_rewards
+            .iter()
+            .filter_map(|r| match r {
+                Reward::Card(c) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(slates.len(), 2);
+        assert!(
+            slates[0]
+                .enchantments
+                .iter()
+                .any(|e| e.iter().any(|x| x.0 == EnchantmentId::Glam)),
+            "the first Kaleidoscope slate is Glam-enchanted: {:?}",
+            slates[0]
+        );
+        assert_eq!(
+            rs.relic_counters.get(&RelicId::SilkenTress).copied(),
+            Some(1)
+        );
+    }
+
     /// Kaleidoscope listener is a noop unless it was the just-obtained relic
     /// (gating on `last_obtained_relic`, not mere ownership) — re-firing would
     /// re-roll the Niche + Rewards streams on every later relic obtain.
@@ -10178,8 +10252,7 @@ mod tests {
     }
 
     /// Bead `sts2-rs-70anj.4`: NinjaScroll spawns `NINJA_SCROLL_SHIVS = 3`
-    /// Shivs into the player's hand on the round-1 player side-turn
-    /// start. Subsequent rounds and enemy turns are no-op.
+    /// Shivs into the player's hand before the turn-1 hand draw.
     #[test]
     fn listener_ninja_scroll_spawns_three_shivs_on_round_one_player_turn() {
         use std::num::NonZeroU32;
@@ -10196,7 +10269,7 @@ mod tests {
         });
         state.round = 1;
         let before_hand = state.player.hand.len();
-        let res = listener_ninja_scroll(&mut state, Side::Player);
+        let res = listener_ninja_scroll(&mut state);
         assert!(matches!(res, EffectResult::Resolved));
         assert_eq!(
             state.player.hand.len(),
@@ -10212,11 +10285,10 @@ mod tests {
         }
     }
 
-    /// Bead `sts2-rs-70anj.4`: NinjaScroll listener is no-op on
-    /// enemy side and on rounds >= 2 (per Python's
-    /// `if side == PLAYER and combat.round_number == 1` gate).
+    /// Bead `sts2-rs-70anj.4`: NinjaScroll listener is a no-op on rounds
+    /// >= 2 (C# `TurnNumber <= 1`, NinjaScroll.cs:25).
     #[test]
-    fn listener_ninja_scroll_is_noop_off_round_one_or_enemy_side() {
+    fn listener_ninja_scroll_is_noop_off_round_one() {
         use std::num::NonZeroU32;
         crate::relics::dispatch::ensure_installed();
         let mut state = sts2_core::CombatState::default();
@@ -10230,8 +10302,9 @@ mod tests {
         });
         let before_hand = state.player.hand.len();
 
-        // Enemy side at round 1: noop.
-        let _ = listener_ninja_scroll(&mut state, Side::Enemy);
+        // Round 2: noop.
+        state.round = 2;
+        let _ = listener_ninja_scroll(&mut state);
         assert_eq!(state.player.hand.len(), before_hand);
     }
 
@@ -10265,7 +10338,7 @@ mod tests {
     }
 
     /// Bead `sts2-rs-70anj.4`: RadiantPearl spawns 1 Luminesce into
-    /// the player's hand on the round-1 player side-turn start.
+    /// the player's hand before the turn-1 hand draw.
     #[test]
     fn listener_radiant_pearl_spawns_one_luminesce_on_round_one_player_turn() {
         use std::num::NonZeroU32;
@@ -10282,7 +10355,7 @@ mod tests {
         });
         state.round = 1;
         let before_hand = state.player.hand.len();
-        let res = listener_radiant_pearl(&mut state, Side::Player);
+        let res = listener_radiant_pearl(&mut state);
         assert!(matches!(res, EffectResult::Resolved));
         assert_eq!(state.player.hand.len(), before_hand + 1);
         let new_uid = *state.player.hand.last().unwrap();
@@ -10290,10 +10363,10 @@ mod tests {
         assert_eq!(card.card_id, CardId::Luminesce);
     }
 
-    /// Bead `sts2-rs-70anj.4`: RadiantPearl listener is no-op on
-    /// enemy side and on rounds >= 2.
+    /// Bead `sts2-rs-70anj.4`: RadiantPearl listener is a no-op on rounds
+    /// >= 2 (C# `TurnNumber == 1`, RadiantPearl.cs:34).
     #[test]
-    fn listener_radiant_pearl_is_noop_off_round_one_or_enemy_side() {
+    fn listener_radiant_pearl_is_noop_off_round_one() {
         use std::num::NonZeroU32;
         crate::relics::dispatch::ensure_installed();
         let mut state = sts2_core::CombatState::default();
@@ -10307,12 +10380,9 @@ mod tests {
         });
         state.round = 1;
         let before_hand = state.player.hand.len();
-        // Enemy side round 1: noop.
-        let _ = listener_radiant_pearl(&mut state, Side::Enemy);
-        assert_eq!(state.player.hand.len(), before_hand);
-        // Player side round 2: noop.
+        // Round 2: noop (the hand-draw channel is the player's only).
         state.round = 2;
-        let _ = listener_radiant_pearl(&mut state, Side::Player);
+        let _ = listener_radiant_pearl(&mut state);
         assert_eq!(state.player.hand.len(), before_hand);
     }
 
@@ -11180,6 +11250,145 @@ mod tests {
         }
     }
 
+    /// C# `BrilliantScarf.AfterCardPlayed` counts the play in its own slot of
+    /// the relic `AfterCardPlayed` walk (BrilliantScarf.cs:89-105, both
+    /// builds). Obtained before Mummified Hand, with three plays counted and
+    /// the 4th a Power, the Scarf makes every hand card globally free before
+    /// Mummified Hand rolls (MummifiedHand.cs:18-42): pools 1 and 2 are empty
+    /// and the roll lands on pool 3, which still offers the card already
+    /// free. Obtained after, the count is 3 when Mummified Hand rolls and
+    /// pool 1 (cards that still cost) is used. Defect random loadout v0.111.0
+    /// seed 5416.
+    #[test]
+    fn brilliant_scarf_counts_in_its_relic_slot_before_mummified_hand() {
+        use std::num::NonZeroU32;
+        use sts2_core::cards::{Card, CardId, CardType, VarKey};
+        use sts2_core::relic_effects::CardEventCtx;
+        use sts2_core::Relic;
+        crate::relics::dispatch::ensure_installed();
+        for version in [
+            sts2_core::GameVersion::V0_107_1,
+            sts2_core::GameVersion::V0_111_0,
+        ] {
+            for scarf_first in [true, false] {
+                let mut state = CombatState {
+                    game_version: version,
+                    ..CombatState::default()
+                };
+                state.player.current_hp = 80;
+                state.player.max_hp = 80;
+                let _ = state.init_player_creature();
+                state.sync_player_creature();
+                let order = if scarf_first {
+                    [RelicKind::BrilliantScarf, RelicKind::MummifiedHand]
+                } else {
+                    [RelicKind::MummifiedHand, RelicKind::BrilliantScarf]
+                };
+                for (i, kind) in order.into_iter().enumerate() {
+                    state.relics.push(Relic {
+                        id: NonZeroU32::new(u32::try_from(i).unwrap() + 1).expect("nz"),
+                        kind,
+                        counter: if kind == RelicKind::BrilliantScarf {
+                            3
+                        } else {
+                            0
+                        },
+                        is_wax: false,
+                        is_melted: false,
+                    });
+                }
+                let power = state.add_card_to_draw_pile(Card {
+                    card_id: CardId::Inflame,
+                    card_type: CardType::Power,
+                    cost: 1,
+                    ..Card::pod_defaults()
+                });
+                state.player.draw.retain(|u| *u != power);
+                state.player.play.push(power);
+                let mut hand = Vec::new();
+                for id in [CardId::StrikeIronclad, CardId::DefendIronclad] {
+                    let uid = state.add_card_to_draw_pile(Card {
+                        card_id: id,
+                        card_type: CardType::Attack,
+                        cost: 1,
+                        ..Card::pod_defaults()
+                    });
+                    state.player.draw.retain(|u| *u != uid);
+                    hand.push(uid);
+                }
+                // The already-free card sits where a two-card roll lands.
+                let k = usize::try_from(
+                    state
+                        .run_rng
+                        .combat_card_selection
+                        .clone()
+                        .next_int_exclusive(0, 2),
+                )
+                .expect("index");
+                let (free, other) = (hand[k], hand[1 - k]);
+                state.player.hand.extend(hand.iter().copied());
+                state.cards[free.0.get() as usize - 1].set_locally_free(VarKey::FreeThisTurn);
+                let ctx = CardEventCtx {
+                    card_id: CardId::Inflame,
+                    card_uid: Some(power),
+                    target: None,
+                    card_tags: sts2_core::cards::CardTags::NONE,
+                    energy_spent: 1,
+                };
+                // A hand play's relic walk (`IsAutoPlay` clear).
+                let _ = sts2_core::relic_effects::dispatch_after_card_played(&mut state, &ctx);
+                let scarf = state
+                    .relics
+                    .iter()
+                    .find(|r| r.kind == RelicKind::BrilliantScarf)
+                    .expect("scarf");
+                assert_eq!(scarf.counter, 4, "{version:?} scarf_first={scarf_first}");
+                let other_freed =
+                    state.cards[other.0.get() as usize - 1].combat_var(VarKey::FreeThisTurn);
+                assert_eq!(
+                    other_freed,
+                    i32::from(!scarf_first),
+                    "{version:?}: pool 3 (already-free card picked) iff the Scarf counted \
+                     first (scarf_first={scarf_first})"
+                );
+            }
+        }
+    }
+
+    /// The Scarf skips an auto-play's `AfterCardPlayed` (`cardPlay.IsAutoPlay`).
+    #[test]
+    fn brilliant_scarf_skips_auto_plays() {
+        use sts2_core::cards::{CardId, CardTags};
+        use sts2_core::relic_effects::CardEventCtx;
+        crate::relics::dispatch::ensure_installed();
+        let mut state = CombatState::default();
+        equip_relic(&mut state, RelicKind::BrilliantScarf);
+        let ctx = CardEventCtx {
+            card_id: CardId::StrikeIronclad,
+            card_uid: None,
+            target: None,
+            card_tags: CardTags::NONE,
+            energy_spent: 0,
+        };
+        let hook_ctx = sts2_core::hooks::CardCtx {
+            card_id: Some(CardId::StrikeIronclad),
+            card_uid: None,
+            card_tags: CardTags::NONE,
+            card_type: None,
+        };
+        sts2_core::combat_loop::dispatch_after_card_played_buses(&mut state, &ctx, &hook_ctx);
+        let count = |s: &CombatState| {
+            s.relics
+                .iter()
+                .find(|r| r.kind == RelicKind::BrilliantScarf)
+                .expect("scarf")
+                .counter
+        };
+        assert_eq!(count(&state), 0, "an auto-play does not count");
+        let _ = sts2_core::relic_effects::dispatch_after_card_played(&mut state, &ctx);
+        assert_eq!(count(&state), 1, "a hand play counts");
+    }
+
     /// IronClub's draw is a card-effect `CardPileCmd.Draw`, so NoDraw (Battle
     /// Trance) vetoes it (`Hook.ShouldDraw`, CardPileCmd.cs:826).
     #[test]
@@ -12023,9 +12232,8 @@ mod tests {
         assert_eq!(dispatch_modify_hand_draw(&state, 5), 5);
     }
 
-    /// The relic bus never counts a play (C# `AfterCardPlayed` skips
-    /// auto-plays, which this bus also carries; the count lives in sts2-core
-    /// `finish_card_play`). Only the player's side-turn start resets it.
+    /// A hand play's relic walk counts the play; only the player's side-turn
+    /// start resets the count.
     #[test]
     fn listener_brilliant_scarf_resets_on_player_turn_only() {
         use sts2_core::cards::CardId;
@@ -12050,7 +12258,7 @@ mod tests {
             energy_spent: 0,
         };
         let _ = dispatch_after_card_played(&mut state, &ctx);
-        assert_eq!(counter(&state), 0, "the relic bus does not count plays");
+        assert_eq!(counter(&state), 1, "a hand play counts");
         for r in &mut state.relics {
             r.counter = 4;
         }

@@ -1244,9 +1244,10 @@ relic_hook_channel!(
         listener_guards_after_card_entered_combat
 );
 
-/// Collect the handlers registered for currently-owned relics, in registry
-/// (`RelicId`) order — the firing order every call-all dispatcher uses (the
-/// `BTreeMap` is keyed by `RelicId`).
+/// Collect the handlers registered for currently-owned relics, in equip order
+/// (`state.relics`) — C# `IterateHookListeners` visits `Player.Relics` in the
+/// order they were obtained. The registry walk is in `RelicId` order (the
+/// `BTreeMap` key); [`equip_reorder`] re-sorts it.
 ///
 /// This replaces the per-call `listeners_*()` heap snapshot of EVERY globally-
 /// registered listener. It takes one read lock, walks the `BTreeMap` once, and
@@ -1271,7 +1272,10 @@ fn collect_owned_listeners<F: Copy + 'static>(
     if state.relics.is_empty() {
         return owned;
     }
-    for_each_owned_listener(registry, state, |_, f| owned.push(f));
+    let mut calls: smallvec::SmallVec<[(RelicId, F); 8]> = smallvec::SmallVec::new();
+    for_each_owned_listener(registry, state, |id, f| calls.push((id, f)));
+    let _ = equip_reorder(state, &mut calls);
+    owned.extend(calls.into_iter().map(|(_, f)| f));
     owned
 }
 
@@ -1291,6 +1295,48 @@ fn for_each_owned_listener<F: Copy + 'static>(
             visit(id, f);
         }
     });
+}
+
+/// The equip slot (first non-melted `state.relics` position) of `id`'s relic,
+/// `None` when the player does not own it.
+#[inline]
+fn owned_equip_slot(state: &CombatState, id: RelicId) -> Option<usize> {
+    let kind = id.to_relic_kind()?;
+    state
+        .relics
+        .iter()
+        .position(|r| !r.is_melted && r.kind == kind)
+}
+
+/// Reorder registry-ordered `(RelicId, handler)` calls into C#'s listener
+/// order: `CombatState.IterateHookListeners` visits the player's relics in
+/// EQUIP order (`Player.Relics`), so every relic hook walk does (random-loadout
+/// Ironclad 5724 v0.107.1: Ripple Basin's block ran before Stone Calendar's
+/// kill). The owned entries are stable-sorted by equip slot among the slots
+/// they hold; an unowned entry (a handler that self-no-ops, or one acting
+/// whatever is owned) keeps its place. Returns whether anything moved.
+fn equip_reorder<T: Copy>(state: &CombatState, calls: &mut [(RelicId, T)]) -> bool {
+    if calls.len() < 2 {
+        return false;
+    }
+    let mut owned: smallvec::SmallVec<[(usize, usize); 8]> = smallvec::SmallVec::new();
+    for (pos, (id, _)) in calls.iter().enumerate() {
+        if let Some(slot) = owned_equip_slot(state, *id) {
+            owned.push((slot, pos));
+        }
+    }
+    if owned.windows(2).all(|w| w[0].0 <= w[1].0) {
+        return false;
+    }
+    let positions: smallvec::SmallVec<[usize; 8]> = owned.iter().map(|&(_, p)| p).collect();
+    let mut sorted = owned.clone();
+    sorted.sort_by_key(|&(slot, _)| slot);
+    let picked: smallvec::SmallVec<[(RelicId, T); 8]> =
+        sorted.iter().map(|&(_, p)| calls[p]).collect();
+    for (dst, call) in positions.into_iter().zip(picked) {
+        calls[dst] = call;
+    }
+    true
 }
 
 /// The equip-order walk of `dispatch_after_side_turn_start` and
@@ -1404,6 +1450,21 @@ enum OwnedChannel {
     ModifyDamageMultiplicative,
     AfterDamageReceived,
     ModifyHpLost,
+}
+
+impl OwnedChannel {
+    /// Whether the dispatcher's fold is order-free: a sum or a product of
+    /// exact rationals, floored once by the caller. Its walk keeps the
+    /// planned `RelicId` order and skips the equip-order sort, a damage and
+    /// block hot path.
+    const fn commutes(self) -> bool {
+        matches!(
+            self,
+            Self::ModifyDamageAdditive
+                | Self::ModifyBlockMultiplicative
+                | Self::ModifyDamageMultiplicative
+        )
+    }
 }
 
 /// Number of [`OwnedChannel`]s.
@@ -1607,6 +1668,18 @@ const GUARDED_CHANNELS: usize = 28;
 const GUARDED_PLAN_CAP: usize = 32;
 
 impl GuardedChannel {
+    /// Whether the walk visits owned handlers in equip order, as C#
+    /// `IterateHookListeners` does. Not for `ModifyPowerAmountGiven`: the
+    /// one Rust fold stands for two C# walks, `ModifyPowerAmountGivenAdditive`
+    /// over every listener and then `…Multiplicative`
+    /// (Hook.cs:2032-2050 v0.107.1), so the order that
+    /// matters is the pass, and `RelicId` order puts the additive Snecko
+    /// Skull before the multiplicative Unsettling Lamp
+    /// (`snecko_skull_then_unsettling_lamp_fold_is_additive_then_multiplicative`).
+    const fn walks_equip_order(self) -> bool {
+        !matches!(self, Self::ModifyPowerAmountGiven)
+    }
+
     /// Every guarded channel, in discriminant order.
     pub(crate) const ALL: [Self; GUARDED_CHANNELS] = [
         Self::BeforeHandDraw,
@@ -2099,9 +2172,9 @@ fn guarded_plan_bits(
     Some(bits)
 }
 
-/// Owned handlers of one owned-collect channel, in `RelicId` order: the
-/// plan's bits over the frozen list, or the generic collect when the plan
-/// does not cover the channel.
+/// Owned handlers of one owned-collect channel, in equip order: the plan's
+/// bits over the frozen list when that `RelicId` order already is equip order
+/// (always, for fewer than two owned handlers), else the reordered collect.
 enum OwnedListeners<F: Copy + 'static> {
     Planned {
         frozen: &'static [(RelicId, F)],
@@ -2144,7 +2217,27 @@ fn owned_listeners<F: Copy + 'static>(
             let bits = plan.owned[c];
             #[cfg(debug_assertions)]
             shadow_owned(registry, state, frozen, bits, channel);
-            return OwnedListeners::Planned { frozen, bits };
+            if bits.count_ones() < 2 || channel.commutes() {
+                return OwnedListeners::Planned { frozen, bits };
+            }
+            // Two or more owned handlers: C# calls them in equip order
+            // ([`equip_reorder`]), which the bit walk (RelicId order) is not.
+            let mut calls: smallvec::SmallVec<[(RelicId, F); 8]> = smallvec::SmallVec::new();
+            let mut b = bits;
+            while b != 0 {
+                calls.push(frozen[b.trailing_zeros() as usize]);
+                b &= b - 1;
+            }
+            if !equip_reorder(state, &mut calls) {
+                return OwnedListeners::Planned { frozen, bits };
+            }
+            return OwnedListeners::Collected(
+                calls
+                    .into_iter()
+                    .map(|(_, f)| f)
+                    .collect::<smallvec::SmallVec<[F; 8]>>()
+                    .into_iter(),
+            );
         }
     }
     OwnedListeners::Collected(collect_owned_listeners(registry, state).into_iter())
@@ -2170,7 +2263,8 @@ fn planned_equip_order<F: Copy + 'static>(
     Some((frozen, order))
 }
 
-/// Debug shadow: the planned owned handlers are exactly the generic walk's.
+/// Debug shadow: the planned owned handlers are exactly the generic walk's
+/// (both in `RelicId` order, before the equip reorder).
 #[cfg(debug_assertions)]
 fn shadow_owned<F: Copy + 'static>(
     registry: &ChannelRegistry<F>,
@@ -2274,11 +2368,17 @@ fn walk_guarded_mut<F: Copy + 'static, R: Copy, A: Copy + PartialEq + std::fmt::
 ) -> A {
     let mut acc = init;
     let Some((frozen, mut bits)) = guarded_plan(registry, channel, state) else {
-        for (_id, f) in registry.listeners() {
+        for f in equip_ordered_all(registry, state) {
             acc = fold(acc, call(f, state));
         }
         return acc;
     };
+    if let Some(calls) = equip_reordered_bits(state, frozen, bits) {
+        for f in calls {
+            acc = fold(acc, call(f, state));
+        }
+        return acc;
+    }
     // Debug shadow: whether this walk is shadowed (it skips a handler, and
     // runs inside a shadowing call-site gate or is sampled), the full walk's
     // accumulator, and the next frozen position to shadow.
@@ -2311,6 +2411,49 @@ fn walk_guarded_mut<F: Copy + 'static, R: Copy, A: Copy + PartialEq + std::fmt::
         );
     }
     acc
+}
+
+/// The planned calls `bits` over `frozen` in equip order ([`equip_reorder`]),
+/// or `None` when the bit walk (RelicId order) already is that order: the
+/// common case, which keeps the narrowed walk and its debug shadow.
+fn equip_reordered_bits<F: Copy + 'static>(
+    state: &CombatState,
+    frozen: &[(RelicId, F)],
+    bits: u32,
+) -> Option<smallvec::SmallVec<[F; 8]>> {
+    if bits.count_ones() < 2 {
+        return None;
+    }
+    let mut calls: smallvec::SmallVec<[(RelicId, F); 8]> = smallvec::SmallVec::new();
+    let mut b = bits;
+    while b != 0 {
+        calls.push(frozen[b.trailing_zeros() as usize]);
+        b &= b - 1;
+    }
+    equip_reorder(state, &mut calls).then(|| calls.into_iter().map(|(_, f)| f).collect())
+}
+
+/// Every registered handler of an un-planned guarded channel, owned ones in
+/// equip order ([`equip_reorder`]).
+fn equip_ordered_all<F: Copy + 'static>(
+    registry: &'static ChannelRegistry<F>,
+    state: &CombatState,
+) -> smallvec::SmallVec<[F; 32]> {
+    let mut calls: smallvec::SmallVec<[(RelicId, F); 32]> =
+        registry.listeners().into_iter().collect();
+    let _ = equip_reorder(state, &mut calls);
+    calls.into_iter().map(|(_, f)| f).collect()
+}
+
+/// A channel's whole listener snapshot with the owned handlers in equip
+/// order ([`equip_reorder`]), for the dispatchers that walk every handler.
+fn equip_ordered_snapshot<F: Copy + 'static>(
+    state: &CombatState,
+    snapshot: ListenerSnapshot<F>,
+) -> smallvec::SmallVec<[(RelicId, F); 32]> {
+    let mut calls: smallvec::SmallVec<[(RelicId, F); 32]> = snapshot.into_iter().collect();
+    let _ = equip_reorder(state, &mut calls);
+    calls
 }
 
 /// [`walk_guarded_mut`] for an event channel: `Resolved` iff a called
@@ -2346,11 +2489,25 @@ fn walk_guarded<F: Copy + 'static, A: Copy + PartialEq + std::fmt::Debug>(
 ) -> A {
     let mut acc = init;
     let Some((frozen, mut bits)) = guarded_plan(registry, channel, state) else {
-        for (_id, f) in registry.listeners() {
+        if !channel.walks_equip_order() {
+            for (_, f) in registry.listeners() {
+                acc = step(f, acc);
+            }
+            return acc;
+        }
+        for f in equip_ordered_all(registry, state) {
             acc = step(f, acc);
         }
         return acc;
     };
+    if channel.walks_equip_order() {
+        if let Some(calls) = equip_reordered_bits(state, frozen, bits) {
+            for f in calls {
+                acc = step(f, acc);
+            }
+            return acc;
+        }
+    }
     #[cfg(debug_assertions)]
     let mut next = 0usize;
     while bits != 0 {
@@ -2741,18 +2898,24 @@ pub fn dispatch_before_side_turn_start(state: &mut CombatState, side: Side) -> E
         #[cfg(debug_assertions)]
         shadow_obtain_order(state, frozen, &order);
         for &entry in order.entries() {
+            let had_choice = state.pending_choice.is_some();
             if (frozen[usize::from(entry)].1)(state, side) == EffectResult::Resolved {
                 any_resolved = true;
             }
+            // `Hook.BeforeSideTurnStart` (Hook.cs:1288-1302 v0.107.1) goes on
+            // past a paused listener.
+            crate::park_listener_choice(state, had_choice);
         }
     } else {
         let listeners = listeners_before_side_turn_start();
         let mut owned: smallvec::SmallVec<[BeforeSideTurnStartFn; 8]> = smallvec::SmallVec::new();
         for_each_obtain_order_listener(&listeners, &state.relics, |_, f| owned.push(f));
         for f in owned {
+            let had_choice = state.pending_choice.is_some();
             if f(state, side) == EffectResult::Resolved {
                 any_resolved = true;
             }
+            crate::park_listener_choice(state, had_choice);
         }
     }
     if any_resolved {
@@ -2802,6 +2965,50 @@ pub fn dispatch_after_card_played(state: &mut CombatState, ctx: &CardEventCtx) -
     } else {
         EffectResult::NotImplemented
     }
+}
+
+/// [`dispatch_after_card_played`] from the `from`-th listener in equip order,
+/// stopping after the first listener for which `stop` holds. Returns where
+/// to go on (the next listener's position), or `None` once the walk is done.
+///
+/// C# `Hook.AfterCardPlayed` awaits each listener with the play's own choice
+/// context (Hook.cs:422-430, both builds), so a listener whose draw opens a
+/// pick (Iron Club's draw reshuffling into Stratagem's grid) holds the later
+/// relics until it resolves.
+pub fn dispatch_after_card_played_from(
+    state: &mut CombatState,
+    ctx: &CardEventCtx,
+    from: usize,
+    stop: impl Fn(&CombatState) -> bool,
+) -> Option<usize> {
+    if is_empty_after_card_played() || state.relics.is_empty() {
+        return None;
+    }
+    let calls: smallvec::SmallVec<[AfterCardPlayedFn; 8]> = if let Some((frozen, order)) =
+        planned_equip_order(
+            registry_after_card_played(),
+            state,
+            READY_AFTER_CARD_PLAYED_ORDER,
+            |p| &p.after_card_played,
+        ) {
+        order
+            .slots()
+            .iter()
+            .map(|slot| frozen[usize::from(slot.entry)].1)
+            .collect()
+    } else {
+        collect_equip_order_listeners(registry_after_card_played(), state)
+            .into_iter()
+            .map(|(_, _, f)| f)
+            .collect()
+    };
+    for (i, f) in calls.into_iter().enumerate().skip(from) {
+        let _ = f(state, ctx);
+        if stop(state) {
+            return Some(i + 1);
+        }
+    }
+    None
 }
 
 /// Dispatch `before_card_played` to every registered listener. Bead
@@ -2893,7 +3100,7 @@ pub fn dispatch_after_room_entered(state: &mut CombatState, room: RoomType) -> E
     if is_empty_after_room_entered() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_after_room_entered();
+    let listeners = equip_ordered_snapshot(state, listeners_after_room_entered());
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(state, room) == EffectResult::Resolved {
@@ -3005,24 +3212,29 @@ pub fn dispatch_after_combat_victory(state: &mut CombatState) -> EffectResult {
     )
 }
 
-/// Dispatch `before_turn_end` to every registered listener.
+/// Dispatch `before_turn_end` to the owned relics' listeners in EQUIP order:
+/// the normal walk of C# `Hook.BeforeSideTurnEnd` (Hook.cs:1376-1409
+/// v0.107.1, :1388-1417 v0.111.0) iterates `IterateCombatHookListeners`.
+/// Stone Calendar equipped before Ripple Basin kills the last enemy before
+/// the block, so Juggernaut rolls nothing (random-loadout Ironclad 5724
+/// v0.107.1). The RelicId-ordered owned plan put Ripple Basin first.
 pub fn dispatch_before_turn_end(state: &mut CombatState, side: Side) -> EffectResult {
     if is_empty_before_turn_end() {
         return EffectResult::NotImplemented;
     }
-    // No-relics early-out: `collect_owned_listeners` is provably empty.
     if state.relics.is_empty() {
         return EffectResult::NotImplemented;
     }
+    let listeners = collect_equip_order_listeners(registry_before_turn_end(), state);
     let mut any_resolved = false;
-    for f in owned_listeners(
-        registry_before_turn_end(),
-        OwnedChannel::BeforeTurnEnd,
-        state,
-    ) {
+    for (_idx, _id, f) in listeners {
+        let had_choice = state.pending_choice.is_some();
         if f(state, side) == EffectResult::Resolved {
             any_resolved = true;
         }
+        // A non-blocking `BeforeSideTurnEnd` walk goes on past a paused
+        // listener (Hook.cs:1377-1405 v0.107.1, `AssignTaskAndWaitForPauseOrCompletion`).
+        crate::park_listener_choice(state, had_choice);
     }
     if any_resolved {
         EffectResult::Resolved
@@ -3043,9 +3255,11 @@ pub fn dispatch_before_turn_end_early(state: &mut CombatState, side: Side) -> Ef
     let listeners = collect_equip_order_listeners(registry_before_turn_end_early(), state);
     let mut any_resolved = false;
     for (_idx, _id, f) in listeners {
+        let had_choice = state.pending_choice.is_some();
         if f(state, side) == EffectResult::Resolved {
             any_resolved = true;
         }
+        crate::park_listener_choice(state, had_choice);
     }
     if any_resolved {
         EffectResult::Resolved
@@ -3070,8 +3284,12 @@ pub fn dispatch_after_turn_end(state: &mut CombatState, side: Side) -> EffectRes
         state,
         |f, state| {
             let block_before = state.player.block;
+            let had_choice = state.pending_choice.is_some();
             let result = f(state, side);
             state.combat_log.block_before_late_turn_end += state.player.block - block_before;
+            // Inside the non-blocking `AfterSideTurnEnd` walk (Hook.cs:1423-1438
+            // v0.111.0), the next relic runs past a paused one.
+            crate::park_listener_choice(state, had_choice);
             result
         },
     )
@@ -3115,7 +3333,14 @@ pub fn dispatch_after_died_to_doom(state: &mut CombatState, ctx: &DiedToDoomCtx)
         registry_after_died_to_doom(),
         GuardedChannel::AfterDiedToDoom,
         state,
-        |f, state| f(state, ctx),
+        |f, state| {
+            // `Hook.AfterDiedToDoom` (Hook.cs:628-642 v0.107.1) goes on past a
+            // paused listener.
+            let had_choice = state.pending_choice.is_some();
+            let result = f(state, ctx);
+            crate::park_listener_choice(state, had_choice);
+            result
+        },
     )
 }
 
@@ -3313,7 +3538,7 @@ pub fn dispatch_after_obtained(state: &mut CombatState) -> EffectResult {
     if is_empty_after_obtained() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_after_obtained();
+    let listeners = equip_ordered_snapshot(state, listeners_after_obtained());
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(state) == EffectResult::Resolved {
@@ -3344,7 +3569,7 @@ pub fn dispatch_after_max_hp_changed(
     if is_empty_after_max_hp_changed() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_after_max_hp_changed();
+    let listeners = equip_ordered_snapshot(state, listeners_after_max_hp_changed());
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(state, ctx) == EffectResult::Resolved {
@@ -3523,7 +3748,13 @@ pub fn dispatch_after_death(
         registry_after_death(),
         GuardedChannel::AfterDeath,
         state,
-        |f, state| f(state, ctx),
+        |f, state| {
+            // `Hook.AfterDeath` (Hook.cs:594-606) goes on past a paused listener.
+            let had_choice = state.pending_choice.is_some();
+            let result = f(state, ctx);
+            crate::park_listener_choice(state, had_choice);
+            result
+        },
     )
 }
 
@@ -3750,7 +3981,7 @@ pub fn dispatch_modify_rewards(state: &CombatState, rewards: &mut Vec<Reward>) {
     if is_empty_modify_rewards() {
         return;
     }
-    let listeners = listeners_modify_rewards();
+    let listeners = equip_ordered_snapshot(state, listeners_modify_rewards());
     for (_id, f) in listeners {
         f(state, rewards);
     }
@@ -3766,7 +3997,7 @@ pub fn dispatch_modify_rest_site_heal_rewards(state: &CombatState, base_heal: i3
     if is_empty_modify_rest_site_heal_rewards() {
         return base_heal;
     }
-    let listeners = listeners_modify_rest_site_heal_rewards();
+    let listeners = equip_ordered_snapshot(state, listeners_modify_rest_site_heal_rewards());
     let mut current = base_heal;
     for (_id, f) in listeners {
         current = f(state, current);
@@ -3787,7 +4018,7 @@ pub fn dispatch_modify_card_reward_options_late(
     if is_empty_modify_card_reward_options_late() {
         return;
     }
-    let listeners = listeners_modify_card_reward_options_late();
+    let listeners = equip_ordered_snapshot(state, listeners_modify_card_reward_options_late());
     for (_id, f) in listeners {
         f(state, options);
     }
@@ -3841,7 +4072,7 @@ pub fn dispatch_modify_shop_price(state: &CombatState, ctx: &ShopPriceCtx, base_
     if is_empty_modify_shop_price() {
         return base_price;
     }
-    let listeners = listeners_modify_shop_price();
+    let listeners = equip_ordered_snapshot(state, listeners_modify_shop_price());
     let mut current = base_price;
     for (_id, f) in listeners {
         current = f(state, ctx, current);
@@ -3901,7 +4132,7 @@ pub fn dispatch_on_pet_summoned(state: &mut CombatState, ctx: &PetSummonCtx) -> 
     if is_empty_on_pet_summoned() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_on_pet_summoned();
+    let listeners = equip_ordered_snapshot(state, listeners_on_pet_summoned());
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(state, ctx) == EffectResult::Resolved {
@@ -4090,7 +4321,7 @@ pub fn dispatch_on_card_added_to_deck(state: &mut CombatState, ctx: &CardAddedCt
     if is_empty_on_card_added_to_deck() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_on_card_added_to_deck();
+    let listeners = equip_ordered_snapshot(state, listeners_on_card_added_to_deck());
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(state, ctx) == EffectResult::Resolved {
@@ -4127,7 +4358,7 @@ pub fn dispatch_after_max_hp_gained(state: &mut CombatState, ctx: &MaxHpChangeCt
     if is_empty_after_max_hp_gained() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_after_max_hp_gained();
+    let listeners = equip_ordered_snapshot(state, listeners_after_max_hp_gained());
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(state, ctx) == EffectResult::Resolved {
@@ -4437,11 +4668,15 @@ mod plan_tests {
                 let c = OwnedChannel::$channel as usize;
                 let mut generic: Vec<RelicId> = Vec::new();
                 for_each_owned_listener($registry(), &$state, |id, _| generic.push(id));
-                let OwnedListeners::Planned { frozen, mut bits } =
-                    owned_listeners($registry(), OwnedChannel::$channel, &$state)
-                else {
-                    panic!("{} is not planned", stringify!($channel));
-                };
+                // The plan's bits (`RelicId` order, before the equip
+                // reorder `owned_listeners` applies).
+                assert!(
+                    $state.relics.plan().ready & (1 << c) != 0,
+                    "{} is not planned",
+                    stringify!($channel)
+                );
+                let frozen = $registry().frozen_view().expect("frozen");
+                let mut bits = $state.relics.plan().owned[c];
                 let mut planned: Vec<RelicId> = Vec::new();
                 while bits != 0 {
                     planned.push(frozen[bits.trailing_zeros() as usize].0);

@@ -2520,3 +2520,619 @@ fn void_drains_the_energy_automation_grants_on_the_same_draw() {
         );
     }
 }
+
+/// C# `Hook.AfterCardExhausted` walks `IterateHookListeners` (CombatState.cs:
+/// powers, then relics, then the cards in every pile). Joss Paper at its
+/// threshold draws a Midnight, Confused sets that card's cost absolutely
+/// (`SetThisCombat`, ConfusedPower.cs:30-43), and only then does
+/// `Midnight.AfterCardExhausted` (Midnight.cs:44-48) take its 1 off the roll.
+/// Rust lowered Midnight before the relic bus, so the roll erased it (loadout
+/// Ironclad 5129 v0.111.0).
+#[test]
+fn midnight_reduction_follows_joss_papers_confused_draw_v0111() {
+    let mut state = fresh(V111, CharacterId::Ironclad);
+    add_player_power(&mut state, 50, PowerKind::Confused, 1);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::JossPaper,
+        counter: 4,
+        is_wax: false,
+        is_melted: false,
+    });
+    push_draw(&mut state, CardId::Midnight);
+    let midnight = state.player.draw[0];
+    let fodder = new_card(&mut state, CardId::StrikeIronclad, false);
+    state.player.hand.push(fodder);
+    let roll = i8::try_from(state.run_rng.combat_energy_costs.clone().next_int(0, 3)).expect("i8");
+    assert!(roll > 0, "a 0 roll cannot tell the orders apart");
+    let _ = sts2_core::card_effects::exhaust_card_uid(&mut state, fodder);
+    assert!(state.player.hand.contains(&midnight), "Joss Paper drew it");
+    assert_eq!(state.cards[midnight.0.get() as usize - 1].cost, roll - 1);
+}
+
+/// C# `CreateClone` is a `MemberwiseClone` + `DeepCloneFields`
+/// (AbstractModel.cs:171-178, CardModel.cs:1194-1201): the clone keeps the
+/// single-turn Retain / Sly flags and the Local keywords, so Master Planner's
+/// Sly (`CardCmd.ApplyKeyword`, MasterPlannerPower.cs:26, applied before the
+/// card exhausts) reaches Burning Sticks' copy (BurningSticks.cs:49). Rust
+/// keeps all three in uid-keyed side tables the clone did not inherit
+/// (loadouts Silent 5229 and 5235 v0.111.0).
+#[test]
+fn burning_sticks_clone_keeps_master_planner_sly_and_single_turn_retain() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Silent);
+        add_player_power(&mut state, 60, PowerKind::MasterPlanner, 1);
+        state.relics.push(sts2_core::Relic {
+            id: NonZeroU32::new(1).expect("nz"),
+            kind: sts2_core::RelicKind::BurningSticks,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        });
+        let i = push_hand(&mut state, CardId::PiercingWail, false);
+        let wail = state.player.hand[usize::from(i)];
+        state.player.retain_this_turn.push(wail);
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+        assert!(
+            state.player.exhaust.contains(&wail),
+            "{version:?}: exhausted"
+        );
+        let clone = *state
+            .player
+            .hand
+            .iter()
+            .find(|u| state.cards[u.0.get() as usize - 1].card_id == CardId::PiercingWail)
+            .expect("Burning Sticks cloned it");
+        assert!(
+            sts2_core::card_effects::card_is_sly(&state, clone),
+            "{version:?}: the clone keeps Master Planner's Sly"
+        );
+        assert!(
+            state.player.retain_this_turn.contains(&clone),
+            "{version:?}: the clone keeps the single-turn Retain"
+        );
+    }
+}
+
+/// Nightmare's select-time snapshot is a `CreateClone` (NightmarePower.cs:57),
+/// so a Master-Planner-Sly pick makes Sly copies (loadout Silent 5224
+/// v0.111.0: a Nightmare'd Blade of Ink copy discarded by Calculated Gamble
+/// auto-played in C#).
+#[test]
+fn nightmare_copies_keep_master_planner_sly() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Silent);
+        let pick = new_card(&mut state, CardId::DefendSilent, false);
+        state.player.hand.push(pick);
+        state.player.sly_this_combat.push(pick);
+        let i = push_hand(&mut state, CardId::Nightmare, false);
+        let step = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        if step == sts2_core::StepResult::PendingChoice {
+            let _ = sts2_core::apply(
+                &mut state,
+                sts2_core::Action::ResolveChoice {
+                    selection: smallvec::smallvec![0],
+                },
+            );
+        }
+        let hand_before = state.player.hand.len();
+        let _ = sts2_core::hooks::dispatch_before_hand_draw_powers(&mut state);
+        let copies: Vec<_> = state.player.hand[hand_before..].to_vec();
+        assert_eq!(copies.len(), 3, "{version:?}: three copies");
+        for c in copies {
+            assert!(
+                sts2_core::card_effects::card_is_sly(&state, c),
+                "{version:?}: each copy is Sly"
+            );
+        }
+    }
+}
+
+/// Bombardment's turn-start auto-play out of the exhaust pile reads its
+/// `EnergyValue` there too (CardCmd.AutoPlay: `Pile != null`, so no move to
+/// Play before `GetAmountToSpend`, CardCmd.cs:115-126 both builds). Void Form
+/// leaves an exhaust-pile cost alone, so the play carries 3 and Intimidating
+/// Helmet grants 4 block (loadout Regent 5225 v0.111.0: Rust moved it to Play
+/// first, read 0, no block).
+#[test]
+fn void_form_does_not_zero_bombardment_from_the_exhaust_pile() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Regent);
+        add_player_power(&mut state, 60, PowerKind::VoidForm, 2);
+        state.relics.push(sts2_core::Relic {
+            id: NonZeroU32::new(1).expect("nz"),
+            kind: sts2_core::RelicKind::IntimidatingHelmet,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        });
+        let bomb = new_card(&mut state, CardId::Bombardment, false);
+        state.player.exhaust.push(bomb);
+        state.phase = CombatPhase::PlayerTurnStart;
+        state.round = 2;
+        let hp0 = enemy_hp(&state);
+        let _ = sts2_core::combat_loop::start_player_turn(&mut state);
+        assert!(enemy_hp(&state) < hp0, "{version:?}: Bombardment fired");
+        assert_eq!(state.player.block, 4, "{version:?}: Helmet's 4");
+    }
+}
+
+/// C# `PowerCmd.Apply` returns at once while `CombatManager.IsEnding`
+/// (PowerCmd.cs:69-72 / :103-106 v0.107.1, :73 / :107 v0.111.0), which is
+/// true as soon as the last primary enemy is dead, before the win check.
+/// A Hidden Gem replay of Royalties+ whose 2nd play's Panache killed the last
+/// Nibbit still runs its 3rd play, but that Apply no-ops (loadout Regent 5212
+/// v0.107.1: Royalties 80 in C#, 120 in Rust, which only checked `is_over`).
+#[test]
+fn powers_do_not_land_while_combat_is_ending() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Regent);
+        state.creatures[0].current_hp = 0;
+        assert!(!state.is_over);
+        assert!(sts2_core::combat_loop::combat_is_ending(&state));
+        let puid = state.player.creature_uid.expect("player creature");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            puid,
+            PowerKind::Royalties,
+            40,
+        );
+        assert_eq!(
+            state.player_power_amount(PowerKind::Royalties),
+            0,
+            "{version:?}"
+        );
+    }
+}
+
+/// Sweeping Gaze with no hittable enemy still runs the Osty's whole
+/// `AttackCommand`: the hit loop breaks, but `History.CreatureAttacked` and
+/// `Hook.AfterAttack` follow (AttackCommand.cs:656-657 v0.107.1, :672-673
+/// v0.111.0). So Flatten's `AfterAttack` makes it free and Rattle's count
+/// grows (loadout Necrobinder 5141 v0.111.0: Rust only latched Bone Flute).
+#[test]
+fn sweeping_gaze_with_no_target_is_still_an_osty_attack() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Necrobinder);
+        state.creatures[0].current_hp = 0;
+        let enemy = state.enemy_uids[0];
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            enemy,
+            PowerKind::Adaptable,
+            1,
+        );
+        let _ = state.summon_osty(5);
+        let flatten = new_card(&mut state, CardId::Flatten, false);
+        state.player.hand.push(flatten);
+        let i = push_hand(&mut state, CardId::SweepingGaze, false);
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+        assert_eq!(
+            state.combat_log.osty_attacks_this_turn, 1,
+            "{version:?}: one CreatureAttacked entry"
+        );
+        assert_eq!(
+            sts2_core::hooks::effective_card_cost(&state, flatten),
+            0,
+            "{version:?}: Flatten's AfterAttack"
+        );
+    }
+}
+
+/// C# `TrackingPower.ModifyDamageMultiplicative` accepts the owner's pet as
+/// the dealer (`dealer != Owner && !Owner.Pets.Contains(dealer)`, both
+/// builds), so an Osty attack on a Weak enemy is multiplied: x2 (Amount 2)
+/// in v0.107.1, x1.5 (Amount 50) in v0.111.0 (loadouts Necrobinder 5206
+/// v0.107.1 / 5230 v0.111.0). Rust gated on the owner only.
+#[test]
+fn tracking_multiplies_the_ostys_attack_on_a_weak_enemy() {
+    for (version, amount, expected) in [(V107, 2, 12), (V111, 50, 9)] {
+        for weak in [true, false] {
+            let mut state = fresh(version, CharacterId::Necrobinder);
+            add_player_power(&mut state, 60, PowerKind::Tracking, amount);
+            let enemy = state.enemy_uids[0];
+            if weak {
+                add_enemy_power(&mut state, enemy, 800, PowerKind::Weak, 2);
+            }
+            let _ = state.summon_osty(5);
+            let i = push_hand(&mut state, CardId::Poke, false);
+            let hp0 = enemy_hp(&state);
+            let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+            assert_eq!(
+                hp0 - enemy_hp(&state),
+                if weak { expected } else { 6 },
+                "{version:?} weak={weak}"
+            );
+        }
+    }
+}
+
+/// Bone Shards with Reaper Form + Sleight of Flesh: the Osty's hit applies
+/// Doom (ReaperFormPower.AfterDamageGiven), Sleight of Flesh reacts inside the
+/// still-open `AttackCommand`, and only then does the command's
+/// `Hook.AfterAttack` run `BoneFlute.AfterAttack` once (BoneFlute.cs:19-31).
+/// Rust granted the latched flute block at the Sleight reaction AND again at
+/// the command's end: 2 procs, C# 1 (random-loadout Necrobinder 5792
+/// v0.107.1 @1035, block C# 23 / Rust 25).
+#[test]
+fn bone_flute_grants_once_across_a_mid_attack_sleight_of_flesh() {
+    let mut state = fresh(V107, CharacterId::Necrobinder);
+    let _ = add_enemy(&mut state, 20, 100);
+    let _ = state.summon_osty(5);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::BoneFlute,
+        counter: sts2_core::RelicKind::BoneFlute.initial_counter(),
+        is_wax: false,
+        is_melted: false,
+    });
+    add_player_power(&mut state, 60, PowerKind::ReaperForm, 1);
+    add_player_power(&mut state, 61, PowerKind::SleightOfFlesh, 3);
+    let i = push_hand(&mut state, CardId::BoneShards, false);
+    let card_block = state.cards[state.player.hand[i as usize].0.get() as usize - 1].base_block;
+    let enemy = state.enemy_uids[0];
+    let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+    assert!(
+        enemy_power(&state, enemy, PowerKind::Doom) > 0,
+        "Reaper Form applied Doom"
+    );
+    assert_eq!(state.player.block, card_block + 2);
+}
+
+/// `ChainsOfBindingPower.AfterCardDrawn` binds only while
+/// `CombatState.CurrentSide == Owner.Side` (ChainsOfBindingPower.cs:38, both
+/// builds): a Centennial Puzzle draw on an enemy hit stays unbound
+/// (random-loadout Regent 5776 v0.111.0 @820: hand_afflictions[0] C# None,
+/// Rust Bound 3).
+#[test]
+fn chains_of_binding_binds_nothing_drawn_on_the_enemy_turn() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Regent);
+        let next = state.powers.iter().map(|p| p.id.get()).max().unwrap_or(0) + 1;
+        add_player_power(&mut state, next, PowerKind::ChainsOfBinding, 3);
+        push_draw(&mut state, CardId::StrikeRegent);
+        state.side = sts2_core::Side::Enemy;
+        let _ = sts2_core::cards::draw_via_state(&mut state, 1);
+        let drawn = state.player.hand[0];
+        assert!(
+            state.cards[drawn.0.get() as usize - 1].affliction.is_none(),
+            "{version:?}"
+        );
+        // The player's own turn still binds.
+        state.side = sts2_core::Side::Player;
+        push_draw(&mut state, CardId::StrikeRegent);
+        let _ = sts2_core::cards::draw_via_state(&mut state, 1);
+        let drawn = state.player.hand[1];
+        assert!(
+            state.cards[drawn.0.get() as usize - 1].affliction.is_some(),
+            "{version:?}"
+        );
+    }
+}
+
+/// `VeilpiercerPower.TryModifyEnergyCostInCombatLate` zeroes an Ethereal
+/// card only while it sits in Hand or Play (VeilpiercerPower.cs:12-38). C#
+/// `CardCmd.AutoPlay` reads `EnergyValue` while an exhausted card is still in
+/// the Exhaust pile (CardCmd.cs:114-126), so Eidolon's auto-played Parse kept
+/// its full cost and Right Hand Hand returned (random-loadout Necrobinder
+/// 5750 v0.111.0 @614). Rust priced it at 0 anywhere.
+#[test]
+fn veilpiercer_frees_ethereal_cards_only_in_hand_or_play() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Necrobinder);
+        add_player_power(&mut state, 60, PowerKind::Veilpiercer, 1);
+        let uid = new_card(&mut state, CardId::StrikeNecrobinder, false);
+        state.cards[uid.0.get() as usize - 1]
+            .set_combat_var(sts2_core::cards::VarKey::EtherealThisCombat, 1);
+        let full = i32::from(state.cards[uid.0.get() as usize - 1].cost);
+        assert!(full > 0);
+        state.player.exhaust.push(uid);
+        assert_eq!(
+            sts2_core::hooks::effective_card_cost(&state, uid),
+            full,
+            "{version:?}: in Exhaust"
+        );
+        state.player.exhaust.clear();
+        state.player.hand.push(uid);
+        assert_eq!(
+            sts2_core::hooks::effective_card_cost(&state, uid),
+            0,
+            "{version:?}: in Hand"
+        );
+    }
+}
+
+/// Iron Club's draw reshuffles into a Stratagem pick; after the pick the
+/// resumed draw's Speedster hit kills the last enemy. C# ends the combat
+/// there (`CombatManager.CheckWinCondition` behind the draw), Rust returned
+/// `Advanced` from the pick and left a won fight running (random-loadout
+/// Silent 5759 v0.107.1, Iron Club's draw into the Queen).
+#[test]
+fn a_kill_in_a_draw_resumed_after_a_pick_ends_the_combat() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Silent);
+        state.creatures[0].current_hp = 2;
+        add_player_power(&mut state, 60, PowerKind::Speedster, 3);
+        add_player_power(&mut state, 61, PowerKind::Stratagem, 1);
+        for _ in 0..3 {
+            let uid = new_card(&mut state, CardId::DefendSilent, false);
+            state.player.discard.push(uid);
+        }
+        // Iron Club's fourth card: its `AfterCardPlayed` draw (IronClub.cs:83-95)
+        // runs after the play's own tail and its combat-end check.
+        state.relics.push(sts2_core::Relic {
+            id: NonZeroU32::new(1).expect("nz"),
+            kind: sts2_core::RelicKind::IronClub,
+            counter: 3,
+            is_wax: false,
+            is_melted: false,
+        });
+        let i = push_hand(&mut state, CardId::DefendSilent, false);
+        let step = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        let _ = step;
+        assert!(
+            state.pending_choice.is_some(),
+            "{version:?}: the Stratagem pick"
+        );
+        assert!(
+            state.creatures[0].current_hp > 0,
+            "{version:?}: alive at the pick"
+        );
+        let step = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::ResolveChoice {
+                selection: smallvec::smallvec![0],
+            },
+        );
+        assert!(
+            state.creatures[0].current_hp <= 0,
+            "{version:?}: the resumed draw killed"
+        );
+        assert_eq!(step, sts2_core::StepResult::CombatWon, "{version:?}");
+        assert!(state.is_over && state.player_won, "{version:?}");
+    }
+}
+
+/// C# `CombatState.IterateHookListeners` visits the player's relics in equip
+/// order (`Player.Relics`), on every relic hook. Radiant Pearl equipped
+/// before Ninja Scroll adds its Luminesce before the Shivs
+/// (RadiantPearl.cs:32-41, NinjaScroll.cs:23); the RelicId-ordered walk put
+/// the Shivs first. Same root as random-loadout Ironclad 5724 v0.107.1
+/// (BeforeTurnEnd), generalised to every relic channel.
+#[test]
+fn relic_hooks_walk_equip_order() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Silent);
+        state.round = 1;
+        for (raw, kind) in [
+            (1, sts2_core::RelicKind::RadiantPearl),
+            (2, sts2_core::RelicKind::NinjaScroll),
+        ] {
+            state.relics.push(sts2_core::Relic {
+                id: NonZeroU32::new(raw).expect("nz"),
+                kind,
+                counter: 0,
+                is_wax: false,
+                is_melted: false,
+            });
+        }
+        let _ = sts2_core::relic_effects::dispatch_before_hand_draw(&mut state);
+        let ids: Vec<CardId> = state
+            .player
+            .hand
+            .iter()
+            .map(|u| {
+                state
+                    .cards
+                    .iter()
+                    .find(|c| c.uid == *u)
+                    .expect("card")
+                    .card_id
+            })
+            .collect();
+        assert_eq!(
+            ids.first(),
+            Some(&CardId::Luminesce),
+            "{version:?}: {ids:?}"
+        );
+        assert_eq!(ids.len(), 4, "{version:?}: {ids:?}");
+    }
+}
+
+/// Twin Strike into a Skittish enemy with Reaper Form + Sleight of Flesh:
+/// each hit's Reaper Form Doom sets off Sleight of Flesh inside the player's
+/// `AttackCommand`, before its `Hook.AfterAttack` grants Skittish's block
+/// (SkittishPower.cs:56-69, AttackCommand.cs:551-673). Rust granted the block
+/// at the first Sleight reaction, so it absorbed the Sleight hit and part of
+/// the second Strike. Same root as random-loadout Necrobinder 5792 v0.107.1
+/// (AQ, the Osty's command).
+#[test]
+fn skittish_waits_for_the_players_attack_command_to_end() {
+    for version in [V107, V111] {
+        sts2_content::monsters::act1_underdocks::install_skittish_handlers();
+        let mut state = fresh(version, CharacterId::Necrobinder);
+        let enemy = first_enemy(&state);
+        add_enemy_power(&mut state, enemy, 70, PowerKind::Skittish, 5);
+        add_player_power(&mut state, 60, PowerKind::ReaperForm, 1);
+        add_player_power(&mut state, 61, PowerKind::SleightOfFlesh, 3);
+        let i = push_hand(&mut state, CardId::TwinStrike, false);
+        let hit = state.cards[state.player.hand[i as usize].0.get() as usize - 1].base_damage;
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+        let e = state
+            .creatures
+            .iter()
+            .find(|c| c.id == enemy.0)
+            .expect("enemy");
+        assert_eq!(e.current_hp, 100 - 2 * (hit + 3), "{version:?}");
+        assert_eq!(e.block, 5, "{version:?}: Skittish once the attack is done");
+    }
+}
+
+/// Iron Club's `AfterCardPlayed` draw (IronClub.cs:83-95) reshuffles into a
+/// Stratagem pick. C# awaits each `AfterCardPlayed` listener with the play's
+/// choice context (Hook.cs:422-430), so the later relics,
+/// `AfterCardPlayedLate`, the move to the result pile and `CheckForEmptyHand`
+/// (CardModel.cs:1957-1993) all wait for the pick: the card is still on Play
+/// while it is open. Rust ran the whole tail first and discarded the card
+/// (the AF gap; random-loadout Silent 5759 v0.107.1 is the same shape).
+#[test]
+fn an_iron_club_pick_holds_the_rest_of_the_hand_play() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Silent);
+        add_player_power(&mut state, 61, PowerKind::Stratagem, 1);
+        for _ in 0..3 {
+            let uid = new_card(&mut state, CardId::DefendSilent, false);
+            state.player.discard.push(uid);
+        }
+        state.relics.push(sts2_core::Relic {
+            id: NonZeroU32::new(1).expect("nz"),
+            kind: sts2_core::RelicKind::IronClub,
+            counter: 3,
+            is_wax: false,
+            is_melted: false,
+        });
+        let i = push_hand(&mut state, CardId::DefendSilent, false);
+        let played = state.player.hand[i as usize];
+        let step = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        assert_eq!(step, sts2_core::StepResult::PendingChoice, "{version:?}");
+        assert!(state.pending_choice.is_some(), "{version:?}: the pick");
+        assert!(
+            state.player.play.contains(&played),
+            "{version:?}: the card waits on Play for the pick"
+        );
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::ResolveChoice {
+                selection: smallvec::smallvec![0],
+            },
+        );
+        assert!(state.pending_choice.is_none(), "{version:?}");
+        assert!(state.pending_play.is_none(), "{version:?}");
+        assert!(state.player.discard.contains(&played), "{version:?}");
+    }
+}
+
+/// C# `UnmovablePower.ModifyBlockMultiplicative` (UnmovablePower.cs:21-42)
+/// counts this turn's block gains from a DIFFERENT `CardPlay`. Second Wind's
+/// gains all belong to its one play, even when Dark Embrace draws a Strike
+/// between them that Hellraiser auto-plays (a nested `CardPlay`). Rust tagged
+/// gains with the combat-wide finished-play counter, which the nested play
+/// bumped, so Second Wind's second gain saw its first as another play's and
+/// was not doubled (Ironclad 5918 v0.111.0 @790: block cs=40 rs=30).
+#[test]
+fn a_nested_auto_play_keeps_second_winds_gains_one_card_play() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Ironclad);
+        add_player_power(&mut state, 61, PowerKind::Unmovable, 1);
+        add_player_power(&mut state, 62, PowerKind::DarkEmbrace, 1);
+        add_player_power(&mut state, 63, PowerKind::Hellraiser, 1);
+        push_draw(&mut state, CardId::StrikeIronclad);
+        push_draw(&mut state, CardId::StrikeIronclad);
+        let i = push_hand(&mut state, CardId::SecondWind, false);
+        let _ = push_hand(&mut state, CardId::DefendIronclad, false);
+        let _ = push_hand(&mut state, CardId::DefendIronclad, false);
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        assert_eq!(
+            enemy_hp(&state),
+            100 - 2 * 6,
+            "{version:?}: both drawn Strikes were auto-played"
+        );
+        assert_eq!(
+            state.player.block, 20,
+            "{version:?}: both 5-block gains doubled"
+        );
+    }
+}
+
+/// Enlightenment+ caps a card with a reduce-only Absolute modifier
+/// (`SetThisCombat(1, reduceOnly)`, Enlightenment.cs:21-23); an in-combat
+/// upgrade (Armaments+) then lowers only `_base` (`CardEnergyCost.UpgradeBy`,
+/// CardEnergyCost.cs:351-370), so the cap still reads `min(new base, 1)`.
+/// Rust subtracted the upgrade delta from the capped cost (Ironclad 5915
+/// v0.107.1 @637: hand_costs[0] cs=1 rs=0).
+#[test]
+fn an_upgrade_under_enlightenments_cap_keeps_the_cap() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Necrobinder);
+        let uid = new_card(&mut state, CardId::Eidolon, false);
+        let card = &mut state.cards[uid.0.get() as usize - 1];
+        assert_eq!(card.cost, 2, "{version:?}");
+        card.set_this_combat_reduce_only(1);
+        assert_eq!(card.cost, 1, "{version:?}: capped");
+        assert!(card.upgrade_for(version), "{version:?}");
+        assert_eq!(card.cost, 1, "{version:?}: min(2 - 1, 1)");
+    }
+}
+
+/// C# awaits each of Stoke's `CardCmd.Exhaust`s (Stoke.cs:24-27 v0.107.1): a
+/// Dark Embrace draw that reshuffles into a Stratagem pick finishes before
+/// Stoke generates its cards, so the drawn cards come first in the hand. Rust
+/// generated while the draw was suspended (Ironclad 5998 v0.107.1 @378).
+#[test]
+fn stoke_generates_after_its_exhausts_suspended_draw() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Ironclad);
+        add_player_power(&mut state, 61, PowerKind::DarkEmbrace, 1);
+        add_player_power(&mut state, 62, PowerKind::Stratagem, 1);
+        for _ in 0..3 {
+            let uid = new_card(&mut state, CardId::DefendIronclad, false);
+            state.player.discard.push(uid);
+        }
+        let i = push_hand(&mut state, CardId::Stoke, false);
+        let _ = push_hand(&mut state, CardId::StrikeIronclad, false);
+        let _ = push_hand(&mut state, CardId::StrikeIronclad, false);
+        let step = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        assert_eq!(step, sts2_core::StepResult::PendingChoice, "{version:?}");
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::ResolveChoice {
+                selection: smallvec::smallvec![0],
+            },
+        );
+        assert!(state.pending_choice.is_none(), "{version:?}");
+        let generated: Vec<i32> = state
+            .player
+            .hand
+            .iter()
+            .map(|u| {
+                state.cards[u.0.get() as usize - 1]
+                    .combat_var(sts2_core::cards::VarKey::GeneratedInCombat)
+            })
+            .collect();
+        assert_eq!(
+            generated,
+            vec![0, 0, 0, 1, 1],
+            "{version:?}: the pick and the draws, then Stoke's two cards"
+        );
+    }
+}

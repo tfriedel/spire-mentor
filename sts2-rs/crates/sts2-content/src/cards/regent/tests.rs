@@ -4295,3 +4295,57 @@ fn the_sealed_throne_upgrade_v0107_is_minus_one_cost_no_innate() {
     assert_eq!(d.cost, Some(0i8), "v0.107.1 upgrade drops cost 1 → 0");
     assert_eq!(d.keywords, None, "v0.107.1 upgrade no longer adds Innate");
 }
+
+/// C# `IterateHookListeners` runs the player's powers before the relics, so
+/// `VoidFormPower.AfterCardPlayed` (VoidFormPower.cs:98-108) counts the Power
+/// play that spends the last free card BEFORE `MummifiedHand.AfterCardPlayed`
+/// (MummifiedHand.cs:16-46) reads `CostsEnergyOrStars(includeGlobalModifiers)`.
+/// Mummified Hand therefore sees Defend cost 1 again and frees it (pool 1),
+/// skipping the Strike that is already free this turn. Rust charged Void Form
+/// after every listener, saw nothing costing energy and fell back to the
+/// favorable pool holding the Strike (loadout Regent 5023, v0.111.0).
+#[test]
+fn mummified_hand_sees_void_form_spent_by_the_power_play() {
+    install_pool();
+    crate::cards::dispatch::ensure_installed();
+    crate::relics::dispatch::ensure_installed();
+    for version in [
+        sts2_core::GameVersion::V0_107_1,
+        sts2_core::GameVersion::V0_111_0,
+    ] {
+        let (mut state, _enemy) = fresh_state_with_enemy(200);
+        state.game_version = version;
+        let _ = state.init_player_creature();
+        state.phase = sts2_core::CombatPhase::PlayerPlayPhase;
+        state.player.energy = 3;
+        state.relics.push(sts2_core::Relic {
+            id: NonZeroU32::new(1).expect("non-zero"),
+            kind: sts2_core::RelicKind::MummifiedHand,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        });
+        apply_power_to_player(&mut state, PowerKind::VoidForm, 1);
+        let power = push_hand_card(&mut state, CardId::Inflame);
+        state.cards[power.0.get() as usize - 1].card_type = CardType::Power;
+        state.cards[power.0.get() as usize - 1].target_type = TargetType::Self_;
+        let strike = push_hand_card(&mut state, CardId::StrikeRegent);
+        state.cards[strike.0.get() as usize - 1]
+            .set_locally_free(sts2_core::cards::VarKey::FreeThisTurn);
+        let defend = push_hand_card(&mut state, CardId::DefendRegent);
+        state.cards[defend.0.get() as usize - 1].card_type = CardType::Skill;
+        state.cards[defend.0.get() as usize - 1].target_type = TargetType::Self_;
+
+        let step = sts2_core::combat_loop::play_card(&mut state, 0, None);
+        assert_eq!(step, sts2_core::StepResult::Advanced, "{version:?}");
+        let free = |uid: sts2_core::CardUid| {
+            state.cards[uid.0.get() as usize - 1].combat_var(sts2_core::cards::VarKey::FreeThisTurn)
+        };
+        assert_eq!(free(defend), 1, "{version:?}: Mummified Hand frees Defend");
+        assert_eq!(
+            sts2_core::combat_loop::void_form_cards_played_this_turn(&state),
+            1,
+            "{version:?}: the Power play spent Void Form once"
+        );
+    }
+}

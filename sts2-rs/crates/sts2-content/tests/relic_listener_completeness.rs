@@ -50,6 +50,9 @@ const INLINE_HANDLED: &[RelicId] = &[
     RelicId::IceCream,
     RelicId::LizardTail,
     RelicId::PaelsWing,
+    // PaperKrane's `ModifyWeakMultiplier` is read by C# `WeakPower`
+    // (WeakPower.cs:36), so it lives in the `PowerKind::Weak` damage arm.
+    RelicId::PaperKrane,
     RelicId::PrismaticGem,
     RelicId::RingingTriangle,
     RelicId::RunicPyramid,

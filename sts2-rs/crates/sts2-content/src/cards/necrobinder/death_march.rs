@@ -48,8 +48,7 @@ pub(crate) fn preview_death_march(
     _target: Option<CreatureUid>,
 ) -> i32 {
     let extra = if card.upgraded { 6 } else { 4 };
-    let non_hand_draws_this_turn =
-        i32::try_from(state.combat_log.cards_drawn_by_effect_this_turn).unwrap_or(i32::MAX);
+    let non_hand_draws_this_turn = i32::from(state.combat_log.cards_drawn_by_effect_this_turn);
     card.base_damage + extra * non_hand_draws_this_turn
 }
 

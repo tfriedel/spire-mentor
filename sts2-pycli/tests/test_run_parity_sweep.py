@@ -364,3 +364,14 @@ def test_record_error_without_timeout_still_raises(monkeypatch) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_enumerate_choices_skips_disabled_rest_option() -> None:
+    view = {
+        "decision": "rest_site",
+        "options": [
+            {"index": 0, "option_id": "HEAL", "is_enabled": True},
+            {"index": 1, "option_id": "SMITH", "is_enabled": False},
+        ],
+    }
+    assert rp.enumerate_choices(None, view) == [("choose_option", {"option_index": 0})]

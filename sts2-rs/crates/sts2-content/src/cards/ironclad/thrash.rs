@@ -330,9 +330,13 @@ fn exhaust_fold_base_damage(state: &CombatState, uid: sts2_core::CardUid) -> i32
         // (`OstyDamage.UpgradeValueBy`, same in v0.107.1). These cards keep
         // `base_damage` at the printed value and apply the upgrade in their
         // handler (`upgrade()` is `None`), so add the bump here (Bone Shards+
-        // folded 9 instead of 12: Ironclad-8019 act3#b2). Poke / Snap carry a
-        // spec delta and take the `base_damage` arm.
-        CardId::BoneShards | CardId::Fetch => card.base_damage + if upgraded { 3 } else { 0 },
+        // folded 9 instead of 12: Ironclad-8019 act3#b2). Poke / Snap declare
+        // an `upgrade()` delta, but `card_upgrades_generated::upgrade_delta`
+        // does not route to it, so their `base_damage` also stays printed
+        // (Poke+ folded 6 instead of 9: loadout Ironclad 5215 v0.107.1).
+        CardId::BoneShards | CardId::Fetch | CardId::Poke | CardId::Snap => {
+            card.base_damage + if upgraded { 3 } else { 0 }
+        }
         CardId::Flatten => card.base_damage + if upgraded { 4 } else { 0 },
         CardId::HighFive | CardId::Rattle | CardId::RightHandHand => {
             card.base_damage + if upgraded { 2 } else { 0 }

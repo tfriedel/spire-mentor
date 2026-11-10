@@ -394,3 +394,150 @@ fn a_toolbox_pause_does_not_double_tick_pendulum_s_hand_draw() {
         );
     }
 }
+
+/// v0.111.0 Pollinous Core through a Toolbox pause. C# `BeforeHandDraw` bumps
+/// `TurnsSeen`, `ModifyHandDraw` adds 2 once `TurnsSeen >= 4` and
+/// `AfterModifyingHandDraw` resets it (decomp v0.111.0 PollinousCore.cs:88-125).
+/// The paused read comes after Rust's tick, which already reset the counter to
+/// 0 on the firing turn, so the look-ahead lost the +2 (loadout Regent 5049,
+/// v0.111.0: Foregone Conclusion paused setup, C# drew one card more).
+fn toolbox_pollinous_hand(counter: i32) -> (usize, i32) {
+    toolbox_pollinous_hand_at(counter, sts2_core::GameVersion::V0_111_0)
+}
+
+fn toolbox_pollinous_hand_at(counter: i32, version: sts2_core::GameVersion) -> (usize, i32) {
+    let mut state = state_with_toolbox(12);
+    state.game_version = version;
+    state.relics.push(Relic {
+        id: NonZeroU32::new(2).expect("nz"),
+        kind: RelicKind::PollinousCore,
+        counter,
+        is_wax: false,
+        is_melted: false,
+    });
+    assert_eq!(
+        combat_loop::start_player_turn(&mut state),
+        StepResult::PendingChoice
+    );
+    let _ = sts2_core::apply(
+        &mut state,
+        Action::ResolveChoice {
+            selection: smallvec::smallvec![0],
+        },
+    );
+    let core = state
+        .relics
+        .iter()
+        .find(|r| r.kind == RelicKind::PollinousCore)
+        .expect("pollinous core");
+    (state.player.hand.len(), core.counter)
+}
+
+#[test]
+fn a_toolbox_pause_keeps_pollinous_core_s_extra_draw() {
+    assert_eq!(
+        toolbox_pollinous_hand(3),
+        (8, 0),
+        "4th turn: 1 Toolbox grant + 5 + 2 Pollinous, counter resets"
+    );
+    assert_eq!(
+        toolbox_pollinous_hand(2),
+        (6, 3),
+        "3rd turn: 1 Toolbox grant + 5, no bonus"
+    );
+    assert_eq!(toolbox_pollinous_hand(0), (6, 1), "1st turn: no bonus");
+}
+
+/// v0.107.1 Pollinous Core: `BeforeSideTurnStart` does `TurnsSeen++`,
+/// `ModifyHandDraw` adds 2 only when `TurnsSeen == 4`, and
+/// `AfterModifyingHandDraw` (run only for a relic that changed the draw,
+/// CombatManager.cs:656-657) resets it to 0. The count never wraps on its
+/// own: a combat that ended after the tick to 4 but before the hand draw
+/// leaves 4, the next combat ticks 5, 6, ... and the relic never fires again
+/// (loadout Defect 5189 v0.107.1). Rust cycled `(counter % 4) + 1`.
+#[test]
+fn pollinous_core_v0107_resets_only_after_raising_the_draw() {
+    let v = sts2_core::GameVersion::V0_107_1;
+    assert_eq!(
+        toolbox_pollinous_hand_at(3, v),
+        (8, 0),
+        "4th turn: 1 Toolbox grant + 5 + 2 Pollinous, counter resets"
+    );
+    assert_eq!(
+        toolbox_pollinous_hand_at(2, v),
+        (6, 3),
+        "3rd turn: no bonus"
+    );
+    assert_eq!(
+        toolbox_pollinous_hand_at(4, v),
+        (6, 5),
+        "stuck past 4: no bonus, no wrap"
+    );
+}
+
+/// Ninja Scroll is a `BeforeHandDraw` relic too (NinjaScroll.cs:23, both
+/// builds), so `Hook.BeforeHandDraw` runs it in obtain order with Toolbox:
+/// obtained after Toolbox, its 3 Shivs land after the Toolbox pick; obtained
+/// before, ahead of the screen. Rust ran it on `BeforeSideTurnStart`, so the
+/// Shivs always preceded the pick (loadout Silent 5189 v0.111.0). Returns
+/// the hand's card ids after the pick.
+fn toolbox_with_ninja_scroll(scroll_first: bool) -> Vec<CardId> {
+    let mut state = state_with_toolbox(10);
+    let scroll = Relic {
+        id: NonZeroU32::new(2).expect("nz"),
+        kind: RelicKind::NinjaScroll,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    };
+    if scroll_first {
+        state.relics.insert(0, scroll);
+    } else {
+        state.relics.push(scroll);
+    }
+    let result = combat_loop::start_player_turn(&mut state);
+    assert_eq!(result, StepResult::PendingChoice, "Toolbox's screen");
+    let shivs_at_screen = state
+        .player
+        .hand
+        .iter()
+        .filter(|u| state.cards[u.0.get() as usize - 1].card_id == CardId::Shiv)
+        .count();
+    assert_eq!(
+        shivs_at_screen,
+        if scroll_first { 3 } else { 0 },
+        "Shivs before the pick"
+    );
+    let _ = sts2_core::apply(
+        &mut state,
+        Action::ResolveChoice {
+            selection: smallvec::smallvec![0],
+        },
+    );
+    state
+        .player
+        .hand
+        .iter()
+        .map(|u| state.cards[u.0.get() as usize - 1].card_id)
+        .collect()
+}
+
+#[test]
+fn ninja_scroll_after_toolbox_adds_its_shivs_after_the_pick() {
+    let hand = toolbox_with_ninja_scroll(false);
+    assert_eq!(hand.len(), 9, "{hand:?}");
+    assert_ne!(hand[0], CardId::Shiv, "the Toolbox card first: {hand:?}");
+    assert!(hand[1..4].iter().all(|c| *c == CardId::Shiv), "{hand:?}");
+    assert!(
+        hand[4..].iter().all(|c| *c == CardId::StrikeIronclad),
+        "{hand:?}"
+    );
+}
+
+#[test]
+fn ninja_scroll_before_toolbox_adds_its_shivs_first() {
+    let hand = toolbox_with_ninja_scroll(true);
+    assert_eq!(hand.len(), 9, "{hand:?}");
+    assert!(hand[0..3].iter().all(|c| *c == CardId::Shiv), "{hand:?}");
+    assert_ne!(hand[3], CardId::Shiv, "then the Toolbox card: {hand:?}");
+}

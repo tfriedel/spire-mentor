@@ -51,7 +51,8 @@ pub(crate) fn play_sweeping_gaze(
             // `Hook.AfterAttack`). That owes BoneFlute's block (act23
             // Necrobinder:1006) and counts as an Osty attack, so every
             // Flatten drops to 0 (`Flatten.AfterAttack`; loadout Necrobinder
-            // v0.111.0 3233). The empty command does both.
+            // v0.111.0 3233; Rattle counts it too, loadout Necrobinder 5141).
+            // The empty command does all of these.
             sts2_core::card_effects::osty_attack_command(state, |_| ());
         }
     }

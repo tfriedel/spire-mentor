@@ -8,9 +8,11 @@ use super::prelude::*;
 /// `OnUpgrade Energy.UpgradeValueBy(1m)` (Cards is NOT bumped) — was
 /// hardcoded to +1 regardless of upgrade.
 pub(crate) fn play_adrenaline(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    let _ = sts2_core::cards::draw_via_state(state, 2);
+    // C# GainEnergy, THEN Draw (Adrenaline.cs, both builds), so a drawn
+    // Void's LoseEnergy takes the energy just gained.
     let energy = if current_card_upgraded(state) { 2 } else { 1 };
-    state.player.energy = state.player.energy.saturating_add(energy);
+    state.gain_energy(energy);
+    let _ = sts2_core::cards::draw_via_state(state, 2);
     EffectResult::Resolved
 }
 

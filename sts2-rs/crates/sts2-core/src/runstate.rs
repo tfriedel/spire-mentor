@@ -1288,6 +1288,18 @@ pub struct RunState {
     /// extended past `room_type`) read from here directly.
     pub current_room: Option<Room>,
 
+    /// The player stands in the act-2/3 opening Ancient's `EventRoom`.
+    ///
+    /// C# enters the Ancient as an `EventRoom` (`EventRoom.cs:81`), so its
+    /// `RunState.CurrentRoom` is no longer the boss's `CombatRoom`. Rust
+    /// keeps [`Self::current_room`] on the boss room (or `None` after the
+    /// act carry) until the next map move, so this flag is what tells a
+    /// `CurrentRoom is CombatRoom` check that the player is in an event room
+    /// instead: see [`Self::in_non_combat_room`]. Set by the run manager when
+    /// it fires the Ancient's `AfterRoomEntered`, cleared by
+    /// [`Self::enter_room`].
+    pub in_ancient_room: bool,
+
     /// The player's current HP outside of combat. Mirrors Python
     /// `RunState.current_hp` (`run_state.py:39`). Defaults to `80`
     /// to match the Python pin `sts2-rl-agent@01c094d`. Bead
@@ -2128,6 +2140,7 @@ impl Default for RunState {
             combat_gold_bounds_override: None,
             dusty_tome_setup_card: None,
             current_room: None,
+            in_ancient_room: false,
             // Python pin `sts2-rl-agent@01c094d:sts2_env/run/run_state.py:38-40`.
             current_hp: 80,
             max_hp: 80,
@@ -2814,7 +2827,26 @@ impl RunState {
         }
         self.rest_site_taken.clear();
         self.current_room = Some(room);
+        self.in_ancient_room = false;
         let _ = crate::run_effects::dispatch_after_room_entered(self, room_type);
+    }
+
+    /// Whether C# `RunState.CurrentRoom` is a non-combat room (shop, rest
+    /// site, treasure, a live event, or the act-opening Ancient), i.e. the
+    /// negation of `CurrentRoom is CombatRoom`. An event FIGHT is a C#
+    /// `CombatRoom`: Rust keeps the `?` room's `Event` type through it, but
+    /// `finish_event_combat` tears the event down (`current_event = None`)
+    /// before the room rewards roll, so only a live event counts. A room-less
+    /// RunState (unit fixtures) is not a non-combat room.
+    pub fn in_non_combat_room(&self) -> bool {
+        if self.in_ancient_room {
+            return true;
+        }
+        match self.current_room.map(|r| r.room_type) {
+            Some(RoomType::Shop | RoomType::RestSite | RoomType::Treasure) => true,
+            Some(RoomType::Event) => self.current_event.is_some(),
+            _ => false,
+        }
     }
 
     /// Enter an event room: set [`Self::current_event`] to `event_id`

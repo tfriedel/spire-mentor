@@ -98,23 +98,47 @@ pub(crate) fn read_hand_draw_after_tick(
     state: &mut CombatState,
     read: impl FnOnce(&CombatState) -> i32,
 ) -> i32 {
-    let idx = (state.game_version >= crate::GameVersion::V0_111_0)
-        .then(|| {
-            state
-                .relics
-                .iter()
-                .position(|r| !r.is_melted && r.kind == crate::RelicKind::Pendulum)
-        })
-        .flatten();
-    let Some(idx) = idx else {
+    if state.game_version < crate::GameVersion::V0_111_0 {
         return read(state);
+    }
+    let find = |state: &CombatState, kind| {
+        state
+            .relics
+            .iter()
+            .position(|r: &crate::Relic| !r.is_melted && r.kind == kind)
     };
-    let ticked = state.relics[idx].counter;
-    state.relics[idx].counter = (ticked + PENDULUM_TURNS - 1) % PENDULUM_TURNS;
+    // (index, stored tick, rewound value) per tick-then-look-ahead relic.
+    let mut rewound: smallvec::SmallVec<[(usize, i32); 2]> = smallvec::SmallVec::new();
+    if let Some(i) = find(state, crate::RelicKind::Pendulum) {
+        let ticked = state.relics[i].counter;
+        rewound.push((i, ticked));
+        state.relics[i].counter = (ticked + PENDULUM_TURNS - 1) % PENDULUM_TURNS;
+    }
+    // PollinousCore has the same shape (decomp v0.111.0 PollinousCore.cs:88-125):
+    // its tick stores `TurnsSeen + 1`, or 0 on the turn the +2 fires, and its
+    // `modify_hand_draw` looks at `counter + 1`. A setup paused on Foregone
+    // Conclusion read 0 + 1 on the firing turn and lost the +2 (loadout
+    // Regent 5049, v0.111.0). After the tick the counter is 1..=3 (not fired)
+    // or 0 (fired), so stepping back one tick, 0 -> 3, is exact.
+    if let Some(i) = find(state, crate::RelicKind::PollinousCore) {
+        let ticked = state.relics[i].counter;
+        rewound.push((i, ticked));
+        state.relics[i].counter = if ticked <= 0 {
+            POLLINOUS_CORE_TURNS - 1
+        } else {
+            ticked - 1
+        };
+    }
     let draw = read(state);
-    state.relics[idx].counter = ticked;
+    for (i, ticked) in rewound {
+        state.relics[i].counter = ticked;
+    }
     draw
 }
+
+/// `PollinousCore.Turns` (decomp v0.111.0 PollinousCore.cs); the content
+/// crate's `POLLINOUS_CORE_TURNS` is the same value.
+const POLLINOUS_CORE_TURNS: i32 = 4;
 
 pub(crate) fn install() {
     register_after_player_turn_start(
@@ -131,4 +155,26 @@ pub(crate) fn install() {
         crate::RelicKind::Pendulum,
         on_before_hand_draw_pendulum as BeforeHandDrawFn,
     );
+}
+
+/// v0.107.1 `PollinousCore.AfterModifyingHandDraw` (PollinousCore.cs:115-120):
+/// `TurnsSeen = 0`. `Hook.AfterModifyingHandDraw` runs only for the models
+/// whose `ModifyHandDraw` changed the count (CombatManager.cs:656-657), which
+/// for Pollinous Core is exactly `TurnsSeen == Turns`. Called once the
+/// turn-start hand-draw count is final, after the `BeforeHandDraw` walk; a
+/// combat that ended before then never gets here and keeps its count
+/// (loadout Defect 5189 v0.107.1). v0.111.0 resets in its own tick.
+pub(crate) fn pollinous_core_after_modifying_hand_draw_v0107(state: &mut CombatState) {
+    if state.game_version >= crate::GameVersion::V0_111_0 {
+        return;
+    }
+    if let Some(relic) = state
+        .relics
+        .iter_mut()
+        .find(|r| !r.is_melted && r.kind == crate::RelicKind::PollinousCore)
+    {
+        if relic.counter == POLLINOUS_CORE_TURNS {
+            relic.counter = 0;
+        }
+    }
 }

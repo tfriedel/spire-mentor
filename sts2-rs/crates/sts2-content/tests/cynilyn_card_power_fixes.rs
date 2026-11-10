@@ -906,3 +906,241 @@ fn calamity_stomp_counts_the_attack_that_generated_it() {
         assert!(found, "{v:?}: no seed generated a Stomp");
     }
 }
+
+/// Banshee's Cry listens to `AfterCardPlayed` from its card slot, AFTER the
+/// player's relics (CombatState.cs:101-160), and reads the played card's LIVE
+/// keywords (BansheesCry.cs:56-67). Razor Tooth upgrades an Apparition first,
+/// and `Apparition.OnUpgrade` removes Ethereal (Apparition.cs:37), so the cost
+/// stays. The play still counts in the `WasEthereal` tally
+/// (CardPlayFinishedEntry.cs:45), which was recorded before the hook. Parse
+/// stays Ethereal when upgraded, so it is still shaved. Loadout Necrobinder
+/// 5451 v0.107.1: hand cost C# 7, Rust 5.
+#[test]
+fn banshees_cry_reads_keywords_after_razor_tooth_upgrades_the_play() {
+    let cry_cost_after = |v: GameVersion, played: CardId, razor_tooth: bool| {
+        let mut state = fresh(v, CharacterId::Necrobinder);
+        let _enemy = add_enemy(&mut state, 2, 200);
+        if razor_tooth {
+            add_relic(&mut state, sts2_core::RelicKind::RazorTooth);
+        }
+        fill_draw(&mut state, 5);
+        let cry = new_card(&mut state, CardId::BansheesCry, false);
+        state.player.discard.push(cry);
+        let idx = push_hand(&mut state, played, false);
+        let _ = sts2_core::combat_loop::play_card(&mut state, idx, None);
+        let c = &state.cards[cry.0.get() as usize - 1];
+        assert_eq!(
+            state.combat_log.ethereal_cards_played_this_combat, 1,
+            "{v:?} {played:?}: the play counts as Ethereal"
+        );
+        assert_eq!(
+            c.combat_var(sts2_core::cards::VarKey::BansheesCryEtherealCounted),
+            1,
+            "{v:?} {played:?}"
+        );
+        c.cost
+    };
+    for v in BOTH {
+        assert_eq!(cry_cost_after(v, CardId::Apparition, true), 9, "{v:?}");
+        assert_eq!(cry_cost_after(v, CardId::Apparition, false), 7, "{v:?}");
+        assert_eq!(cry_cost_after(v, CardId::Parse, true), 7, "{v:?}");
+    }
+}
+
+/// `BouncingFlask.OnPlay` re-reads `DynamicVars.Repeat` on every iteration
+/// (BouncingFlask.cs:43, both builds). When Outbreak's third Poison AoE kills
+/// the Dampen caster mid-play, `DampenPower.AfterRemoved` re-upgrades the flask
+/// on Play, so Repeat goes from 3 to 4 and C# throws a 4th flask. Loadout Silent
+/// 5522 v0.107.1: C# made one more CombatTargets roll.
+#[test]
+fn bouncing_flask_rereads_its_repeat_after_the_dampen_caster_dies() {
+    // OutbreakPower is gone in v0.111.0; the loop shape is the same there.
+    {
+        let v = V107;
+        let mut state = fresh(v, CharacterId::Silent);
+        let caster = add_enemy(&mut state, 2, 5);
+        let _survivor = add_enemy(&mut state, 3, 200);
+        let flask = new_card(&mut state, CardId::BouncingFlask, true);
+        state.player.hand.push(flask);
+        sts2_core::monster_power_effects::install_dampen_power_handlers();
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+        let pid = state
+            .powers
+            .iter()
+            .find(|p| p.kind == PowerKind::Dampen)
+            .map(|p| p.id)
+            .expect("Dampen applied");
+        state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+        let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+            Some(caster),
+        );
+        assert!(!state.cards[flask.0.get() as usize - 1].upgraded, "{v:?}");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            PowerKind::Outbreak,
+            10,
+        );
+        state.player.energy = 3;
+        let rolls_before = state.run_rng.combat_targets.counter();
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+
+        assert_eq!(
+            hp_of(&state, caster),
+            0,
+            "{v:?}: Outbreak killed the caster"
+        );
+        assert_eq!(
+            state.run_rng.combat_targets.counter() - rolls_before,
+            4,
+            "{v:?}: the re-upgraded flask throws a 4th time"
+        );
+    }
+}
+
+/// A hand play's `AfterCardPlayed` (Iron Club's 4th-play draw) draws a Seeker
+/// Strike that Hellraiser auto-plays, and its select prompts. C# moves the hand
+/// card to its result pile only after `Hook.AfterCardPlayed` returns
+/// (CardModel.cs:1963-2002), so after the pick. Rust deferred the move while
+/// the select was open, but the pick resolved through the parked auto-play's
+/// resume, which returned without flushing. The card stayed stranded on the
+/// Play pile (loadout Ironclad 5605 v0.111.0: Expect a Fight).
+#[test]
+fn hand_card_leaves_play_after_a_hellraiser_select_its_after_played_drew() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Ironclad);
+        let _ = add_enemy(&mut state, 2, 500);
+        add_relic(&mut state, sts2_core::RelicKind::IronClub);
+        state.relics[0].counter = 3;
+        let p = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(&mut state, p, PowerKind::Hellraiser, 1);
+        let seeker = new_card(&mut state, CardId::SeekerStrike, false);
+        state.player.draw.push(seeker);
+        fill_draw(&mut state, 4);
+        let defend = new_card(&mut state, CardId::DefendIronclad, false);
+        state.player.hand.push(defend);
+
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: 0,
+                target: None,
+            },
+        );
+        assert!(
+            state.pending_choice.is_some(),
+            "{v:?}: Seeker Strike's select prompts"
+        );
+        assert!(
+            state.player.play.contains(&defend),
+            "{v:?}: held until the pick"
+        );
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::ResolveChoice {
+                selection: SmallVec::from_slice(&[0]),
+            },
+        );
+        assert!(state.pending_choice.is_none(), "{v:?}");
+        assert!(
+            state.player.play.is_empty(),
+            "{v:?}: nothing stranded on Play"
+        );
+        assert!(state.player.discard.contains(&defend), "{v:?}");
+    }
+}
+
+/// C# `CardModel.DowngradeInternal` resets `_keywords` to the canonical Local
+/// set (CardModel.cs:2157 v0.111.0, :2144 v0.107.1), so Dampen's downgrade
+/// wipes a Sly that Master Planner applied with `CardCmd.ApplyKeyword`
+/// (MasterPlannerPower.cs:26) and a Retain from `apply_retain_keyword`;
+/// `AfterRemoved`'s re-upgrade does not bring them back. Rust kept the Sly in
+/// `player.sly_this_combat`, so a later discard auto-played the card
+/// (random-loadout Silent 5772 v0.111.0 @814).
+#[test]
+fn dampen_downgrade_wipes_applied_sly_and_retain() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Silent);
+        let e = add_enemy(&mut state, 2, 100);
+        let sly = new_card(&mut state, CardId::Backflip, true);
+        let kept = new_card(&mut state, CardId::Backflip, true);
+        state.player.hand.push(sly);
+        state.player.hand.push(kept);
+        state.player.sly_this_combat.push(sly);
+        sts2_core::card_effects::apply_retain_keyword(&mut state.cards[kept.0.get() as usize - 1]);
+        assert!(sts2_core::card_effects::card_is_sly(&state, sly));
+        sts2_core::monster_power_effects::install_dampen_power_handlers();
+        let player = state.player.creature_uid.expect("player");
+        let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+            Some(e),
+        );
+        let _ = sts2_core::monster_power_effects::dispatch_after_removed_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+        );
+        assert!(state.cards[sly.0.get() as usize - 1].upgraded, "{v:?}");
+        assert!(
+            !sts2_core::card_effects::card_is_sly(&state, sly),
+            "{v:?}: Master Planner's Sly is gone"
+        );
+        assert!(
+            !sts2_core::card_effects::card_retain_inst(&state.cards[kept.0.get() as usize - 1]),
+            "{v:?}: the applied Retain is gone"
+        );
+    }
+}
+
+/// C# `BlackHolePower.AfterCardPlayed` fires only on `cardPlay.IsLastInSeries`
+/// (BlackHolePower.cs:23, CardPlay.cs:73): a Duplicated star card deals the
+/// AoE once, after its replay. Here Calamity adds a card on each iteration and
+/// the AoE's kill draws through Gremlin Horn, so the hand is both Calamity
+/// cards, then the draw. Rust fired on the first iteration (Regent 5995 /
+/// 6052 v0.111.0), drawing between the two Calamity cards.
+#[test]
+fn black_hole_waits_for_the_last_play_of_the_series() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Regent);
+        let _target = add_enemy(&mut state, 2, 100);
+        let victim = add_enemy(&mut state, 3, 2);
+        add_relic(&mut state, sts2_core::RelicKind::GremlinHorn);
+        fill_draw(&mut state, 1);
+        state.player.stars = 5;
+        let player = state.player.creature_uid.expect("player");
+        for (kind, amount) in [
+            (PowerKind::Calamity, 1),
+            (PowerKind::BlackHole, 3),
+            (PowerKind::Duplication, 1),
+        ] {
+            sts2_core::card_effects::apply_power_to_creature(&mut state, player, kind, amount);
+        }
+        let blast = push_hand(&mut state, CardId::GammaBlast, false);
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, blast, Some(0));
+
+        assert_eq!(hp_of(&state, victim), 0, "{v:?}: Black Hole killed it");
+        let hand: Vec<_> = state
+            .player
+            .hand
+            .iter()
+            .map(|u| state.cards[u.0.get() as usize - 1])
+            .collect();
+        assert_eq!(hand.len(), 3, "{v:?}: {hand:?}");
+        for (i, card) in hand.iter().take(2).enumerate() {
+            assert_eq!(
+                card.combat_var(sts2_core::cards::VarKey::GeneratedInCombat),
+                1,
+                "{v:?}: Calamity's card {i} before the draw"
+            );
+        }
+        assert_eq!(hand[2].card_id, CardId::StrikeIronclad, "{v:?}");
+    }
+}

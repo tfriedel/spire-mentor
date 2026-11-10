@@ -953,7 +953,7 @@ impl StepCtx {
             self.osty_strength = creature_powers(state, osty).2;
         }
         s[V5_LIGHTNING_SO_FAR] = clampf(
-            state.combat_log.lightning_orbs_channeled_this_combat as f32 / 10.0,
+            f32::from(state.combat_log.lightning_orbs_channeled_this_combat) / 10.0,
             0.0,
             3.0,
         );

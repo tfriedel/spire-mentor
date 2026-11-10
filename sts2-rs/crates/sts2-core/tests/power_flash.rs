@@ -179,6 +179,9 @@ fn noxious_fumes_flashes_on_the_owners_turn_even_with_no_enemy_to_poison() {
 #[test]
 fn juggernaut_flashes_only_when_its_guard_holds() {
     let mut state = state_with_power(PowerKind::Juggernaut, 3);
+    // A live player: at 0 HP the combat is ending and Juggernaut is silent.
+    state.player.current_hp = 50;
+    state.player.max_hp = 50;
     add_enemy(&mut state, 40);
 
     sts2_core::hooks::dispatch_after_block_gained(

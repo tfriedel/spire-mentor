@@ -20,7 +20,9 @@ pub(crate) fn play_dual_wield(state: &mut CombatState, _t: Option<CreatureUid>) 
         let idx = uid.0.get() as usize - 1;
         // C# `CreateClone()` of the picked card (DualWield.cs).
         let template = state.cards[idx].create_clone();
-        let _ = sts2_core::card_effects::spawn_card_into_hand(state, template);
+        let copy = sts2_core::card_effects::spawn_card_into_hand(state, template);
+        // `CreateClone` keeps the pick's Retain / Sly flags.
+        state.inherit_clone_flags(uid, copy);
     }
     EffectResult::Resolved
 }

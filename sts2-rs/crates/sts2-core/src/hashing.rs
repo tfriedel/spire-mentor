@@ -611,8 +611,10 @@ fn hash_enemies_cards_items_pending_skipping<E: HashEncoding, H: Hasher>(
         c.ap.force_exhaust.hash(h);
         c.batch.hash(h);
     }
-    if state.pending_play_phase_tail {
-        0xC1u8.hash(h);
+    match state.pending_play_phase_tail {
+        None => {}
+        Some(crate::PlayPhaseTail::AfterPlayPhaseStart) => 0xC1u8.hash(h),
+        Some(crate::PlayPhaseTail::AfterImbued) => 0xC2u8.hash(h),
     }
     // GH #1129: a select captured from the enemy side. The snapshot is the
     // same for every state reached from one enemy side, so the answers given

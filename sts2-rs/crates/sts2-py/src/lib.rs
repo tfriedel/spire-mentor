@@ -317,7 +317,7 @@ fn build_encounter_state(
         pending_snecko_cost_randomize: false,
         pending_cluster_resume: None,
         pending_collect_resume: None,
-        pending_play_phase_tail: false,
+        pending_play_phase_tail: None,
         pending_hand_draw_resume: None,
         pending_relic_hand_draw_resume: None,
         pending_wlp_retain_resume: false,
@@ -1570,10 +1570,10 @@ impl PyCombatState {
         // `last_attack_skill_played` and `card_play_log` hold uids the
         // reconstruction has just reallocated, and
         // `chains_bound_card_played_this_turn` IS on the wire, so reality
-        // must keep winning on it. `unmovable_card_block_plays` is safe:
-        // its tags are `player_card_plays_this_combat` sequence numbers,
-        // which travel with it, so the fresh state's future plays continue
-        // the same numbering — Unmovable rebuilt without it doubled EVERY
+        // must keep winning on it. `unmovable_card_block_plays` is safe
+        // between plays: every finished play's tag is the uid-free
+        // `UNMOVABLE_EARLIER_PLAY` (only a play still resolving holds its
+        // card's uid) — Unmovable rebuilt without it doubled EVERY
         // block card instead of only the turn's first (30 of the 140
         // on-play `$.player.block` divergences on the v27wr sweep).
         {

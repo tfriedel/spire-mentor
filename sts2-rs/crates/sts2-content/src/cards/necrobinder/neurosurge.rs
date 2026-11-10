@@ -33,13 +33,14 @@ pub(crate) fn play_neurosurge(
     state.gain_energy(gain);
 
     // CardPileCmd.Draw(ctx, Cards.BaseValue=2, Owner). Not upgraded.
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, 2);
 
     // PowerCmd.Apply<NeurosurgePower>(Owner.Creature, 3, ...): self-applied
     // Neurosurge (a Debuff/Counter) that, on each of the owner's turn starts,
     // applies its Amount in Doom to the owner. The NeurosurgePower stack count
     // is NOT upgraded (only the energy gain is), so it is always 3.
-    apply_power_to_player(state, PowerKind::Neurosurge, 3);
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, sts2_core::DrawThen::Neurosurge);
 
     EffectResult::Resolved
 }

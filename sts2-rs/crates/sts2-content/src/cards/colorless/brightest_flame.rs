@@ -28,7 +28,9 @@ pub(crate) fn play_brightest_flame(
     };
     if state.pending_choice.is_some() {
         if let Some(pdr) = state.pending_draw_resume.as_mut() {
-            pdr.then_lose_max_hp_from_card += max_hp_loss;
+            pdr.then_lose_max_hp_from_card = pdr
+                .then_lose_max_hp_from_card
+                .saturating_add(i16::try_from(max_hp_loss).unwrap_or(i16::MAX));
             return EffectResult::Resolved;
         }
     }

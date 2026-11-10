@@ -488,6 +488,82 @@ fn after_death_select_on_enemy_turn_waits_for_the_next_player_turn() {
     }
 }
 
+/// Scrape kills one Nibbit; Gremlin Horn's `AfterDeath` draw reshuffles the
+/// three-card discard into a Stratagem select that is parked behind the play.
+/// Scrape then draws those three cards and discards them (all cost 1), so the
+/// draw pile is empty when the grid finally shows. C# `CardPileCmd.Draw`
+/// resumes right after `ShuffleIfNecessary`: `drawPile.FirstOrDefault()` is
+/// null and the horn's draw ends (CardPileCmd.cs:857-866 v0.107.1). Rust
+/// re-entered the draw loop from the top and reshuffled the discard a second
+/// time, opening a second Stratagem select. Random-loadout Defect v0.107.1
+/// seed 5393.
+#[test]
+fn parked_reshuffle_select_resumes_without_a_second_shuffle() {
+    for v in BOTH {
+        let (mut state, dying, reshuffled) = horn_stratagem_fixture(
+            v,
+            5,
+            &[CardId::DefendIronclad, CardId::Bash, CardId::IronWave],
+        );
+        let scrape = new_card(&mut state, CardId::Scrape);
+        state.player.hand.push(scrape);
+
+        let r = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+
+        let hp = state.creatures.iter().find(|c| c.id == dying.0).expect("c");
+        assert_eq!(hp.current_hp, 0, "{v:?}: Scrape killed the Nibbit");
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{v:?}");
+        let pc = state.pending_choice.as_ref().expect("the grid surfaced");
+        assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand, "{v:?}");
+        assert!(state.player.draw.is_empty(), "{v:?}: Scrape drew the pile");
+        assert_eq!(state.player.discard.len(), 4, "{v:?}: 3 discarded + Scrape");
+
+        resolve(&mut state, 0);
+        assert!(
+            state.pending_choice.is_none(),
+            "{v:?}: no second Stratagem select"
+        );
+        assert!(state.pending_draw_resume.is_none(), "{v:?}");
+        assert!(state.combat_log.parked_hook_choices.is_none(), "{v:?}");
+        assert!(state.player.draw.is_empty(), "{v:?}: no second reshuffle");
+        assert_eq!(state.player.hand.len(), 1, "{v:?}: only the pick");
+        assert!(reshuffled.contains(&state.player.hand[0]), "{v:?}");
+        assert_eq!(state.player.discard.len(), 3, "{v:?}");
+    }
+}
+
+/// The blocking twin: Scrape's own draw reshuffles into the Stratagem select,
+/// which C# awaits inside the draw. After the pick the draw takes the rest of
+/// the reshuffled pile and stops at the empty pile with nothing to reshuffle.
+#[test]
+fn blocking_reshuffle_select_resumes_on_the_reshuffled_pile() {
+    for v in BOTH {
+        let (mut state, _dying, reshuffled) = horn_stratagem_fixture(
+            v,
+            50,
+            &[CardId::DefendIronclad, CardId::Bash, CardId::IronWave],
+        );
+        let scrape = new_card(&mut state, CardId::Scrape);
+        state.player.hand.push(scrape);
+
+        let r = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{v:?}");
+        assert_eq!(state.player.draw.len(), 3, "{v:?}: reshuffled");
+
+        resolve(&mut state, 0);
+        assert!(state.pending_choice.is_none(), "{v:?}");
+        assert!(state.pending_draw_resume.is_none(), "{v:?}");
+        assert!(state.player.draw.is_empty(), "{v:?}");
+        // The pick is Stratagem's, not part of Scrape's draw result, so it
+        // stays; Scrape discards the two cards its draw took (cost 1).
+        assert_eq!(state.player.hand.len(), 1, "{v:?}: the pick");
+        assert!(reshuffled.contains(&state.player.hand[0]), "{v:?}");
+        let mut gone = state.player.discard.clone();
+        gone.retain(|c| reshuffled.contains(c));
+        assert_eq!(gone.len(), 2, "{v:?}: both drawn cards discarded");
+    }
+}
+
 // ── A per-card draw listener can end the draw mid-way ────────────────────
 
 /// Speedster's per-card `AfterCardDrawn` damage (SpeedsterPower.cs:15-23)
@@ -686,4 +762,291 @@ fn turn_end_orb_kill_select_opens_before_the_hand_flush() {
             "{v:?}: the flush ran after the pick"
         );
     }
+}
+
+// ── A nested damage call kills its own targets ───────────────────────────
+
+/// Flick-Flack (8 with Strength 2) hits four enemies at [21, 8, 19, 17]; the
+/// second dies. The first target's Envenom Poison is Outbreak's third, so
+/// Outbreak's own `CreatureCmd.Damage` (OutbreakPower.cs:47) deals 11 to the
+/// living [13, -, 11, 9] and, at the end of THAT call, kills the third and
+/// fourth (CreatureCmd.cs:409 v0.107.1), which `RemoveCreature` takes out of
+/// the combat. The outer tails then poison the second (killed by the outer
+/// call, not yet `Kill`ed, so it can still receive powers): Outbreak counts 1.
+/// The removed third and fourth receive nothing (`CanReceivePowers`,
+/// Creature.cs:308-321), so Outbreak does not fire again and the first enemy
+/// lives at 2. Rust queued the nested kills on the outer batch, poisoned all
+/// three corpses and fired Outbreak a second time, ending the combat (loadout
+/// Silent 5093 v0.107.1). Outbreak is gone in v0.111.0.
+#[test]
+fn a_nested_outbreak_kills_its_own_targets_before_the_outer_tails() {
+    let mut state = fresh(GameVersion::V0_107_1);
+    state.player.character = Some(CharacterId::Silent);
+    for (i, hp) in [21, 8, 19, 17].into_iter().enumerate() {
+        let id = u32::try_from(i).expect("u32") + 2;
+        state
+            .creatures
+            .push(enemy(id, hp, MonsterKind::Nibbit, "Nibbit"));
+        state
+            .enemy_uids
+            .push(CreatureUid(NonZeroU32::new(id).expect("nz")));
+    }
+    let p = state.player.creature_uid.expect("player");
+    for (kind, amount) in [
+        (PowerKind::Envenom, 1),
+        (PowerKind::Outbreak, 11),
+        (PowerKind::Strength, 2),
+    ] {
+        sts2_core::card_effects::apply_power_to_creature(&mut state, p, kind, amount);
+    }
+    for pw in &mut state.powers {
+        if pw.kind == PowerKind::Outbreak {
+            pw.counter = 2;
+        }
+    }
+    let ff = new_card(&mut state, CardId::FlickFlack);
+    state.player.hand.push(ff);
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+
+    let poison = |state: &CombatState, i: usize| {
+        state.creatures[i]
+            .powers
+            .iter()
+            .filter_map(|puid| {
+                state
+                    .powers
+                    .iter()
+                    .find(|p| p.id == puid.0 && p.kind == PowerKind::Poison)
+            })
+            .map(|p| p.amount)
+            .sum::<i32>()
+    };
+    let hp: Vec<i32> = state.creatures[1..].iter().map(|c| c.current_hp).collect();
+    assert!(!state.is_over, "the first enemy survives");
+    assert_eq!(hp, vec![2, 0, 0, 0]);
+    assert_eq!(poison(&state, 1), 1, "the first enemy's Envenom Poison");
+    for i in [3, 4] {
+        assert_eq!(poison(&state, i), 0, "removed enemy {i} takes no Poison");
+    }
+    let outbreak = state
+        .powers
+        .iter()
+        .find(|p| p.kind == PowerKind::Outbreak)
+        .expect("outbreak");
+    assert_eq!(
+        outbreak.counter, 1,
+        "only the second enemy's Poison counted"
+    );
+}
+
+/// Outbreak's counter stays at 3 while its own damage resolves: C# does
+/// `timesPoisoned %= 3` after the awaited `CreatureCmd.Damage`
+/// (OutbreakPower.cs:42-48 v0.107.1). Deadly Poison is Outbreak's third; its
+/// 11 kills the minion, Gremlin Horn draws, and Corrosive Wave's Poison on
+/// that draw is the fourth, which fires Outbreak again before the outer `%=`.
+/// Rust reset the counter before the damage, so the nested Poison counted 1
+/// (Silent 6003 v0.107.1 @703: monsters[0].hp cs=73 rs=88). Outbreak is gone in
+/// v0.111.0.
+#[test]
+fn a_poison_inside_outbreaks_damage_counts_on_top_of_its_third() {
+    let mut state = fresh(GameVersion::V0_107_1);
+    state.player.character = Some(CharacterId::Silent);
+    for (id, hp) in [(2, 100), (3, 5)] {
+        state
+            .creatures
+            .push(enemy(id, hp, MonsterKind::Nibbit, "Nibbit"));
+        state
+            .enemy_uids
+            .push(CreatureUid(NonZeroU32::new(id).expect("nz")));
+    }
+    add_relic(&mut state, sts2_core::RelicKind::GremlinHorn);
+    let p = state.player.creature_uid.expect("player");
+    for (kind, amount) in [(PowerKind::Outbreak, 11), (PowerKind::CorrosiveWave, 1)] {
+        sts2_core::card_effects::apply_power_to_creature(&mut state, p, kind, amount);
+    }
+    for pw in &mut state.powers {
+        if pw.kind == PowerKind::Outbreak {
+            pw.counter = 2;
+        }
+    }
+    let drawn = new_card(&mut state, CardId::DefendIronclad);
+    state.player.draw.push(drawn);
+    let dp = new_card(&mut state, CardId::DeadlyPoison);
+    state.player.hand.push(dp);
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+
+    assert!(state.player.hand.contains(&drawn), "Gremlin Horn drew");
+    assert_eq!(state.creatures[2].current_hp, 0, "the 5-HP enemy died");
+    assert_eq!(
+        state.creatures[1].current_hp,
+        100 - 11 - 11,
+        "Outbreak fired twice"
+    );
+    let outbreak = state
+        .powers
+        .iter()
+        .find(|p| p.kind == PowerKind::Outbreak)
+        .expect("outbreak");
+    assert_eq!(outbreak.counter, 1, "4 % 3 after the nested proc");
+}
+
+// ── The Hunt's extra card reward on the last enemy ───────────────────────
+
+/// The Hunt's Fatal kill of the LAST enemy still adds its extra card reward:
+/// C# calls `combatRoom.AddExtraReward(.., new CardReward(..))` before
+/// `PowerCmd.Apply<TheHuntPower>` (TheHunt.cs:45-48, both builds), and only
+/// the power apply no-ops once the combat `IsEnding` (PowerCmd.cs:69-72).
+/// Rust counted the reward by the power's stacks, which the ending-combat
+/// guard drops, so the room offered one card reward short (random-loadout
+/// Silent 5307 v0.107.1, 5345 v0.111.0).
+#[test]
+fn the_hunt_killing_the_last_enemy_still_adds_its_card_reward() {
+    for v in BOTH {
+        let mut state = fresh(v);
+        state.player.character = Some(CharacterId::Silent);
+        state
+            .creatures
+            .push(enemy(2, 5, MonsterKind::Nibbit, "Nibbit"));
+        let target = CreatureUid(NonZeroU32::new(2).expect("nz"));
+        state.enemy_uids.push(target);
+        let hunt = new_card(&mut state, CardId::TheHunt);
+        state.player.hand.push(hunt);
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+        assert_eq!(state.creatures[1].current_hp, 0, "{v:?}: the kill");
+        assert_eq!(
+            state.combat_log.extra_card_rewards_this_combat, 1,
+            "{v:?}: the room's extra card reward"
+        );
+    }
+}
+
+// ── BeforeSideTurnEnd runs its Early walk before the normal one ──────────
+
+/// `Hook.BeforeSideTurnEnd` is three full listener walks — VeryEarly, Early,
+/// then normal (Hook.cs:1388-1417, both builds). Plating's block is Early
+/// (`PlatingPower.BeforeSideTurnEndEarly`), The Bomb's detonation normal, so
+/// even with The Bomb listed first Plating's 9 block lands, Juggernaut's
+/// `AfterBlockGained` hit picks its random target (one `combat_targets`
+/// draw), and only then does the Bomb kill the enemy. Rust walked once in
+/// listener order: the Bomb killed the last enemy first and Juggernaut drew
+/// nothing (random-loadout Ironclad 5429 v0.111.0).
+#[test]
+fn plating_blocks_before_the_bomb_detonates() {
+    for v in BOTH {
+        let mut state = fresh(v);
+        state
+            .creatures
+            .push(enemy(2, 9, MonsterKind::Nibbit, "Nibbit"));
+        let target = CreatureUid(NonZeroU32::new(2).expect("nz"));
+        state.enemy_uids.push(target);
+        let p = state.player.creature_uid.expect("player");
+        for (kind, amount) in [
+            (PowerKind::TheBomb, 1),
+            (PowerKind::Plating, 9),
+            (PowerKind::Juggernaut, 6),
+        ] {
+            sts2_core::card_effects::apply_power_to_creature(&mut state, p, kind, amount);
+        }
+        for pw in &mut state.powers {
+            if pw.kind == PowerKind::TheBomb {
+                pw.counter = 40;
+            }
+        }
+        let targets_before = state.run_rng.combat_targets.counter();
+        let _ = sts2_core::apply(&mut state, sts2_core::Action::EndTurn);
+        assert_eq!(
+            state.creatures[1].current_hp, 0,
+            "{v:?}: the Bomb killed it"
+        );
+        assert_eq!(state.player.block, 9, "{v:?}: Plating's block");
+        assert_eq!(
+            state.run_rng.combat_targets.counter(),
+            targets_before + 1,
+            "{v:?}: Juggernaut's hit picked a target"
+        );
+    }
+}
+
+// ── A null CombatState throws out of the card play ──────────────────────
+
+/// Echoing Slash (10) hits A [40], B [11, block 10] and C [5]. Loop 2 of its
+/// `CreatureCmd.Damage` runs A's tail first: A's Envenom Poison is Outbreak's
+/// third, and Outbreak's own damage call kills B and `RemoveCreature` nulls
+/// its `CombatState` (CombatState.cs:559). B's tail then reads it:
+/// `Hook.AfterBlockBroken(originalTarget.CombatState, ...)`
+/// (CreatureCmd.cs:378 v0.107.1) throws a NullReferenceException in the
+/// listener walk (Hook.cs:253). The throw skips C's tail and the call's
+/// `Kill` (C stays at 0 HP, unkilled), Echoing Slash's rewave for C, and the
+/// rest of `OnPlayWrapper`: `AfterCardPlayed` (no Rage block) and the move to
+/// Discard. The energy stays spent. Loadout Silent 1037 v0.107.1 (C#: the card
+/// stayed in Play, discard 15; Rust 16). Outbreak is gone in v0.111.0.
+fn echoing_slash_into_a_nested_outbreak(b_block: i32) -> (CombatState, sts2_core::CardUid) {
+    let mut state = fresh(GameVersion::V0_107_1);
+    state.player.character = Some(CharacterId::Silent);
+    for (id, hp) in [(2_u32, 40), (3, 11), (4, 5)] {
+        state
+            .creatures
+            .push(enemy(id, hp, MonsterKind::Nibbit, "Nibbit"));
+        state
+            .enemy_uids
+            .push(CreatureUid(NonZeroU32::new(id).expect("nz")));
+    }
+    state.creatures[2].block = b_block;
+    let p = state.player.creature_uid.expect("player");
+    for (kind, amount) in [
+        (PowerKind::Envenom, 1),
+        (PowerKind::Outbreak, 11),
+        (PowerKind::Rage, 3),
+    ] {
+        sts2_core::card_effects::apply_power_to_creature(&mut state, p, kind, amount);
+    }
+    for pw in &mut state.powers {
+        if pw.kind == PowerKind::Outbreak {
+            pw.counter = 2;
+        }
+    }
+    let slash = new_card(&mut state, CardId::EchoingSlash);
+    state.player.hand.push(slash);
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+    (state, slash)
+}
+
+#[test]
+fn a_block_broken_target_removed_by_a_nested_outbreak_throws_out_of_the_play() {
+    let (state, slash) = echoing_slash_into_a_nested_outbreak(10);
+    let hp: Vec<i32> = state.creatures[1..].iter().map(|c| c.current_hp).collect();
+    assert_eq!(
+        hp,
+        vec![19, 0, 0],
+        "A took the slash and Outbreak; no rewave"
+    );
+    assert!(!state.is_over, "A lives");
+    assert_eq!(state.player.energy, 4, "the play's energy stays spent");
+    assert!(
+        !state.player.discard.contains(&slash)
+            && !state.player.hand.contains(&slash)
+            && !state.player.draw.contains(&slash)
+            && !state.player.exhaust.contains(&slash),
+        "the card never reaches its result pile"
+    );
+    assert!(state.player.play.is_empty(), "Rust drops it from Play");
+    assert_eq!(state.player.block, 0, "no AfterCardPlayed: no Rage block");
+    assert_eq!(state.combat_log.player_card_plays_this_combat, 0);
+    assert!(
+        !state.combat_log.card_play_faulted,
+        "the play took the latch"
+    );
+}
+
+/// Control: B has no block to break, so its tail runs, C's kill rewaves
+/// (A 19 -> 9), and the card finishes into Discard with Rage's block.
+#[test]
+fn an_unbroken_target_removed_by_a_nested_outbreak_finishes_the_play() {
+    let (state, slash) = echoing_slash_into_a_nested_outbreak(0);
+    let hp: Vec<i32> = state.creatures[1..].iter().map(|c| c.current_hp).collect();
+    assert_eq!(hp, vec![9, 0, 0]);
+    assert!(state.player.discard.contains(&slash));
+    assert!(state.player.play.is_empty());
+    assert_eq!(state.player.block, 3, "Rage's AfterCardPlayed block");
+    assert_eq!(state.combat_log.player_card_plays_this_combat, 1);
 }

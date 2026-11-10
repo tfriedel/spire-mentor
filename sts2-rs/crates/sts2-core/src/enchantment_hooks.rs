@@ -392,50 +392,85 @@ fn after_player_turn_start_stub(state: &mut CombatState) {
                 .is_some_and(|c| c.has_enchantment(EnchantmentId::Imbued))
         })
         .collect();
-    for uid in imbued {
+    imbued_run(state, &imbued);
+}
+
+/// Auto-play the snapshotted Imbued cards in order. C# awaits each
+/// `CardCmd.AutoPlay` (Imbued.cs:20-27), so a select one of them opens (Hidden
+/// Daggers' discard) resolves before the next card plays: when a play parks on
+/// `pending_autoplay_resume`, the cards not yet played go onto it as a loop
+/// continuation, the BeatDown way, and [`imbued_resume`] plays them once the
+/// pick lands (Silent v0.111.0 seed 5447). A Sly card that same select
+/// discards nests under it, and the Sly loop keeps this continuation as its
+/// outer one ([`crate::card_effects::play_discarded_sly`]).
+fn imbued_run(state: &mut CombatState, imbued: &[CardUid]) {
+    for (i, &uid) in imbued.iter().enumerate() {
         if state.is_over {
             break;
         }
-        // `CardCmd.AutoPlay` plays the card from whatever pile it is in now.
-        // Outside the draw pile no top-of-pile bookkeeping applies: the
-        // any-pile auto-play moves it to Play and resolves it.
-        let Some(pos) = state.player.draw.iter().position(|u| *u == uid) else {
-            if !state.player.play.contains(&uid) {
-                let _ = crate::combat_loop::auto_play_specific_card_from_discard(
-                    state, uid, /*force_exhaust=*/ false,
-                );
-            }
-            continue;
-        };
-        if state.player.deferred_draw_order {
-            // GH #785: under BeliefDraw the auto-play below pops the top
-            // through `cards::pop_top_card`, which only takes a KNOWN card
-            // deterministically. The Imbued card is known, so move it to the
-            // physical top and PIN it there (it is then popped with no RNG
-            // read). A swap would drop whatever sat at `draw[0]` (a pinned
-            // card, or the head of the sorted unknown middle) into the
-            // middle of the pile and break the pile's segment layout.
-            state.player.draw.remove(pos);
-            state.player.draw.insert(0, uid);
-            crate::cards::pin_top(&mut state.player, uid);
-        } else if pos != 0 {
-            // C# `CardCmd.AutoPlay(card)` plays the card where it sits and
-            // leaves the rest of the pile in order, so lift it to the top
-            // (remove + insert) rather than swapping, which dropped the old
-            // top card into the Imbued card's slot. Imbued cards now start at
-            // the BOTTOM (`ShouldStartAtBottomOfDrawPile`, CombatManager.cs:
-            // 661-666, see `start_player_turn`), so a swap would bury the top
-            // card at the bottom on every Imbued combat (act23 Ironclad:1013).
-            state.player.draw.remove(pos);
-            state.player.draw.insert(0, uid);
+        imbued_play_one(state, uid);
+        if let Some(resume) = state.pending_autoplay_resume.as_mut() {
+            // The parked card took any loop of its own onto its frame
+            // (`park_auto_play_finish`), so the top slot is free for ours.
+            debug_assert!(resume.continuation.is_none());
+            resume.continuation = Some(crate::AutoPlayLoopCont {
+                resume_fn: imbued_resume,
+                iters: 0,
+                uids: imbued[i + 1..].iter().copied().collect(),
+                force_exhaust: false,
+                then: None,
+            });
+            return;
         }
-        // Imbued does NOT force-exhaust — C# `Imbued.cs` calls
-        // `CardCmd.AutoPlay(card, null)` which leaves `ExhaustOnNextPlay`
-        // at its default (false), so the played card routes to its natural
-        // pile (discard unless it self-exhausts). Bead q6bix F-F.
-        let _ =
-            crate::combat_loop::auto_play_card_from_draw_top(state, /*force_exhaust=*/ false);
     }
+}
+
+/// Resume entry point stored on [`crate::AutoPlayLoopCont`]: play the Imbued
+/// cards not yet played.
+fn imbued_resume(state: &mut CombatState, cont: &crate::AutoPlayLoopCont) {
+    imbued_run(state, &cont.uids);
+}
+
+/// One Imbued card's `CardCmd.AutoPlay`, from whatever pile it is in now.
+fn imbued_play_one(state: &mut CombatState, uid: CardUid) {
+    // `CardCmd.AutoPlay` plays the card from whatever pile it is in now.
+    // Outside the draw pile no top-of-pile bookkeeping applies: the
+    // any-pile auto-play moves it to Play and resolves it.
+    let Some(pos) = state.player.draw.iter().position(|u| *u == uid) else {
+        if !state.player.play.contains(&uid) {
+            let _ = crate::combat_loop::auto_play_specific_card_from_discard(
+                state, uid, /*force_exhaust=*/ false,
+            );
+        }
+        return;
+    };
+    if state.player.deferred_draw_order {
+        // GH #785: under BeliefDraw the auto-play below pops the top
+        // through `cards::pop_top_card`, which only takes a KNOWN card
+        // deterministically. The Imbued card is known, so move it to the
+        // physical top and PIN it there (it is then popped with no RNG
+        // read). A swap would drop whatever sat at `draw[0]` (a pinned
+        // card, or the head of the sorted unknown middle) into the
+        // middle of the pile and break the pile's segment layout.
+        state.player.draw.remove(pos);
+        state.player.draw.insert(0, uid);
+        crate::cards::pin_top(&mut state.player, uid);
+    } else if pos != 0 {
+        // C# `CardCmd.AutoPlay(card)` plays the card where it sits and
+        // leaves the rest of the pile in order, so lift it to the top
+        // (remove + insert) rather than swapping, which dropped the old
+        // top card into the Imbued card's slot. Imbued cards now start at
+        // the BOTTOM (`ShouldStartAtBottomOfDrawPile`, CombatManager.cs:
+        // 661-666, see `start_player_turn`), so a swap would bury the top
+        // card at the bottom on every Imbued combat (act23 Ironclad:1013).
+        state.player.draw.remove(pos);
+        state.player.draw.insert(0, uid);
+    }
+    // Imbued does NOT force-exhaust — C# `Imbued.cs` calls
+    // `CardCmd.AutoPlay(card, null)` which leaves `ExhaustOnNextPlay`
+    // at its default (false), so the played card routes to its natural
+    // pile (discard unless it self-exhausts). Bead q6bix F-F.
+    let _ = crate::combat_loop::auto_play_card_from_draw_top(state, /*force_exhaust=*/ false);
 }
 
 // ---------------------------------------------------------------------------

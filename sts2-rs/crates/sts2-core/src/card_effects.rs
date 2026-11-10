@@ -378,6 +378,10 @@ pub fn osty_attack_command<R>(state: &mut CombatState, f: impl FnOnce(&mut Comba
         if !state.is_over {
             state.combat_log.bone_flute_latched = true;
         }
+        // The command's `Hook.AfterAttack` runs now, before the rest of the
+        // card (Bone Shards: BoneFlute's +2, then the card's own block), and
+        // with it Skittish's grant for a hit this command armed.
+        crate::hooks::grant_latched_skittish(state);
     }
     r
 }
@@ -1081,6 +1085,15 @@ pub(crate) fn corpses_can_receive_powers(state: &CombatState) -> bool {
     !state.powers.iter().any(|p| p.kind == PowerKind::DieForYou)
 }
 
+/// Whether a corpse was killed and removed from the combat by a nested damage
+/// call while an outer one is still resolving: C# `RemoveCreature` cleared its
+/// `CombatState`, so `CanReceivePowers` is false (Creature.cs:308-321). See
+/// `CombatLog::removed_in_damage_scope`.
+fn removed_mid_damage(state: &CombatState, uid: CreatureUid) -> bool {
+    let bit = uid.0.get() - 1;
+    bit < u16::BITS && state.combat_log.removed_in_damage_scope & (1 << bit) != 0
+}
+
 /// Signed power fold onto a **dead-but-present** creature — the `allow_dead`
 /// twin of the `Effect::ApplyPower` negative-amount arm, used by MonarchsGaze's
 /// `-Strength` leg so it lands on a corpse killed by the same powered attack
@@ -1100,7 +1113,9 @@ pub fn apply_signed_power_to_creature_allow_dead(
     let Some(creature_idx) = state.creatures.iter().position(|c| c.id == target_uid.0) else {
         return;
     };
-    if state.creatures[creature_idx].current_hp <= 0 && !corpses_can_receive_powers(state) {
+    if state.creatures[creature_idx].current_hp <= 0
+        && (!corpses_can_receive_powers(state) || removed_mid_damage(state, target_uid))
+    {
         return;
     }
     let has_kind = |state: &CombatState, u: PowerUid| {
@@ -1177,18 +1192,23 @@ fn apply_power_to_creature_inner(
     if amount <= 0 {
         return;
     }
-    // C# `PowerCmd.Apply` no-ops once the combat `IsOverOrEnding`
-    // (`PowerCmd.cs:32-35`) while `PowerCmd.Remove` is unguarded — a
-    // mid-move power swap on the killing blow drops the old power but
-    // never applies the new one (sweep seed 3094: Doormaker's
-    // SwapPhasePower removed Scrutiny, Grasp not applied). Bead
-    // `sts2-rs-i77h0` follow-up.
-    if state.is_over {
+    // C# `PowerCmd.Apply` no-ops once the combat `IsEnding`
+    // (PowerCmd.cs:69-72 / :103-106 v0.107.1, :73 / :107 v0.111.0) while
+    // `PowerCmd.Remove` is unguarded — a mid-move power swap on the killing
+    // blow drops the old power but never applies the new one (sweep seed
+    // 3094: Doormaker's SwapPhasePower removed Scrutiny, Grasp not applied).
+    // `IsEnding` holds as soon as the last primary enemy is dead, before the
+    // win check sets `is_over` (loadout Regent 5212 v0.107.1: a Royalties+
+    // replay after the kill still stacked).
+    if state.is_over || crate::combat_loop::enemy_side_is_ending(state) {
         return;
     }
     let can_receive = |state: &CombatState| {
         crate::creature_pos(&state.creatures, target_uid.0).filter(|&i| {
-            state.creatures[i].current_hp > 0 || (allow_dead && corpses_can_receive_powers(state))
+            state.creatures[i].current_hp > 0
+                || (allow_dead
+                    && corpses_can_receive_powers(state)
+                    && !removed_mid_damage(state, target_uid))
         })
     };
     let Some(mut creature_idx) = can_receive(state) else {
@@ -1968,16 +1988,17 @@ fn apply_power_to_creature_with_applier_inner(
     if amount <= 0 {
         return;
     }
-    // C# `PowerCmd.Apply` no-ops once the combat `IsOverOrEnding`
-    // (`PowerCmd.cs:32-35`); see `apply_power_to_creature`.
-    if state.is_over {
+    // C# `PowerCmd.Apply` no-ops once the combat `IsEnding`; see
+    // `apply_power_to_creature_inner`.
+    if state.is_over || crate::combat_loop::enemy_side_is_ending(state) {
         return;
     }
     // A corpse receives the power only while no `DieForYou` is in the fight
     // ([`corpses_can_receive_powers`]): with an Osty summoned, Reaper Form's
     // killing-blow Doom never lands, so Shroud grants no block for it
     // (loadout Necrobinder 1073/1078/1092/1114/1122/1035/1109).
-    let allow_dead = allow_dead && corpses_can_receive_powers(state);
+    let allow_dead =
+        allow_dead && corpses_can_receive_powers(state) && !removed_mid_damage(state, target_uid);
     let Some(creature_idx) = state
         .creatures
         .iter()
@@ -2925,14 +2946,36 @@ pub fn spawn_card_into_pile_with_origin(
     } else {
         pile
     };
-    match pile {
-        PileKind::Draw => state.player.draw.insert(0, uid),
-        PileKind::Discard => state.player.discard.push(uid),
-        PileKind::Exhaust => state.player.exhaust.push(uid),
-        PileKind::Hand => state.player.hand.push(uid),
+    // C# `CardPileCmd.Add` fails before touching a combat pile once
+    // `CombatManager.IsEnding` ([`combat_pile_add_blocked`]); the generation
+    // record and hook still run (their listeners gate on ending themselves).
+    if !combat_pile_add_blocked(state) {
+        match pile {
+            PileKind::Draw => state.player.draw.insert(0, uid),
+            PileKind::Discard => state.player.discard.push(uid),
+            PileKind::Exhaust => state.player.exhaust.push(uid),
+            PileKind::Hand => state.player.hand.push(uid),
+        }
     }
     fire_card_generation_listeners(state, uid, pile, added_by_player);
     uid
+}
+
+/// C# `CardPileCmd.Add` returns `success = false` before adding anything when
+/// `newPile.IsCombatPile && CombatManager.Instance.IsEnding`
+/// (CardPileCmd.cs:312 v0.107.1, :379 v0.111.0). A card generated after the
+/// last enemy died (Calamity's Attack after a lethal Fiend Fire) never reaches
+/// the hand, draw or discard pile. It stays in the arena so its uid still
+/// resolves, like C#'s `cardAdded` with `success = false`.
+///
+/// This reads the enemy half of `IsEnding` (plus a finished combat), not the
+/// player's HP. C#'s player half is `_pendingLoss`, which is only set once a
+/// death has gone through the death-prevention relics. A Rust player at 0 HP
+/// is not that yet, and the 0-HP default player of unit fixtures is not
+/// "ending" either.
+#[must_use]
+pub fn combat_pile_add_blocked(state: &CombatState) -> bool {
+    state.is_over || crate::combat_loop::enemy_side_is_ending(state)
 }
 
 /// Spawn a combat-generated card into the DRAW pile at a uniform-random index,
@@ -3781,7 +3824,9 @@ pub fn spawn_card_into_draw_pile_bottom(
     // v0.111.0 values for a card minted on a v0.107.1-only path (GH #793).
     card.normalize_for_version(state.game_version);
     state.cards.push(card);
-    state.player.draw.push(uid);
+    if !combat_pile_add_blocked(state) {
+        state.player.draw.push(uid);
+    }
     // Player-created (Reave / soul OnPlays, `creator: Owner`): counts toward
     // Supermassive (`CardPileCmd.cs:243`, `Supermassive.cs:22-27`).
     record_player_generated_card(state);
@@ -3875,7 +3920,9 @@ fn spawn_card_into_hand_inner(
         state.player.generated_cards_this_combat =
             state.player.generated_cards_this_combat.saturating_add(1);
     }
-    if state.player.hand.len() < crate::cards::HAND_LIMIT {
+    if combat_pile_add_blocked(state) {
+        // `CardPileCmd.Add` fails once the combat is ending.
+    } else if state.player.hand.len() < crate::cards::HAND_LIMIT {
         state.player.hand.push(uid);
     } else {
         state.player.discard.push(uid);
@@ -4413,6 +4460,29 @@ pub fn upgrade_card_uid(state: &mut CombatState, uid: CardUid) -> bool {
     }
     let version = state.game_version;
     crate::card_by_uid_mut(&mut state.cards, uid).is_some_and(|c| c.upgrade_for(version))
+}
+
+/// `CardCmd.Downgrade` on an in-combat card: [`Card::downgrade_for`] plus the
+/// keyword storage that lives off the card. C# `CardModel.DowngradeInternal`
+/// resets `_keywords` to the canonical Local set (CardModel.cs:2157 v0.111.0,
+/// :2144 v0.107.1), so a Sly that Master Planner applied with
+/// `CardCmd.ApplyKeyword` (MasterPlannerPower.cs:26, kept here in
+/// `player.sly_this_combat`) is gone; the single-turn Sly / Retain flags are
+/// separate fields and survive (random-loadout Silent 5772 v0.111.0). The
+/// on-card keywords (`keyword_override`'s Retain, `EtherealThisCombat`) are
+/// reset by `Card::downgrade_for` itself. Returns whether it downgraded.
+///
+/// [`Card::downgrade_for`]: crate::cards::Card::downgrade_for
+pub fn downgrade_card_in_combat(state: &mut CombatState, uid: CardUid) -> bool {
+    let version = state.game_version;
+    let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) else {
+        return false;
+    };
+    if !card.downgrade_for(version) {
+        return false;
+    }
+    state.player.sly_this_combat.retain(|u| *u != uid);
+    true
 }
 
 /// Clear the `upgraded` flag on the card at `uid`. Returns `true` iff
@@ -5968,7 +6038,10 @@ pub fn route_generated_into_hand(state: &mut CombatState, uids: &[CardUid]) {
         if let Some(card) = state.cards.get_mut(uid.0.get() as usize - 1) {
             stamp_generated_in_combat(card);
         }
-        let pile = if state.player.hand.len() < crate::cards::HAND_LIMIT {
+        let pile = if combat_pile_add_blocked(state) {
+            // `CardPileCmd.Add` fails once the combat is ending.
+            PileKind::Hand
+        } else if state.player.hand.len() < crate::cards::HAND_LIMIT {
             state.player.hand.push(uid);
             PileKind::Hand
         } else {
@@ -6366,6 +6439,13 @@ mod tests {
     #[test]
     fn apply_power_allow_dead_targets_a_corpse() {
         let (mut state, uid) = fresh_state_with_one_enemy();
+        // A living second enemy: with the corpse the last one the combat
+        // `IsEnding`, and `PowerCmd.Apply` lands nothing (PowerCmd.cs:69).
+        let other = NonZeroU32::new(2).expect("non-zero");
+        let mut second = state.creatures[0].clone();
+        second.id = other;
+        state.creatures.push(second);
+        state.enemy_uids.push(CreatureUid(other));
         state.creatures[0].current_hp = 0;
         apply_power_to_creature_allow_dead(&mut state, uid, PowerKind::MonarchsGazeStrengthDown, 2);
         assert_eq!(state.powers.len(), 1, "corpse receives the power");

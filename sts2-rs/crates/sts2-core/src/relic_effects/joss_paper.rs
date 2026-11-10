@@ -43,7 +43,7 @@ pub(crate) fn on_after_turn_end_joss_paper(state: &mut CombatState, side: Side) 
     state.combat_log.joss_paper_ethereal_count = 0;
     if banked > 0 {
         if let Some(r) = joss_paper_relic_mut(state) {
-            r.counter = r.counter.saturating_add(banked as i32);
+            r.counter = r.counter.saturating_add(i32::from(banked));
         }
     }
     joss_paper_draw_if_threshold_met(state);

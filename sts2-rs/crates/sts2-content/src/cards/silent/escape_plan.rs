@@ -15,7 +15,18 @@ pub(crate) fn play_escape_plan(state: &mut CombatState, _t: Option<CreatureUid>)
     // reshuffle pick (auto-taken from a 1-card discard) lands in hand without
     // being drawn, and an empty pile after it draws nothing (Silent v0.111.0
     // full seed 2548: the picked Snakebite wrongly granted the block).
+    let was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, 1);
+    // A draw that suspended on a reshuffle's Stratagem pick returns its card
+    // only once it finishes: owe the block test to it (loadout Silent 5079
+    // v0.107.1: Defend drawn after the pick, C# blocked, Rust did not).
+    if !was_suspended && state.pending_choice.is_some() {
+        let block = u8::try_from(current_card_block(state).max(0)).unwrap_or(u8::MAX);
+        if let Some(pdr) = state.pending_draw_resume.as_mut() {
+            pdr.then_escape_plan_block = pdr.then_escape_plan_block.saturating_add(block);
+            return EffectResult::Resolved;
+        }
+    }
     if let Some(drawn) = state.last_drawn_card {
         let idx = drawn.0.get() as usize - 1;
         // C# `cardModel.Type == CardType.Skill`: a drawn Quest card is

@@ -513,8 +513,9 @@ pub struct ContentCallbacks {
     /// card reward rolls at the un-advanced cursor (legacy behavior).
     /// Mirrors `sts2_content::run_callbacks::apply_combat_gold_and_potion`.
     /// Bead `sts2-rs-jenwp` (M4 live reward stream).
+    /// Returns whether a potion reward dropped (the set's `PotionReward`).
     pub apply_combat_gold_and_potion:
-        Option<fn(rs: &mut RunState, room_type: crate::runstate::RoomType)>,
+        Option<fn(rs: &mut RunState, room_type: crate::runstate::RoomType) -> bool>,
     /// Roll the replacement card for one interactive deck transform
     /// (NewLeaf's `CardCmd.TransformToRandom(item, RunState.Rng.Niche)`).
     /// The callback owns the character transform pool walk (C/U/R,
@@ -1320,6 +1321,7 @@ impl RunManager {
             point_type,
             point_type.to_room_type(),
         ));
+        self.run_state.in_ancient_room = false;
         // Leaving an event room drops its binding, or the next event room
         // would reuse this event instead of drawing from the act pool.
         self.run_state.exit_event_room();
@@ -1344,6 +1346,7 @@ impl RunManager {
         if self.run_state.current_room.is_none() {
             self.run_state.current_room = Some(crate::runstate::Room::new(room_type));
         }
+        self.run_state.in_ancient_room = false;
         self.combat = Some(combat);
         self.phase = Phase::Combat;
     }
@@ -1382,6 +1385,7 @@ impl RunManager {
             }
             None => crate::runstate::Room::new(room_type),
         });
+        self.run_state.in_ancient_room = false;
     }
 
     /// Open [`Phase::CardReward`] offering `cards` (each built with its
@@ -2928,7 +2932,7 @@ impl RunManager {
                 .map_or(crate::runstate::RoomType::Boss, |r| r.room_type);
             let hook_relics = self.reward_hook_relics();
             if let Some(apply) = self.callbacks.apply_combat_gold_and_potion {
-                apply(&mut self.run_state, reward_room_type);
+                let _ = apply(&mut self.run_state, reward_room_type);
             }
             // Advance into the next act only AFTER the boss reward chain
             // (card reward, then the boss-relic / Ancient choice) fully
@@ -2991,9 +2995,24 @@ impl RunManager {
         // `RewardsSet.cs:139`; the reward is only taken afterwards). A White
         // Star dropped by this very elite must not add a card reward to it.
         let hook_relics = self.reward_hook_relics();
-        if let Some(apply) = self.callbacks.apply_combat_gold_and_potion {
-            apply(&mut self.run_state, reward_room_type);
+        let potion_dropped = self
+            .callbacks
+            .apply_combat_gold_and_potion
+            .is_some_and(|apply| apply(&mut self.run_state, reward_room_type));
+        // The set in C# insertion order, as (`RewardsSetIndex`, slot), for
+        // the `List.Sort` emulation below (`RewardsSet.cs:148`).
+        let mut reward_set = Vec::new();
+        // C# adds a Monster room's `GoldReward` only for `GoldProportion > 0`
+        // (`RewardsSet.cs:228`); Elite / Boss always.
+        if reward_room_type != crate::runstate::RoomType::Monster
+            || self.run_state.last_combat_gold_proportion > 0.0
+        {
+            reward_set.push((1, RewardSlot::Other));
         }
+        if potion_dropped {
+            reward_set.push((2, RewardSlot::Other));
+        }
+        reward_set.push((5, RewardSlot::Room));
         self.roll_card_reward_options();
         let relics_before_card_reward = self.run_state.relics.len();
         let card_options = if self.run_state.game_version >= crate::GameVersion::V0_111_0 {
@@ -3038,9 +3057,17 @@ impl RunManager {
             // card-reward-screen relic-list diff diverged (RP109/RP72).
             self.run_state.drain_relic_rewards_directly();
         }
+        if elite_relic.is_some() {
+            reward_set.push((3, RewardSlot::Other));
+        }
+        reward_set.extend(
+            extra_rewards
+                .iter()
+                .map(|r| (extra_reward_set_index(r), RewardSlot::Other)),
+        );
         // The room's `ExtraRewards` populate after the base set (Elite relic
         // included) and before the hook additions below.
-        self.populate_fixed_extra_gold_rewards();
+        reward_set.extend(self.populate_fixed_extra_gold_rewards());
         // `Hook.ModifyRewards` additions, populated after the base rewards
         // (`Rewards/RewardsSet.cs:139-146`) in the relics' hook order:
         //  - BlackStar (Elite) appends one more `RelicReward(player)`
@@ -3055,8 +3082,9 @@ impl RunManager {
         //    neither was rolled, so the `Rewards` cursor fell 9 reads behind
         //    C# (act23 probe Necrobinder:1012, White Star).
         // All identical in v0.107.1 and v0.111.0.
-        self.populate_hook_rewards(reward_room_type, hook_relics.clone());
+        reward_set.extend(self.populate_hook_rewards(reward_room_type, hook_relics.clone()));
         self.apply_obtained_eggs_to_open_card_reward(relics_before_card_reward);
+        self.offer_first_sorted_card_reward(&reward_set);
         self.fire_before_combat_reward_offered(
             reward_room_type,
             card_options,
@@ -3157,6 +3185,42 @@ impl RunManager {
         }
     }
 
+    /// Open the card reward C# offers first: the oracle offers a room's
+    /// `CardReward`s in the set's sorted order, and `RewardsSet.cs:148` sorts
+    /// by `RewardsSetIndex` with the unstable `List.Sort` (both builds). When
+    /// that puts a queued card reward (Prayer Wheel / White Star / TheHunt)
+    /// ahead of the room's own, swap the two slates. Only the 3-item swap
+    /// network reorders equal keys at these sizes ([room card, hook card,
+    /// gold] → [gold, hook card, room card]); 2-item and insertion sorts are
+    /// stable, so every other set keeps the room's card first.
+    fn offer_first_sorted_card_reward(&mut self, reward_set: &[(u8, RewardSlot)]) {
+        if self.phase != Phase::CardReward
+            || self.card_reward_options.is_empty()
+            || self.card_reward_bundles.is_some()
+            || self.card_offer_choose_screen
+        {
+            return;
+        }
+        let keys: Vec<u8> = reward_set.iter().map(|&(key, _)| key).collect();
+        let first_card = dotnet_list_sort_order(&keys)
+            .into_iter()
+            .map(|i| reward_set[i].1)
+            .find(|slot| !matches!(slot, RewardSlot::Other));
+        let Some(RewardSlot::Queued(i)) = first_card else {
+            return;
+        };
+        let Some(crate::runstate::Reward::Card(reward)) = self.run_state.pending_rewards.get_mut(i)
+        else {
+            return;
+        };
+        if reward.options.is_empty() {
+            return;
+        }
+        std::mem::swap(&mut reward.options, &mut self.card_reward_options);
+        std::mem::swap(&mut reward.upgraded, &mut self.card_reward_upgraded);
+        std::mem::swap(&mut reward.enchantments, &mut self.card_reward_enchantments);
+    }
+
     /// The relics whose `TryModifyRewards` runs for a combat room's set: the
     /// ones owned while the set is generated, i.e. BEFORE any auto-collected
     /// reward relic is obtained (`RewardsSet.GenerateWithoutOffering` calls
@@ -3198,13 +3262,29 @@ impl RunManager {
         &mut self,
         reward_room_type: crate::runstate::RoomType,
         hook_relics: Vec<crate::RelicId>,
-    ) {
+    ) -> Vec<(u8, RewardSlot)> {
         use crate::runstate::RoomType;
+        let mut added_set = Vec::new();
         for relic in hook_relics {
             match (relic, reward_room_type) {
                 (crate::RelicId::BlackStar, RoomType::Elite) => {
                     self.run_state.offer_random_relic_rewards(1, &[None]);
                     self.run_state.drain_relic_rewards_directly();
+                    added_set.push((3, RewardSlot::Other));
+                }
+                (crate::RelicId::AmethystAubergine, _) => {
+                    // Its gold is credited with the base gold (content
+                    // `apply_combat_gold_and_potion`); here it only takes its
+                    // place in the set. The listener is a pure push.
+                    if let Some(listener) = crate::run_effects::lookup_modify_rewards(relic) {
+                        let mut added = Vec::new();
+                        let _ = listener(&mut self.run_state, &mut added, reward_room_type);
+                        added_set.extend(
+                            added
+                                .iter()
+                                .map(|r| (extra_reward_set_index(r), RewardSlot::Other)),
+                        );
+                    }
                 }
                 (crate::RelicId::WongosMysteryTicket | crate::RelicId::LavaRock, _) => {
                     let Some(listener) = crate::run_effects::lookup_modify_rewards(relic) else {
@@ -3216,6 +3296,7 @@ impl RunManager {
                         if matches!(reward, crate::runstate::Reward::Relic(_)) {
                             self.run_state.offer_random_relic_rewards(1, &[None]);
                             self.run_state.drain_relic_rewards_directly();
+                            added_set.push((3, RewardSlot::Other));
                         }
                     }
                 }
@@ -3228,6 +3309,8 @@ impl RunManager {
                     };
                     if let Some(roll) = self.callbacks.roll_hook_card_reward {
                         let reward = roll(&mut self.run_state, odds);
+                        added_set
+                            .push((5, RewardSlot::Queued(self.run_state.pending_rewards.len())));
                         self.run_state
                             .pending_rewards
                             .push(crate::runstate::Reward::Card(reward));
@@ -3236,6 +3319,7 @@ impl RunManager {
                 _ => {}
             }
         }
+        added_set
     }
 
     /// Advance the `Rewards` stream once per fixed-amount gold reward the
@@ -3256,31 +3340,36 @@ impl RunManager {
     /// constructor and `GenerateWithoutOffering` skips it (`!IsPopulated`),
     /// so it reads nothing. Same in v0.111.0. Ported from
     /// manojnuthakki/spire-mentor 9262b2d6e.
-    fn populate_fixed_extra_gold_rewards(&mut self) {
+    fn populate_fixed_extra_gold_rewards(&mut self) -> Vec<(u8, RewardSlot)> {
+        let mut added_set = Vec::new();
         let Some(combat) = self.combat.as_ref() else {
-            return;
+            return added_set;
         };
         if !combat.player_won {
-            return;
+            return added_set;
         }
         // Heist is added at the carrier's death, Royalties at combat end; one
         // draw each (solo: one Heist instance per merc theft).
         let heist = combat.heist_recovered_gold;
         let royalties = combat.player_power_amount(crate::PowerKind::Royalties);
         // TheHunt adds one `CardReward(ForRoom(owner, roomType), 3)` per Fatal
-        // kill, stacking one `TheHuntPower` with it (TheHunt.cs:45-48), so the
-        // stack count is the number of extra card rewards. Same in v0.107.1.
-        let hunt_rewards = combat.player_power_amount(crate::PowerKind::TheHunt);
+        // kill (TheHunt.cs:45-48, both builds), counted on the combat log:
+        // the `TheHuntPower` it also applies is dropped when the kill ends the
+        // combat, the reward is not (random-loadout Silent 5307 v0.107.1).
+        let hunt_rewards = i32::from(combat.combat_log.extra_card_rewards_this_combat);
         if heist > 0 {
             let _ = self.run_state.rng.rewards.next_int(heist, heist);
+            added_set.push((1, RewardSlot::Other));
         }
         // Mid-combat kills, so ahead of Royalties' combat-end gold. (A Heist
         // carrier killed after a Fatal kill would populate after it; the two
         // never meet in one solo fight in practice.)
-        self.roll_extra_combat_card_rewards(hunt_rewards);
+        added_set.extend(self.roll_extra_combat_card_rewards(hunt_rewards));
         if royalties > 0 {
             let _ = self.run_state.rng.rewards.next_int(royalties, royalties);
+            added_set.push((1, RewardSlot::Other));
         }
+        added_set
     }
 
     /// Populate `count` extra card rewards the fight added to its room
@@ -3289,18 +3378,21 @@ impl RunManager {
     /// `Rewards` draws (3x rarity, pick, upgrade each) land here, with the
     /// room's other extras; each is offered once the reward before it resolves
     /// (`drain_pending_rewards` surfaces a pre-resolved `Reward::Card`).
-    fn roll_extra_combat_card_rewards(&mut self, count: i32) {
+    fn roll_extra_combat_card_rewards(&mut self, count: i32) -> Vec<(u8, RewardSlot)> {
+        let mut added_set = Vec::new();
         let Some(roll) = self.callbacks.generate_extra_combat_card_reward else {
-            return;
+            return added_set;
         };
         for _ in 0..count {
             let reward = roll(&mut self.run_state);
             if !reward.options.is_empty() {
+                added_set.push((5, RewardSlot::Queued(self.run_state.pending_rewards.len())));
                 self.run_state
                     .pending_rewards
                     .push(crate::runstate::Reward::Card(reward));
             }
         }
+        added_set
     }
 
     /// Collect a combat room's `ExtraRewards` the way the C# headless does,
@@ -5732,7 +5824,12 @@ impl RunManager {
     /// map move). C# enters the Ancient as an `EventRoom`, whose
     /// `EnterInternal` runs `Hook.AfterRoomEntered` (`EventRoom.cs:81`, both
     /// builds); of the room-entered relics only MawBank reacts to it.
+    ///
+    /// From here until the next map move C# `CurrentRoom` is that
+    /// `EventRoom`, so `in_ancient_room` is raised first (C# pushes the room
+    /// before `EnterInternal` runs the hook).
     fn fire_ancient_room_entered(&mut self) {
+        self.run_state.in_ancient_room = true;
         let _ = crate::run_effects::dispatch_after_room_entered(
             &mut self.run_state,
             crate::runstate::RoomType::Event,
@@ -6234,6 +6331,58 @@ impl RunManager {
     pub const fn card_offer_can_skip(&self) -> bool {
         self.card_offer_can_skip
     }
+}
+
+/// Where a reward of a combat room's set lives once populated, for
+/// [`RunManager::offer_first_sorted_card_reward`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RewardSlot {
+    /// The room's own card reward (the open slate).
+    Room,
+    /// A card reward queued on `pending_rewards` at this index.
+    Queued(usize),
+    /// Anything else (gold, potion, relic, ...).
+    Other,
+}
+
+/// C# `RewardsSetIndex` of a populated reward: Gold 1, Potion 2, Relic 3,
+/// SpecialCard 4, Card 5, CardRemoval 7. A pre-resolved `Reward::Card` among
+/// an event fight's `ExtraRewards` is its `SpecialCardReward`.
+const fn extra_reward_set_index(reward: &crate::runstate::Reward) -> u8 {
+    use crate::runstate::Reward;
+    match reward {
+        Reward::Gold { .. } => 1,
+        Reward::Potion(_) => 2,
+        Reward::Relic(_) => 3,
+        Reward::Card(_) => 4,
+        Reward::RemoveCard { .. } => 7,
+        _ => 6,
+    }
+}
+
+/// The order .NET `List<T>.Sort` leaves `keys` in, as source indices: the
+/// introsort's small-size paths (`ArraySortHelper.IntroSort`): 2 items
+/// `SwapIfGreater`, 3 items the (0,1) (0,2) (1,2) swap network, up to 16 an
+/// insertion sort. Larger sets (never a reward set) fall back to a stable
+/// sort.
+fn dotnet_list_sort_order(keys: &[u8]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..keys.len()).collect();
+    let swap_if_greater = |order: &mut Vec<usize>, i: usize, j: usize| {
+        if keys[order[i]] > keys[order[j]] {
+            order.swap(i, j);
+        }
+    };
+    match keys.len() {
+        0 | 1 => {}
+        2 => swap_if_greater(&mut order, 0, 1),
+        3 => {
+            swap_if_greater(&mut order, 0, 1);
+            swap_if_greater(&mut order, 0, 2);
+            swap_if_greater(&mut order, 1, 2);
+        }
+        _ => order.sort_by_key(|&i| keys[i]),
+    }
+    order
 }
 
 #[cfg(test)]
@@ -7694,13 +7843,80 @@ mod tests {
         assert_eq!(elite, vec![vec![CardId::Bash]]);
     }
 
-    /// TheHunt's Fatal kill adds a `CardReward(ForRoom(...), 3)` to the
-    /// combat room (`TheHunt.cs:47`, both builds), one per `TheHuntPower`
-    /// stack. It is rolled when the room's rewards populate, right after the
-    /// room's own card reward, and offered once that one resolves (run_parity
-    /// Silent PARITY193 at v0.111.0: the oracle drew 9 more `Rewards`).
+    /// C# sorts a room's reward set by `RewardsSetIndex` with the unstable
+    /// `List.Sort` (`RewardsSet.cs:148`, both builds). With exactly three
+    /// rewards it runs a swap network, so a Monster set with no gold (every
+    /// monster fled, `GoldProportion` 0) and no potion — [card, PrayerWheel
+    /// card, AmethystAubergine gold] — sorts to [gold, PrayerWheel card,
+    /// room card]: the Prayer Wheel slate is offered first. Any other shape
+    /// keeps the room's own card first. Loadout Necrobinder 5073 (v0.107.1).
     #[test]
-    fn the_hunt_stacks_each_add_an_extra_card_reward() {
+    fn three_reward_set_offers_the_prayer_wheel_card_first() {
+        use crate::cards::CardId;
+        use crate::runstate::RoomType;
+        use crate::RelicId::{AmethystAubergine, PrayerWheel};
+        fn aubergine(
+            _rs: &mut RunState,
+            r: &mut Vec<crate::runstate::Reward>,
+            _room: RoomType,
+        ) -> crate::card_effects::EffectResult {
+            r.push(crate::runstate::Reward::Gold { amount: 15 });
+            crate::card_effects::EffectResult::Resolved
+        }
+        crate::run_effects::register_modify_rewards(
+            AmethystAubergine,
+            aubergine as crate::run_effects::ModifyRewardsRunFn,
+        );
+        let offered = |relics: &[crate::RelicId], proportion: f64| {
+            fn base_cards(_rs: &mut RunState) -> Vec<CardId> {
+                vec![CardId::Bash]
+            }
+            fn hook_cards(_rs: &mut RunState, _room: RoomType) -> crate::runstate::CardReward {
+                crate::runstate::CardReward::from_options(vec![CardId::Anger])
+            }
+            let cb = ContentCallbacks {
+                generate_card_reward_options: Some(base_cards),
+                roll_hook_card_reward: Some(hook_cards),
+                ..ContentCallbacks::default()
+            };
+            let mut rm = RunManager::new(7, CharacterId::Ironclad).with_content_callbacks(cb);
+            rm.run_state.relics.extend_from_slice(relics);
+            rm.run_state.last_combat_gold_proportion = proportion;
+            rm.run_state.current_room = Some(crate::runstate::Room::new(RoomType::Monster));
+            rm.combat = Some(crate::CombatState {
+                is_over: true,
+                player_won: true,
+                ..crate::CombatState::default()
+            });
+            rm.set_phase(Phase::Combat);
+            let _ = rm.exit_combat_and_transition();
+            let mut offered = Vec::new();
+            while rm.phase() == Phase::CardReward && !rm.card_reward_options.is_empty() {
+                offered.push(rm.card_reward_options.clone());
+                let _ = rm.take_action(RunAction::PickCardReward { idx: None });
+            }
+            offered
+        };
+        let wheel_first = vec![vec![CardId::Anger], vec![CardId::Bash]];
+        let room_first = vec![vec![CardId::Bash], vec![CardId::Anger]];
+        assert_eq!(offered(&[PrayerWheel, AmethystAubergine], 0.0), wheel_first);
+        // [card, gold, card]: the network keeps the cards' order.
+        assert_eq!(offered(&[AmethystAubergine, PrayerWheel], 0.0), room_first);
+        // Base gold in front: [gold, card, card, gold] is an insertion sort.
+        assert_eq!(offered(&[PrayerWheel, AmethystAubergine], 1.0), room_first);
+        // No third reward: a 2-item sort of equal keys keeps the order.
+        assert_eq!(offered(&[PrayerWheel], 0.0), room_first);
+    }
+
+    /// TheHunt's Fatal kill adds a `CardReward(ForRoom(...), 3)` to the
+    /// combat room (`TheHunt.cs:47`, both builds), one per kill counted on the
+    /// combat log. It is rolled when the room's rewards populate, right after
+    /// the room's own card reward, and offered once that one resolves
+    /// (run_parity Silent PARITY193 at v0.111.0: the oracle drew 9 more
+    /// `Rewards`). With or without the base gold and potion, the set sorts the
+    /// room's card first (random-loadout Silent 5307 v0.107.1).
+    #[test]
+    fn the_hunt_kills_each_add_an_extra_card_reward() {
         fn base_cards(_rs: &mut RunState) -> Vec<crate::cards::CardId> {
             vec![crate::cards::CardId::Bash]
         }
@@ -7708,48 +7924,71 @@ mod tests {
             let _ = rs.rng.rewards.next_float(1.0);
             crate::runstate::CardReward::from_options(vec![crate::cards::CardId::Anger])
         }
-        let cb = ContentCallbacks {
-            generate_card_reward_options: Some(base_cards),
-            generate_extra_combat_card_reward: Some(hunt_cards),
-            ..ContentCallbacks::default()
-        };
-        let mut rm = RunManager::new(7, CharacterId::Ironclad).with_content_callbacks(cb);
-        rm.run_state.current_room = Some(crate::runstate::Room::new(
-            crate::runstate::RoomType::Monster,
-        ));
-        let mut combat = crate::CombatState {
-            player_won: true,
-            ..crate::CombatState::default()
-        };
-        combat.player.current_hp = 50;
-        combat.player.max_hp = 50;
-        let player = combat.init_player_creature();
-        crate::card_effects::apply_power_to_creature(
-            &mut combat,
-            player,
-            crate::PowerKind::TheHunt,
-            2,
-        );
-        combat.is_over = true;
-        rm.combat = Some(combat);
-        rm.set_phase(Phase::Combat);
-        let before = rm.run_state.rng.rewards.counter();
-        let _ = rm.exit_combat_and_transition();
-        // Both extra rewards rolled up front, with the room's own.
-        assert_eq!(rm.run_state.rng.rewards.counter(), before + 2);
-        assert_eq!(rm.card_reward_options, vec![crate::cards::CardId::Bash]);
-        for _ in 0..2 {
-            let _ = rm.take_action(RunAction::PickCardReward { idx: None });
-            assert_eq!(rm.phase(), Phase::CardReward);
-            assert_eq!(rm.card_reward_options, vec![crate::cards::CardId::Anger]);
+        fn potion(_rs: &mut RunState, _room: crate::runstate::RoomType) -> bool {
+            true
         }
-        let _ = rm.take_action(RunAction::PickCardReward { idx: Some(0) });
-        assert_ne!(rm.phase(), Phase::CardReward);
-        assert!(rm
-            .run_state
-            .master_deck
-            .iter()
-            .any(|c| c.card_id == crate::cards::CardId::Anger));
+        fn no_potion(_rs: &mut RunState, _room: crate::runstate::RoomType) -> bool {
+            false
+        }
+        for (kills, proportion, potion_drops) in [
+            (2u16, 1.0, false),
+            (1, 1.0, false),
+            (1, 0.0, false),
+            (1, 1.0, true),
+            (1, 0.0, true),
+        ] {
+            let case = format!("kills {kills} gold {proportion} potion {potion_drops}");
+            let cb = ContentCallbacks {
+                generate_card_reward_options: Some(base_cards),
+                generate_extra_combat_card_reward: Some(hunt_cards),
+                apply_combat_gold_and_potion: Some(if potion_drops { potion } else { no_potion }),
+                ..ContentCallbacks::default()
+            };
+            let mut rm = RunManager::new(7, CharacterId::Ironclad).with_content_callbacks(cb);
+            rm.run_state.last_combat_gold_proportion = proportion;
+            rm.run_state.current_room = Some(crate::runstate::Room::new(
+                crate::runstate::RoomType::Monster,
+            ));
+            let mut combat = crate::CombatState {
+                player_won: true,
+                ..crate::CombatState::default()
+            };
+            combat.combat_log.extra_card_rewards_this_combat = kills;
+            combat.is_over = true;
+            rm.combat = Some(combat);
+            rm.set_phase(Phase::Combat);
+            let before = rm.run_state.rng.rewards.counter();
+            let _ = rm.exit_combat_and_transition();
+            // Every extra reward rolled up front, with the room's own.
+            assert_eq!(
+                rm.run_state.rng.rewards.counter(),
+                before + u32::from(kills),
+                "{case}"
+            );
+            assert_eq!(
+                rm.card_reward_options,
+                vec![crate::cards::CardId::Bash],
+                "{case}"
+            );
+            for _ in 0..kills {
+                let _ = rm.take_action(RunAction::PickCardReward { idx: None });
+                assert_eq!(rm.phase(), Phase::CardReward, "{case}");
+                assert_eq!(
+                    rm.card_reward_options,
+                    vec![crate::cards::CardId::Anger],
+                    "{case}"
+                );
+            }
+            let _ = rm.take_action(RunAction::PickCardReward { idx: Some(0) });
+            assert_ne!(rm.phase(), Phase::CardReward, "{case}");
+            assert!(
+                rm.run_state
+                    .master_deck
+                    .iter()
+                    .any(|c| c.card_id == crate::cards::CardId::Anger),
+                "{case}"
+            );
+        }
     }
 
     /// BlackStar (`BlackStar.cs:23`, same in both builds) appends a second
@@ -11287,8 +11526,9 @@ mod tests {
             fn cards(_rs: &mut RunState) -> Vec<crate::cards::CardId> {
                 vec![crate::cards::CardId::Bash; 3]
             }
-            fn gold_and_potion(rs: &mut RunState, _room: crate::runstate::RoomType) {
+            fn gold_and_potion(rs: &mut RunState, _room: crate::runstate::RoomType) -> bool {
                 rs.gold += 1000;
+                false
             }
             let cb = ContentCallbacks {
                 generate_card_reward_options: Some(cards),
@@ -12898,13 +13138,14 @@ mod tests {
     /// and records the room type it was asked for in the gold's thousands
     /// (Monster → +1000), so a test can see both that it ran and for which
     /// room.
-    fn apply_marker_gold(rs: &mut RunState, room_type: crate::runstate::RoomType) {
+    fn apply_marker_gold(rs: &mut RunState, room_type: crate::runstate::RoomType) -> bool {
         let room_marker = if room_type == crate::runstate::RoomType::Monster {
             1000
         } else {
             0
         };
         rs.gain_gold(13 + room_marker);
+        false
     }
 
     fn dense_vegetation_callbacks(resolve: fn(&mut RunState, usize) -> bool) -> ContentCallbacks {
@@ -13000,9 +13241,13 @@ mod tests {
 
     /// `apply_combat_gold_and_potion` test double that records the gold
     /// bounds override it saw as gold (`min + max`, or 0 without one).
-    fn apply_override_marker_gold(rs: &mut RunState, _room_type: crate::runstate::RoomType) {
+    fn apply_override_marker_gold(
+        rs: &mut RunState,
+        _room_type: crate::runstate::RoomType,
+    ) -> bool {
         let marker = rs.combat_gold_bounds_override.map_or(0, |(lo, hi)| lo + hi);
         rs.gain_gold(marker);
+        false
     }
 
     /// Win the staged event fight from `Phase::Event` (option 0).

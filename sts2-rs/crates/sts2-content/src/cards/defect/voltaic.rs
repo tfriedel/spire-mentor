@@ -20,7 +20,7 @@ pub(crate) fn preview_voltaic(
     _card: &Card,
     _target: Option<CreatureUid>,
 ) -> i32 {
-    i32::try_from(state.combat_log.lightning_orbs_channeled_this_combat).unwrap_or(i32::MAX)
+    i32::from(state.combat_log.lightning_orbs_channeled_this_combat)
 }
 
 pub(crate) fn play_voltaic(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
