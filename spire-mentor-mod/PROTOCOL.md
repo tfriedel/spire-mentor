@@ -325,7 +325,7 @@ and a fresh re-send; the disabled button is never clicked.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `options` | array | `{index, id, action:"rest_option", label, description, enabled}` per option. Only options the game currently allows (`RestSiteOption.IsEnabled`) are offered, so `enabled` is always `true`; advisor mode offers the same set. |
+| `options` | array | `{index, option_index, id, action:"rest_option", label, description, enabled}` per option. Only options the game currently allows (`RestSiteOption.IsEnabled`) are offered, so `enabled` is always `true`; advisor mode offers the same set. `index` numbers the offered options (what `choose` answers). **New, 2026-11:** `option_index` is the option's slot in `NRestSiteRoom.Options` (`RestSiteOption.Generate` order, minus options already taken), which a disabled option still occupies — e.g. HEAL 0, a disabled SMITH 1, DIG 2 — and equals the sim engine's `rest_option` idx. Older builds omit it; consumers fall back to the position. |
 
 ### `shop`
 

@@ -15703,8 +15703,8 @@ pub(crate) fn withering_presence_after_card_played(state: &mut CombatState, _ctx
 /// Every [`PowerKind`] a `player_power_uids`-consuming lane of
 /// [`dispatch_after_card_played`] discriminates on: the commutative
 /// `pending` collection (Rage / Vigor / DevourLifePower /
-/// Gigantification), the armed-gate collections (Afterimage, Storm /
-/// Subroutine), the ordered walk (SerpentForm / Haunt / Panache /
+/// Gigantification), the armed-gate collections (Afterimage,
+/// Subroutine), the ordered walk (Storm / SerpentForm / Haunt / Panache /
 /// Calamity), and the Juggling / Tender / Monologue lookups. When none is
 /// live the union build + all those lanes are skipped. The arena-wide lanes
 /// (Slow / Enrage / Oblivion / Strangle / Galvanic / CurlUp) do NOT read the
@@ -15745,9 +15745,10 @@ const AFTER_CARD_PLAYED_PENDING_KINDS: crate::PowerKindSet = crate::PowerKindSet
     PowerKind::Gigantification,
 ]);
 const AFTER_CARD_PLAYED_SNAPSHOT_KINDS: crate::PowerKindSet =
-    crate::PowerKindSet::from_kinds(&[PowerKind::Storm, PowerKind::Subroutine]);
+    crate::PowerKindSet::from_kinds(&[PowerKind::Subroutine]);
 const AFTER_CARD_PLAYED_ORDERED_ENEMY_HIT_KINDS: crate::PowerKindSet =
     crate::PowerKindSet::from_kinds(&[
+        PowerKind::Storm,
         PowerKind::SerpentForm,
         PowerKind::Haunt,
         PowerKind::Panache,
@@ -15901,6 +15902,7 @@ pub fn dispatch_after_card_played_ordered_enemy_hits(state: &mut CombatState, ct
     }
     let is_soul = ctx.card_id == Some(crate::cards::CardId::Soul);
     let is_attack = ctx.card_type == Some(crate::cards::CardType::Attack);
+    let is_power = ctx.card_type == Some(crate::cards::CardType::Power);
     let ordered_walk_uids = state.player_power_uids();
     for uid in ordered_walk_uids.iter().copied() {
         let kind = match state.powers.get_by_id(uid.0) {
@@ -15918,6 +15920,26 @@ pub fn dispatch_after_card_played_ordered_enemy_hits(state: &mut CombatState, ct
                 let spent = std::mem::take(&mut state.combat_log.black_hole_stars_spent_on_play);
                 if spent > 0 {
                     state.apply_black_hole_on_stars_event(spent);
+                }
+            }
+            // Storm: a Lightning channel into a full orb row evokes the front
+            // orb, whose hit rolls `CombatTargets` and can kill — so Storm
+            // walks in application order with Panache / SerpentForm (parity
+            // Defect 6179 v0.111.0: Storm before Panache, the evoke killed the
+            // boss and Panache found no enemy). `counter` is the
+            // `BeforeCardPlayed` snapshot armed by [`arm_storm_snapshot`]; C#
+            // records it only for POWER cards and channels it here
+            // (StormPower.cs:42-64), flashing once. Always disarm.
+            PowerKind::Storm => {
+                let snapshot = match state.powers.get_mut_by_id(uid.0) {
+                    Some(power) => std::mem::take(&mut power.counter),
+                    None => continue,
+                };
+                if is_power && snapshot > 0 {
+                    crate::event_log::flash_player_power(state, PowerKind::Storm);
+                    for _ in 0..snapshot {
+                        crate::orbs::channel_orb(state, crate::orbs::Orb::Lightning);
+                    }
                 }
             }
             // SerpentForm: `counter` holds the pre-OnPlay AMOUNT snapshot (set
@@ -16342,7 +16364,9 @@ fn dispatch_after_card_played_player_powers(
                 // `counter: 0` during `OnPlay`); a later Power play triggers
                 // the stacks held before it. Always disarm so the transient
                 // never leaks past a non-Power play.
-                if matches!(power.kind, PowerKind::Storm | PowerKind::Subroutine) {
+                // Storm rides the ordered walk instead
+                // ([`dispatch_after_card_played_ordered_enemy_hits`]).
+                if power.kind == PowerKind::Subroutine {
                     let kind = power.kind;
                     let snapshot = power.counter;
                     power.counter = 0;
@@ -16411,35 +16435,6 @@ fn dispatch_after_card_played_player_powers(
             // PhantomBlades therefore needs no body in this apply loop; its
             // damage bonus lands in the `modify_damage_additive` arm
             // (hooks.rs ~2660), gated on `shivs_played_this_turn == 0`.
-            PowerKind::Storm
-                // C# (authoritative): `StormPower.BeforeCardPlayed` records
-                // `base.Amount` for the Power card being played; `AfterCardPlayed`
-                // removes that entry and channels `lightning` Lightning orbs
-                // (StormPower.cs:42-64). `amount` here is the BEFORE-play
-                // SNAPSHOT collected above (from the transient `counter` armed in
-                // [`arm_storm_snapshot`]), NOT the live stack count — so the
-                // Storm card's own play channels 0 (no entry recorded yet) and a
-                // later Power play channels the stacks held before it. The
-                // earlier port channeled the live `amount` (Python pin
-                // `turn_effects.py:145-151`), over-channeling by 1 on every Storm
-                // card play (the `combat_targets` end-of-turn desync the
-                // cache-trace census flagged as the dominant Defect root). The
-                // `is_power` gate is redundant with the snapshot collection (only
-                // pushed for Power cards) but kept as a guard.
-                if is_power => {
-                    // C# `StormPower.cs:57` calls `Flash()` inside
-                    // `Card.Owner == Owner.Player && amountsForPlayedCards
-                    // .Remove(card, out lightning) && lightning > 0`, ONCE
-                    // before the `lightning` Channel calls — not once per orb.
-                    // The `pending` push above is that exact clause: it only
-                    // fires for a Power card the before-play arm armed
-                    // (`snapshot > 0`), so reaching this arm is reaching the
-                    // C# flash.
-                    crate::event_log::flash_player_power(state, PowerKind::Storm);
-                    for _ in 0..amount.max(0) {
-                        crate::orbs::channel_orb(state, crate::orbs::Orb::Lightning);
-                    }
-                }
             PowerKind::Subroutine
                 // C# `SubroutinePower.BeforeCardPlayed` records `base.Amount`
                 // for a player-owned POWER card; `AfterCardPlayed` calls
@@ -20682,6 +20677,94 @@ mod tests {
         let state = CombatState::default();
         assert_eq!(iter_power_listeners(&state).count(), 0);
         assert_eq!(iter_relic_listeners(&state).count(), 0);
+    }
+
+    /// Storm also walks in application order with Panache: its channel into a
+    /// full orb row evokes a Lightning (a `CombatTargets` roll) that can kill
+    /// the enemy Panache would otherwise kill first. C# `Hook.AfterCardPlayed`
+    /// walks the player's powers in list order (CombatState.cs:117-137).
+    /// Parity Defect 6179 v0.111.0: Storm applied before Panache, the evoke
+    /// killed the 9-HP boss and Panache found no enemy; Rust ran Panache's
+    /// walk first and lost the roll.
+    #[test]
+    fn after_card_played_storm_and_panache_fire_in_application_order() {
+        use crate::cards::CardType;
+        use crate::orbs::{Orb, OrbSlots};
+        use smallvec::SmallVec;
+
+        // Returns (`CombatTargets` reads, enemy HP).
+        let run = |storm_first: bool| -> (u32, i32) {
+            let mut state = CombatState::default();
+            let storm = Power {
+                id: NonZeroU32::new(1).unwrap(),
+                kind: PowerKind::Storm,
+                amount: 1,
+                counter: 1, // armed: the before-play snapshot
+                applier: None,
+                skip_next_tick: false,
+            };
+            let panache = Power {
+                id: NonZeroU32::new(2).unwrap(),
+                kind: PowerKind::Panache,
+                amount: 10,
+                counter: 1, // this play is the fifth card
+                applier: None,
+                skip_next_tick: false,
+            };
+            let order = if storm_first {
+                [storm, panache]
+            } else {
+                [panache, storm]
+            };
+            // Power ids follow application order, as in a real combat.
+            for (n, mut p) in (1u32..).zip(order) {
+                p.id = NonZeroU32::new(n).unwrap();
+                state.powers.push(p);
+                state.player.powers.push(PowerUid(p.id));
+            }
+            state.player.orbs = OrbSlots::with_default_capacity();
+            for _ in 0..state.player.orbs.capacity {
+                state.player.orbs.channel(Orb::Lightning);
+            }
+            assert_eq!(
+                state.player.orbs.filled_len(),
+                usize::from(state.player.orbs.capacity)
+            );
+            state.creatures.push(Creature {
+                id: NonZeroU32::new(3).unwrap(),
+                current_hp: 8,
+                max_hp: 8,
+                block: 0,
+                powers: SmallVec::new(),
+                species: Some(MonsterKind::Nibbit),
+                intent: None,
+                intent_history: IntentHistory::default(),
+                monster_id: crate::MonsterId("Nibbit"),
+                ai: None,
+            });
+            state
+                .enemy_uids
+                .push(CreatureUid(NonZeroU32::new(3).unwrap()));
+            let before = state.run_rng.combat_targets.counter();
+            let ctx = CardCtx {
+                card_type: Some(CardType::Power),
+                ..CardCtx::default()
+            };
+            dispatch_after_card_played(&mut state, &ctx);
+            (
+                state.run_rng.combat_targets.counter() - before,
+                state.creatures[0].current_hp,
+            )
+        };
+        let (storm_first_rolls, hp) = run(true);
+        assert_eq!(hp, 0);
+        let (panache_first_rolls, hp) = run(false);
+        assert_eq!(hp, 0);
+        assert_eq!(
+            storm_first_rolls,
+            panache_first_rolls + 1,
+            "Storm first: the evoke rolls a target while the enemy lives"
+        );
     }
 
     // ── modify_card_cost channel (bead sts2-rs-zlx.5) ──────────────────

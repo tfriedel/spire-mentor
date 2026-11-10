@@ -1433,7 +1433,31 @@ impl Card {
         let capped_base = base.min(cap);
         let new_reduction = capped_base - (base - reduction).min(cap);
         let new_cost = (i32::from(self.cost) - reduction).min(cap) + new_reduction;
-        let lowered = new_cost < i32::from(self.cost);
+        let mut lowered = new_cost < i32::from(self.cost);
+        // The cap also folds after this turn's Stomp / Pinpoint
+        // `AddThisTurn(-n)` shaves. Once `EndOfTurnCleanup` drops them
+        // (`CardEnergyCost.cs:331-335`) the cap still yields
+        // `min(unshaved, cap)`, so re-bank only what the turn-start restore
+        // may add back above the capped cost (parity Ironclad 6293 v0.111.0:
+        // an Enlightenment+'d Stomp came back at 2, C# 1).
+        // Not modelled: the same shaves under a live Snecko roll (the branch
+        // below), which would need the roll's and the shave's relative order.
+        let turn_bank = match self.card_id {
+            CardId::Stomp => Some(VarKey::StompCostReductionThisTurn),
+            CardId::Pinpoint => Some(VarKey::PinpointCostReductionThisTurn),
+            _ => None,
+        };
+        if let Some(key) = turn_bank.filter(|_| live == 0 && banked == 0) {
+            let shaved = self.combat_var(key);
+            if shaved != 0 {
+                let after_turn =
+                    (i32::from(self.cost) + shaved - reduction).min(cap) + new_reduction;
+                if after_turn < i32::from(self.cost) + shaved {
+                    lowered = true;
+                }
+                self.set_combat_var(key, (after_turn - new_cost).max(0));
+            }
+        }
         self.cost = i8::try_from(new_cost).unwrap_or(i8::MAX);
         if reduction != 0 || new_reduction != 0 {
             self.set_combat_var(VarKey::CostReductionUntilPlayed, new_reduction);

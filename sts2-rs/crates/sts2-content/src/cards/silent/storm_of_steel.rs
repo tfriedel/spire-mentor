@@ -18,21 +18,29 @@ pub(crate) fn play_storm_of_steel(
     // C# `CardCmd.Discard` fires the Sly auto-play for each discarded Sly card;
     // a raw pile move drops it. Route through the shared hook-aware path.
     // The Shivs wait behind every Sly auto-play, including a Sly select the
-    // player answers first (GH #1131). Bit 31 of the packed arg is the upgrade.
-    let upgrade_bit = if current_card_upgraded(state) {
-        1 << 31
-    } else {
-        0
+    // player answers first (GH #1131). C# reads `IsUpgraded` only after the
+    // discard and `Shiv.CreateInHand` (StormOfSteel.cs:24-27, both builds):
+    // a Sly auto-play that kills the Dampen caster re-upgrades this card
+    // (DampenPower.cs:49-67; random-loadout Silent v0.107.1 seed 6225). So
+    // the packed arg carries the card's uid (high 24 bits) beside the count
+    // (low 8 bits), and the bit is read when the Shivs are made.
+    let Some(storm) = sts2_core::card_effects::resolving_card_uid(state) else {
+        return EffectResult::Resolved;
     };
-    let packed = u32::try_from(count).unwrap_or(0) | upgrade_bit;
+    let count = u32::try_from(count).unwrap_or(0).min(0xFF);
+    let packed = (storm.0.get() << 8) | count;
     let then = sts2_core::LoopThen::Call(storm_of_steel_shivs, packed);
     let _ = sts2_core::card_effects::discard_hand_cards_then(state, &hand_uids, Some(then));
     EffectResult::Resolved
 }
 
 fn storm_of_steel_shivs(state: &mut CombatState, packed: u32) {
-    let upgrade_shivs = packed & (1 << 31) != 0;
-    for _ in 0..(packed & !(1 << 31)) {
+    let storm = (packed >> 8) as usize;
+    let upgrade_shivs = storm
+        .checked_sub(1)
+        .and_then(|i| state.cards.get(i))
+        .is_some_and(|c| c.upgraded);
+    for _ in 0..(packed & 0xFF) {
         let shiv_uid = spawn_shiv(state, PileKind::Hand);
         if upgrade_shivs {
             let _ = sts2_core::card_effects::upgrade_card_uid(state, shiv_uid);

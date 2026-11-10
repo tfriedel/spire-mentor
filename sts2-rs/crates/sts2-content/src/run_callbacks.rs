@@ -2416,6 +2416,47 @@ mod tests {
         assert_eq!(rm.phase(), Phase::MapChoice);
     }
 
+    /// v0.107.1 parity seed 6104 (all characters): NeowsBones rolled
+    /// Kaleidoscope then ScrollBoxes. Kaleidoscope's two card rewards defer
+    /// ScrollBoxes; once the 2nd card reward resolves, the settle drain in
+    /// `advance_after_card_reward` grants ScrollBoxes, whose pack choice C#
+    /// awaits inside the same `RewardsSet.Offer()` (`NeowsBones.cs:40-44`).
+    /// Rust stranded the bundle on `pending_bundles` and went to the map,
+    /// which also stranded the NeowsBones curse.
+    #[test]
+    fn neows_bones_deferred_scroll_boxes_offers_its_packs_after_kaleidoscope_rewards() {
+        use sts2_core::run_manager::{ActionResult, Phase, RunAction, RunManager};
+        use sts2_core::NeowRelic;
+        crate::relics::dispatch::ensure_installed();
+        let mut rm = RunManager::new(0, CharacterId::Ironclad)
+            .with_content_callbacks(ironclad_content_callbacks())
+            .with_neow_start();
+        rm.run_state.direct_event_relic_grant = true;
+        let mut offers = rm.run_state.neow_offers.expect("neow offers rolled");
+        offers.positive_2 = NeowRelic::Kaleidoscope;
+        rm.run_state.neow_offers = Some(offers);
+        // The NeowsBones batch state: ScrollBoxes is owed after Kaleidoscope.
+        rm.run_state
+            .pending_post_pick_relic_grants
+            .push(RelicId::ScrollBoxes);
+        assert_eq!(
+            rm.take_action(RunAction::EventChoice { idx: 1 }),
+            ActionResult::Advanced
+        );
+        for i in 0..2 {
+            assert_eq!(rm.phase(), Phase::CardReward, "Kaleidoscope reward {i}");
+            assert!(rm.card_reward_bundles().is_none(), "reward {i} is cards");
+            assert_eq!(
+                rm.take_action(RunAction::PickCardReward { idx: None }),
+                ActionResult::Advanced
+            );
+        }
+        assert!(rm.run_state.relics.contains(&RelicId::ScrollBoxes));
+        assert_eq!(rm.phase(), Phase::CardReward, "the pack choice is open");
+        assert!(rm.card_reward_bundles().is_some(), "offered as bundles");
+        assert!(rm.run_state.pending_bundles.is_empty());
+    }
+
     #[test]
     fn card_reward_returns_three_cards_for_ironclad() {
         let mut rs = RunState::new();

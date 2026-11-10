@@ -69,3 +69,37 @@ def test_falls_back_to_index_labels_without_the_accessor() -> None:
     g.rm = rm
     opts = g.get_state()["options"]
     assert [o["option_id"] for o in opts] == ["Rest", "Smith"]
+
+
+class _EngineRestRm(_RestRm):
+    """Like the real engine: a disabled option is listed but not an action."""
+
+    def __init__(self, options: list[tuple[str, bool]], extra: list[dict] | None = None) -> None:
+        super().__init__(options)
+        self._actions = [
+            {"action": "rest_option", "idx": i} for i, (_, en) in enumerate(options) if en
+        ] + list(extra or [])
+
+    def available_actions(self) -> list[dict]:
+        return list(self._actions)
+
+
+def test_disabled_option_not_offered_by_engine_is_still_rendered() -> None:
+    """C# shows a disabled Smith greyed; the engine just doesn't offer it."""
+    g = RustGame()
+    g.rm = _EngineRestRm([("HEAL", True), ("SMITH", False)])
+    opts = g.get_state()["options"]
+    assert [(o["option_id"], o["is_enabled"]) for o in opts] == [
+        ("HEAL", True),
+        ("SMITH", False),
+    ]
+    # choose_option 0 still resolves to Rest.
+    assert g._option_actions[0] == {"action": "rest_option", "idx": 0}
+
+
+def test_only_disabled_left_after_tent_renders_leave() -> None:
+    g = RustGame()
+    g.rm = _EngineRestRm([("SMITH", False)], extra=[{"action": "leave_shop"}])
+    opts = g.get_state()["options"]
+    assert opts[0]["option_id"] == "SMITH" and opts[0]["is_enabled"] is False
+    assert g._option_actions[-1] == {"action": "leave_shop"}

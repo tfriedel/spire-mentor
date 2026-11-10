@@ -6066,7 +6066,15 @@ impl RunState {
         // via `RemoveDeckCard` actions. Default (parity) mode falls through
         // to the front-of-deck auto-removal the Python pin uses.
         if self.interactive_card_removal {
-            let take = count.min(self.master_deck.len());
+            // Each pick is its own `FromDeckForRemoval`, which offers only
+            // removable (non-Eternal) cards and returns empty with no select
+            // once none are left (`CardSelectCmd.cs:771-774`). Picks already
+            // queued will each take one of them first.
+            let removable = self
+                .removal_offer_order()
+                .len()
+                .saturating_sub(self.pending_deck_removals as usize);
+            let take = count.min(removable);
             self.pending_deck_removals += u32::try_from(take).unwrap_or(u32::MAX);
             return 0;
         }

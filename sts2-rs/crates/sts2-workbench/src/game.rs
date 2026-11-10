@@ -1561,12 +1561,27 @@ impl Game {
             Self::fill_smith(state, &smith_acts, &smith_ids);
             return;
         }
-        self.option_actions = if rest_acts.is_empty() {
-            acts
-        } else {
-            rest_acts
-        };
+        // The engine does not offer a DISABLED option (Smith with nothing to
+        // upgrade) as an action, but C# still shows it greyed: render every
+        // engine option at its idx (`is_enabled` false; picking it is
+        // rejected). With no enabled option left (MiniatureTent) the remaining
+        // actions — leave — follow.
         let engine_opts = rmx::rest_site_options(rm);
+        self.option_actions = if engine_opts.is_empty() {
+            if rest_acts.is_empty() {
+                acts
+            } else {
+                rest_acts
+            }
+        } else {
+            let mut v: Vec<RunAction> = (0..engine_opts.len())
+                .map(|idx| RunAction::RestOption { idx })
+                .collect();
+            if rest_acts.is_empty() {
+                v.extend(acts);
+            }
+            v
+        };
         let options: Vec<Value> = self
             .option_actions
             .iter()

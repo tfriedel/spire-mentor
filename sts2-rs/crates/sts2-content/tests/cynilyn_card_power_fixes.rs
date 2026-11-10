@@ -1199,3 +1199,56 @@ fn black_hole_waits_for_the_last_play_of_the_series() {
         assert_eq!(hand[2].card_id, CardId::StrikeIronclad, "{v:?}");
     }
 }
+
+/// `StormOfSteel.cs:24-27` (both builds) reads `IsUpgraded` after the discard
+/// and `Shiv.CreateInHand`, so a Sly auto-play during the discard that kills
+/// the Dampen caster re-upgrades Storm of Steel (`DampenPower.cs:49-67`) and
+/// its Shivs come out upgraded. Rust captured the bit before the discard
+/// (random-loadout Silent v0.107.1 seed 6225: the Shiv hits were 2 short).
+#[test]
+fn storm_of_steel_after_killing_the_dampen_caster_upgrades_its_shivs() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Silent);
+        let caster = add_enemy(&mut state, 2, 1);
+        let _survivor = add_enemy(&mut state, 3, 100);
+        let storm = new_card(&mut state, CardId::StormOfSteel, true);
+        state.player.hand.push(storm);
+        let _ = push_hand(&mut state, CardId::Ricochet, false);
+        sts2_core::monster_power_effects::install_dampen_power_handlers();
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+        let pid = state
+            .powers
+            .iter()
+            .find(|p| p.kind == PowerKind::Dampen)
+            .map(|p| p.id)
+            .expect("Dampen applied");
+        state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+        let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+            Some(caster),
+        );
+        assert!(
+            !state.cards[storm.0.get() as usize - 1].upgraded,
+            "{v:?}: Dampen downgraded Storm of Steel"
+        );
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+        assert_eq!(
+            hp_of(&state, caster),
+            0,
+            "{v:?}: Ricochet killed the caster"
+        );
+        let shivs: Vec<bool> = state
+            .player
+            .hand
+            .iter()
+            .map(|u| &state.cards[u.0.get() as usize - 1])
+            .filter(|c| c.card_id == CardId::Shiv)
+            .map(|c| c.upgraded)
+            .collect();
+        assert_eq!(shivs, vec![true], "{v:?}: one upgraded Shiv");
+    }
+}

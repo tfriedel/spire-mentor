@@ -285,10 +285,13 @@ def _pick_rest_action(rm: Any, acts: list[dict[str, Any]], rng: random.Random) -
         return rng.choice(non_basic or smith_picks)
     rest_opts = [a for a in acts if a["action"] == "rest_option"]
     if rest_opts:
-        # Engine option order is [Rest, Smith, …] (RestSiteOption enum).
-        if _hp_frac(rm) < 0.65 or len(rest_opts) == 1:
+        # Engine option order is [Rest, Smith, …] (RestSiteOption enum); a
+        # disabled Smith (nothing upgradable) keeps idx 1 but is not offered,
+        # so pick Smith by idx rather than by position.
+        smith = next((a for a in rest_opts if a.get("idx") == 1), None)
+        if _hp_frac(rm) < 0.65 or smith is None:
             return rest_opts[0]
-        return rest_opts[1]
+        return smith
     return rng.choice(acts)
 
 

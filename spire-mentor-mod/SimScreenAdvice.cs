@@ -637,6 +637,7 @@ internal static class SimScreenAdvice
             options.Add(new()
             {
                 ["index"] = i,
+                ["option_index"] = SimRestOptionSlot.Of(room, buttons[i].Option),
                 ["id"] = buttons[i].Option.OptionId,
                 ["action"] = NonCombatBridgeProtocol.RestOptionAction,
                 ["label"] = label,

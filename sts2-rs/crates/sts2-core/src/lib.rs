@@ -3011,6 +3011,24 @@ pub enum DrawThen {
     Stoke(u8),
     /// Stoke+: the same, upgraded.
     StokePlus(u8),
+    /// FiendFire.cs:36-41: the `DamageCmd.Attack` after its awaited
+    /// exhausts. Packed: the hit count (cards exhausted) in the low nibble,
+    /// the target's `enemy_uids` index in the high nibble.
+    FiendFire(u8),
+}
+
+impl DrawThen {
+    /// A tail that follows the card's own `CardCmd.Exhaust` loop rather than
+    /// a draw it made: the draw it waits on belongs to an exhaust's
+    /// `AfterCardExhausted` walk, so the rest of that walk (the relic half
+    /// parked on the draw: Forgotten Soul) runs before it.
+    #[must_use]
+    pub const fn follows_exhaust_walk(self) -> bool {
+        matches!(
+            self,
+            Self::Stoke(_) | Self::StokePlus(_) | Self::FiendFire(_)
+        )
+    }
 }
 
 /// Runs a [`DrawThen`] tail; registered by `sts2-content`.
@@ -8808,8 +8826,18 @@ impl CombatState {
             }
         }
         // The rest of the drawing card's `OnPlay` (Big Bang's stars, energy
-        // and Forge), awaited behind its draw.
-        self.run_draw_then(pdr.then_card_tail);
+        // and Forge), awaited behind its draw. A tail behind an exhaust loop
+        // (Stoke, Fiend Fire) waits for that exhaust's walk below instead.
+        let pdr = if pdr.then_card_tail.follows_exhaust_walk() {
+            pdr
+        } else {
+            self.run_draw_then(pdr.then_card_tail);
+            // Ran: a later step that re-suspends must not carry it on.
+            PendingDrawResume {
+                then_card_tail: DrawThen::None,
+                ..pdr
+            }
+        };
         // Likewise a `DiscardAndDraw`'s Sly auto-plays follow its draw.
         if pdr.then_play_sly {
             let sly = crate::card_effects::take_sly_owed_after_draw(self);
@@ -8839,6 +8867,13 @@ impl CombatState {
             if self.carry_into_resuspended_draw(&rest) {
                 return Some(StepResult::PendingChoice);
             }
+        }
+        // The exhausting card's own code after its exhaust loop (Fiend Fire's
+        // attack, FiendFire.cs:36-41; Stoke's cards): C# awaits every exhaust,
+        // the relic half above included, first (loadout Ironclad 6200
+        // v0.107.1: Fiend Fire killed before a parked Forgotten Soul rolled).
+        if pdr.then_card_tail.follows_exhaust_walk() {
+            self.run_draw_then(pdr.then_card_tail);
         }
         if pdr.then_gain_strength != 0 {
             apply_post_choice_effect(
@@ -20134,6 +20169,107 @@ mod tests {
             "the -1 after the zero takes the local cost below 0"
         );
         assert_eq!(state.cards[0].cost, 2, "the base still carries the -1");
+    }
+
+    /// Infernal Blade generates a Stomp that is free this turn BEFORE it
+    /// enters combat (`InfernalBlade.cs:26-27`), so `Stomp.AfterCardEnteredCombat`'s
+    /// `AddThisTurn(-attacks)` (`Stomp.cs:45-58`) folds after the local
+    /// `Absolute(0)`: the local cost is -2 and Tangled's +1 leaves it at 0
+    /// after the clamp. Parity Ironclad 6230 v0.107.1: C# 0, Rust 1.
+    #[test]
+    fn stomp_entering_free_this_turn_banks_its_shave_after_the_local_zero() {
+        let mut state = CombatState::default();
+        let uid = CardUid::new(1).expect("nz");
+        let mut stomp = Card {
+            card_id: crate::cards::CardId::Stomp,
+            card_type: crate::cards::CardType::Attack,
+            cost: 3,
+            ..Card::pod_defaults()
+        };
+        stomp.uid = uid;
+        stomp.affliction = Some(crate::card_afflictions::CardAffliction::new(
+            crate::card_afflictions::CardAfflictionKind::Entangled,
+            1,
+        ));
+        stomp.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        state.cards.push(stomp);
+        state.player.hand.push(uid);
+        let pid = std::num::NonZeroU32::new(1).unwrap();
+        state.powers.push(crate::Power {
+            id: pid,
+            kind: crate::PowerKind::Tangled,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(crate::PowerUid(pid));
+        state.player.cards_played_this_turn[crate::cards::CardType::Attack.index()] = 2;
+
+        crate::card_effects::stamp_entered_combat_cost_backfill(&mut state, uid);
+
+        assert_eq!(
+            crate::hooks::effective_card_cost(&state, uid),
+            0,
+            "0 - 2 + Tangled's 1, clamped"
+        );
+        assert_eq!(state.cards[0].cost, 1, "the base still carries the -2");
+    }
+
+    /// Enlightenment+ (`SetThisCombat(1, reduceOnly: true)`, Enlightenment.cs:23)
+    /// on a Stomp shaved this turn appends the cap AFTER the `AddThisTurn(-1)`:
+    /// now `min(2, 1) = 1`, and once `EndOfTurnCleanup` drops the shave the
+    /// cap still yields `min(3, 1) = 1`. Restoring the shave's bank on top of
+    /// the capped cost left it at 2 (parity Ironclad 6293 v0.111.0: C# 0 with
+    /// a later Attack's shave, Rust 1). Same for Pinpoint.
+    #[test]
+    fn reduce_only_cap_supersedes_this_turns_stomp_and_pinpoint_shaves() {
+        for (id, bank) in [
+            (
+                crate::cards::CardId::Stomp,
+                crate::cards::VarKey::StompCostReductionThisTurn,
+            ),
+            (
+                crate::cards::CardId::Pinpoint,
+                crate::cards::VarKey::PinpointCostReductionThisTurn,
+            ),
+        ] {
+            let mut state = CombatState::default();
+            let mut card = Card {
+                card_id: id,
+                cost: 2,
+                ..Card::pod_defaults()
+            };
+            card.uid = CardUid::new(1).expect("nz");
+            card.set_combat_var(bank, 1);
+            state.cards.push(card);
+            state.player.hand.push(card.uid);
+
+            state.cards[0].set_this_combat_reduce_only(1);
+            assert_eq!(state.cards[0].cost, 1, "{id:?}: min(2, 1)");
+
+            state.restore_stomp_costs_for_turn_start();
+            state.restore_pinpoint_costs_for_turn_start();
+            assert_eq!(state.cards[0].cost, 1, "{id:?}: min(3, 1) next turn");
+            assert_ne!(
+                state.cards[0].combat_var(crate::cards::VarKey::CostAbsolutelySet),
+                0,
+                "{id:?}: the cap owns the cost"
+            );
+        }
+        // A cap above the unshaved cost changes nothing.
+        let mut state = CombatState::default();
+        let mut card = Card {
+            card_id: crate::cards::CardId::Stomp,
+            cost: 1,
+            ..Card::pod_defaults()
+        };
+        card.uid = CardUid::new(1).expect("nz");
+        card.set_combat_var(crate::cards::VarKey::StompCostReductionThisTurn, 1);
+        state.cards.push(card);
+        state.cards[0].set_this_combat_reduce_only(3);
+        state.restore_stomp_costs_for_turn_start();
+        assert_eq!(state.cards[0].cost, 2);
     }
 
     #[test]

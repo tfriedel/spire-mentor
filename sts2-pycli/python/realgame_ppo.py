@@ -558,7 +558,15 @@ def _build_rest_site(state: dict[str, Any]) -> PpoDecision | None:
     run_state = state.get("run_state") or {}
     obs = _base_obs(state, run_state)
     obs["rest_option_labels"] = list(_REST_OPTION_LABELS)
-    actions = [{"action": "rest_option", "idx": i} for i in range(len(options))]
+    # ``option_index`` is the option's slot in C# ``room.Options`` -- the
+    # engine ``rest_site_options()`` order the net was trained on (a disabled
+    # Smith keeps slot 1). The mod's ``index`` is renumbered after it drops
+    # disabled options, so keying on position put Dig on ``rest_smith``. Older
+    # mods send no ``option_index``. Mirrors ``sts2-runai`` ``build_rest_site``.
+    actions = [
+        {"action": "rest_option", "idx": int(o.get("option_index", i))}
+        for i, o in enumerate(options)
+    ]
     responses = [
         {"action": "choose", "index": int(o.get("index", i))} for i, o in enumerate(options)
     ]

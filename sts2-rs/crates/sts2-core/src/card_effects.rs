@@ -3676,8 +3676,20 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
     if card.is_clone() || card.combat_var(crate::cards::VarKey::IsDupe) != 0 {
         return;
     }
+    // A card already zeroed by a local `Absolute(0)` (Infernal Blade's
+    // `SetToFreeThisTurn` runs BEFORE `AddGeneratedCardToCombat`,
+    // `InfernalBlade.cs:26-27`) shows only what is appended after the zero:
+    // this `AddThisTurn(-plays)` folds after it, unclamped, so a global
+    // surcharge (Tangled's +1) lands on a negative local cost and clamps to 0
+    // (parity Ironclad 6230 v0.107.1). Mirrors the play-time discount walk
+    // (`CombatState::discount_card_cost_on_play_walk`).
+    let zeroed = crate::hooks::card_cost_locally_zeroed(state, card);
     let card = &mut state.cards[idx];
     let plays = i32::try_from(plays).unwrap_or(i32::MAX);
+    if zeroed && plays > 0 {
+        let key = crate::cards::VarKey::CostAddedAfterLocalZero;
+        card.set_combat_var(key, card.combat_var(key).saturating_sub(plays));
+    }
     let shave = plays.min(i32::from(card.cost.max(0)));
     if shave > 0 {
         card.cost -= shave as i8;

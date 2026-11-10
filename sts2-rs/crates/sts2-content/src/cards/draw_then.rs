@@ -38,6 +38,7 @@ pub fn run(state: &mut CombatState, tail: DrawThen) {
         DrawThen::StokePlus(count) => {
             super::ironclad::stoke::generate_stoke_cards(state, count, true);
         }
+        DrawThen::FiendFire(packed) => super::ironclad::fiend_fire::fiend_fire_hits(state, packed),
     }
 }
 

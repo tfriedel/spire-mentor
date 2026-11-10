@@ -219,6 +219,33 @@ internal static class SimRelicOptions
 }
 
 
+/// <summary>
+/// A rest-site option's slot in <c>NRestSiteRoom.Options</c> (the player's
+/// <c>RestSiteSynchronizer</c> list: <c>RestSiteOption.Generate</c> order,
+/// minus options already taken). A disabled option keeps its slot, so this is
+/// the index the sim engine's <c>rest_option</c> action uses -- unlike the
+/// message <c>index</c>, which is renumbered over the enabled options only.
+/// </summary>
+internal static class SimRestOptionSlot
+{
+    // `object`, not RestSiteOption, so this file needs no extra game-namespace
+    // import (release content-marker budget). Equals is the option's own
+    // override (OptionId + Owner), the same test `room.Options.Contains` uses.
+    internal static int Of(NRestSiteRoom room, object option)
+    {
+        int i = 0;
+        foreach (var o in room.Options)
+        {
+            if (Equals(o, option))
+            {
+                return i;
+            }
+            i++;
+        }
+        return -1;
+    }
+}
+
 /// <summary>Rest site: the agent picks one of the enabled campfire options.</summary>
 public class SimRestSiteRoomHandler : IRoomHandler, IHandler
 {
@@ -246,9 +273,14 @@ public class SimRestSiteRoomHandler : IRoomHandler, IHandler
             return;
         }
 
+        // `index` is this message's own numbering (what `choose` answers);
+        // `option_index` is the option's slot in room.Options -- generation
+        // order, which a disabled option still occupies -- and is what the
+        // sim's `rest_option` idx means (see PROTOCOL.md `rest_site`).
         List<Dictionary<string, object>> options = buttons.Select((b, i) => new Dictionary<string, object>
         {
             ["index"] = i,
+            ["option_index"] = SimRestOptionSlot.Of(room, b.Option),
             ["id"] = b.Option.OptionId,
             ["action"] = NonCombatBridgeProtocol.RestOptionAction,
             ["label"] = b.Option.Title.GetFormattedText(),

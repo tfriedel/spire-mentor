@@ -661,8 +661,20 @@ fn build_rest_site(state: &Value) -> Option<WireDecision> {
     obs.rest_option_labels = Some(REST_OPTION_LABELS.iter().map(|&x| x.to_owned()).collect());
     Some(WireDecision {
         obs,
-        actions: (0..options.len())
-            .map(|idx| ActionDesc::RestOption { idx: idx as i64 })
+        // `option_index` is the option's slot in C# `room.Options` — the
+        // engine's `rest_site_options()` order the net was trained on, where
+        // a disabled Smith keeps slot 1 and Dig is 2. The mod's `index` is
+        // renumbered after it drops disabled options, so keying on position
+        // put Dig on `rest_smith`. Older mods send no `option_index`.
+        actions: options
+            .iter()
+            .enumerate()
+            .map(|(pos, o)| ActionDesc::RestOption {
+                idx: o
+                    .get("option_index")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(pos as i64),
+            })
             .collect(),
         responses: options
             .iter()
@@ -1813,6 +1825,51 @@ mod tests {
         });
         let d = build_decision(&s, "shop").expect("decision");
         assert_eq!(d.labels, ["remove:BASH", "remove:ANGER"]);
+    }
+
+    /// The mod drops disabled options and renumbers `index`, so a masked
+    /// Smith used to put Dig at position 1 = the net's `rest_smith` token.
+    /// `option_index` (the option's slot in C# `room.Options`, the same order
+    /// as the engine's `rest_site_options()`) keys the action instead.
+    #[test]
+    fn rest_option_idx_is_the_game_slot_not_the_position() {
+        let s = json!({
+            "type": "rest_site", "floor": 5, "act": 1, "run_state": run_state(),
+            "options": [
+                {"index": 0, "option_index": 0, "id": "HEAL", "label": "Rest", "enabled": true},
+                {"index": 1, "option_index": 2, "id": "DIG", "label": "Dig", "enabled": true}
+            ]
+        });
+        let d = build_decision(&s, "rest_site").expect("decision");
+        assert_eq!(
+            d.actions,
+            [
+                ActionDesc::RestOption { idx: 0 },
+                ActionDesc::RestOption { idx: 2 }
+            ]
+        );
+        // The reply still answers with the mod's own `index`.
+        assert_eq!(d.responses[1], json!({"action": "choose", "index": 1}));
+    }
+
+    /// An older mod sends no `option_index`: keep the positional idx.
+    #[test]
+    fn rest_option_idx_falls_back_to_position_without_option_index() {
+        let s = json!({
+            "type": "rest_site", "floor": 5, "act": 1, "run_state": run_state(),
+            "options": [
+                {"index": 0, "id": "HEAL", "label": "Rest", "enabled": true},
+                {"index": 1, "id": "DIG", "label": "Dig", "enabled": true}
+            ]
+        });
+        let d = build_decision(&s, "rest_site").expect("decision");
+        assert_eq!(
+            d.actions,
+            [
+                ActionDesc::RestOption { idx: 0 },
+                ActionDesc::RestOption { idx: 1 }
+            ]
+        );
     }
 
     #[test]

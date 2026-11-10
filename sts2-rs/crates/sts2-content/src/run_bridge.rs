@@ -637,7 +637,11 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
     // `ShouldGiveRewards => false`) offers an empty set
     // (`RewardsCmd.OfferForRoomEnd` → `EmptyForRoom`, `RewardsCmd.cs:26-29`),
     // so none of the room's extras below (Grimoire, Royalties, Heist) are
-    // offered. Ported from manojnuthakki/spire-mentor 9262b2d6e.
+    // offered on v0.107.1. Ported from manojnuthakki/spire-mentor 9262b2d6e.
+    // v0.111.0's `BattlewornDummy.Resume` instead concatenates
+    // `combatRoom.ExtraRewards` after its own setting reward and offers the
+    // lot (`BattlewornDummy.cs:110-116`) — unless the dummy ran out of time,
+    // which returns before any reward (`:76-79`).
     //
     // A Boss room in the last act is empty too: `RewardsSet.WithRewardsFromRoom`
     // returns before the `ExtraRewards` merge (`RewardsSet.cs:91-94`, both
@@ -648,7 +652,15 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
         && rs.current_room.map(|r| r.room_type) == Some(sts2_core::runstate::RoomType::Boss);
     let room_gives_rewards = !last_act_boss
         && match &rs.event_combat {
-            Some(req) => req.encounter.grants_base_room_rewards(),
+            Some(req) => {
+                req.encounter.grants_base_room_rewards()
+                    || (rs.game_version >= sts2_core::GameVersion::V0_111_0
+                        && matches!(
+                            req.encounter,
+                            sts2_core::events::EventEncounter::BattlewornDummy(_)
+                        )
+                        && !combat.event_combat_timed_out)
+            }
             None => true,
         };
     let grimoire_stacks = combat.player_power_amount(sts2_core::PowerKind::ForbiddenGrimoire);
@@ -2670,16 +2682,15 @@ mod tests {
         );
     }
 
-    /// A fight whose encounter gives no rewards (Battleworn Dummy,
-    /// `ShouldGiveRewards => false`, `BattlewornDummyEventEncounter.cs:28`)
-    /// offers an EMPTY set (`RewardsCmd.OfferForRoomEnd` →
-    /// `EmptyForRoom`, `RewardsCmd.cs:26-29`; `CombatRoom.cs:255` skips
-    /// `OfferRoomEndRewards` outright), so the room's `ExtraRewards` —
-    /// Royalties' gold, Forbidden Grimoire's removals — are never offered.
-    #[test]
-    fn a_no_rewards_event_fight_grants_none_of_its_extras() {
+    /// Exit a won Battleworn Dummy fight carrying 30 Royalties, Forbidden
+    /// Grimoire and 42 Heist gold; returns (gold gained, rewards staged).
+    fn battleworn_extras_after_exit(
+        version: sts2_core::GameVersion,
+        timed_out: bool,
+    ) -> (i32, usize) {
         use sts2_core::events::{BattlewornDummySetting, EventCombatRequest, EventEncounter};
         let mut rs = fresh_run();
+        rs.game_version = version;
         rs.event_combat = Some(EventCombatRequest::resuming(
             EventEncounter::BattlewornDummy(BattlewornDummySetting::Setting1),
             sts2_core::events::EventId::BattlewornDummy,
@@ -2695,13 +2706,46 @@ mod tests {
         combat.gold = rs.gold;
         combat.heist_recovered_gold = 42;
         combat.player_won = true;
+        combat.event_combat_timed_out = timed_out;
         let gold = rs.gold;
         let pending = rs.pending_rewards.len();
 
         exit_combat(&mut rs, &combat);
 
-        assert_eq!(rs.gold, gold, "no Royalties or Heist gold");
-        assert_eq!(rs.pending_rewards.len(), pending, "no Grimoire removals");
+        (rs.gold - gold, rs.pending_rewards.len() - pending)
+    }
+
+    /// v0.107.1: a fight whose encounter gives no rewards (Battleworn Dummy,
+    /// `ShouldGiveRewards => false`, `BattlewornDummyEventEncounter.cs:28`)
+    /// offers an EMPTY set (`RewardsCmd.OfferForRoomEnd` →
+    /// `EmptyForRoom`, `RewardsCmd.cs:26-29`; `CombatRoom.cs:255` skips
+    /// `OfferRoomEndRewards` outright) and `BattlewornDummy.Resume` never
+    /// reads the room's `ExtraRewards`, so Royalties' gold, Forbidden
+    /// Grimoire's removals and Heist's gold are never offered.
+    #[test]
+    fn a_no_rewards_event_fight_grants_none_of_its_extras_v0107() {
+        assert_eq!(
+            battleworn_extras_after_exit(sts2_core::GameVersion::V0_107_1, false),
+            (0, 0)
+        );
+    }
+
+    /// v0.111.0 `BattlewornDummy.Resume` (`BattlewornDummy.cs:110-116`)
+    /// concatenates `combatRoom.ExtraRewards` onto its own reward list and
+    /// offers them, unless the dummy ran out of time (the early `DEFEAT`
+    /// return at `:76-79`). Parity seed Regent 6104 v0.111.0.
+    #[test]
+    fn battleworn_fight_offers_its_extras_on_v0111_unless_timed_out() {
+        assert_eq!(
+            battleworn_extras_after_exit(sts2_core::GameVersion::V0_111_0, false),
+            (30 + 42, 1),
+            "Royalties + Heist gold and one Grimoire removal reward"
+        );
+        assert_eq!(
+            battleworn_extras_after_exit(sts2_core::GameVersion::V0_111_0, true),
+            (0, 0),
+            "RanOutOfTime offers nothing"
+        );
     }
 
     /// GH #604: C# `HeistPower.BeforeDeath` hands the merc's stolen gold back

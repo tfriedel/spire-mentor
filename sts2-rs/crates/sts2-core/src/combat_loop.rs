@@ -8430,6 +8430,11 @@ pub(crate) enum TailResume {
     /// `OnPlayWrapper` awaits it before `CardPlayFinished` / `AfterCardPlayed`
     /// / the result-pile move (CardModel.cs:1938-1970, both builds).
     AfterEnchantmentOnPlay,
+    /// Auto-plays only: after the result-pile move, whose exhaust ran an
+    /// `AfterCardExhausted` draw (Joss Paper / Dark Embrace) that suspended on
+    /// a reshuffle select. C# awaits `CardCmd.Exhaust` inside `OnPlayWrapper`
+    /// (CardModel.cs:1980-1989), so only the post-move cleanup is left.
+    AfterResultPile,
 }
 
 /// The cost a replay iteration's power `BeforeCardPlayed` listeners read. C#
@@ -10001,6 +10006,9 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
         }
         TailResume::AfterPlayedDraw(_) => {
             unreachable!("only an auto-play tail parks after its AfterCardPlayed draw")
+        }
+        TailResume::AfterResultPile => {
+            unreachable!("only an auto-play's tail parks after its result-pile move")
         }
         TailResume::AfterEchoOnPlay => {
             replay_after_on_play(
@@ -12827,6 +12835,7 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
             first_replay = i + 1;
         }
         TailResume::AfterPlayedDraw(i) => first_replay = i,
+        TailResume::AfterResultPile => first_replay = extra_plays,
         TailResume::AfterEchoOnPlay => unreachable!("an auto-play has no Echo Form copy"),
         TailResume::AfterPlayedRelic(_) => {
             unreachable!("only a hand play's tail parks inside its relic walk")
@@ -12990,7 +12999,8 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
     // Cascade / Catastrophe / Uproar), mirroring the hand-play path in
     // `finish_card_play`: decided at auto-play start
     // (`auto_feral_returns_to_hand`, see `feral_claims_result_location`).
-    if state.player.play.contains(&top_uid) {
+    let result_pile_moved = matches!(resume_at, TailResume::AfterResultPile);
+    if !result_pile_moved && state.player.play.contains(&top_uid) {
         let self_exhausts = self_exhausts_pre_dispatch;
         // CorruptionPower routes the owner's played Skills to Exhaust — the
         // auto-play mirror of the same branch in `play_card`, using the
@@ -13062,6 +13072,7 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
                 state.player.play.remove(pos);
             }
         } else if exhausts {
+            let draw_was_parked = state.pending_draw_resume.is_some();
             let _ = exhaust_from_play(
                 state,
                 top_uid,
@@ -13070,6 +13081,13 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
                 top_card_tags,
                 top_card_type,
             );
+            // An `AfterCardExhausted` draw (Joss Paper / Dark Embrace) that
+            // reshuffled into a Stratagem pick holds the rest of this play,
+            // and with it the loop that auto-played the card (Catastrophe.cs:
+            // 20-31 awaits each AutoPlay; loadout Defect 6195 v0.107.1).
+            if after_played_draw_suspended(state, draw_was_parked) {
+                park_auto_tail!(TailResume::AfterResultPile);
+            }
         } else if top_card_id == cards::CardId::ShiningStrike {
             // C# `ShiningStrike.OnPlay` (ShiningStrike.cs): a non-exhausting
             // copy returns to the TOP of the draw pile (`CardPileCmd.Add(this,

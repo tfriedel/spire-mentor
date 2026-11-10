@@ -584,6 +584,31 @@ class TestBuilderStructure:
     def test_rest_site_no_options_returns_none(self) -> None:
         assert rp._build_rest_site({**REST_SITE_STATE, "options": []}) is None
 
+    def test_rest_site_idx_is_the_game_slot(self) -> None:
+        """The mod renumbers ``index`` after dropping disabled options; the
+        ``rest_option`` idx must be the C# slot (``option_index``) so Dig
+        behind a disabled Smith is not encoded as ``rest_smith``."""
+        options = [
+            {"index": 0, "option_index": 0, "id": "HEAL", "label": "Rest", "enabled": True},
+            {"index": 1, "option_index": 2, "id": "DIG", "label": "Dig", "enabled": True},
+        ]
+        decision = rp._build_rest_site({**REST_SITE_STATE, "options": options})
+        assert decision is not None
+        assert decision.actions == [
+            {"action": "rest_option", "idx": 0},
+            {"action": "rest_option", "idx": 2},
+        ]
+        assert decision.responses[1] == {"action": "choose", "index": 1}
+
+    def test_rest_site_idx_falls_back_to_position_for_old_mods(self) -> None:
+        options = [
+            {"index": 0, "id": "HEAL", "label": "Rest", "enabled": True},
+            {"index": 1, "id": "DIG", "label": "Dig", "enabled": True},
+        ]
+        decision = rp._build_rest_site({**REST_SITE_STATE, "options": options})
+        assert decision is not None
+        assert [a["idx"] for a in decision.actions] == [0, 1]
+
     def test_event_no_options_returns_none(self) -> None:
         assert rp._build_event({**EVENT_STATE, "options": []}) is None
 

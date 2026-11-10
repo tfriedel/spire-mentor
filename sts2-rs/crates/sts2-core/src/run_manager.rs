@@ -2025,15 +2025,31 @@ impl RunManager {
                 // (was hard-coded `[0, 1]`, which made Hatch/Dig/Cook
                 // unselectable — an `act_reject` whenever C# offered one).
                 //
+                // A DISABLED option (Smith with nothing upgradable, Cook with
+                // <2 removable cards) keeps its slot in the index space but is
+                // not an action: C# `NRestSiteButton.Create` marks it
+                // `_isUnclickable = !option.IsEnabled` (`NRestSiteButton.cs:229`
+                // v0.107.1) and `OnRelease` drops the click. Offering it was a
+                // free "skip the rest site" move the game does not have.
+                //
                 // After a MiniatureTent-kept pick, `rest_site_options` omits
-                // the taken options and the player may also leave.
+                // the taken options and the player may also leave (C#
+                // `AfterSelectingOptionAsync` → `ShowProceedButton`,
+                // `NRestSiteRoom.cs:591`) — the only exit when what remains is
+                // all disabled.
                 let _ = RestSiteOption::Rest;
-                let mut actions: Vec<RunAction> = (0..self.run_state.rest_site_options().len())
-                    .map(|idx| RunAction::RestOption { idx })
+                let mut actions: Vec<RunAction> = self
+                    .run_state
+                    .rest_site_options()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, o)| o.enabled())
+                    .map(|(idx, _)| RunAction::RestOption { idx })
                     .collect();
-                if !self.run_state.rest_site_taken.is_empty() {
+                if self.rest_site_can_leave(actions.is_empty()) {
                     actions.push(RunAction::LeaveShop);
                 }
+                debug_assert!(!actions.is_empty(), "rest site with no legal action");
                 actions
             }
             Phase::Event => {
@@ -2162,7 +2178,7 @@ impl RunManager {
             // `RestSiteSynchronizer.BeforeLocalRestSiteExited`). Only offered
             // once an option was taken; reuses the shop's leave-room action.
             (Phase::RestSite, RunAction::LeaveShop)
-                if !self.run_state.rest_site_taken.is_empty() =>
+                if self.rest_site_can_leave(!self.rest_site_has_enabled_option()) =>
             {
                 self.run_state.rest_site_taken.clear();
                 self.phase = Phase::MapChoice;
@@ -4054,8 +4070,14 @@ impl RunManager {
         // no-op because `grant_batch_settled()` is false while
         // `card_reward_options` is non-empty. The `return` keeps the
         // boss/map fall-through from running once a select is surfaced.
+        //
+        // A deferred Scroll Boxes (NeowsBones' 2nd relic after Kaleidoscope's
+        // card rewards) queues its pack choice on `pending_bundles`; C# awaits
+        // it inside the same `RewardsSet.Offer()` (`NeowsBones.cs:40-44`), so
+        // it surfaces here too (parity seed 6104 v0.107.1, all characters).
         if !self.run_state.pending_card_selects.is_empty()
             || !self.run_state.relic_rewards.is_empty()
+            || !self.run_state.pending_bundles.is_empty()
             || self.drain_pending_rewards()
         {
             self.phase = Phase::CardReward;
@@ -4125,6 +4147,19 @@ impl RunManager {
         // gap) leaves `boss_relic_options` empty and falls through to
         // `advance_boss_act` below — no softlock on a zero-action
         // `BossRelic` screen.
+        //
+        // The roll also waits for any interactive deck pick the boss
+        // `RewardsSet` opened (Forbidden Grimoire's `CardRemovalReward`):
+        // C# starts the Ancient only after the whole set resolves, so Tanx /
+        // Pael read the post-removal deck (parity Necrobinder 6125 v0.111.0).
+        // `settle_after_deck_pick` re-enters here once the picks drain.
+        if self.pending_boss_act_advance
+            && self.boss_relic_options.is_empty()
+            && self.deck_pick_pending()
+        {
+            self.phase = Phase::CardReward;
+            return;
+        }
         if self.pending_boss_act_advance && self.boss_relic_options.is_empty() {
             if let Some(gen) = self.callbacks.generate_boss_relic_pool {
                 self.boss_relic_options = gen(&mut self.run_state);
@@ -4653,9 +4688,30 @@ impl RunManager {
         }
     }
 
+    /// Whether the rest site may be left now. C# enables Proceed once an
+    /// option was taken (`NRestSiteRoom.AfterSelectingOptionAsync`, only
+    /// reachable with `MiniatureTent`). `no_enabled_option` is a backstop
+    /// that C# never needs: Heal is always generated, never disabled and
+    /// never removed by a modify hook (`RestSiteOption.Generate`,
+    /// `HealRestSiteOption` has no `IsEnabled` override; Midas only removes
+    /// Smith), so an untouched rest site always has an enabled option. If the
+    /// engine ever builds one without, leaving beats stranding the run.
+    fn rest_site_can_leave(&self, no_enabled_option: bool) -> bool {
+        !self.run_state.rest_site_taken.is_empty() || no_enabled_option
+    }
+
+    fn rest_site_has_enabled_option(&self) -> bool {
+        self.run_state
+            .rest_site_options()
+            .iter()
+            .any(crate::runstate::RestSiteOption::enabled)
+    }
+
     fn do_rest_site_at(&mut self, idx: usize) -> ActionResult {
         let opts = self.run_state.rest_site_options();
-        if idx >= opts.len() {
+        // A disabled option is unclickable in C# (`NRestSiteButton.cs:229`),
+        // so it is rejected without consuming the rest site.
+        if idx >= opts.len() || !opts[idx].enabled() {
             return ActionResult::InvalidForPhase;
         }
         let _ = self.do_rest_site_action(opts[idx]);
@@ -4930,11 +4986,7 @@ impl RunManager {
         // are exactly what we're about to surface, so they're excluded from
         // this "still picking?" test (which is why `has_pending_grant_choice`
         // can't be reused here verbatim).
-        let still_picking = self.run_state.pending_deck_removals != 0
-            || self.run_state.pending_deck_upgrades != 0
-            || !self.run_state.pending_deck_transforms.is_empty()
-            || !self.run_state.pending_deck_enchants.is_empty();
-        if !still_picking {
+        if !self.deck_pick_pending() {
             let opened_card_reward = self.drain_pending_rewards();
             // A deferred Scroll Boxes (NeowsBones' 2nd relic after a Pomander
             // pick) queues its pack choice; C# awaits it inside the same
@@ -4947,9 +4999,27 @@ impl RunManager {
             {
                 self.phase = Phase::CardReward;
                 self.advance_after_card_reward();
+            } else if self.pending_boss_act_advance
+                && self.boss_relic_options.is_empty()
+                && self.phase == Phase::CardReward
+                && self.card_reward_options.is_empty()
+                && self.card_reward_bundles.is_none()
+            {
+                // The boss reward set's last interactive pick (a Grimoire
+                // removal) resolved: start the deferred next-act Ancient.
+                self.advance_after_card_reward();
             }
         }
         self.drain_post_pick_deck_cards_if_settled();
+    }
+
+    /// True while an interactive deck pick (removal / upgrade / transform /
+    /// enchant) is still outstanding; those preempt every phase's actions.
+    fn deck_pick_pending(&self) -> bool {
+        self.run_state.pending_deck_removals != 0
+            || self.run_state.pending_deck_upgrades != 0
+            || !self.run_state.pending_deck_transforms.is_empty()
+            || !self.run_state.pending_deck_enchants.is_empty()
     }
 
     fn drain_post_pick_deck_cards_if_settled(&mut self) {
@@ -5623,6 +5693,22 @@ impl RunManager {
             return result;
         }
         self.grant_event_combat_outcome(&req, clean_victory);
+        // v0.111.0 `BattlewornDummy.Resume` appends the room's `ExtraRewards`
+        // after its own setting reward and offers the lot through
+        // `RewardsCmd.OfferCustom` (`BattlewornDummy.cs:110-116`), whose
+        // populate pass reads `Rewards` once per fixed extra `GoldReward`
+        // (Heist, Royalties; `RewardsSet.cs:135-138`). The setting reward was
+        // rolled just above in the resume, so these draws land after it.
+        // `exit_combat` already credited the gold; only the draws are left.
+        if clean_victory
+            && self.run_state.game_version >= crate::GameVersion::V0_111_0
+            && matches!(
+                req.encounter,
+                crate::events::EventEncounter::BattlewornDummy(_)
+            )
+        {
+            self.populate_fixed_extra_gold_rewards();
+        }
         // Tear down the parent event (C# `SetEventFinished` inside Resume /
         // the no-resume combat room exit). `exit_event_room` clears
         // `current_event` + `event_state`; `event_combat` is already taken.
@@ -6181,15 +6267,15 @@ impl RunManager {
     /// - [`Hatched`](crate::runstate::RestSiteActionOutcome::Hatched)
     /// - [`Dug`](crate::runstate::RestSiteActionOutcome::Dug)
     /// - [`Cloned`](crate::runstate::RestSiteActionOutcome::Cloned)
-    /// - [`Disabled`](crate::runstate::RestSiteActionOutcome::Disabled)
-    ///   (no-op — the agent picked a disabled option; the room is
-    ///   still consumed, matching Python's "fallback to first enabled"
-    ///   safety net which also exits the phase on completion)
     /// - [`Unsupported`](crate::runstate::RestSiteActionOutcome::Unsupported)
     ///   (deferred variant — handler not yet ported; the run still
     ///   advances so simulation can continue past partial content)
     ///
-    /// **Non-terminal outcome** (phase stays at `RestSite`):
+    /// **Non-terminal outcomes** (phase stays at `RestSite`):
+    /// - [`Disabled`](crate::runstate::RestSiteActionOutcome::Disabled)
+    ///   — a disabled option (C# `IsEnabled == false`) is unclickable
+    ///   (`NRestSiteButton.cs:229`); nothing changes and the rest site
+    ///   stays open. It used to consume the room — a free skip.
     /// - [`SmithAwaitingChoice`](crate::runstate::RestSiteActionOutcome::SmithAwaitingChoice)
     ///   — a `pending_choice` is open over the upgradable cards. The
     ///   caller resolves it via
@@ -6224,7 +6310,6 @@ impl RunManager {
             | O::Lifted
             | O::Cooked
             | O::Cloned
-            | O::Disabled
             | O::Unsupported => {
                 // A heal offers the `ModifyRestSiteHealRewards` list right away
                 // (`HealRestSiteOption.cs:112-113` → `RewardsCmd.OfferCustom`):
@@ -6240,7 +6325,7 @@ impl RunManager {
                 let dug_pickup_pending = matches!(outcome, O::Dug { .. })
                     && (!self.run_state.relic_rewards.is_empty()
                         || !self.run_state.pending_card_selects.is_empty());
-                let succeeded = !matches!(outcome, O::Disabled | O::Unsupported);
+                let succeeded = !matches!(outcome, O::Unsupported);
                 if self.run_state.pending_rewards.is_empty() && !dug_pickup_pending {
                     self.phase = Phase::MapChoice;
                     if succeeded {
@@ -6256,7 +6341,10 @@ impl RunManager {
                     self.advance_after_card_reward();
                 }
             }
-            O::SmithAwaitingChoice => {}
+            // A disabled option (or a request blocked by an open pending
+            // choice) changes nothing and the rest site stays open: C# ignores
+            // the click on an unclickable button.
+            O::SmithAwaitingChoice | O::Disabled => {}
         }
         outcome
     }
@@ -8854,6 +8942,46 @@ mod tests {
                 "{version:?} seed {seed}: skipping leaves 2 Attacks → no TriBoomerang, got {:?}",
                 skipped.boss_relic_options()
             );
+
+            // Forbidden Grimoire's interactive `CardRemovalReward` belongs to
+            // the same boss `RewardsSet`, so it too resolves before the
+            // Ancient starts (parity Necrobinder 6125 v0.111.0). A 3-Attack
+            // deck that removes an Attack must NOT see TriBoomerang.
+            let mut removed = boss_won(seed, version);
+            removed
+                .run_state
+                .master_deck
+                .push(card(CardId::Bash, CardType::Attack));
+            removed.run_state.interactive_card_removal = true;
+            removed
+                .run_state
+                .pending_rewards
+                .push(crate::runstate::Reward::RemoveCard { count: 1 });
+            assert_eq!(
+                removed.take_action(RunAction::PickCardReward { idx: None }),
+                ActionResult::Advanced
+            );
+            assert_eq!(removed.run_state.pending_deck_removals, 1);
+            assert!(
+                removed.boss_relic_options().is_empty(),
+                "{version:?}: the Ancient waits for the removal pick"
+            );
+            let order = removed.run_state.removal_offer_order();
+            let attack = (0..order.len())
+                .find(|&i| removed.run_state.master_deck[order[i]].card_type == CardType::Attack)
+                .expect("an Attack is removable");
+            assert_eq!(
+                removed.take_action(RunAction::RemoveDeckCard { idx: attack }),
+                ActionResult::Advanced
+            );
+            assert_eq!(removed.phase(), Phase::BossRelic);
+            assert!(
+                !removed
+                    .boss_relic_options()
+                    .contains(&crate::RelicId::TriBoomerang),
+                "{version:?} seed {seed}: removing an Attack leaves 2 → no TriBoomerang, got {:?}",
+                removed.boss_relic_options()
+            );
         }
     }
 
@@ -9821,12 +9949,15 @@ mod tests {
     #[test]
     fn rest_site_actions_enumerate_both_rest_and_smith() {
         // Bead `sts2-rs-7kl4f`: the base rest-site list is always
-        // `[Rest, Smith{enabled:?}]`; enumeration emits both idx slots
-        // so a "pick first option" driver hitting a rest site can fall
-        // through to Smith when the relic/modifier registry later
-        // disables Rest. The `enabled:false` Smith case is handled in
-        // `do_rest_site_action` by the `Disabled` outcome → MapChoice.
+        // `[Rest, Smith{enabled:?}]`. With an upgradable card (the starter
+        // deck) both slots are actions; a disabled Smith keeps its slot but
+        // is not offered (see `rest_site_actions_skip_disabled_smith`).
         let mut rm = RunManager::new(0, CharacterId::Ironclad);
+        rm.run_state.master_deck.push(crate::cards::Card {
+            card_id: crate::cards::CardId::Bash,
+            upgraded: false,
+            ..crate::cards::Card::pod_defaults()
+        });
         rm.set_phase(Phase::RestSite);
         let actions = rm.get_available_actions();
         assert_eq!(
@@ -9836,6 +9967,23 @@ mod tests {
                 RunAction::RestOption { idx: 1 },
             ],
             "got {actions:?}",
+        );
+    }
+
+    #[test]
+    fn rest_site_actions_skip_disabled_smith() {
+        // C# `SmithRestSiteOption.IsEnabled => Deck.UpgradableCardCount != 0`
+        // and a disabled button is unclickable (`NRestSiteButton.cs:229`).
+        let mut rm = RunManager::new(0, CharacterId::Ironclad);
+        rm.run_state.master_deck.push(crate::cards::Card {
+            card_id: crate::cards::CardId::Bash,
+            upgraded: true,
+            ..crate::cards::Card::pod_defaults()
+        });
+        rm.set_phase(Phase::RestSite);
+        assert_eq!(
+            rm.get_available_actions(),
+            vec![RunAction::RestOption { idx: 0 }]
         );
     }
 
@@ -12455,15 +12603,16 @@ mod tests {
     }
 
     #[test]
-    fn do_rest_site_action_disabled_still_exits_phase() {
-        // Smith with `enabled: false` resolves to Disabled; the room
-        // is still consumed and the run advances to MapChoice.
+    fn do_rest_site_action_disabled_is_a_no_op() {
+        // Smith with `enabled: false` resolves to Disabled. C# ignores the
+        // click on an unclickable option (`NRestSiteButton.cs:229`), so the
+        // rest site stays open — it is not a free skip.
         let mut rm = RunManager::new(0, CharacterId::Ironclad);
         rm.phase = Phase::RestSite;
         let outcome =
             rm.do_rest_site_action(crate::runstate::RestSiteOption::Smith { enabled: false });
         assert_eq!(outcome, crate::runstate::RestSiteActionOutcome::Disabled);
-        assert_eq!(rm.phase(), Phase::MapChoice);
+        assert_eq!(rm.phase(), Phase::RestSite);
     }
 
     #[test]
@@ -13059,6 +13208,48 @@ mod tests {
         );
         assert!(rm.run_state.event_combat.is_none());
         assert_eq!(rm.phase(), Phase::MapChoice);
+    }
+
+    /// `Rewards` draws a Battleworn fight's room extras cost on resume: a
+    /// Heist gold-back on the dummy fight, resolved under `version`.
+    fn battleworn_extra_gold_rewards_draws(version: crate::GameVersion, timed_out: bool) -> u32 {
+        let mut rm = RunManager::new(0, CharacterId::Ironclad)
+            .with_content_callbacks(bridge_callbacks(resolve_stages_resuming_dummy));
+        rm.run_state.game_version = version;
+        rm.run_state.enter_event_room(EventId::BattlewornDummy);
+        rm.set_phase(Phase::Event);
+        rm.take_action(RunAction::EventChoice { idx: 0 });
+        let combat = rm.combat.as_mut().expect("combat set");
+        combat.player_won = true;
+        combat.is_over = true;
+        combat.event_combat_timed_out = timed_out;
+        combat.heist_recovered_gold = 42;
+        let before = rm.run_state.rng.rewards.counter();
+        rm.exit_combat_and_transition();
+        rm.run_state.rng.rewards.counter() - before
+    }
+
+    /// v0.111.0 `BattlewornDummy.Resume` offers `combatRoom.ExtraRewards`
+    /// through `RewardsCmd.OfferCustom` (`BattlewornDummy.cs:110-116`), whose
+    /// `GenerateWithoutOffering` populates each reward
+    /// (`RewardsSet.cs:135-138`): a fixed `GoldReward` still reads
+    /// `Rewards.NextInt(min, max + 1)`. v0.107.1 never offers the extras, and
+    /// a timed-out dummy returns before any reward. Parity seed Regent 6104
+    /// v0.111.0 (`rng.rewards` one behind after the dummy).
+    #[test]
+    fn battleworn_extra_gold_reward_populates_on_the_rewards_stream_v0111() {
+        assert_eq!(
+            battleworn_extra_gold_rewards_draws(crate::GameVersion::V0_111_0, false),
+            1
+        );
+        assert_eq!(
+            battleworn_extra_gold_rewards_draws(crate::GameVersion::V0_111_0, true),
+            0
+        );
+        assert_eq!(
+            battleworn_extra_gold_rewards_draws(crate::GameVersion::V0_107_1, false),
+            0
+        );
     }
 
     /// `build_event_combat` test double: a fight that is already won when it

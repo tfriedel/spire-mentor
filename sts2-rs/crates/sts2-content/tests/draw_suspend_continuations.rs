@@ -1116,3 +1116,146 @@ fn turn_end_in_hand_select_blocks_end_turn_v0107() {
 fn turn_end_in_hand_select_blocks_end_turn_v0111() {
     turn_end_in_hand_select_blocks_end_turn(V111);
 }
+
+// ── An auto-played card's exhaust draw holds its auto-play loop ──────────
+
+/// Catastrophe auto-plays Production, the only draw-pile card. Production
+/// exhausts, and Dark Embrace's `AfterCardExhausted` draw reshuffles the
+/// discard into Stratagem's grid. C# awaits the result-pile move inside
+/// `OnPlayWrapper` (CardModel.cs:1980-1989 → `CardCmd.Exhaust`, CardCmd.cs:244)
+/// and the AutoPlay inside Catastrophe's loop (Catastrophe.cs:20-31), so the
+/// second iteration picks only after the grid resolves. Rust did not park the
+/// tail on that draw, so the second Strike was auto-played before the pick
+/// (loadout Defect 6195 v0.107.1: `Shuffle` read 2 early, there via Joss Paper).
+fn auto_play_loop_waits_for_its_exhaust_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    let hp = |s: &CombatState| s.creatures[0].current_hp;
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 1);
+    for id in [
+        CardId::StrikeIronclad,
+        CardId::StrikeIronclad,
+        CardId::StrikeIronclad,
+    ] {
+        let uid = new_card(&mut state, id);
+        state.player.discard.push(uid);
+    }
+    let production = push_draw(&mut state, CardId::Production);
+    let cata = push_hand(&mut state, CardId::Catastrophe);
+    let _ = sts2_core::combat_loop::play_card(&mut state, cata, None);
+
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    assert!(state.player.exhaust.contains(&production));
+    assert_eq!(
+        hp(&state),
+        500,
+        "Catastrophe's second auto-play waits for the pick"
+    );
+
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert!(state.pending_autoplay_resume.is_none());
+    assert!(
+        hp(&state) < 500,
+        "the second iteration auto-played a Strike"
+    );
+}
+
+#[test]
+fn auto_play_loop_waits_for_its_exhaust_draw_v0111() {
+    auto_play_loop_waits_for_its_exhaust_draw(V111);
+}
+
+#[test]
+fn auto_play_loop_waits_for_its_exhaust_draw_v0107() {
+    auto_play_loop_waits_for_its_exhaust_draw(V107);
+}
+
+// ── Fiend Fire's attack waits for its exhausts' suspended draw ───────────
+
+/// Fiend Fire exhausts two Strikes; the first exhaust's Dark Embrace draw
+/// reshuffles the discard into Stratagem's grid. C# awaits each
+/// `CardCmd.Exhaust` before `DamageCmd.Attack` (FiendFire.cs:36-41), so no
+/// hit lands before the pick. Rust dealt the hits at once and killed the
+/// enemy before a Forgotten Soul parked on the draw could roll its target
+/// (loadout Ironclad 6200 v0.107.1).
+fn fiend_fire_hits_after_its_exhausts_suspended_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    let hp = |s: &CombatState| s.creatures[0].current_hp;
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 1);
+    for _ in 0..3 {
+        let uid = new_card(&mut state, CardId::DefendIronclad);
+        state.player.discard.push(uid);
+    }
+    let ff = push_hand(&mut state, CardId::FiendFire);
+    let _ = push_hand(&mut state, CardId::StrikeIronclad);
+    let _ = push_hand(&mut state, CardId::StrikeIronclad);
+    let _ = sts2_core::combat_loop::play_card(&mut state, ff, Some(0));
+
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    assert_eq!(hp(&state), 500, "no hit before the pick");
+
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert_eq!(hp(&state), 500 - 2 * 7, "two hits, one per exhausted card");
+}
+
+/// The same with Forgotten Soul (1 damage to a random enemy per exhaust)
+/// and a 14-HP enemy that Fiend Fire's two hits kill: the first exhaust's
+/// Forgotten Soul is parked on the draw, and C# runs it before the attack,
+/// so both Forgotten Souls roll a target (`CombatTargets` +2).
+fn fiend_fire_waits_for_the_parked_forgotten_soul(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    state.creatures[0].current_hp = 14;
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::ForgottenSoul,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    });
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 1);
+    for _ in 0..3 {
+        let uid = new_card(&mut state, CardId::DefendIronclad);
+        state.player.discard.push(uid);
+    }
+    let ff = push_hand(&mut state, CardId::FiendFire);
+    let _ = push_hand(&mut state, CardId::StrikeIronclad);
+    let _ = push_hand(&mut state, CardId::StrikeIronclad);
+    let before = state.run_rng.combat_targets.counter();
+    let _ = sts2_core::combat_loop::play_card(&mut state, ff, Some(0));
+    assert!(state.pending_choice.is_some(), "Stratagem grid opens");
+    resolve(&mut state, 0);
+    assert_eq!(state.creatures[0].current_hp, 0);
+    assert_eq!(
+        state.run_rng.combat_targets.counter() - before,
+        2,
+        "both Forgotten Souls hit before Fiend Fire's kill"
+    );
+}
+
+#[test]
+fn fiend_fire_waits_for_the_parked_forgotten_soul_v0111() {
+    fiend_fire_waits_for_the_parked_forgotten_soul(V111);
+}
+
+#[test]
+fn fiend_fire_waits_for_the_parked_forgotten_soul_v0107() {
+    fiend_fire_waits_for_the_parked_forgotten_soul(V107);
+}
+
+#[test]
+fn fiend_fire_hits_after_its_exhausts_suspended_draw_v0111() {
+    fiend_fire_hits_after_its_exhausts_suspended_draw(V111);
+}
+
+#[test]
+fn fiend_fire_hits_after_its_exhausts_suspended_draw_v0107() {
+    fiend_fire_hits_after_its_exhausts_suspended_draw(V107);
+}
