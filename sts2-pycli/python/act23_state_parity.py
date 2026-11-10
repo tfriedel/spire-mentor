@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import io
 import json
 import random
 import sys
@@ -1415,7 +1416,20 @@ def print_report(rep: SweepReport) -> None:
                 print(f"        e.g. {ex}")
 
 
+def _utf8_stdio() -> None:
+    """Write stdout/stderr as UTF-8.
+
+    Redirected to a file or pipe on Windows, they default to cp1252, which has
+    no ``Δ``. The run summary prints ``max |Δhp|``, so a finished run crashed
+    there with ``UnicodeEncodeError`` and lost its verdict.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper) and stream.encoding.lower() != "utf-8":
+            stream.reconfigure(encoding="utf-8")
+
+
 def main() -> int:
+    _utf8_stdio()
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

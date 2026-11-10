@@ -8,6 +8,9 @@ the CLI on real seeds.
 
 from __future__ import annotations
 
+import io
+import sys
+
 import act23_state_parity as a23
 import pytest
 from run_parity import Snap
@@ -545,3 +548,27 @@ def test_graft_reports_an_engine_refusal() -> None:
 
     problems = a23._graft_loadout(_Side(), Refuses(), LOADOUT, RS_VIEW)
     assert problems == ["Rust set_player failed: 'unknown relic'"]
+
+
+def test_utf8_stdio_survives_a_cp1252_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A piped stdout on Windows is cp1252, which has no ``Δ``; the run summary
+    prints ``max |Δhp|`` and used to crash there after the whole run had passed."""
+    raw = io.BytesIO()
+    cp1252 = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+    monkeypatch.setattr(sys, "stdout", cp1252)
+    with pytest.raises(UnicodeEncodeError):
+        print("max |Δhp|=0")
+    a23._utf8_stdio()
+    print("max |Δhp|=0")
+    sys.stdout.flush()
+    assert raw.getvalue().endswith("max |Δhp|=0\n".encode())
+
+
+def test_utf8_stdio_leaves_a_non_textiowrapper_stream_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A replaced stream without ``reconfigure`` (StringIO) is left as it is."""
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    a23._utf8_stdio()
+    assert sys.stdout is buf
