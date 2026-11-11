@@ -306,6 +306,12 @@ pub enum VarKey {
     /// in `CombatState`, which sits at clippy's large-stack-array limit.
     /// Appended so no existing discriminant moves.
     AfterCardDrawnDeferred = 43,
+    /// A drawn card whose `Hook.AfterCardDrawn` walk is parked on a nested
+    /// draw's choice (`PendingDrawResume::then_after_drawn`): the power
+    /// listener it suspended in, the last of its snapshot, and its flags,
+    /// packed. Kept on the card, not in `CombatState`, which sits at clippy's
+    /// large-stack-array limit. Appended so no existing discriminant moves.
+    AfterCardDrawnWalk = 44,
 }
 
 // Bead sts2-rs-k2y (P6-8): persistent card enchantments (`Card::enchantments`).
@@ -1072,6 +1078,7 @@ impl Card {
         // The original's owed on-draw pass is its own: a clone was never
         // drawn (Juggling cloning a parked Hellraiser play).
         clone.combat_vars.zero(VarKey::AfterCardDrawnDeferred);
+        clone.combat_vars.zero(VarKey::AfterCardDrawnWalk);
         clone
     }
 

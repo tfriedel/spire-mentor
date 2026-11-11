@@ -2962,13 +2962,14 @@ pub struct PendingDrawResume {
     /// `CombatState`, which holds this struct twice, past clippy's
     /// large-stack-array limit.
     pub then_play_sly: bool,
-    /// An Ethereal card whose `ChainsOfBindingPower.AfterCardDrawn` waits on
-    /// this draw: a Pagestorm that listens BEFORE Chains of Binding drew on
-    /// it, and that draw suspended on a reshuffle select (Stratagem). C#
-    /// `Hook.AfterCardDrawn` awaits Pagestorm's `CardPileCmd.Draw`, pick
-    /// included, before Chains checks the card against this turn's `Bound`
-    /// count (GH #1150).
-    pub then_chains_bound: Option<CardUid>,
+    /// A drawn card whose `Hook.AfterCardDrawn` walk waits on this draw: one
+    /// of its power listeners (Pagestorm, Iteration) drew, and that draw
+    /// suspended on a choice (Stratagem's reshuffle pick). C# awaits the
+    /// listener, pick included, before the later listeners (Chains of
+    /// Binding's `Bound` count, GH #1150; Automation; the card's own Void)
+    /// see the card. Where the walk resumes is on the card
+    /// ([`cards::VarKey::AfterCardDrawnWalk`]).
+    pub then_after_drawn: Option<CardUid>,
     /// Thunderclap's Vulnerable still owed to these enemies (bit `id - 1` of
     /// the creature's arena id): an earlier target's apply opened a select
     /// (Vicious drew Seeker Strike, which Hellraiser auto-played) while this
@@ -6478,17 +6479,6 @@ impl CombatState {
         }
     }
 
-    /// Arena id of the player's first `kind` power (`u32::MAX` if none).
-    /// Among live powers, id order is application order -- the order C#
-    /// `IterateHookListeners` walks a creature's power list.
-    pub(crate) fn player_power_arena_id(&self, kind: PowerKind) -> u32 {
-        self.player_power_uids()
-            .iter()
-            .filter_map(|u| self.powers.get_by_id(u.0))
-            .find(|p| p.kind == kind)
-            .map_or(u32::MAX, |p| p.id.get())
-    }
-
     /// Yield the player's power [`PowerUid`]s as the UNION of the mirror
     /// Creature's `powers` and the legacy `state.player.powers`, deduped
     /// by uid (mirror first, then legacy uids not already seen).
@@ -8896,12 +8886,22 @@ impl CombatState {
         if self.carry_into_resuspended_draw(&pdr) {
             return Some(StepResult::PendingChoice);
         }
-        // Pagestorm's draw is done: Chains of Binding now checks the Ethereal
-        // card that triggered it, before the outer draw goes on.
-        if let Some(uid) = pdr.then_chains_bound {
-            let stacks = self.chains_of_binding_stacks();
-            self.afflict_bound_from_chains(uid, stacks);
-        }
+        // The listener's draw is done: the rest of the drawn card's
+        // `AfterCardDrawn` walk runs before the outer draw goes on. Its own
+        // later draw may suspend again; the rest waits behind that one.
+        let pdr = if let Some(uid) = pdr.then_after_drawn {
+            self.resume_after_card_drawn_walk(uid);
+            let rest = PendingDrawResume {
+                then_after_drawn: None,
+                ..pdr
+            };
+            if self.carry_into_resuspended_draw(&rest) {
+                return Some(StepResult::PendingChoice);
+            }
+            rest
+        } else {
+            pdr
+        };
         // The rider's draw is done: the outer draw it interrupted goes on.
         let pdr = if pdr.outer_draw.remaining() > 0 {
             let mut own = crate::cards::OwnDraw::default();
@@ -9174,8 +9174,8 @@ impl CombatState {
             again.then_relic_after_card_exhausted = pdr.then_relic_after_card_exhausted;
             again.then_block_unpowered += pdr.then_block_unpowered;
         }
-        if again.then_chains_bound.is_none() {
-            again.then_chains_bound = pdr.then_chains_bound;
+        if again.then_after_drawn.is_none() {
+            again.then_after_drawn = pdr.then_after_drawn;
         }
         again.then_thunderclap_vulnerable |= pdr.then_thunderclap_vulnerable;
         // The card that owns the tail awaits this whole draw, nested draws
@@ -9464,7 +9464,7 @@ impl CombatState {
         // `CombatState.CurrentSide == Owner.Side` (ChainsOfBindingPower.cs:38,
         // both builds): a draw on the enemy turn (Centennial Puzzle on a hit)
         // binds nothing (random-loadout Regent 5776 v0.111.0). Like
-        // Speedster's gate in `invoke_card_drawn_for_newly_drawn`.
+        // Speedster's gate in `after_card_drawn_power`.
         if self.side != Side::Player {
             return 0;
         }
@@ -9523,18 +9523,9 @@ impl CombatState {
     }
 
     /// Walk the suffix of the player's hand newly populated by the most
-    /// recent `draw_signaling` and invoke per-card on-draw effects.
-    ///
-    /// Currently only the `CardId::Void` energy-drain branch from Python's
-    /// `_invoke_card_drawn` is implemented; the broader `on_card_drawn`
-    /// power-bus dispatch (`hooks::dispatch_on_card_drawn`) remains a
-    /// no-op until bead `sts2-rs-h9u-8` lands the per-card uid context.
-    /// Bead `sts2-rs-6ynt.3.2`.
-    ///
-    /// Per-card on-draw riders also handled here (bead `sts2-rs-8z4u4`):
-    /// Regent `KinglyPunch` permanently gains
-    /// [`Self::KINGLY_PUNCH_DRAW_INCREASE`] base_damage per draw, and
-    /// `KinglyKick` loses 1 energy cost per draw (`AddThisCombat(-1)`).
+    /// recent draw and run C# `Hook.AfterCardDrawn` for each card: the Early
+    /// pass (Hellraiser), then every listener's `AfterCardDrawn` in
+    /// `IterateHookListeners` order ([`Self::after_card_drawn_walk`]).
     pub(crate) fn invoke_card_drawn_for_newly_drawn(
         &mut self,
         hand_len_before: usize,
@@ -9590,6 +9581,12 @@ impl CombatState {
         // routes through `apply_power_to_creature` when `player.creature_uid`
         // is set, so the power lands on `state.creatures[uid].powers`.
         let has_hellraiser = self.player_power_amount(PowerKind::Hellraiser) > 0;
+        // `History.CardDrawn` precedes the hook (CardPileCmd.cs), so a Status
+        // is in Iteration's count before the Early pass's auto-play draws.
+        // Under Hellraiser `drawn` holds one card (see below).
+        if has_hellraiser {
+            self.count_drawn_status_cards(&drawn);
+        }
         // `HellraiserPower.AfterCardDrawnEarly` (`HellraiserPower.cs:37-68`)
         // auto-plays every drawn Strike, with ONE cap: while every hittable
         // enemy shows infinite HP (`HittableEnemies.All(c =>
@@ -9683,16 +9680,20 @@ impl CombatState {
                 }
             }
             if crate::combat_loop::combat_is_ending(self) {
-                self.count_drawn_status_cards(&drawn);
                 return;
             }
         }
-        self.after_card_drawn_normal_pass(drawn, from_hand_draw, &early_auto_played);
+        self.after_card_drawn_normal_pass(
+            drawn,
+            from_hand_draw,
+            &early_auto_played,
+            has_hellraiser,
+        );
     }
 
-    /// The normal pass is empty once the combat is ending. Iteration's
-    /// first-Status gate reads `CardDrawnEntry` history, not a listener, so a
-    /// drawn Status still counts toward it.
+    /// Record drawn Status cards in this turn's count (C# `CardDrawnEntry`,
+    /// which Iteration's first-Status gate reads). History, not a listener:
+    /// a card counts even when the combat is ending and no listener runs.
     fn count_drawn_status_cards(&mut self, drawn: &[CardUid]) {
         for &uid in drawn {
             if self
@@ -9726,7 +9727,6 @@ impl CombatState {
             }
             let drawn: smallvec::SmallVec<[CardUid; 8]> = smallvec::smallvec![uid];
             if crate::combat_loop::combat_is_ending(self) {
-                self.count_drawn_status_cards(&drawn);
                 continue;
             }
             let early: smallvec::SmallVec<[CardUid; 1]> = if flags & AFTER_DRAWN_AUTO_PLAYED != 0 {
@@ -9734,497 +9734,220 @@ impl CombatState {
             } else {
                 smallvec::SmallVec::new()
             };
+            // Counted before its Early pass (only Hellraiser parks a walk).
             self.after_card_drawn_normal_pass(
                 drawn,
                 flags & AFTER_DRAWN_FROM_HAND_DRAW != 0,
                 &early,
+                true,
             );
         }
     }
 
     /// C# `Hook.AfterCardDrawn`'s second pass: every listener's
-    /// `AfterCardDrawn` for the cards just drawn, after the Early pass.
-    #[allow(clippy::too_many_lines)]
+    /// `AfterCardDrawn`, one drawn card at a time, after the Early pass.
+    ///
+    /// `status_counted`: the cards' `CardDrawnEntry` is already in the turn's
+    /// Status count (the Hellraiser path counts it before its Early pass).
     fn after_card_drawn_normal_pass(
         &mut self,
         drawn: smallvec::SmallVec<[CardUid; 8]>,
         from_hand_draw: bool,
         early_auto_played: &[CardUid],
+        status_counted: bool,
     ) {
-        // Silent `SpeedsterPower.AfterCardDrawn` (C# `SpeedsterPower.cs:18-27`):
-        // for each card drawn NOT via the turn-start hand draw
-        // (`fromHandDraw == false` — the C# default for every `CardPileCmd.Draw`
-        // except `CombatManager`'s hand draw), deal `Amount` Unpowered damage to
-        // every hittable enemy. The C# gate also requires `CurrentSide ==
-        // Owner.Side` (`SpeedsterPower.cs:17`), so a draw during the ENEMY turn
-        // (Centennial Puzzle on an enemy hit) deals nothing. Read the
-        // stack once off the mirror+legacy union; one hit per drawn card is
-        // dealt after the per-card rider loop (Speedster consumes no RNG and
-        // deals to ALL enemies, so the deferral is observationally identical to
-        // C#'s per-card `AfterCardDrawn` firing).
-        let speedster_amount = if from_hand_draw || self.side != Side::Player {
-            0
-        } else {
-            self.player_power_amount(PowerKind::Speedster).max(0)
-        };
-        let speedster_hits = if speedster_amount > 0 {
-            i32::try_from(drawn.len()).unwrap_or(i32::MAX)
-        } else {
-            0
-        };
-
-        // Bead `sts2-rs-lj36b`: ConfusedPower.AfterCardDrawn (Snecko Eye /
-        // FAKE_SNECKO_EYE). C# `ConfusedPower.cs::AfterCardDrawn` re-rolls
-        // every player card's energy cost as it is drawn, *unless* its
-        // canonical cost is negative (X-cost or unplayable Status/Curse,
-        // `card.EnergyCost.Canonical < 0`). The roll is
-        // `RunState.Rng.CombatEnergyCosts.NextInt(4)` ([0,3]) and is set as
-        // an absolute per-combat cost (`SetThisCombat`). Read the
-        // mirror+legacy power union via `player_power_amount` so a
-        // mirror-applied Confused (FAKE_SNECKO_EYE wires it through
-        // `apply_power_to_creature`) is seen. Confused is the only on-draw
-        // RNG consumer in this loop, so its position relative to the other
-        // per-card riders does not perturb the `combat_energy_costs` cursor.
-        let confused = self.player_power_amount(PowerKind::Confused) > 0;
-
-        // Bead `sts2-rs-4wppb`: PagestormPower.AfterCardDrawn (Necrobinder).
-        // C# `PagestormPower.cs`: when the owning player draws a card that has
-        // the `Ethereal` keyword, draw `Amount` additional cards. Read the
-        // player's stack count once (mirror+legacy union via
-        // `player_power_amount`); the per-card accumulation + the actual draw
-        // (which recurses through `draw_into_hand` → here, so a cascade of
-        // Ethereal-into-Ethereal draws fires faithfully) live below.
-        let pagestorm_amount = self.player_power_amount(PowerKind::Pagestorm).max(0);
-
-        // Defect `IterationPower.AfterCardDrawn` (C# `IterationPower.cs`): the
-        // FIRST `CardType::Status` card the owner draws each turn draws
-        // `Amount` extra cards. Read the stack once (mirror+legacy union); the
-        // per-drawn-card "first status this turn" gate + the deferred draw
-        // (which recurses through `draw_via_state` → here) live below.
-        // Iteration is a Defect power and Pagestorm/Speedster/CorrosiveWave are
-        // Necrobinder/Silent, so the deferred draw can never reorder against
-        // them in a single-character combat.
-        let iteration_amount = self.player_power_amount(PowerKind::Iteration).max(0);
-
-        // Silent `CorrosiveWavePower.AfterCardDrawn` (C#
-        // `CorrosiveWavePower.cs:25-42`): for each card the owning player
-        // draws, apply `Amount` Poison to every hittable enemy. The C# gate
-        // `card.Owner.Creature == base.Owner` is always true here (this walks
-        // the player's own hand). Read the stack once (mirror+legacy union);
-        // accumulate per-drawn-card below and apply after the loop (deferred
-        // past the `self.cards` borrow). Poison applies no RNG, so the
-        // post-loop placement is order-neutral.
-        let corrosive_wave_amount = self.player_power_amount(PowerKind::CorrosiveWave).max(0);
-
-        // Bead `sts2-rs-kese5` (f933s sub-1) — hoisted out of the per-card
-        // loop (perf 2026-07-04): the ChainsOfBinding stack count is
-        // loop-invariant (the loop body mutates card fields, player energy,
-        // combat-log counters, and Automation `counter`s — never a power's
-        // kind/amount, and it neither adds nor removes powers), so one scan
-        // replaces the per-drawn-card `player.powers` walk. Gated on the
-        // `present_kinds` superset first: no live ChainsOfBinding anywhere ⇒
-        // the walk would find nothing ⇒ 0, bit-identically.
-        let chains_stacks: u32 = self.chains_of_binding_stacks();
-
-        // Perf 2026-07-04: `present_kinds` is a conservative superset of every
-        // live power kind, so a miss proves the per-drawn-card Automation walk
-        // over the whole power arena below could never match — skip it.
-        let automation_present = self.powers.present_kinds().contains(PowerKind::Automation);
-        // v0.111.0 `CacophonyPower` (GH #794); the kind only exists from v0.111.0.
-        let cacophony_present = self.game_version >= crate::GameVersion::V0_111_0
-            && self.powers.present_kinds().contains(PowerKind::Cacophony);
-        // Cacophony damage triggers (one `Amount` per instance that wrapped),
-        // dealt after the per-card loop like Speedster's.
-        let mut cacophony_hits: smallvec::SmallVec<[i32; 2]> = smallvec::SmallVec::new();
-        // A Cacophony instance applied after Pagestorm counts an Ethereal
-        // card only once Pagestorm's nested draw has run: C#
-        // `Hook.AfterCardDrawn` awaits the listeners in list order, so the
-        // nested cards tick (and may fire) the counter first. These are the
-        // instances whose tick for this batch waits for that draw.
-        let cacophony_after_pagestorm: Option<u32> = if cacophony_present && pagestorm_amount > 0 {
-            Some(self.player_power_arena_id(PowerKind::Pagestorm))
-        } else {
-            None
-        };
-        let mut cacophony_deferred: smallvec::SmallVec<[std::num::NonZeroU32; 2]> =
-            smallvec::SmallVec::new();
-        // `CacophonyPower`'s `CardsVar(33)` (decomp CacophonyPower.cs:20).
-        const CACOPHONY_CARDS: i32 = 33;
-
-        // Bead `sts2-rs-q6bix` (F-S): accumulated AutomationPower energy
-        // gain, applied once after the per-card loop (deferred past the
-        // `self.powers` borrow).
-        // C# `AutomationPower.cs:45` flashes once per instance that resets
-        // (`cardsLeft <= 0`) — same accumulate-then-apply deferral as
-        // `automation_energy` (the power is always player-owned, so a count
-        // suffices; no per-owner tracking needed).
-        let mut automation_flashes: i32 = 0;
-        // Bead `sts2-rs-4wppb`: accumulated Pagestorm extra-draw count, drawn
-        // once after the per-card loop (deferred past the `self.cards` borrow;
-        // the draw recurses into this fn so the cascade is handled there).
-        let mut pagestorm_draws: i32 = 0;
-        // C# `PagestormPower.cs:23` flashes once per qualifying `AfterCardDrawn`
-        // call (one per Ethereal card drawn), same accumulate-then-apply
-        // deferral as `pagestorm_draws` — applied after the loop, ahead of the
-        // deferred draw.
-        let mut pagestorm_flashes: i32 = 0;
-        // CorrosiveWave Poison-on-draw: count the number of drawn cards that
-        // trigger `CorrosiveWavePower.AfterCardDrawn`. C# applies a SEPARATE
-        // `PowerCmd.Apply<PoisonPower>(base.Amount)` per drawn card, and each
-        // such application re-enters the `ModifyPowerAmountGivenAdditive`
-        // chain — so a flat per-application Poison additive (e.g. the Silent
-        // relic SneckoSkull, +1 per applied Poison) fires ONCE PER CARD, not
-        // once for an accumulated sum. Accumulating into a single
-        // `apply_power_to_enemy(Poison, N*Amount)` would apply that additive
-        // only once, under-counting by `(cards-1) * additive` (seed 1131:
-        // Adrenaline draws 2 cards under SneckoSkull → C# 6, accumulate-once 5).
-        // Apply per drawn card after the loop instead (deferred past the
-        // `self.cards` borrow; Poison applies no RNG, so the count is exact).
-        let mut corrosive_wave_cards: i32 = 0;
-        // Accumulated Defect Iteration extra-draw count, drawn once after the
-        // per-card loop (deferred past the `self.cards` borrow; the draw
-        // recurses into this fn so a status-into-status cascade is bounded and
-        // does not re-fire — the per-turn counter is already past 1).
-        let mut iteration_draws: i32 = 0;
-
-        // C# `Hook.AfterCardDrawn` walks the player's powers in list
-        // (application) order and AWAITS each listener: when Pagestorm was
-        // applied before Chains of Binding, `PagestormPower.AfterCardDrawn`
-        // runs its nested `CardPileCmd.Draw` (PagestormPower.cs:19-26) to
-        // completion -- every nested card taking its own Chains check --
-        // before `ChainsOfBindingPower.AfterCardDrawn` sees the Ethereal card
-        // that triggered it (ChainsOfBindingPower.cs:37-47). Its history count
-        // of this turn's `Bound`s then includes the nested ones, so at the cap
-        // the Ethereal card stays unafflicted and a nested card is Bound
-        // instead. Rust ran Chains first: it bound the Ethereal Defile, C#
-        // bound the Volley Pagestorm drew after it, and the next Bound play
-        // was vetoed by `ShouldPlay` in Rust only (loadout Necrobinder
-        // v0.107.1 1244). Applied the other way round, Chains does go first.
-        //
-        // "Applied first" is the power's arena id, not its position in
-        // `player_power_uids()`: that lists the mirror creature's powers and
-        // then the legacy list, so a monster-applied Chains of Binding (the
-        // Queen's) sorted after a Pagestorm the player played later (loadout
-        // Necrobinder v0.107.1 1019: C# Chains first, Rust walked Pagestorm
-        // first). New ids are `max + 1`, so among live powers id order is
-        // application order.
-        //
-        // Iteration's nested draw on the turn's first Status card is the same
-        // shape (IterationPower.cs:18-29): applied before Chains of Binding,
-        // its drawn cards take their `Bound`s before the Status card is
-        // checked (Defect v0.107.1 5533 @595: C# bound the Void Iteration
-        // drew, Rust the Dazed that triggered it).
-        let (pagestorm_id, iteration_id, chains_id) = if chains_stacks > 0
-            && (pagestorm_amount > 0 || iteration_amount > 0 || cacophony_present)
-        {
-            let kind_id = |kind: PowerKind| {
-                self.player_power_uids()
-                    .iter()
-                    .filter_map(|u| self.powers.get_by_id(u.0))
-                    .find(|p| p.kind == kind)
-                    .map(|p| p.id.get())
-            };
-            (
-                kind_id(PowerKind::Pagestorm),
-                kind_id(PowerKind::Iteration),
-                kind_id(PowerKind::ChainsOfBinding),
-            )
-        } else {
-            (None, None, None)
-        };
-        let listens_before_chains =
-            |listener: Option<u32>| matches!((listener, chains_id), (Some(l), Some(c)) if l < c);
-        let pagestorm_before_chains = pagestorm_amount > 0 && listens_before_chains(pagestorm_id);
-        let iteration_before_chains = iteration_amount > 0 && listens_before_chains(iteration_id);
-        // Drawn cards whose Chains check waits for a nested draw.
-        let mut chains_after_nested_draw: smallvec::SmallVec<[CardUid; 1]> =
-            smallvec::SmallVec::new();
-
         for uid in drawn {
-            let idx = (uid.get() as usize).saturating_sub(1);
-            let Some(card) = self.cards.get(idx) else {
-                continue;
-            };
-            let card_id = card.card_id;
-            // Captured under the same immutable `card` borrow; consumed by the
-            // Iteration first-status-of-turn gate below.
-            let card_type = card.card_type;
-            // Captured under the same immutable `card` borrow as `card_id`;
-            // consumed by the Pagestorm accumulation below (bead `sts2-rs-4wppb`).
-            // C# reads `card.Keywords`, which folds `Hook.ModifyKeywordsInCombat`
-            // (CardModel.cs:526/1179): HexPower grants Ethereal to every Hexed
-            // card (HexPower.cs:26-37), so a Hexed draw chains Pagestorm too
-            // (Necrobinder full seed 3790). Same predicate as the play-time
-            // Ethereal gate.
-            let is_ethereal =
-                pagestorm_amount > 0 && crate::combat_loop::card_is_ethereal_at_play(self, card);
-            // Canonical (base) cost captured before any per-card cost rider
-            // mutates `self.cards[idx].cost`. For the Confused skip check:
-            // C# `ConfusedPower.AfterCardDrawn` skips only `Canonical < 0`
-            // (Status/Curse with canonicalCost=-1). X-cost cards have
-            // `Canonical = 0` in C# (`CardEnergyCost` ctor: `CostsX ? 0 : canonicalCost`),
-            // so they ARE rolled — consuming one RNG read — even though the modifier
-            // is never applied (C# `GetWithModifiers` short-circuits on `CostsX`).
-            // In Rust, X-cost cards use cost=-1 with `is_x_cost()=true`; we must
-            // consume the read without overwriting the sentinel. Bead `sts2-rs-ktqmg`.
-            let canonical_cost = card.base_cost();
-            // Quest cards (`base(-1, CardType.Quest, ..)`, no `HasEnergyCostX`)
-            // keep `Canonical = -1` in C# (`CardEnergyCost.cs:86`), so Confused
-            // skips them; Rust models them as cost -1 Skills, which
-            // `is_x_cost()` alone would mistake for X-cost cards.
-            let is_x_cost_card = card.is_x_cost() && !card.is_quest();
-            // Regent KinglyPunch (`KinglyPunch.cs::AfterCardDrawn`, bead
-            // `sts2-rs-8z4u4`): every time this card is drawn into hand it
-            // permanently bumps its own `base_damage` by `Increase` (4 base,
-            // 6 upgraded — C# `KinglyPunch.cs` OnUpgrade
-            // `Increase.UpgradeValueBy(2m)`). Bead `sts2-rs-om4tt` restores
-            // the upgrade-scaled rider; previously hardcoded to 4.
-            // C# gates on `card == this`, which here is the per-uid match —
-            // we mutate exactly the drawn card instance.
-            if card_id == crate::cards::CardId::KinglyPunch {
-                if let Some(c) = self.cards.get_mut(idx) {
-                    let inc = if c.upgraded {
-                        Self::KINGLY_PUNCH_DRAW_INCREASE_UPGRADED
-                    } else {
-                        Self::KINGLY_PUNCH_DRAW_INCREASE
-                    };
-                    c.base_damage = c.base_damage.saturating_add(inc);
-                }
+            // C# `CardPileCmd.Draw` records `CardDrawnEntry` before it awaits
+            // the hook, card by card: Iteration's Status count includes this
+            // card and any drawn ahead of it, nested draws included.
+            if !status_counted {
+                self.count_drawn_status_cards(&[uid]);
             }
-            // Bead `sts2-rs-lj36b` + `sts2-rs-ktqmg`: ConfusedPower per-draw
-            // cost re-roll. C# `ConfusedPower.AfterCardDrawn` skips ONLY cards
-            // where `card.EnergyCost.Canonical < 0` — i.e. Status/Curse and
-            // Quest cards (`canonicalCost = -1`). X-cost cards have `Canonical = 0` (not
-            // negative), so C# DOES consume one `CombatEnergyCosts.NextInt(4)`
-            // read for them (even though the resulting modifier is ignored by
-            // `GetWithModifiers` which short-circuits on `CostsX`).
-            // In Rust: skip only unplayable cards (`canonical_cost < 0 AND NOT
-            // is_x_cost`); for X-cost cards consume the read but leave
-            // `c.cost = -1` intact (overwriting the sentinel would break
-            // `is_x_cost()` and drain player energy on play).
-            // C# ref: `ConfusedPower.cs::AfterCardDrawn` (v0.103.2).
-            if confused && (canonical_cost >= 0 || is_x_cost_card) {
-                let rolled = self.run_rng.combat_energy_costs.next_int(0, 3);
-                // `EnergyCost.SetThisCombat(roll)`: an Absolute for the rest of
-                // combat, so it hides every earlier modifier. An X-cost card
-                // only consumes the read (`GetWithModifiers` short-circuits on
-                // `CostsX`; its negative base drops the modifier).
-                if let Some(c) = self.cards.get_mut(idx) {
-                    c.cost.set_this_combat(rolled, false);
-                }
-            }
-            // Regent KinglyKick (`KinglyKick.cs::AfterCardDrawn`, bead
-            // `sts2-rs-8z4u4`): every draw reduces this card's energy cost
-            // by 1 for the rest of combat (`EnergyCost.AddThisCombat(-1)`).
-            // MUST run AFTER the Confused re-roll above: C#
-            // `CombatState.IterateHookListeners` fires powers (Confused) BEFORE
-            // pile cards (KinglyKick), and `CardEnergyCost` applies its local
-            // modifiers chronologically. Confused's `SetThisCombat(roll)` is an
-            // absolute set; KinglyKick's `AddThisCombat(-1)` then subtracts from
-            // it, so a card drawn while Confused lands at `roll - 1`, not `roll`.
-            // Running KinglyKick first (the old order) let Confused's absolute
-            // overwrite clobber the -1 (regent-hand-cost part B, seeds
-            // 4113/4597/5402). When not Confused the block above is skipped, so
-            // ordering is behavior-neutral. `AddThisCombat` is unclamped: a
-            // shave below 0 stays as cost debt (like Midnight's).
-            if card_id == crate::cards::CardId::KinglyKick && idx < self.cards.len() {
-                self.add_card_cost_this_combat(self.cards[idx].uid, -1);
-            }
-            // Bead `sts2-rs-kese5` (f933s sub-1): ChainsOfBindingPower
-            // AfterCardDrawn. C# `ChainsOfBindingPower.cs` (v0.103.2)
-            // afflicts each newly-drawn player card with `Bound` up to
-            // the power's stack-count per turn; further draws this
-            // turn after the cap are not afflicted. The per-turn
-            // cap-check budget lives on
-            // [`TurnEvents::bound_cards_afflicted_by_chains_this_turn`]
-            // (bead `sts2-rs-hmxmc`) and clears at turn start.
-            //
-            // The player's ChainsOfBinding stack count (`chains_stacks`) is
-            // read ONCE above the loop — it is loop-invariant (see the hoist
-            // comment). If the card already carries an affliction we skip —
-            // the flat single-slot affliction model matches C#
-            // `CardModel.Affliction` semantics, and `Bound`'s `CanAfflict`
-            // returns false on already-afflicted cards.
-            //
-            // A Strike HellraiserPower auto-played in the Early pass above was
-            // played UNafflicted (so the play neither tripped `ShouldPlay` nor
-            // set `boundCardPlayed`, act23 Ironclad:1007) and takes `Bound`
-            // here, after its nested draws took theirs (`Bound.CanAfflict`
-            // ignores the card's pile).
             let auto_played = early_auto_played.contains(&uid);
-            // A Pagestorm listening BEFORE Chains of Binding draws its card
-            // first, so that nested draw's cards take their `Bound`s before
-            // this one is checked against the cap (see
-            // `pagestorm_before_chains`).
-            // Iteration fires on the turn's first Status card (the count
-            // below, before this card is added).
-            let fires_iteration = iteration_before_chains
-                && card_type == crate::cards::CardType::Status
-                && self.combat_log.status_cards_drawn_this_turn == 0;
-            // A Cacophony applied before Chains of Binding that this card
-            // brings to its 33rd draw hits first: a kill there runs Gremlin
-            // Horn's nested draw, whose cards take their `Bound`s before this
-            // one is checked (loadout Necrobinder v0.111.0 8178: C# bound the
-            // Squeeze the Horn drew, Rust the Pull From Below that set the hit
-            // off).
-            let fires_cacophony = cacophony_present
-                && chains_id.is_some_and(|chains| {
-                    self.powers.iter().any(|p| {
-                        p.kind == PowerKind::Cacophony
-                            && p.id.get() < chains
-                            && p.counter.saturating_add(1) >= CACOPHONY_CARDS
-                    })
+            // A walk that suspends parks itself on the nested draw's resume
+            // ([`Self::park_after_card_drawn_walk`]). Only the per-card draw
+            // loop holds a listener that can suspend, so no card follows it.
+            let _ = self.after_card_drawn_walk(uid, from_hand_draw, auto_played, 0, u32::MAX);
+        }
+    }
+
+    /// One drawn card's `Hook.AfterCardDrawn` walk over C#
+    /// `CombatState.IterateHookListeners` (CombatState.cs): the player's powers
+    /// in the order they were applied, then the card's own hook (Void,
+    /// KinglyKick, KinglyPunch), then its enchantment's (Slither). Relics,
+    /// potions, orbs and modifiers have no `AfterCardDrawn` in either build.
+    /// Each listener is awaited before the next starts, so a nested draw
+    /// (Pagestorm, Iteration) or a kill's death hooks (Speedster, Cacophony:
+    /// Gremlin Horn's energy and draw) finish before a later listener sees
+    /// the card.
+    ///
+    /// Only power listeners with an arena id in `(after, last]` run: a resumed
+    /// walk starts past the listener it suspended in, and C# snapshots the
+    /// listener list when the walk starts, so a power applied meanwhile does
+    /// not join it. Returns `true` when a listener's nested draw suspended on
+    /// a choice; the rest of the walk then waits on that draw's resume.
+    fn after_card_drawn_walk(
+        &mut self,
+        uid: CardUid,
+        from_hand_draw: bool,
+        auto_played: bool,
+        after: u32,
+        last: u32,
+    ) -> bool {
+        // `present_kinds` is a superset of the live kinds: with none of the
+        // listener kinds anywhere, only the card's own listeners can run.
+        if self
+            .powers
+            .present_kinds()
+            .intersects(&AFTER_CARD_DRAWN_POWERS)
+        {
+            let listeners = self.after_card_drawn_power_listeners(after, last);
+            let snapshot_last = listeners.last().map_or(after, |&(id, _)| id.get());
+            for (id, kind) in listeners {
+                if self.after_card_drawn_power(id, kind, uid, from_hand_draw)
+                    && self.park_after_card_drawn_walk(
+                        uid,
+                        from_hand_draw,
+                        auto_played,
+                        id.get(),
+                        snapshot_last,
+                    )
+                {
+                    return true;
+                }
+            }
+        }
+        self.after_card_drawn_card_listeners(uid, from_hand_draw, auto_played);
+        false
+    }
+
+    /// The player's live `AfterCardDrawn` power listeners with an arena id in
+    /// `(after, last]`, in arena-id (application) order -- the order C#
+    /// `IterateHookListeners` walks a creature's power list. A non-instanced
+    /// kind listens once (its stacks summed over the mirror+legacy union, as
+    /// [`Self::player_power_amount`] reads them); Automation and Cacophony are
+    /// instanced and listen per instance.
+    fn after_card_drawn_power_listeners(
+        &self,
+        after: u32,
+        last: u32,
+    ) -> smallvec::SmallVec<[(NonZeroU32, PowerKind); 4]> {
+        let mine = self.player_power_uids();
+        // Co-op: only the drawer's Automation counts its draws
+        // (`AutomationPower.cs`: `card.Owner == Owner.Player`); a waiting
+        // teammate's row stays in the arena.
+        let seated = crate::coop::has_seats(self);
+        let cacophony_live = self.game_version >= crate::GameVersion::V0_111_0;
+        let mut out: smallvec::SmallVec<[(NonZeroU32, PowerKind); 4]> = smallvec::SmallVec::new();
+        for p in &self.powers {
+            if !AFTER_CARD_DRAWN_POWERS.contains(p.kind) {
+                continue;
+            }
+            let id = p.id;
+            if id.get() <= after || id.get() > last {
+                continue;
+            }
+            let listens = match p.kind {
+                // No owner gate (`CacophonyPower.AfterCardDrawn`); the kind
+                // only exists from v0.111.0.
+                PowerKind::Cacophony => cacophony_live,
+                PowerKind::Automation => !seated || mine.contains(&PowerUid(p.id)),
+                _ => mine.contains(&PowerUid(p.id)),
+            };
+            if listens {
+                out.push((id, p.kind));
+            }
+        }
+        out.sort_unstable_by_key(|&(id, _)| id.get());
+        // One listener per non-instanced kind (a mirror and a legacy row of
+        // the same power act once, on their summed stacks).
+        let mut seen = crate::PowerKindSet::EMPTY;
+        out.retain(|&mut (_, kind)| {
+            if matches!(kind, PowerKind::Automation | PowerKind::Cacophony) {
+                return true;
+            }
+            if seen.contains(kind) {
+                return false;
+            }
+            seen.insert(kind);
+            true
+        });
+        out
+    }
+
+    /// One power's `AfterCardDrawn` for the drawn card `uid`. Returns `true`
+    /// when it opened a choice inside a draw that suspended on it (a nested
+    /// draw reshuffling into Stratagem's pick, a Hellraiser auto-play's
+    /// select), so the walk must wait for that draw's resume.
+    fn after_card_drawn_power(
+        &mut self,
+        id: NonZeroU32,
+        kind: PowerKind,
+        uid: CardUid,
+        from_hand_draw: bool,
+    ) -> bool {
+        // C# skips a listener the walk no longer `Contains` (CombatState.cs).
+        let Some(power) = self.powers.get_by_id(id) else {
+            return false;
+        };
+        let instance_amount = power.amount;
+        let idx = (uid.get() as usize).saturating_sub(1);
+        let draw_was_suspended = self.pending_draw_resume.is_some();
+        match kind {
+            // `AutomationPower.AfterCardDrawn`: `cardsLeft` counts down from
+            // 10; at 0 it flashes, `GainEnergy(Amount)` and resets. Modelled
+            // as a per-instance count-up on `counter`.
+            PowerKind::Automation => {
+                let fired = self.powers.get_mut_by_id(id).is_some_and(|p| {
+                    let next = p.counter.saturating_add(1);
+                    if next >= 10 {
+                        p.counter = 0;
+                        true
+                    } else {
+                        p.counter = next;
+                        false
+                    }
                 });
-            if (pagestorm_before_chains && is_ethereal) || fires_iteration || fires_cacophony {
-                chains_after_nested_draw.push(uid);
-            } else {
-                self.afflict_bound_from_chains(uid, chains_stacks);
+                if fired {
+                    crate::event_log::flash_player_power(self, PowerKind::Automation);
+                    self.gain_energy(instance_amount);
+                }
             }
-            // Bead `sts2-rs-q6bix` (F-S): AutomationPower.AfterCardDrawn.
-            // C# `AutomationPower` keeps an internal `cardsLeft` counter
-            // starting at 10; every player card drawn decrements it, and at
-            // 0 it fires `PlayerCmd.GainEnergy(Amount)` and resets to 10. We
-            // model the count-up on the power's per-instance `counter` (0 →
-            // 10): bump per drawn card, and on reaching 10 gain `amount`
-            // energy and reset. Read the mirror+legacy union so a
-            // card-applied Automation (mirror-only) is seen. The energy gain
-            // is deferred to a (uid, amount) list applied after the borrow
-            // of `self.powers` ends. With `PowerKind::Automation` instanced,
-            // each separate Automation power increments its counter
-            // independently (C# AutomationPower.IsInstanced=true).
-            // Skipped entirely when no Automation is live (`present_kinds`
-            // superset gate hoisted above — the walk could never match).
-            let mut card_automation_energy: i32 = 0;
-            if automation_present {
-                // Co-op: only the drawer's instances count their draws
-                // (C# `AutomationPower.cs:38`); a waiting teammate's row
-                // stays in the arena.
-                let seated = crate::coop::has_seats(self).then(|| self.player_power_uids());
-                for p in &mut self.powers {
-                    if p.kind == PowerKind::Automation
-                        && seated.as_ref().is_none_or(|s| s.contains(&PowerUid(p.id)))
-                    {
-                        let new_counter = p.counter.saturating_add(1);
-                        if new_counter >= 10 {
-                            p.counter = 0;
-                            card_automation_energy =
-                                card_automation_energy.saturating_add(p.amount);
-                            automation_flashes = automation_flashes.saturating_add(1);
-                        } else {
-                            p.counter = new_counter;
-                        }
+            // `ConfusedPower.AfterCardDrawn`: skips only `EnergyCost.Canonical
+            // < 0` (Status, Curse, Quest), rolls `CombatEnergyCosts.NextInt(4)`
+            // and `SetThisCombat`s it. An X-cost card has `Canonical = 0`: it
+            // takes the roll, which `GetWithModifiers` then ignores, so its
+            // `-1` cost sentinel stays.
+            PowerKind::Confused => {
+                if self.player_power_amount(PowerKind::Confused) <= 0 {
+                    return false;
+                }
+                let Some(card) = self.cards.get(idx) else {
+                    return false;
+                };
+                let is_x_cost_card = card.is_x_cost() && !card.is_quest();
+                if card.base_cost() >= 0 || is_x_cost_card {
+                    let rolled = self.run_rng.combat_energy_costs.next_int(0, 3);
+                    if let Some(c) = self.cards.get_mut(idx) {
+                        c.cost.set_this_combat(rolled, false);
                     }
                 }
             }
-            // C# walks each drawn card's `AfterCardDrawn` in full before the
-            // next card moves: the player's powers first (Automation's
-            // `GainEnergy`), then the card's own hook (Void's
-            // `LoseEnergy(1)`, Void.cs:27-33). Granting Automation's energy
-            // once after the whole batch let a Void drawn on the threshold
-            // draw drain an empty pool (loadout Defect 1152 v0.111.0: Scrawl
-            // with two Automations, energy cs=1 rs=2).
-            if card_automation_energy > 0 {
-                self.gain_energy(card_automation_energy);
+            // `ChainsOfBindingPower.AfterCardDrawn`: `Bound` while this turn's
+            // Chains-applied count is under the stacks, on the owner's turn.
+            PowerKind::ChainsOfBinding => {
+                let stacks = self.chains_of_binding_stacks();
+                self.afflict_bound_from_chains(uid, stacks);
             }
-            if card_id == crate::cards::CardId::Void {
-                self.player.energy = self.player.energy.saturating_sub(1).max(0);
-            }
-            // v0.111.0 `CacophonyPower.AfterCardDrawn` (decomp
-            // CacophonyPower.cs:22): every card drawn (no owner gate) takes one
-            // off the instance's `Cards` var (33); at 0 it resets to 33 and
-            // deals `Amount` unpowered damage to a random hittable enemy. The
-            // per-instance `counter` counts up to 33 (Instanced, like
-            // Automation's).
-            if cacophony_present {
-                let after_pagestorm = cacophony_after_pagestorm.filter(|_| is_ethereal);
-                for p in &mut self.powers {
-                    if p.kind == PowerKind::Cacophony {
-                        if after_pagestorm.is_some_and(|ps| p.id.get() > ps) {
-                            cacophony_deferred.push(p.id);
-                            continue;
-                        }
-                        let new_counter = p.counter.saturating_add(1);
-                        if new_counter >= CACOPHONY_CARDS {
-                            p.counter = 0;
-                            cacophony_hits.push(p.amount);
-                        } else {
-                            p.counter = new_counter;
-                        }
-                    }
+            // `CorrosiveWavePower.AfterCardDrawn`: `Flash()`, then a separate
+            // `PowerCmd.Apply<PoisonPower>(HittableEnemies, Amount)` per drawn
+            // card, so a per-apply additive (Snecko Skull) counts per card.
+            // No card source: Unsettling Lamp neither captures nor doubles it.
+            PowerKind::CorrosiveWave => {
+                let amount = self.player_power_amount(PowerKind::CorrosiveWave);
+                if amount <= 0 {
+                    return false;
                 }
-            }
-            // Bead `sts2-rs-4wppb`: PagestormPower.AfterCardDrawn. C# gates on
-            // `card.Owner.Creature == base.Owner` (the card is mine) — always
-            // true here since this walks the player's own hand — and
-            // `card.Keywords.Contains(Ethereal)`. Defer the draw so the
-            // `self.cards` borrow is released first; the count is exact
-            // regardless of interleaving because each Ethereal card
-            // contributes exactly `Amount` draws.
-            if pagestorm_amount > 0 && is_ethereal {
-                pagestorm_draws = pagestorm_draws.saturating_add(pagestorm_amount);
-                pagestorm_flashes = pagestorm_flashes.saturating_add(1);
-            }
-            if corrosive_wave_amount > 0 {
-                corrosive_wave_cards = corrosive_wave_cards.saturating_add(1);
-            }
-            // Defect IterationPower.AfterCardDrawn (C# `IterationPower.cs`):
-            // count this drawn Status card; only the FIRST status card drawn
-            // this turn (C# `num <= 1`, the count INCLUDING the current draw)
-            // fires the +`Amount` draw. The counter persists across draw
-            // batches (turn-start hand draw + effect draws) and clears at
-            // turn start, matching C#'s per-turn `CardDrawnEntry` history scan.
-            if card_type == crate::cards::CardType::Status {
-                self.combat_log.status_cards_drawn_this_turn = self
-                    .combat_log
-                    .status_cards_drawn_this_turn
-                    .saturating_add(1);
-                if iteration_amount > 0 && self.combat_log.status_cards_drawn_this_turn == 1 {
-                    iteration_draws = iteration_draws.saturating_add(iteration_amount);
-                }
-            }
-            // Card enchantments' `AfterCardDrawn` (Slither's cost re-roll).
-            // C# `IterateHookListeners` (`CombatState.cs:118-164`) walks
-            // creature powers before each card's enchantment, so this runs
-            // after Confused's roll for the same card, per card. A Strike
-            // HellraiserPower auto-plays in `AfterCardDrawnEarly` has left
-            // the hand by then and `Slither.AfterCardDrawn` returns on
-            // `Pile.Type != Hand` without a `CombatEnergyCosts` roll
-            // (`Hook.cs:346-361`, act23 Ironclad:4092).
-            if !auto_played {
-                crate::enchantment_hooks::dispatch_on_card_drawn(self, uid, from_hand_draw);
-            }
-        }
-        for _ in 0..automation_flashes {
-            crate::event_log::flash_player_power(self, PowerKind::Automation);
-        }
-        // Automation's energy was granted per card above.
-        // CorrosiveWave Poison-on-draw (deferred past the per-card `self.cards`
-        // borrow): C# `CorrosiveWavePower.AfterCardDrawn` applies a separate
-        // `PowerCmd.Apply<PoisonPower>(base.Amount)` per drawn card. Replay one
-        // apply per drawn card so each application independently re-enters the
-        // `modify_power_amount_given` chain — matching SneckoSkull's per-apply
-        // +1 additive (seed 1131). Recompute the alive set each card so a kill
-        // mid-batch is reflected, mirroring C#'s per-card `HittableEnemies`.
-        // Both listeners fire once per drawn card, in the powers' list
-        // (application) order: C# `Hook.AfterCardDrawn` awaits Speedster's
-        // `CreatureCmd.Damage` -- and the Stock respawn its kill triggers --
-        // before a later-applied Corrosive Wave picks its `HittableEnemies`
-        // for the same card. Speedster applied first, the card that killed an
-        // Axebot poisons the respawned one (loadout Silent v0.107.1 8690).
-        let speedster_first = speedster_hits > 0
-            && corrosive_wave_cards > 0
-            && self.player_power_arena_id(PowerKind::Speedster)
-                < self.player_power_arena_id(PowerKind::CorrosiveWave);
-        for card in 0..corrosive_wave_cards.max(speedster_hits) {
-            if speedster_first && card < speedster_hits {
-                self.deal_unpowered_damage_to_all_enemies(speedster_amount);
-            }
-            if card < corrosive_wave_cards {
-                // C# `CorrosiveWavePower.cs:32` calls `Flash()` inside
-                // `AfterCardDrawn`'s `card.Owner.Creature == Owner` guard — once per
-                // DRAWN CARD, before that card's Poison application, and regardless
-                // of whether any enemy is hittable. The per-card replay below is the
-                // same batch C# fires one hook per, so one flash per iteration.
                 crate::event_log::flash_player_power(self, PowerKind::CorrosiveWave);
                 for enemy_uid in self.enemy_uids.clone() {
                     let alive = self
@@ -10232,131 +9955,181 @@ impl CombatState {
                         .iter()
                         .any(|c| c.id == enemy_uid.0 && c.current_hp > 0);
                     if alive {
-                        // `PowerCmd.Apply<PoisonPower>(..., base.Owner, null)`:
-                        // no card source, so Unsettling Lamp (`cardSource ==
-                        // null` -> return) neither captures nor doubles it even
-                        // when the draw came from a resolving card (Prepared).
                         crate::card_effects::apply_power_to_creature_cardless(
                             self,
                             enemy_uid,
                             PowerKind::Poison,
-                            corrosive_wave_amount,
+                            amount,
                         );
                     }
                 }
             }
-            // Silent SpeedsterPower damage-on-draw: one hit of
-            // `speedster_amount` to all living enemies per drawn card. The
-            // target set is recomputed each hit so a kill mid-batch matches
-            // C#'s per-card `HittableEnemies`.
-            if !speedster_first && card < speedster_hits {
-                self.deal_unpowered_damage_to_all_enemies(speedster_amount);
+            // `SpeedsterPower.AfterCardDrawn`: on a draw that is not the
+            // turn-start hand draw, during the owner's side turn (a Centennial
+            // Puzzle draw on an enemy hit deals nothing), `Amount` unpowered
+            // damage to every hittable enemy.
+            PowerKind::Speedster => {
+                if from_hand_draw || self.side != Side::Player {
+                    return false;
+                }
+                let amount = self.player_power_amount(PowerKind::Speedster);
+                self.deal_unpowered_damage_to_all_enemies(amount);
             }
-        }
-        // Cacophony (v0.111.0): `Rng.CombatTargets.NextItem(HittableEnemies)`
-        // then `CreatureCmd.Damage(enemy, Amount, ValueProp.Unpowered, Owner)`
-        // (decomp CacophonyPower.cs:30-37); no roll and no hit with no enemy.
-        for amount in cacophony_hits {
-            self.cacophony_hit(amount);
-        }
-        // Pagestorm extra draws (bead `sts2-rs-4wppb`). Route through the
-        // card-effect draw chokepoint `draw_via_state` — NOT `draw_into_hand`:
-        // C# `PagestormPower.AfterCardDrawn` calls `CardPileCmd.Draw(.., Amount,
-        // player)` with the default `fromHandDraw = false`, so each Pagestorm
-        // draw is a non-hand-draw and is counted by Necrobinder DeathMarch's
-        // `CalculatedDamageVar` multiplier (C# `CardDrawnEntry` with
-        // `!FromHandDraw`). `draw_into_hand` is the turn-start hand-draw path
-        // (`from_hand_draw = true`) and silently bypassed
-        // `cards_drawn_by_effect_this_turn`, undercounting DeathMarch's damage
-        // when Pagestorm fired (sweep seeds 53/412). `draw_via_state` recurses
-        // into this fn for the newly-drawn suffix, so a chain of Ethereal draws
-        // still cascades correctly (bounded by draw+discard size).
-        if pagestorm_flashes > 0 {
-            for _ in 0..pagestorm_flashes {
+            // `PagestormPower.AfterCardDrawn`: an Ethereal card (keywords as
+            // modified in combat: Hex makes a Hexed card Ethereal) flashes
+            // and draws `Amount` with `fromHandDraw = false`, so DeathMarch
+            // counts the nested cards.
+            PowerKind::Pagestorm => {
+                let amount = self.player_power_amount(PowerKind::Pagestorm);
+                let ethereal = amount > 0
+                    && self
+                        .cards
+                        .get(idx)
+                        .is_some_and(|c| crate::combat_loop::card_is_ethereal_at_play(self, c));
+                if !ethereal {
+                    return false;
+                }
                 crate::event_log::flash_player_power(self, PowerKind::Pagestorm);
+                crate::cards::draw_via_state(self, amount);
             }
-        }
-        let draw_was_suspended = self.pending_draw_resume.is_some();
-        // The nested draws and the deferred Chains check run in the powers'
-        // application order (C# `Hook.AfterCardDrawn` walks powers in list
-        // order and awaits each). Without a deferred check, Pagestorm then
-        // Iteration, as before.
-        #[derive(Clone, Copy)]
-        enum AfterDrawn {
-            Pagestorm,
-            Iteration,
-            Chains,
-        }
-        let mut steps: smallvec::SmallVec<[(u32, AfterDrawn); 3]> = smallvec::SmallVec::new();
-        if pagestorm_draws > 0 {
-            steps.push((pagestorm_id.unwrap_or(0), AfterDrawn::Pagestorm));
-        }
-        if iteration_draws > 0 {
-            steps.push((iteration_id.unwrap_or(u32::MAX), AfterDrawn::Iteration));
-        }
-        if !chains_after_nested_draw.is_empty() {
-            steps.push((chains_id.unwrap_or(u32::MAX), AfterDrawn::Chains));
-            steps.sort_by_key(|&(id, _)| id);
-        }
-        for (_, step) in steps {
-            match step {
-                AfterDrawn::Pagestorm => {
-                    crate::cards::draw_via_state(self, pagestorm_draws);
-                    // The later-applied Cacophony instances now count the
-                    // Ethereal card(s) that set Pagestorm off. A hit at its
-                    // nested draw may have ended the combat: the listener walk
-                    // already under way still runs (`IterateCombatHookListeners`
-                    // checks `IsOverOrEnding` only before its first listener),
-                    // with no hittable enemy left to roll for.
-                    for id in core::mem::take(&mut cacophony_deferred) {
-                        let fired = self.powers.get_mut_by_id(id).and_then(|p| {
-                            let new_counter = p.counter.saturating_add(1);
-                            if new_counter >= CACOPHONY_CARDS {
-                                p.counter = 0;
-                                Some(p.amount)
-                            } else {
-                                p.counter = new_counter;
-                                None
-                            }
-                        });
-                        if let Some(amount) = fired {
-                            self.cacophony_hit(amount);
-                        }
-                    }
+            // `IterationPower.AfterCardDrawn`: a Status, while this turn's
+            // history holds at most one drawn Status (`num <= 1`, read when
+            // this listener runs, so a Status an earlier listener's nested
+            // draw took counts), flashes and draws `Amount`.
+            PowerKind::Iteration => {
+                let amount = self.player_power_amount(PowerKind::Iteration);
+                let first_status = amount > 0
+                    && self
+                        .cards
+                        .get(idx)
+                        .is_some_and(|c| c.card_type == crate::cards::CardType::Status)
+                    && self.combat_log.status_cards_drawn_this_turn <= 1;
+                if !first_status {
+                    return false;
                 }
-                // Defect Iteration extra draws (deferred past the per-card
-                // `self.cards` borrow). Routed through `draw_via_state` (the
-                // card-effect draw chokepoint) to match C#
-                // `IterationPower.AfterCardDrawn`'s `CardPileCmd.Draw(..,
-                // Amount, player)` (default `fromHandDraw=false`). The
-                // recursion re-enters this fn for the newly-drawn suffix; the
-                // status counter is already >= 1, so an extra-drawn status
-                // card does not re-trigger Iteration (C#'s `num <= 1` gate).
-                AfterDrawn::Iteration => {
-                    // C# `IterationPower.cs:25` flashes inside the same gate,
-                    // immediately before `CardPileCmd.Draw(Amount)`.
-                    crate::event_log::flash_player_power(self, PowerKind::Iteration);
-                    crate::cards::draw_via_state(self, iteration_draws);
-                }
-                AfterDrawn::Chains => {
-                    // A nested draw suspended on a reshuffle select
-                    // (Stratagem): Chains checks the card only after the pick
-                    // (GH #1150). With Stratagem live, draws run one card per
-                    // call, so one card waits; any other is checked now.
-                    let mut deferred = core::mem::take(&mut chains_after_nested_draw).into_iter();
-                    if !draw_was_suspended && self.pending_choice.is_some() {
-                        if let Some(pdr) = self.pending_draw_resume.as_mut() {
-                            if pdr.then_chains_bound.is_none() {
-                                pdr.then_chains_bound = deferred.next();
-                            }
-                        }
+                crate::event_log::flash_player_power(self, PowerKind::Iteration);
+                crate::cards::draw_via_state(self, amount);
+            }
+            // v0.111.0 `CacophonyPower.AfterCardDrawn`: every card drawn (no
+            // owner gate) takes one off the instance's `Cards` var (33); at 0
+            // it resets and deals `Amount` unpowered damage to a random
+            // hittable enemy (`Rng.CombatTargets.NextItem`; no roll and no
+            // hit with none left). Modelled as a count-up on `counter`.
+            PowerKind::Cacophony => {
+                const CACOPHONY_CARDS: i32 = 33;
+                let fired = self.powers.get_mut_by_id(id).is_some_and(|p| {
+                    let next = p.counter.saturating_add(1);
+                    if next >= CACOPHONY_CARDS {
+                        p.counter = 0;
+                        true
+                    } else {
+                        p.counter = next;
+                        false
                     }
-                    for uid in deferred {
-                        self.afflict_bound_from_chains(uid, chains_stacks);
-                    }
+                });
+                if fired {
+                    self.cacophony_hit(instance_amount);
                 }
             }
+            _ => {}
         }
+        !draw_was_suspended && self.pending_choice.is_some() && self.pending_draw_resume.is_some()
+    }
+
+    /// The drawn card's own `AfterCardDrawn` (it comes after every power in
+    /// `IterateHookListeners`), then its enchantment's.
+    fn after_card_drawn_card_listeners(
+        &mut self,
+        uid: CardUid,
+        from_hand_draw: bool,
+        auto_played: bool,
+    ) {
+        let idx = (uid.get() as usize).saturating_sub(1);
+        let Some(card) = self.cards.get(idx) else {
+            return;
+        };
+        match card.card_id {
+            // `KinglyPunch.AfterCardDrawn`: `card == this` permanently raises
+            // its damage by `Increase` (4, upgraded 6).
+            crate::cards::CardId::KinglyPunch => {
+                let inc = if card.upgraded {
+                    Self::KINGLY_PUNCH_DRAW_INCREASE_UPGRADED
+                } else {
+                    Self::KINGLY_PUNCH_DRAW_INCREASE
+                };
+                if let Some(c) = self.cards.get_mut(idx) {
+                    c.base_damage = c.base_damage.saturating_add(inc);
+                }
+            }
+            // `KinglyKick.AfterCardDrawn`: `EnergyCost.AddThisCombat(-1)`,
+            // unclamped. After Confused's `SetThisCombat` (a power, so
+            // earlier in the walk), a card drawn while Confused lands at
+            // `roll - 1`.
+            crate::cards::CardId::KinglyKick => {
+                let card_uid = card.uid;
+                self.add_card_cost_this_combat(card_uid, -1);
+            }
+            // `Void.AfterCardDrawn`: `LoseEnergy(1)`, clamped at 0, after
+            // every power listener (Automation's gain, a Speedster kill's
+            // Gremlin Horn energy).
+            crate::cards::CardId::Void => {
+                self.player.energy = self.player.energy.saturating_sub(1).max(0);
+            }
+            _ => {}
+        }
+        // Card enchantments' `AfterCardDrawn` (Slither's cost re-roll). A
+        // Strike HellraiserPower auto-played in `AfterCardDrawnEarly` has left
+        // the hand, and `Slither.AfterCardDrawn` returns on `Pile.Type !=
+        // Hand` without a `CombatEnergyCosts` roll (act23 Ironclad:4092).
+        if !auto_played {
+            crate::enchantment_hooks::dispatch_on_card_drawn(self, uid, from_hand_draw);
+        }
+    }
+
+    /// Park the rest of `uid`'s walk -- the power listeners after arena id
+    /// `after` up to `last`, then the card's own -- on the suspended nested
+    /// draw's resume, which runs it once that draw finishes and before the
+    /// outer draw takes its next card ([`Self::resume_after_card_drawn_walk`]).
+    /// The resume holds one parked walk: when a deeper walk already holds it,
+    /// or the ids do not fit the card var, this one runs on now (`false`).
+    fn park_after_card_drawn_walk(
+        &mut self,
+        uid: CardUid,
+        from_hand_draw: bool,
+        auto_played: bool,
+        after: u32,
+        last: u32,
+    ) -> bool {
+        let Some(packed) = pack_after_drawn_walk(after, last, from_hand_draw, auto_played) else {
+            return false;
+        };
+        let Some(pdr) = self.pending_draw_resume.as_mut() else {
+            return false;
+        };
+        if pdr.then_after_drawn.is_some() {
+            return false;
+        }
+        pdr.then_after_drawn = Some(uid);
+        if let Some(c) = self.cards.get_mut((uid.get() as usize).saturating_sub(1)) {
+            c.set_combat_var(cards::VarKey::AfterCardDrawnWalk, packed);
+        }
+        true
+    }
+
+    /// Run the rest of `uid`'s parked `AfterCardDrawn` walk
+    /// ([`Self::park_after_card_drawn_walk`]).
+    pub(crate) fn resume_after_card_drawn_walk(&mut self, uid: CardUid) {
+        let idx = (uid.get() as usize).saturating_sub(1);
+        let Some(c) = self.cards.get_mut(idx) else {
+            return;
+        };
+        let packed = c.combat_var(cards::VarKey::AfterCardDrawnWalk);
+        c.combat_vars.zero(cards::VarKey::AfterCardDrawnWalk);
+        let Some((after, last, from_hand_draw, auto_played)) = unpack_after_drawn_walk(packed)
+        else {
+            return;
+        };
+        let _ = self.after_card_drawn_walk(uid, from_hand_draw, auto_played, after, last);
     }
 
     /// Shuffle the player's draw pile in place and fire the
@@ -16796,6 +16569,51 @@ pub fn legal_actions(state: &CombatState) -> SmallVec<[Action; 16]> {
 const AFTER_DRAWN_DEFERRED: i32 = 1;
 const AFTER_DRAWN_FROM_HAND_DRAW: i32 = 2;
 const AFTER_DRAWN_AUTO_PLAYED: i32 = 4;
+
+/// Player power kinds with a C# `AfterCardDrawn` override (both builds;
+/// Cacophony from v0.111.0). The walk's `present_kinds` gate.
+const AFTER_CARD_DRAWN_POWERS: PowerKindSet = PowerKindSet::from_kinds(&[
+    PowerKind::Automation,
+    PowerKind::Confused,
+    PowerKind::ChainsOfBinding,
+    PowerKind::CorrosiveWave,
+    PowerKind::Iteration,
+    PowerKind::Pagestorm,
+    PowerKind::Speedster,
+    PowerKind::Cacophony,
+]);
+
+/// Bits of a power arena id in a parked walk ([`cards::VarKey::AfterCardDrawnWalk`]).
+const AFTER_DRAWN_WALK_ID_BITS: u32 = 13;
+const AFTER_DRAWN_WALK_ID_MASK: u32 = (1 << AFTER_DRAWN_WALK_ID_BITS) - 1;
+
+/// Pack a parked `AfterCardDrawn` walk: the listener it suspended in
+/// (`after`, never 0), the last listener of its snapshot, and its flags.
+/// `None` when an id does not fit.
+fn pack_after_drawn_walk(
+    after: u32,
+    last: u32,
+    from_hand_draw: bool,
+    auto_played: bool,
+) -> Option<i32> {
+    if after == 0 || after > AFTER_DRAWN_WALK_ID_MASK || last > AFTER_DRAWN_WALK_ID_MASK {
+        return None;
+    }
+    let flags = u32::from(from_hand_draw) | (u32::from(auto_played) << 1);
+    let packed =
+        after | (last << AFTER_DRAWN_WALK_ID_BITS) | (flags << (2 * AFTER_DRAWN_WALK_ID_BITS));
+    i32::try_from(packed).ok()
+}
+
+/// Inverse of [`pack_after_drawn_walk`]: `(after, last, from_hand_draw,
+/// auto_played)`, `None` for an unset var.
+fn unpack_after_drawn_walk(packed: i32) -> Option<(u32, u32, bool, bool)> {
+    let packed = u32::try_from(packed).ok().filter(|&p| p != 0)?;
+    let after = packed & AFTER_DRAWN_WALK_ID_MASK;
+    let last = (packed >> AFTER_DRAWN_WALK_ID_BITS) & AFTER_DRAWN_WALK_ID_MASK;
+    let flags = packed >> (2 * AFTER_DRAWN_WALK_ID_BITS);
+    Some((after, last, flags & 1 != 0, flags & 2 != 0))
+}
 
 #[cfg(test)]
 mod cost_model_audit_tests;

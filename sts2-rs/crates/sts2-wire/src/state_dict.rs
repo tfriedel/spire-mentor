@@ -5047,6 +5047,7 @@ pub const fn var_key_wire_name(k: VarKey) -> &'static str {
         VarKey::CloneTurnFlags => "clone_turn_flags",
         VarKey::ExhaustOwedAfterDraw => "exhaust_owed_after_draw",
         VarKey::AfterCardDrawnDeferred => "after_card_drawn_deferred",
+        VarKey::AfterCardDrawnWalk => "after_card_drawn_walk",
     }
 }
 
@@ -5083,6 +5084,7 @@ pub fn var_key_from_wire(name: &str) -> Option<VarKey> {
         VarKey::CloneTurnFlags,
         VarKey::ExhaustOwedAfterDraw,
         VarKey::AfterCardDrawnDeferred,
+        VarKey::AfterCardDrawnWalk,
     ];
     ALL.iter().copied().find(|k| var_key_wire_name(*k) == name)
 }
