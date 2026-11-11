@@ -1114,15 +1114,51 @@ pub fn roll_noncombat_card_reward_options(rs: &mut RunState) -> Vec<CardId> {
 /// (`LastingCandy.cs:107`), so a `CardCreationSource.Other` slate skips it.
 #[must_use]
 pub fn roll_noncombat_card_reward_cards(rs: &mut RunState) -> Vec<sts2_core::cards::Card> {
+    let mut cards = roll_noncombat_card_reward_slate(rs, None, false);
+    let _ = sts2_core::run_effects::dispatch_modify_card_reward_options_late(rs, &mut cards);
+    cards
+}
+
+/// A `new CardReward(ForNonCombatWithDefaultOdds([Character.CardPool]),
+/// count, Owner)` slate (Trial `NondescriptGuilty`, Trial.cs:183 in both
+/// builds): the same hooked roll as [`roll_noncombat_card_reward_cards`] —
+/// `CardReward` stamps `IsCardReward` (CardReward.cs:115), so
+/// `Hook.ModifyCardRewardCreationOptions` (CardFactory.cs:218) lets Dingy Rug
+/// and Prismatic Gem widen the pool — but `count` cards and no upgrade roll
+/// (`ForNonCombatWithDefaultOdds` stamps `NoUpgradeRoll`,
+/// CardCreationOptions.cs:116-119). The late listeners are NOT run: the
+/// caller offers the slate through `RunState::offer_card_slate`, which runs
+/// them.
+#[must_use]
+pub fn roll_noncombat_card_reward_cards_no_upgrade(
+    rs: &mut RunState,
+    count: usize,
+) -> Vec<sts2_core::cards::Card> {
+    roll_noncombat_card_reward_slate(rs, Some(count), true)
+}
+
+/// Shared body of the `CardCreationSource.Other` card-reward rollers: fold the
+/// creation-option hooks, then roll `count` (default: the folded
+/// `num_cards`) cards at base RegularEncounter odds. `no_upgrade_roll` is
+/// C#'s `NoUpgradeRoll` flag: no upgrade float per card.
+fn roll_noncombat_card_reward_slate(
+    rs: &mut RunState,
+    count: Option<usize>,
+    no_upgrade_roll: bool,
+) -> Vec<sts2_core::cards::Card> {
     use sts2_core::card_rewards::{
         combat_card_upgrade_base_chance, roll_for_upgrade_with_dotnet, RarityContext,
     };
     let character = rs.character_id;
-    let opts =
+    let mut opts =
         rs.modify_card_reward_creation_options(sts2_core::runstate::CardRewardGenerationOptions {
             card_creation_source: "other",
             ..sts2_core::runstate::CardRewardGenerationOptions::default()
         });
+    if no_upgrade_roll {
+        opts.roll_upgrade = false;
+    }
+    let num_cards = count.unwrap_or(usize::from(opts.num_cards));
     let character_ids: Vec<CharacterId> = if !opts.character_ids.is_empty() {
         opts.character_ids.clone()
     } else if opts.use_default_character_pool {
@@ -1136,7 +1172,7 @@ pub fn roll_noncombat_card_reward_cards(rs: &mut RunState) -> Vec<sts2_core::car
     let upgrade_base = combat_card_upgrade_base_chance();
     let mut chosen: Vec<CardId> = Vec::new();
     let mut cards: Vec<sts2_core::cards::Card> = Vec::new();
-    for _ in 0..usize::from(opts.num_cards) {
+    for _ in 0..num_cards {
         let mut rarity = rs.card_rarity_odds.roll_with_base_odds_with_dotnet_for(
             version,
             &mut rs.rng.rewards,
@@ -1187,7 +1223,6 @@ pub fn roll_noncombat_card_reward_cards(rs: &mut RunState) -> Vec<sts2_core::car
             cards.push(card);
         }
     }
-    let _ = sts2_core::run_effects::dispatch_modify_card_reward_options_late(rs, &mut cards);
     cards
 }
 
@@ -3166,21 +3201,17 @@ fn merchant_roll_relic_slot(
     slot_rarity: sts2_core::runstate::RelicRarity,
     extra_exclude: &std::collections::BTreeSet<sts2_core::relics::RelicId>,
 ) -> sts2_core::shop::ShopRelicEntry {
-    use sts2_core::shop::{
-        ShopRelicEntry, MERCHANT_RELIC_PRICE_VARIANCE_MAX, MERCHANT_RELIC_PRICE_VARIANCE_MIN,
-    };
+    use sts2_core::shop::ShopRelicEntry;
     let pulled = rs.pop_relic_from_grab_bag_back(slot_rarity, |id| {
         sts2_core::shop::is_relic_allowed_in_shops(id) && !extra_exclude.contains(&id)
     });
-    let jitter = rs.rng.shops.next_float_range(
-        MERCHANT_RELIC_PRICE_VARIANCE_MIN,
-        MERCHANT_RELIC_PRICE_VARIANCE_MAX,
-    );
+    let jitter = sts2_core::shop::merchant_relic_jitter(&mut rs.rng.shops);
     let (relic_id, cost_rarity) = match pulled {
         Some((id, bucket_rarity)) => (Some(id), bucket_rarity),
         None => (None, slot_rarity),
     };
-    let price = (f64::from(merchant_relic_cost(cost_rarity)) * jitter).round_ties_even() as i32;
+    // `(float)MerchantCost * jitter`, banker's — single precision as in C#.
+    let price = sts2_core::shop::merchant_round(merchant_relic_cost(cost_rarity), jitter);
     ShopRelicEntry {
         relic_rarity: relic_rarity_to_shop(slot_rarity),
         relic_id,

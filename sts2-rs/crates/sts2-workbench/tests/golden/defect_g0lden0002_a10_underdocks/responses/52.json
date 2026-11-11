@@ -1,2437 +1,1231 @@
 {
- "active_leaf": 42,
- "active_path": [
-  0,
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  10,
-  11,
-  12,
-  13,
-  14,
-  15,
-  16,
-  17,
-  18,
-  19,
-  20,
-  21,
-  22,
-  23,
-  24,
-  25,
-  26,
-  27,
-  28,
-  29,
-  30,
-  31,
-  32,
-  33,
-  34,
-  35,
-  36,
-  37,
-  38,
-  39,
-  40,
-  41,
-  42
- ],
- "nodes": [
-  {
+ "step": {
+  "action_label": "",
+  "assets_base": "https://assets.test",
+  "chosen_action": null,
+  "decision": "map_select",
+  "idx": 0,
+  "meta": {
    "act": 1,
-   "child_ids": [
-    1
-   ],
-   "combat_log": [],
-   "decision": "event_choice",
-   "details": [],
-   "error": false,
-   "floor": 1,
-   "id": 0,
-   "idx": 0,
-   "label": "Started Defect (seed G0LDEN0002, A10, act1 underdocks)",
-   "parent_id": null,
-   "turn": null,
-   "value": null
+   "act_name": "Underdocks",
+   "bg_col": 2,
+   "bg_row": 2,
+   "bg_seed": 206169372,
+   "floor": 3,
+   "step_no": 0,
+   "turn": null
   },
-  {
+  "pv": null,
+  "scores": [],
+  "source": "live",
+  "state": {
    "act": 1,
-   "child_ids": [
-    2
+   "act1": "underdocks",
+   "act_name": "Underdocks",
+   "ascension": 10,
+   "bg_col": 2,
+   "bg_row": 2,
+   "bg_seed": 206169372,
+   "choices": [
+    {
+     "col": 1,
+     "icon": "https://assets.test/run_history/monster.png",
+     "row": 3,
+     "type": "Monster"
+    },
+    {
+     "col": 3,
+     "icon": null,
+     "row": 3,
+     "type": "Unknown"
+    }
    ],
-   "combat_log": [],
    "decision": "map_select",
-   "details": [
-    "+Relic Fishing Rod"
-   ],
-   "error": false,
-   "floor": 1,
-   "id": 1,
-   "idx": 1,
-   "label": "Choose: Fishing Rod",
-   "parent_id": 0,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    3
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Corpse Slug #1",
-    "Spawned: Corpse Slug #2"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 2,
-   "idx": 2,
-   "label": "Map → (2,1)",
-   "parent_id": 1,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    4
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 3,
-   "idx": 3,
-   "label": "Play Defend",
-   "parent_id": 2,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    5
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 5→10"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 4,
-   "idx": 4,
-   "label": "Play Defend",
-   "parent_id": 3,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    6
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 21,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Corpse Slug using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Corpse Slug #1 HP 27→21 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 5,
-   "idx": 5,
-   "label": "Play Strike → Corpse Slug #1",
-   "parent_id": 4,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    7
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 25,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "The Defect dealt 3 damage to Corpse Slug.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Whip Slap",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Corpse Slug used Whip Slap.",
-     "verb": "used"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 3,
-     "hp_after": 60,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Whip Slap",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "CorpseSlug",
-     "source_move_id": "WHIP_SLAP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Corpse Slug dealt 0 damage to The Defect using Whip Slap.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 3,
-     "hp_after": 60,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Whip Slap",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "CorpseSlug",
-     "source_move_id": "WHIP_SLAP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Corpse Slug dealt 0 damage to The Defect using Whip Slap.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 3,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Glomp",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Corpse Slug used Glomp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 3,
-     "amount": 5,
-     "blocked": 4,
-     "hp_after": 55,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Glomp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "CorpseSlug",
-     "source_move_id": "GLOMP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Corpse Slug dealt 5 damage to The Defect using Glomp.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 60→55 (−5)",
-    "You Block 10→0",
-    "Corpse Slug #2 HP 28→25 (−3)",
-    "Lightning orb passive: 3 damage to a random enemy"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 6,
-   "idx": 6,
-   "label": "End turn",
-   "parent_id": 5,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    8
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 15,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Corpse Slug using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Corpse Slug #1 HP 21→15 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 7,
-   "idx": 7,
-   "label": "Play Strike → Corpse Slug #1",
-   "parent_id": 6,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    9
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 9,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Corpse Slug using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Corpse Slug #1 HP 15→9 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 8,
-   "idx": 8,
-   "label": "Play Strike → Corpse Slug #1",
-   "parent_id": 7,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    10
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 17,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "The Defect dealt 8 damage to Corpse Slug using Dualcast.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 1,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Corpse Slug using Dualcast.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Dualcast",
-    "Corpse Slug #1 HP 9→1 (−8)",
-    "Corpse Slug #2 HP 25→17 (−8)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 9,
-   "idx": 9,
-   "label": "Play Dualcast",
-   "parent_id": 8,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    11
-   ],
-   "combat_log": [
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Glomp",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Corpse Slug used Glomp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 46,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Glomp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "CorpseSlug",
-     "source_move_id": "GLOMP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Corpse Slug dealt 9 damage to The Defect using Glomp.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 3,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Goop",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Corpse Slug used Goop.",
-     "verb": "used"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Frail",
-     "round": 2,
-     "side": "enemy",
-     "source": "Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "CorpseSlug",
-     "source_move_id": "GOOP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "The Defect gained 2 Frail.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 55→46 (−9)",
-    "You +2 Frail"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 10,
-   "idx": 10,
-   "label": "End turn",
-   "parent_id": 9,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    12
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_channeled",
-     "noun": "Lightning Orb",
-     "round": 3,
-     "side": "player",
-     "source": "Zap",
-     "source_card": "ZAP",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect channeled Lightning Orb.",
-     "verb": "channeled"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Zap"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 11,
-   "idx": 11,
-   "label": "Play Zap",
-   "parent_id": 10,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    13
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 3,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Corpse Slug using Dualcast.",
-     "verb": "dealt"
-    },
-    {
-     "actor": null,
-     "actor_side": null,
-     "actor_uid": null,
-     "amount": null,
-     "kind": "power_flash",
-     "noun": "Ravenous",
-     "round": 3,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "Corpse Slug's Ravenous triggered.",
-     "verb": "triggered"
-    },
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 3,
-     "amount": 5,
-     "kind": "power",
-     "noun": "Strength",
-     "round": 3,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "Corpse Slug gained 5 Strength.",
-     "verb": "gained"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 3,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 9,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "The Defect dealt 8 damage to Corpse Slug using Dualcast.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Dualcast",
-    "Corpse Slug #1 HP 1→0  ☠ defeated",
-    "Corpse Slug #2 HP 17→9 (−8)",
-    "Corpse Slug #2 +5 Strength"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 12,
-   "idx": 12,
-   "label": "Play Dualcast",
-   "parent_id": 11,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    14
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 3,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "The Defect dealt 6 damage to Corpse Slug using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Corpse Slug HP 9→3 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 13,
-   "idx": 13,
-   "label": "Play Strike → Corpse Slug",
-   "parent_id": 12,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    15
-   ],
-   "combat_log": [
-    {
-     "actor": "Corpse Slug",
-     "actor_side": "enemy",
-     "actor_uid": 3,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Stunned",
-     "round": 3,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Corpse Slug used Stunned.",
-     "verb": "used"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Frail 2→1"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 14,
-   "idx": 14,
-   "label": "End turn",
-   "parent_id": 13,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    16
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Corpse Slug",
-     "target_side": "enemy",
-     "target_uid": 3,
-     "text": "The Defect dealt 6 damage to Corpse Slug using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "Corpse Slug HP 3→0  ☠ defeated",
-    "You −Frail",
-    "Gold 99→106"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 15,
-   "idx": 15,
-   "label": "Play Strike → Corpse Slug",
-   "parent_id": 14,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    17
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 2,
-   "id": 16,
-   "idx": 16,
-   "label": "Take Go for the Eyes",
-   "parent_id": 15,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    18
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Seapunk"
-   ],
-   "error": false,
    "floor": 3,
-   "id": 17,
-   "idx": 17,
-   "label": "Map → (2,2)",
-   "parent_id": 16,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    19
-   ],
-   "combat_log": [
+   "full_map": {
+    "boss": {
+     "col": 3,
+     "icon": "https://assets.test/run_history/soul_fysh_boss.png",
+     "id": "SOUL_FYSH_BOSS",
+     "kind": "SoulFysh",
+     "name": "Soul Fysh",
+     "row": 16,
+     "type": "Boss"
+    },
+    "current_coord": {
+     "col": 2,
+     "row": 2
+    },
+    "path_plan": {
+     "baseline_col": 3,
+     "best_col": 3,
+     "columns": [
+      {
+       "baseline_score": 0.9598,
+       "can_skip_elite": true,
+       "col": 1,
+       "is_pick": false,
+       "max_elites": 3,
+       "min_elites": 0,
+       "n_paths": 74,
+       "score": 0.9598
+      },
+      {
+       "baseline_score": 1.1486,
+       "can_skip_elite": true,
+       "col": 3,
+       "is_pick": true,
+       "max_elites": 3,
+       "min_elites": 0,
+       "n_paths": 104,
+       "score": 1.1486
+      }
+     ],
+     "diverged": false,
+     "first_col": null,
+     "route": [
+      {
+       "col": 3,
+       "row": 3
+      },
+      {
+       "col": 3,
+       "row": 4
+      },
+      {
+       "col": 2,
+       "row": 5
+      },
+      {
+       "col": 2,
+       "row": 6
+      },
+      {
+       "col": 1,
+       "row": 7
+      },
+      {
+       "col": 1,
+       "row": 8
+      },
+      {
+       "col": 2,
+       "row": 9
+      },
+      {
+       "col": 3,
+       "row": 10
+      },
+      {
+       "col": 3,
+       "row": 11
+      },
+      {
+       "col": 2,
+       "row": 12
+      },
+      {
+       "col": 3,
+       "row": 13
+      },
+      {
+       "col": 4,
+       "row": 14
+      },
+      {
+       "col": 4,
+       "row": 15
+      }
+     ]
+    },
+    "rows": [
+     [
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 1
+        },
+        {
+         "col": 5,
+         "row": 1
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/ancient.png",
+       "row": 0,
+       "type": "Ancient",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 2
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 1,
+       "type": "Monster",
+       "visited": true
+      },
+      {
+       "children": [
+        {
+         "col": 5,
+         "row": 2
+        }
+       ],
+       "col": 5,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 1,
+       "type": "Monster",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 1,
+         "row": 3
+        },
+        {
+         "col": 3,
+         "row": 3
+        }
+       ],
+       "col": 2,
+       "current": true,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 2,
+       "type": "Monster",
+       "visited": true
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 3
+        },
+        {
+         "col": 6,
+         "row": 3
+        }
+       ],
+       "col": 5,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 2,
+       "type": "Monster",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 4
+        },
+        {
+         "col": 0,
+         "row": 4
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 3,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 4
+        },
+        {
+         "col": 2,
+         "row": 4
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": null,
+       "row": 3,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 4
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": null,
+       "row": 3,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 6,
+         "row": 4
+        }
+       ],
+       "col": 6,
+       "current": false,
+       "icon": "https://assets.test/run_history/shop.png",
+       "row": 3,
+       "type": "Shop",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 5
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 4,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 5
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": null,
+       "row": 4,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 5
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/shop.png",
+       "row": 4,
+       "type": "Shop",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 5
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 4,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 5,
+         "row": 5
+        }
+       ],
+       "col": 6,
+       "current": false,
+       "icon": null,
+       "row": 4,
+       "type": "Unknown",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 6
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 5,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 6
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 5,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 6
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/shop.png",
+       "row": 5,
+       "type": "Shop",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 5,
+         "row": 6
+        }
+       ],
+       "col": 5,
+       "current": false,
+       "icon": null,
+       "row": 5,
+       "type": "Unknown",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 1,
+         "row": 7
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 6,
+       "type": "Elite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 1,
+         "row": 7
+        },
+        {
+         "col": 3,
+         "row": 7
+        },
+        {
+         "col": 2,
+         "row": 7
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": null,
+       "row": 6,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 7
+        }
+       ],
+       "col": 5,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 6,
+       "type": "Elite",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 8
+        },
+        {
+         "col": 1,
+         "row": 8
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 7,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 8
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 7,
+       "type": "RestSite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 8
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 7,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 8
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 7,
+       "type": "RestSite",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 9
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": null,
+       "row": 8,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 9
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 8,
+       "type": "RestSite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 9
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 8,
+       "type": "Elite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 9
+        },
+        {
+         "col": 2,
+         "row": 9
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 8,
+       "type": "Elite",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 1,
+         "row": 10
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/treasure.png",
+       "row": 9,
+       "type": "Treasure",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 1,
+         "row": 10
+        },
+        {
+         "col": 3,
+         "row": 10
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/treasure.png",
+       "row": 9,
+       "type": "Treasure",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 10
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": "https://assets.test/run_history/treasure.png",
+       "row": 9,
+       "type": "Treasure",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 11
+        },
+        {
+         "col": 1,
+         "row": 11
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 10,
+       "type": "Elite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 11
+        },
+        {
+         "col": 3,
+         "row": 11
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": null,
+       "row": 10,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 11
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": null,
+       "row": 10,
+       "type": "Unknown",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 12
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 11,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 12
+        },
+        {
+         "col": 1,
+         "row": 12
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 11,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 12
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 11,
+       "type": "Elite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 12
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 11,
+       "type": "RestSite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 12
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": null,
+       "row": 11,
+       "type": "Unknown",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 13
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 12,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 13
+        },
+        {
+         "col": 0,
+         "row": 13
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 12,
+       "type": "RestSite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 13
+        },
+        {
+         "col": 3,
+         "row": 13
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": null,
+       "row": 12,
+       "type": "Unknown",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 13
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 12,
+       "type": "RestSite",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 14
+        },
+        {
+         "col": 1,
+         "row": 14
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 13,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 14
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 13,
+       "type": "Elite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 14
+        },
+        {
+         "col": 3,
+         "row": 14
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": null,
+       "row": 13,
+       "type": "Unknown",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 0,
+         "row": 15
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 14,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 15
+        }
+       ],
+       "col": 1,
+       "current": false,
+       "icon": "https://assets.test/run_history/elite.png",
+       "row": 14,
+       "type": "Elite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 2,
+         "row": 15
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 14,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 15
+        }
+       ],
+       "col": 3,
+       "current": false,
+       "icon": "https://assets.test/run_history/monster.png",
+       "row": 14,
+       "type": "Monster",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 4,
+         "row": 15
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": null,
+       "row": 14,
+       "type": "Unknown",
+       "visited": false
+      }
+     ],
+     [
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 16
+        }
+       ],
+       "col": 0,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 15,
+       "type": "RestSite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 16
+        }
+       ],
+       "col": 2,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 15,
+       "type": "RestSite",
+       "visited": false
+      },
+      {
+       "children": [
+        {
+         "col": 3,
+         "row": 16
+        }
+       ],
+       "col": 4,
+       "current": false,
+       "icon": "https://assets.test/run_history/rest_site.png",
+       "row": 15,
+       "type": "RestSite",
+       "visited": false
+      }
+     ]
+    ],
+    "second_boss": null
+   },
+   "options": [
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 18,
-   "idx": 18,
-   "label": "Play Defend",
-   "parent_id": 17,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    20
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
+     "action": "select_map_node",
+     "args": {
+      "col": 1,
+      "row": 3
+     },
+     "enabled": true,
+     "label": "Monster (1,3)"
     },
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 39,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Seapunk using Dualcast.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 31,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Seapunk using Dualcast.",
-     "verb": "dealt"
+     "action": "select_map_node",
+     "args": {
+      "col": 3,
+      "row": 3
+     },
+     "enabled": true,
+     "label": "Unknown (3,3)"
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "Play Dualcast",
-    "Seapunk HP 47→31 (−16)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 19,
-   "idx": 19,
-   "label": "Play Dualcast",
-   "parent_id": 18,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    21
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 25,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Seapunk using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Seapunk HP 31→25 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 20,
-   "idx": 20,
-   "label": "Play Strike → Seapunk",
-   "parent_id": 19,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    22
-   ],
-   "combat_log": [
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Sea Kick",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Seapunk used Sea Kick.",
-     "verb": "used"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 8,
-     "blocked": 5,
-     "hp_after": 38,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Sea Kick",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "SEA_KICK",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Seapunk dealt 8 damage to The Defect using Sea Kick.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 46→38 (−8)",
-    "You Block 5→0"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 21,
-   "idx": 21,
-   "label": "End turn",
-   "parent_id": 20,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    23
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 22,
-   "idx": 22,
-   "label": "Play Defend",
-   "parent_id": 21,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    24
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 22,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Go for the Eyes",
-     "source_card": "GO_FOR_THE_EYES",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Seapunk using Go for the Eyes.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 1,
-     "kind": "power",
-     "noun": "Weak",
-     "round": 2,
-     "side": "player",
-     "source": "Go for the Eyes",
-     "source_card": "GO_FOR_THE_EYES",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Seapunk gained 1 Weak.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Go for the Eyes",
-    "Seapunk HP 25→22 (−3)",
-    "Seapunk +1 Weak"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 23,
-   "idx": 23,
-   "label": "Play Go for the Eyes → Seapunk",
-   "parent_id": 22,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    25
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 16,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Seapunk using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Seapunk HP 22→16 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 24,
-   "idx": 24,
-   "label": "Play Strike → Seapunk",
-   "parent_id": 23,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    26
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 10,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Seapunk using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Seapunk HP 16→10 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 25,
-   "idx": 25,
-   "label": "Play Strike → Seapunk",
-   "parent_id": 24,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    27
-   ],
-   "combat_log": [
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Spinning Kick",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Seapunk used Spinning Kick.",
-     "verb": "used"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 1,
-     "hp_after": 38,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Spinning Kick",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "SPINNING_KICK",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Seapunk dealt 0 damage to The Defect using Spinning Kick.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 1,
-     "hp_after": 38,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Spinning Kick",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "SPINNING_KICK",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Seapunk dealt 0 damage to The Defect using Spinning Kick.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 1,
-     "hp_after": 38,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Spinning Kick",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "SPINNING_KICK",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Seapunk dealt 0 damage to The Defect using Spinning Kick.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 1,
-     "hp_after": 38,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Spinning Kick",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "SPINNING_KICK",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Seapunk dealt 0 damage to The Defect using Spinning Kick.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 5→0",
-    "Seapunk −Weak"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 26,
-   "idx": 26,
-   "label": "End turn",
-   "parent_id": 25,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    28
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 4,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Seapunk using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Seapunk HP 10→4 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 27,
-   "idx": 27,
-   "label": "Play Strike → Seapunk",
-   "parent_id": 26,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    29
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 28,
-   "idx": 28,
-   "label": "Play Defend",
-   "parent_id": 27,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    30
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 5→10"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 29,
-   "idx": 29,
-   "label": "Play Defend",
-   "parent_id": 28,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    31
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 1,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Go for the Eyes",
-     "source_card": "GO_FOR_THE_EYES",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Seapunk using Go for the Eyes.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Go for the Eyes",
-    "Seapunk HP 4→1 (−3)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 30,
-   "idx": 30,
-   "label": "Play Go for the Eyes → Seapunk",
-   "parent_id": 29,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    32
-   ],
-   "combat_log": [
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Bubble Burp",
-     "round": 3,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Seapunk used Bubble Burp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 8,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "enemy",
-     "source": "Bubble Burp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "BUBBLE_BURP",
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Seapunk gained 8 Block.",
-     "verb": "gained"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Strength",
-     "round": 3,
-     "side": "enemy",
-     "source": "Bubble Burp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "BUBBLE_BURP",
-     "source_upgraded": null,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Seapunk gained 2 Strength.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 10→0",
-    "Seapunk Block 0→8",
-    "Seapunk +2 Strength"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 31,
-   "idx": 31,
-   "label": "End turn",
-   "parent_id": 30,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    33
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Play Dualcast"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 32,
-   "idx": 32,
-   "label": "Play Dualcast",
-   "parent_id": 31,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    34
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 4,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 33,
-   "idx": 33,
-   "label": "Play Defend",
-   "parent_id": 32,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    35
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 0,
-     "blocked": 6,
-     "hp_after": 1,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 0 damage to Seapunk using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Seapunk Block 8→2"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 34,
-   "idx": 34,
-   "label": "Play Strike → Seapunk",
-   "parent_id": 33,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    36
-   ],
-   "combat_log": [
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Sea Kick",
-     "round": 4,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Seapunk used Sea Kick.",
-     "verb": "used"
-    },
-    {
-     "actor": "Seapunk",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 10,
-     "blocked": 5,
-     "hp_after": 28,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "enemy",
-     "source": "Sea Kick",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Seapunk",
-     "source_move_id": "SEA_KICK",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Seapunk dealt 10 damage to The Defect using Sea Kick.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 38→28 (−10)",
-    "You Block 5→0",
-    "Seapunk Block 2→0"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 35,
-   "idx": 35,
-   "label": "End turn",
-   "parent_id": 34,
-   "turn": 5,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    37
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 5,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Seapunk",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Seapunk using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "Seapunk HP 1→0  ☠ defeated",
-    "Gold 106→115"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 36,
-   "idx": 36,
-   "label": "Play Strike → Seapunk",
-   "parent_id": 35,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    38
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 3,
-   "id": 37,
-   "idx": 37,
-   "label": "Take Lightning Rod",
-   "parent_id": 36,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    39
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Sludge Spinner"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 38,
-   "idx": 38,
-   "label": "Map → (1,3)",
-   "parent_id": 37,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    40
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 39,
-   "idx": 39,
-   "label": "Play Defend",
-   "parent_id": 38,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    41
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Lightning Rod",
-     "source_card": "LIGHTNING_ROD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 4 Block.",
-     "verb": "gained"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Lightning Rod",
-     "round": 1,
-     "side": "player",
-     "source": "Lightning Rod",
-     "source_card": "LIGHTNING_ROD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "The Defect gained 2 Lightning Rod.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Lightning Rod",
-    "You Block 5→9",
-    "You +2 Lightning Rod"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 40,
-   "idx": 40,
-   "label": "Play Lightning Rod",
-   "parent_id": 39,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    42
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 36,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Sludge Spinner",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Sludge Spinner using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Sludge Spinner HP 42→36 (−6)"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 41,
-   "idx": 41,
-   "label": "Play Strike → Sludge Spinner",
-   "parent_id": 40,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 33,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "Sludge Spinner",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Sludge Spinner.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Sludge Spinner",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Oil Spray",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Sludge Spinner used Oil Spray.",
-     "verb": "used"
-    },
-    {
-     "actor": "Sludge Spinner",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 9,
-     "hp_after": 28,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Oil Spray",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "SludgeSpinner",
-     "source_move_id": "OIL_SPRAY",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Sludge Spinner dealt 0 damage to The Defect using Oil Spray.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 1,
-     "kind": "power",
-     "noun": "Weak",
-     "round": 1,
-     "side": "enemy",
-     "source": "Oil Spray",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "SludgeSpinner",
-     "source_move_id": "OIL_SPRAY",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "The Defect gained 1 Weak.",
-     "verb": "gained"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_channeled",
-     "noun": "Lightning Orb",
-     "round": 2,
-     "side": "player",
-     "source": "Oil Spray",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "SludgeSpinner",
-     "source_move_id": "OIL_SPRAY",
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect channeled Lightning Orb.",
-     "verb": "channeled"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 9→0",
-    "Sludge Spinner HP 36→33 (−3)",
-    "Lightning orb passive: 3 damage to a random enemy",
-    "You Lightning Rod 2→1",
-    "You +1 Weak"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 42,
-   "idx": 42,
-   "label": "End turn",
-   "parent_id": 41,
-   "turn": 2,
-   "value": null
+   "player": {
+    "block": 0,
+    "deck": [
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 0,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 1,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 2,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 3,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 4,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 5,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 6,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 7,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Channel 1 Lightning.",
+      "description_rich": "[gold]Channel[/gold] 1 [gold]Lightning[/gold].",
+      "id": "ZAP",
+      "image": "https://assets.test/card_atlas/defect/zap.png",
+      "index": 8,
+      "name": "Zap",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Evoke your rightmost Orb twice.",
+      "description_rich": "[gold]Evoke[/gold] your rightmost Orb twice.",
+      "id": "DUALCAST",
+      "image": "https://assets.test/card_atlas/defect/dualcast.png",
+      "index": 9,
+      "name": "Dualcast",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "curse",
+      "cost": "X",
+      "description": "Unplayable.\nEthereal.\nEternal.",
+      "description_rich": "[gold]Unplayable[/gold].\n[gold]Ethereal[/gold].\n[gold]Eternal[/gold].",
+      "id": "ASCENDERS_BANE",
+      "image": "https://assets.test/card_atlas/curse/ascenders_bane.png",
+      "index": 10,
+      "name": "Ascender's Bane",
+      "rarity": "Curse",
+      "type": "Curse",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 0,
+      "description": "Deal 3 damage.\nIf the enemy intends to attack, apply 1 Weak.",
+      "description_rich": "Deal 3 damage.\nIf the enemy intends to attack, apply 1 Weak.",
+      "id": "GO_FOR_THE_EYES",
+      "image": "https://assets.test/card_atlas/defect/go_for_the_eyes.png",
+      "index": 11,
+      "name": "Go for the Eyes",
+      "rarity": "Common",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 4 Block.\nAt the start of the next 2 turns, Channel 1 Lightning.",
+      "description_rich": "Gain 4 Block.\nAt the start of the next 2 turns, Channel 1 Lightning.",
+      "id": "LIGHTNING_ROD",
+      "image": "https://assets.test/card_atlas/defect/lightning_rod.png",
+      "index": 12,
+      "name": "Lightning Rod",
+      "rarity": "Common",
+      "type": "Skill",
+      "upgraded": false
+     }
+    ],
+    "gold": 115,
+    "hp": 28,
+    "max_hp": 75,
+    "name": "Defect",
+    "potion_slots": 2,
+    "potions": [],
+    "relics": [
+     {
+      "description": "At the start of each combat, Channel 1 Lightning.",
+      "id": "CRACKED_CORE",
+      "image": "https://assets.test/relic_atlas/cracked_core.png",
+      "name": "Cracked Core"
+     },
+     {
+      "description": "Every 3 normal combats, Upgrade a random card in your Deck.",
+      "id": "FISHING_ROD",
+      "image": "https://assets.test/relic_atlas/fishing_rod.png",
+      "name": "Fishing Rod"
+     }
+    ]
+   }
   }
- ]
+ }
 }

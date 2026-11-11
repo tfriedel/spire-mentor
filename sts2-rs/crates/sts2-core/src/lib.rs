@@ -6853,12 +6853,14 @@ impl CombatState {
             .copied()
             .collect();
         for uid in combat_pile_uids {
-            if let Some(c) = self.cards.iter_mut().find(|c| c.uid == uid) {
-                if c.card_id == crate::cards::CardId::Melancholy {
-                    // C# `EnergyCost.AddThisCombat(-1)`, clamped only at the
-                    // final cost read.
-                    c.add_cost_this_combat(-1);
-                }
+            if self
+                .cards
+                .iter()
+                .any(|c| c.uid == uid && c.card_id == crate::cards::CardId::Melancholy)
+            {
+                // C# `EnergyCost.AddThisCombat(-1)`, clamped only at the
+                // final cost read.
+                self.add_card_cost_this_combat(uid, -1);
             }
         }
     }
@@ -9311,6 +9313,11 @@ impl CombatState {
         if !self.player.draw.is_empty() || self.player.discard.is_empty() {
             return false;
         }
+        // C# `CardPileCmd.Shuffle` returns at once on `IsOverOrEnding`
+        // (CardPileCmd.cs:888, both builds).
+        if !self.enemy_uids.is_empty() && crate::combat_loop::is_over_or_ending(self) {
+            return false;
+        }
         let perfect_fit_order = self.perfect_fit_listener_order();
         let shuffled = crate::cards::discard_pile_into_draw_pile_signaling(
             &mut self.player,
@@ -9521,31 +9528,111 @@ impl CombatState {
                 if let Some(pos) = self.player.hand.iter().position(|u| *u == uid) {
                     self.player.hand.remove(pos);
                     self.player.play.push(uid);
+                    let parked_before = self.pending_autoplay_resume.is_some();
                     crate::combat_loop::resolve_auto_played_card(
                         self, uid, /*force_exhaust=*/ false,
                     );
+                    // The auto-play parked on a select its `OnPlay` opened
+                    // (Seeker Strike's draw-pile pick). C# is still inside
+                    // the Early pass, awaiting it: the card's normal
+                    // `AfterCardDrawn` pass (Chains of Binding, Confused,
+                    // Speedster, ...) runs only once the play's tail has,
+                    // and before the draw takes its next card (Ironclad 6588
+                    // v0.107.1: Juggling cloned Seeker Strike already Bound).
+                    // The resume runs it ([`Self::run_deferred_after_card_drawn`]).
+                    if !parked_before
+                        && self.pending_autoplay_resume.is_some()
+                        && self.pending_choice.is_some()
+                    {
+                        for &u in &drawn {
+                            let flags = AFTER_DRAWN_DEFERRED
+                                | if from_hand_draw {
+                                    AFTER_DRAWN_FROM_HAND_DRAW
+                                } else {
+                                    0
+                                }
+                                | if early_auto_played.contains(&u) {
+                                    AFTER_DRAWN_AUTO_PLAYED
+                                } else {
+                                    0
+                                };
+                            if let Some(c) = self.cards.get_mut(u.get() as usize - 1) {
+                                c.set_combat_var(cards::VarKey::AfterCardDrawnDeferred, flags);
+                            }
+                        }
+                        return;
+                    }
                 }
             }
             if crate::combat_loop::combat_is_ending(self) {
-                // The normal pass is empty. Iteration's first-Status gate
-                // reads `CardDrawnEntry` history, not a listener, so a drawn
-                // Status still counts toward it.
-                for &uid in &drawn {
-                    if self
-                        .cards
-                        .get((uid.get() as usize).saturating_sub(1))
-                        .is_some_and(|c| c.card_type == crate::cards::CardType::Status)
-                    {
-                        self.combat_log.status_cards_drawn_this_turn = self
-                            .combat_log
-                            .status_cards_drawn_this_turn
-                            .saturating_add(1);
-                    }
-                }
+                self.count_drawn_status_cards(&drawn);
                 return;
             }
         }
+        self.after_card_drawn_normal_pass(drawn, from_hand_draw, &early_auto_played);
+    }
 
+    /// The normal pass is empty once the combat is ending. Iteration's
+    /// first-Status gate reads `CardDrawnEntry` history, not a listener, so a
+    /// drawn Status still counts toward it.
+    fn count_drawn_status_cards(&mut self, drawn: &[CardUid]) {
+        for &uid in drawn {
+            if self
+                .cards
+                .get((uid.get() as usize).saturating_sub(1))
+                .is_some_and(|c| c.card_type == crate::cards::CardType::Status)
+            {
+                self.combat_log.status_cards_drawn_this_turn = self
+                    .combat_log
+                    .status_cards_drawn_this_turn
+                    .saturating_add(1);
+            }
+        }
+    }
+
+    /// Run the normal `AfterCardDrawn` pass a parked Hellraiser auto-play held
+    /// back ([`cards::VarKey::AfterCardDrawnDeferred`]), once that play's tail
+    /// has run and before the suspended draw takes its next card. Each
+    /// pass's listener walk yields nothing once the combat is ending.
+    pub(crate) fn run_deferred_after_card_drawn(&mut self) {
+        let key = cards::VarKey::AfterCardDrawnDeferred;
+        let marked: smallvec::SmallVec<[(CardUid, i32); 1]> = self
+            .cards
+            .iter()
+            .filter(|c| c.combat_vars.maybe_nonzero(key) && c.combat_var(key) != 0)
+            .map(|c| (c.uid, c.combat_var(key)))
+            .collect();
+        for (uid, flags) in marked {
+            if let Some(c) = self.cards.get_mut(uid.get() as usize - 1) {
+                c.combat_vars.zero(key);
+            }
+            let drawn: smallvec::SmallVec<[CardUid; 8]> = smallvec::smallvec![uid];
+            if crate::combat_loop::combat_is_ending(self) {
+                self.count_drawn_status_cards(&drawn);
+                continue;
+            }
+            let early: smallvec::SmallVec<[CardUid; 1]> = if flags & AFTER_DRAWN_AUTO_PLAYED != 0 {
+                smallvec::smallvec![uid]
+            } else {
+                smallvec::SmallVec::new()
+            };
+            self.after_card_drawn_normal_pass(
+                drawn,
+                flags & AFTER_DRAWN_FROM_HAND_DRAW != 0,
+                &early,
+            );
+        }
+    }
+
+    /// C# `Hook.AfterCardDrawn`'s second pass: every listener's
+    /// `AfterCardDrawn` for the cards just drawn, after the Early pass.
+    #[allow(clippy::too_many_lines)]
+    fn after_card_drawn_normal_pass(
+        &mut self,
+        drawn: smallvec::SmallVec<[CardUid; 8]>,
+        from_hand_draw: bool,
+        early_auto_played: &[CardUid],
+    ) {
         // Silent `SpeedsterPower.AfterCardDrawn` (C# `SpeedsterPower.cs:18-27`):
         // for each card drawn NOT via the turn-start hand draw
         // (`fromHandDraw == false` — the C# default for every `CardPileCmd.Draw`
@@ -9851,8 +9938,8 @@ impl CombatState {
             // ordering is behavior-neutral. `AddThisCombat` is unclamped: a
             // shave below 0 stays as cost debt (like Midnight's).
             if card_id == crate::cards::CardId::KinglyKick {
-                if let Some(c) = self.cards.get_mut(idx) {
-                    c.add_cost_this_combat(-1);
+                if let Some(uid) = self.cards.get(idx).map(|c| c.uid) {
+                    self.add_card_cost_this_combat(uid, -1);
                 }
             }
             // Bead `sts2-rs-kese5` (f933s sub-1): ChainsOfBindingPower
@@ -10862,20 +10949,33 @@ impl CombatState {
     }
 
     /// One Banshee's Cry `EnergyCost.AddThisCombat(-2)` (BansheesCry.cs:10).
+    /// Appended while a local zero is live (a generated free-this-turn copy)
+    /// it folds after it: `0 - 2`, so a global surcharge (Borrowed Time) skips
+    /// the negative cost (loadout Necrobinder 3109 v0.111.0: C# 0, Rust 1).
     fn shave_banshees_cry(&mut self, uid: CardUid) {
-        // An `AddThisCombat(-2)` appended while a local zero is live (a
-        // generated free-this-turn copy) folds after it: `0 - 2`, so a
-        // global surcharge (Borrowed Time) skips the negative cost
-        // (loadout Necrobinder 3109 v0.111.0: C# 0, Rust 1).
+        self.add_card_cost_this_combat(uid, -2);
+    }
+
+    /// C# `EnergyCost.AddThisCombat(delta)` on the card `uid`: a Relative
+    /// local modifier for the rest of combat
+    /// ([`cards::Card::add_cost_this_combat`]). Local modifiers fold in
+    /// insertion order (`CardEnergyCost.cs:110-115`), so one appended while a
+    /// local `Absolute(0)` is live (`SetToFreeThisTurn`, `SetUntilPlayed(0)`,
+    /// Flatten after an Osty attack) also shows on top of that zero
+    /// ([`cards::VarKey::CostAddedAfterLocalZero`]): a negative result makes
+    /// `Hook.ModifyEnergyCostInCombat` skip the global surcharges (Borrowed
+    /// Time, Tangled). X-cost cards take no modifier.
+    pub fn add_card_cost_this_combat(&mut self, uid: CardUid, delta: i32) {
+        let idx = uid.get() as usize - 1;
         let zeroed = self
             .cards
-            .get(uid.get() as usize - 1)
-            .is_some_and(|c| crate::hooks::card_cost_locally_zeroed(self, c));
-        if let Some(c) = self.cards.get_mut(uid.get() as usize - 1) {
-            c.add_cost_this_combat(-2);
+            .get(idx)
+            .is_some_and(|c| !c.is_x_cost() && crate::hooks::card_cost_locally_zeroed(self, c));
+        if let Some(c) = self.cards.get_mut(idx) {
+            c.add_cost_this_combat(delta);
             if zeroed {
-                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
-                c.set_combat_var(key, c.combat_var(key) - 2);
+                let key = cards::VarKey::CostAddedAfterLocalZero;
+                c.set_combat_var(key, c.combat_var(key).saturating_add(delta));
             }
         }
     }
@@ -12582,6 +12682,14 @@ fn resolve_choice_atomic(
                 state.pending_draw_resume = outer_draw;
             }
             if suspended {
+                return StepResult::PendingChoice;
+            }
+            // A drawn card whose Hellraiser auto-play this was owes its
+            // normal `AfterCardDrawn` pass now — after the play's tail,
+            // before the suspended draw below takes its next card (or, with
+            // nothing left to draw, before the draw's own tail).
+            state.run_deferred_after_card_drawn();
+            if state.pending_choice.is_some() {
                 return StepResult::PendingChoice;
             }
             // Bead `sts2-rs-hellraiser-draw-suspend` (DRAW_ORDER / PILE_COUNT
@@ -16871,6 +16979,13 @@ pub fn legal_actions(state: &CombatState) -> SmallVec<[Action; 16]> {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/// [`cards::VarKey::AfterCardDrawnDeferred`] bits: the card's normal
+/// `AfterCardDrawn` pass is owed, it came from the turn-start hand draw, and
+/// Hellraiser auto-played it in the Early pass.
+const AFTER_DRAWN_DEFERRED: i32 = 1;
+const AFTER_DRAWN_FROM_HAND_DRAW: i32 = 2;
+const AFTER_DRAWN_AUTO_PLAYED: i32 = 4;
 
 #[cfg(test)]
 mod tests {

@@ -17,22 +17,20 @@ pub(crate) fn play_modded(state: &mut CombatState, _t: Option<CreatureUid>) -> E
     // channel-time base-init (orbs.rs) never fires afterward (capacity != 0),
     // capping the belt at 1 (Defect fuzz seed 188: orbs.len cs=4 rs=1, monster
     // hp cs=73 rs=53). Mirror Capacitor's precedent: establish the 3-slot
-    // Defect base first. Modded is a Defect-only card, so the unconditional
-    // default is correct here.
-    // A belt Bulk Up emptied is sized and grows from 0, as in C#.
-    state.player.orbs.ensure_defect_base();
+    // Defect base first — for a Defect only: a generated Modded on another
+    // character adds its 1 slot onto 0 (Ironclad seed 6637 analog).
+    // Lazy Defect base for an unsized fixture belt only — never for a
+    // non-Defect (C# `Capacitor`/`Modded` are just `OrbCmd.AddSlots` onto a
+    // `BaseOrbSlotCount` of 0); a belt Bulk Up emptied grows from 0.
+    sts2_core::orbs::ensure_character_base_slots(state);
     state.player.orbs.add_slots(1);
     // Bump the just-played card's persistent cost (mirrors Python
     // `card.cost += 1`, which mutates the CardInstance held in the
     // master deck — the next play of this same instance costs +1).
-    if let Some(idx) =
-        sts2_core::card_effects::resolving_card_uid(state).map(|u| u.0.get() as usize - 1)
-    {
-        if let Some(card) = state.cards.get_mut(idx) {
-            // `EnergyCost.AddThisCombat(1)` (Modded.cs:28): pays off a
-            // below-zero cost debt first, as C#'s unclamped Relative does.
-            card.add_cost_this_combat(1);
-        }
+    if let Some(uid) = sts2_core::card_effects::resolving_card_uid(state) {
+        // `EnergyCost.AddThisCombat(1)` (Modded.cs:28): pays off a
+        // below-zero cost debt first, as C#'s unclamped Relative does.
+        state.add_card_cost_this_combat(uid, 1);
     }
     EffectResult::Resolved
 }

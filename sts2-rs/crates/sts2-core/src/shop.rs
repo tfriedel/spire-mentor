@@ -439,40 +439,89 @@ pub const fn is_relic_allowed_in_shops(id: crate::relics::RelicId) -> bool {
     )
 }
 
-/// Roll a relic rarity from the merchant pool. Mirrors Python
-/// `roll_relic_rarity(rng)` (`shop.py:81-88`): 50% Common, 33% Uncommon,
-/// 17% Rare. Reads one `rng.next_float()` draw — matches Python's RNG
-/// advancement exactly.
+/// Roll a relic rarity from the merchant pool: C# `RelicFactory.RollRarity`
+/// (RelicFactory.cs:92-93), 50% Common, 33% Uncommon, 17% Rare. One draw.
 pub fn roll_relic_rarity(rng: &mut crate::dotnet_rng::Rng) -> ShopRelicRarity {
     let roll = rng.next_float(1.0);
-    if roll < 0.50 {
+    relic_rarity_for_sample(roll)
+}
+
+/// The rarity [`roll_relic_rarity`] picks for the raw `NextDouble` sample:
+/// C# compares the `float` `Rng.NextFloat()` against `0.5f` / `0.83f`.
+#[allow(clippy::cast_possible_truncation)]
+fn relic_rarity_for_sample(sample: f64) -> ShopRelicRarity {
+    let roll = sample as f32;
+    if roll < 0.5_f32 {
         ShopRelicRarity::Common
-    } else if roll < 0.83 {
+    } else if roll < 0.83_f32 {
         ShopRelicRarity::Uncommon
     } else {
         ShopRelicRarity::Rare
     }
 }
 
-/// Roll a potion rarity from the merchant pool. Mirrors Python
-/// `roll_potion_rarity(rng)` (`shop.py:93-100`): 10% Rare, 25% Uncommon,
-/// 65% Common (Python compares with `<=`, so the boundary draws go to
-/// the higher rarity — preserved here).
+/// Roll a potion rarity from the merchant pool: C# `PotionFactory`
+/// (PotionFactory.cs:73-74 v0.107.1, :82-83 v0.111.0), 10% Rare, 25%
+/// Uncommon, 65% Common, with `<=` so a boundary draw goes to the higher
+/// rarity. One draw.
 pub fn roll_potion_rarity(rng: &mut crate::dotnet_rng::Rng) -> ShopPotionRarity {
     let roll = rng.next_float(1.0);
-    if roll <= 0.10 {
+    potion_rarity_for_sample(roll)
+}
+
+/// The rarity [`roll_potion_rarity`] picks for the raw `NextDouble` sample:
+/// C# compares the `float` `Rng.NextFloat()` against `0.1f` / `0.35f`.
+#[allow(clippy::cast_possible_truncation)]
+fn potion_rarity_for_sample(sample: f64) -> ShopPotionRarity {
+    let roll = sample as f32;
+    if roll <= 0.1_f32 {
         ShopPotionRarity::Rare
-    } else if roll <= 0.35 {
+    } else if roll <= 0.35_f32 {
         ShopPotionRarity::Uncommon
     } else {
         ShopPotionRarity::Common
     }
 }
 
-/// Rolled card price. Mirrors Python `card_price(rarity, rng,
-/// is_colorless, on_sale)` (`shop.py:52-60`). Advances RNG by exactly
-/// one `next_float_range` draw, after the colorless multiplier is
-/// applied (matches Python's order of operations).
+/// One merchant price jitter as C# draws it: `Rng.NextFloat(min, max)` with
+/// `float` bounds, i.e. `(float)(NextDouble() * (double)(max - min) +
+/// (double)min)`. `max - min` is exact in `float` (Sterbenz), so
+/// [`crate::dotnet_rng::Rng::next_float_range`] over the widened bounds gives
+/// the same `f64`, and the cast back to `f32` matches C#. One read.
+#[must_use]
+pub fn merchant_jitter(rng: &mut crate::dotnet_rng::Rng, min: f32, max: f32) -> f32 {
+    #[allow(clippy::cast_possible_truncation)]
+    let factor = rng.next_float_range(f64::from(min), f64::from(max)) as f32;
+    factor
+}
+
+/// `(float)cost * factor`, rounded half-to-even — the single-precision
+/// product every C# merchant `CalcCost` takes before `Mathf.RoundToInt` /
+/// `Mathf.Round` / `Math.Round` (all banker's). Multiplying in `f64` instead
+/// lets a product the `float` lands on an exact `.5` round the other way
+/// (76.50005 → 77 where C#'s 76.5f → 76; Necrobinder 6664, v0.111.0).
+#[must_use]
+pub fn merchant_round(cost: i32, factor: f32) -> i32 {
+    #[allow(clippy::cast_precision_loss)]
+    let cost = cost as f32;
+    #[allow(clippy::cast_possible_truncation)]
+    let price = (cost * factor).round_ties_even() as i32;
+    price
+}
+
+/// The colorless card base, C# `Mathf.RoundToInt((float)num * 1.15f)`
+/// (`MerchantCardEntry.GetCost`, MerchantCardEntry.cs:48): `float` product,
+/// banker's rounding (150 → 172.5f → 172).
+#[must_use]
+pub fn colorless_card_base_cost(base: i32) -> i32 {
+    merchant_round(base, 1.15_f32)
+}
+
+/// Rolled card price, C# `MerchantCardEntry.CalcCost` (MerchantCardEntry.cs:
+/// 119-129, both builds): `Mathf.RoundToInt((float)GetCost(card) *
+/// Shops.NextFloat(0.95f, 1.05f))`, halved (integer division) when on sale.
+/// `GetCost` applies the colorless multiplier first. One `next_float_range`
+/// draw.
 #[must_use]
 pub fn card_price(
     rarity: RewardRarity,
@@ -480,84 +529,69 @@ pub fn card_price(
     is_colorless: bool,
     on_sale: bool,
 ) -> i32 {
-    let mut base = f64::from(card_base_cost(rarity));
+    let mut base = card_base_cost(rarity);
     if is_colorless {
-        // C# `MerchantCardEntry.GetCost` applies the colorless multiplier via
-        // `Mathf.RoundToInt(num * 1.15f)` = `(int)Math.Round(x)`, which is
-        // banker's rounding (round-half-to-even). The colorless base lands on
-        // an exact `.5` (rare: 150×1.15 = 172.5 → 172, NOT 173), so half-away
-        // `f64::round` diverges by one here. Match Godot/.NET `RoundToInt`.
-        base = (base * COLORLESS_CARD_PRICE_MULTIPLIER).round_ties_even();
+        base = colorless_card_base_cost(base);
     }
-    let factor = rng.next_float_range(
-        MERCHANT_CARD_PRICE_VARIANCE_MIN,
-        MERCHANT_CARD_PRICE_VARIANCE_MAX,
+    #[allow(clippy::cast_possible_truncation)]
+    let factor = merchant_jitter(
+        rng,
+        MERCHANT_CARD_PRICE_VARIANCE_MIN as f32,
+        MERCHANT_CARD_PRICE_VARIANCE_MAX as f32,
     );
-    // Final cost likewise via `Mathf.RoundToInt` (banker's). For colored cards
-    // the `base × random_factor` product practically never hits an exact `.5`,
-    // so this only matters for determinism with the colorless base above.
-    let mut cost = (base * factor).round_ties_even() as i32;
+    let mut cost = merchant_round(base, factor);
     if on_sale {
         cost /= SALE_PRICE_DIVISOR;
     }
     cost
 }
 
-/// Rolled potion price. Mirrors Python `potion_price(rarity, rng)`
-/// (`shop.py:63-66`).
+/// Rolled potion price — the same bit-exact roll as
+/// [`merchant_potion_price`].
 #[must_use]
 pub fn potion_price(rarity: ShopPotionRarity, rng: &mut crate::dotnet_rng::Rng) -> i32 {
-    let base = f64::from(potion_base_cost(rarity));
-    let factor = rng.next_float_range(
-        MERCHANT_POTION_PRICE_VARIANCE_MIN,
-        MERCHANT_POTION_PRICE_VARIANCE_MAX,
-    );
-    // C# `MerchantPotionEntry.CalcCost` rounds via `(int)Mathf.Round(...)`,
-    // which is .NET `Math.Round` = round-half-to-even (banker's), NOT
-    // half-away-from-zero. Match the card path above (`round_ties_even`).
-    (base * factor).round_ties_even() as i32
+    merchant_potion_price(rarity, rng)
 }
 
 /// Merchant potion price as the real game rolls it, bit-exact: C# `MerchantPotionEntry.CalcCost` (v0.111.0 `:66-70`) is
-/// `(int)Mathf.Round((float)cost * Shops.NextFloat(0.95f, 1.05f))`, and
-/// `Rng.NextFloat(float, float)` is `(float)(NextDouble() * (double)(max -
-/// min) + (double)min)` with `max - min` taken in `float`. That subtraction
-/// is exact (Sterbenz), so [`crate::dotnet_rng::Rng::next_float_range`] over
-/// the widened `f32` bounds gives the same `f64`. The cast back to `f32`, the
-/// `float` multiply and the banker's round then match C# step for step, so a
-/// product near `.5` rounds the same way. One read, the same one the C# makes
-/// from `PlayerRng.Shops`.
+/// `(int)Mathf.Round((float)cost * Shops.NextFloat(0.95f, 1.05f))`; see
+/// [`merchant_jitter`] and [`merchant_round`]. One read, the same one the C#
+/// makes from `PlayerRng.Shops`.
 ///
 /// The game skips this read when `TestMode` is on. The headless oracle runs
 /// `CalcCost` with `TestMode` off (Harmony patch in
 /// `RunSimulator.PatchTestModeRelicRewards`) so it matches the real game.
 #[must_use]
 pub fn merchant_potion_price(rarity: ShopPotionRarity, rng: &mut crate::dotnet_rng::Rng) -> i32 {
-    const MIN: f32 = 0.95;
-    const MAX: f32 = 1.05;
     #[allow(clippy::cast_possible_truncation)]
-    let factor = rng.next_float_range(f64::from(MIN), f64::from(MAX)) as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let cost = potion_base_cost(rarity) as f32;
-    #[allow(clippy::cast_possible_truncation)]
-    let price = (cost * factor).round_ties_even() as i32;
-    price
+    let factor = merchant_jitter(
+        rng,
+        MERCHANT_POTION_PRICE_VARIANCE_MIN as f32,
+        MERCHANT_POTION_PRICE_VARIANCE_MAX as f32,
+    );
+    merchant_round(potion_base_cost(rarity), factor)
 }
 
-/// Rolled relic price. Mirrors Python `relic_price(merchant_cost, rng)`
-/// (`shop.py:69-71`). Wider variance band than card / potion (0.85-1.15
-/// vs 0.95-1.05).
+/// One relic price jitter, C# `Shops.NextFloat(0.85f, 1.15f)`
+/// (MerchantRelicEntry.cs:45, FakeMerchant.cs:116).
+#[must_use]
+pub fn merchant_relic_jitter(rng: &mut crate::dotnet_rng::Rng) -> f32 {
+    #[allow(clippy::cast_possible_truncation)]
+    let factor = merchant_jitter(
+        rng,
+        MERCHANT_RELIC_PRICE_VARIANCE_MIN as f32,
+        MERCHANT_RELIC_PRICE_VARIANCE_MAX as f32,
+    );
+    factor
+}
+
+/// Rolled relic price, C# `MerchantRelicEntry.CalcCost`
+/// (MerchantRelicEntry.cs:45, both builds): `(int)Math.Round((float)
+/// MerchantCost * Shops.NextFloat(0.85f, 1.15f))` — `float` product,
+/// banker's rounding.
 #[must_use]
 pub fn relic_price(rarity: ShopRelicRarity, rng: &mut crate::dotnet_rng::Rng) -> i32 {
-    let base = f64::from(relic_base_cost(rarity));
-    let factor = rng.next_float_range(
-        MERCHANT_RELIC_PRICE_VARIANCE_MIN,
-        MERCHANT_RELIC_PRICE_VARIANCE_MAX,
-    );
-    // C# `MerchantRelicEntry.CalcCost` rounds via `(int)Math.Round((float)...)`
-    // = round-half-to-even (banker's), NOT half-away-from-zero. Match the card
-    // path above (`round_ties_even`).
-    (base * factor).round_ties_even() as i32
+    merchant_round(relic_base_cost(rarity), merchant_relic_jitter(rng))
 }
 
 // ── Inventory-roll generator (bead `sts2-rs-64mq2`) ──────────────────
@@ -1105,6 +1139,90 @@ fn buy_potion_impl(
 mod tests {
     use super::*;
 
+    /// C# `MerchantCardEntry.CalcCost` (MerchantCardEntry.cs:124, both
+    /// builds) multiplies in SINGLE precision:
+    /// `Mathf.RoundToInt((float)cost * Shops.NextFloat(0.95f, 1.05f))`. At
+    /// Shops counter 41 of this seed the f32 product is exactly 76.5 → 76
+    /// (banker's); the f64 product 76.50005 rounded to 77 (Necrobinder 6664,
+    /// v0.111.0). Rare at counter 1610: 152, not 153.
+    #[test]
+    fn card_price_multiplies_in_single_precision() {
+        let at = |counter: u32| {
+            let mut rng = crate::dotnet_rng::Rng::from_seed(11_516_260_550_929_097_939);
+            rng.fast_forward_counter(counter);
+            rng
+        };
+        assert_eq!(
+            card_price(RewardRarity::Uncommon, &mut at(41), false, false),
+            76
+        );
+        assert_eq!(
+            card_price(RewardRarity::Rare, &mut at(1610), false, false),
+            152
+        );
+    }
+
+    /// Every merchant price is the C# float formula, step for step:
+    /// `(float)cost * (float)NextFloat(min, max)`, banker's rounding; the
+    /// colorless base is `Mathf.RoundToInt((float)num * 1.15f)`
+    /// (MerchantCardEntry.cs:48), relics `Math.Round((float)MerchantCost *
+    /// NextFloat(0.85f, 1.15f))` (MerchantRelicEntry.cs:45), potions
+    /// `Mathf.Round((float)cost * NextFloat(0.95f, 1.05f))`
+    /// (MerchantPotionEntry.cs:69).
+    #[test]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn merchant_prices_match_the_float_formula() {
+        fn reference(cost: i32, rng: &mut crate::dotnet_rng::Rng, min: f32, max: f32) -> i32 {
+            let factor = rng.next_float_range(f64::from(min), f64::from(max)) as f32;
+            ((cost as f32) * factor).round_ties_even() as i32
+        }
+        let colorless = |n: i32| ((n as f32) * 1.15_f32).round_ties_even() as i32;
+        let mut a = crate::dotnet_rng::Rng::from_seed(11_516_260_550_929_097_939);
+        let mut b = a.clone();
+        for _ in 0..3000 {
+            for rarity in [
+                RewardRarity::Common,
+                RewardRarity::Uncommon,
+                RewardRarity::Rare,
+            ] {
+                let base = card_base_cost(rarity);
+                assert_eq!(
+                    card_price(rarity, &mut a, false, false),
+                    reference(base, &mut b, 0.95, 1.05)
+                );
+                assert_eq!(
+                    card_price(rarity, &mut a, true, false),
+                    reference(colorless(base), &mut b, 0.95, 1.05)
+                );
+                assert_eq!(
+                    card_price(rarity, &mut a, false, true),
+                    reference(base, &mut b, 0.95, 1.05) / 2
+                );
+            }
+            for rarity in [
+                ShopRelicRarity::Common,
+                ShopRelicRarity::Uncommon,
+                ShopRelicRarity::Rare,
+                ShopRelicRarity::Shop,
+            ] {
+                assert_eq!(
+                    relic_price(rarity, &mut a),
+                    reference(relic_base_cost(rarity), &mut b, 0.85, 1.15)
+                );
+            }
+            for rarity in [
+                ShopPotionRarity::Common,
+                ShopPotionRarity::Uncommon,
+                ShopPotionRarity::Rare,
+            ] {
+                assert_eq!(
+                    potion_price(rarity, &mut a),
+                    reference(potion_base_cost(rarity), &mut b, 0.95, 1.05)
+                );
+            }
+        }
+    }
+
     #[test]
     fn card_base_cost_matches_python_table() {
         assert_eq!(card_base_cost(RewardRarity::Rare), 150);
@@ -1250,6 +1368,27 @@ mod tests {
 
     use crate::card_rewards::CardRarityOdds;
     use crate::dotnet_rng::Rng;
+
+    /// C# `RelicFactory.RollRarity` / `PotionFactory` compare the `float`
+    /// `Rng.NextFloat()` against `float` thresholds (RelicFactory.cs:92-93,
+    /// PotionFactory.cs:73-74 v0.107.1). A sample just under 0.83 rounds to
+    /// `0.83f` and is Rare; one just over 0.1 rounds to `0.1f` and is Rare.
+    #[test]
+    fn rarity_rolls_compare_in_single_precision() {
+        assert_eq!(relic_rarity_for_sample(0.829_999_99), ShopRelicRarity::Rare);
+        assert_eq!(
+            relic_rarity_for_sample(0.829_999_9),
+            ShopRelicRarity::Uncommon
+        );
+        assert_eq!(
+            potion_rarity_for_sample(0.100_000_000_5),
+            ShopPotionRarity::Rare
+        );
+        assert_eq!(
+            potion_rarity_for_sample(0.100_000_1),
+            ShopPotionRarity::Uncommon
+        );
+    }
 
     #[test]
     fn roll_relic_rarity_covers_all_three_buckets() {

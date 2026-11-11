@@ -84,14 +84,21 @@ impl RarityContext {
     }
 }
 
+/// A legacy Xoshiro unit draw in single precision, like C#'s `NextFloat()`
+/// the odds are compared against.
+#[allow(clippy::cast_possible_truncation)]
+fn unit_f32(rng: &mut Xoshiro256PlusPlus) -> f32 {
+    next_unit_f64(rng) as f32
+}
+
 // ── Python pin: `CardRarityOdds` constants ───────────────────────────
 
 /// Initial rare-threshold offset. Mirrors
 /// `CardRarityOdds.BASE_RARITY_OFFSET = -0.05`.
-pub const BASE_RARITY_OFFSET: f64 = -0.05;
+pub const BASE_RARITY_OFFSET: f32 = -0.05;
 /// Cap on the rare-threshold offset. Mirrors
 /// `CardRarityOdds.MAX_RARITY_OFFSET = 0.40`.
-pub const MAX_RARITY_OFFSET: f64 = 0.40;
+pub const MAX_RARITY_OFFSET: f32 = 0.40;
 /// Ascension level at which the scarcity branch activates. Mirrors
 /// `CardRarityOdds.SCARCITY_ASCENSION_LEVEL = 7`. This branch is LIVE:
 /// `RunManager::with_ascension` binds the run's `CardRarityOdds` to the
@@ -99,34 +106,34 @@ pub const MAX_RARITY_OFFSET: f64 = 0.40;
 /// and the halved upgrade scaling apply at A7+.
 pub const SCARCITY_ASCENSION_LEVEL: u8 = 7;
 
-const REGULAR_COMMON_ODDS: f64 = 0.60;
-const REGULAR_COMMON_ODDS_SCARCITY: f64 = 0.615;
-const REGULAR_UNCOMMON_ODDS: f64 = 0.37;
-const REGULAR_RARE_ODDS: f64 = 0.03;
-const REGULAR_RARE_ODDS_SCARCITY: f64 = 0.0149;
+const REGULAR_COMMON_ODDS: f32 = 0.60;
+const REGULAR_COMMON_ODDS_SCARCITY: f32 = 0.615;
+const REGULAR_UNCOMMON_ODDS: f32 = 0.37;
+const REGULAR_RARE_ODDS: f32 = 0.03;
+const REGULAR_RARE_ODDS_SCARCITY: f32 = 0.0149;
 
-const ELITE_COMMON_ODDS: f64 = 0.50;
-const ELITE_COMMON_ODDS_SCARCITY: f64 = 0.549;
-const ELITE_UNCOMMON_ODDS: f64 = 0.40;
-const ELITE_RARE_ODDS: f64 = 0.10;
-const ELITE_RARE_ODDS_SCARCITY: f64 = 0.05;
+const ELITE_COMMON_ODDS: f32 = 0.50;
+const ELITE_COMMON_ODDS_SCARCITY: f32 = 0.549;
+const ELITE_UNCOMMON_ODDS: f32 = 0.40;
+const ELITE_RARE_ODDS: f32 = 0.10;
+const ELITE_RARE_ODDS_SCARCITY: f32 = 0.05;
 
-const BOSS_COMMON_ODDS: f64 = 0.00;
-const BOSS_UNCOMMON_ODDS: f64 = 0.00;
-const BOSS_RARE_ODDS: f64 = 1.00;
+const BOSS_COMMON_ODDS: f32 = 0.00;
+const BOSS_UNCOMMON_ODDS: f32 = 0.00;
+const BOSS_RARE_ODDS: f32 = 1.00;
 
-const SHOP_COMMON_ODDS: f64 = 0.54;
-const SHOP_COMMON_ODDS_SCARCITY: f64 = 0.585;
-const SHOP_UNCOMMON_ODDS: f64 = 0.37;
-const SHOP_RARE_ODDS: f64 = 0.09;
-const SHOP_RARE_ODDS_SCARCITY: f64 = 0.045;
+const SHOP_COMMON_ODDS: f32 = 0.54;
+const SHOP_COMMON_ODDS_SCARCITY: f32 = 0.585;
+const SHOP_UNCOMMON_ODDS: f32 = 0.37;
+const SHOP_RARE_ODDS: f32 = 0.09;
+const SHOP_RARE_ODDS_SCARCITY: f32 = 0.045;
 
-const UNIFORM_COMMON_ODDS: f64 = 0.33;
-const UNIFORM_UNCOMMON_ODDS: f64 = 0.33;
-const UNIFORM_RARE_ODDS: f64 = 0.33;
+const UNIFORM_COMMON_ODDS: f32 = 0.33;
+const UNIFORM_UNCOMMON_ODDS: f32 = 0.33;
+const UNIFORM_RARE_ODDS: f32 = 0.33;
 
-const RARITY_GROWTH: f64 = 0.01;
-const RARITY_GROWTH_SCARCITY: f64 = 0.005;
+const RARITY_GROWTH: f32 = 0.01;
+const RARITY_GROWTH_SCARCITY: f32 = 0.005;
 
 // ── Python pin: `roll_for_upgrade` constants ─────────────────────────
 
@@ -143,9 +150,9 @@ const SCARCITY_CARD_UPGRADE_ODD_SCALING: f64 = 0.125;
 /// total and lets the containing `RunState` keep its derived `Eq`.
 #[derive(Clone, Copy, Debug)]
 struct RarityOdds {
-    common: f64,
-    uncommon: f64,
-    rare: f64,
+    common: f32,
+    uncommon: f32,
+    rare: f32,
 }
 
 impl PartialEq for RarityOdds {
@@ -173,13 +180,13 @@ pub struct CardRarityOdds {
     pub ascension_level: u8,
     /// Rolling pity offset added to the rare threshold on non-boss
     /// rolls. Starts at [`BASE_RARITY_OFFSET`].
-    pub current_value: f64,
+    pub current_value: f32,
     regular: RarityOdds,
     elite: RarityOdds,
     boss: RarityOdds,
     shop: RarityOdds,
     uniform: RarityOdds,
-    rarity_growth: f64,
+    rarity_growth: f32,
 }
 
 impl Default for CardRarityOdds {
@@ -291,7 +298,7 @@ impl CardRarityOdds {
         } else {
             self.current_value
         };
-        let roll_val = next_unit_f64(rng);
+        let roll_val = unit_f32(rng);
         let rare_threshold = odds.rare + offset;
 
         if roll_val < rare_threshold {
@@ -327,7 +334,7 @@ impl CardRarityOdds {
         } else {
             self.current_value
         };
-        let roll_val = rng.next_float(1.0);
+        let roll_val = rng.next_float_f32();
         let rare_threshold = odds.rare + offset;
 
         let result = if roll_val < rare_threshold {
@@ -355,7 +362,7 @@ impl CardRarityOdds {
         context: RarityContext,
     ) -> RewardRarity {
         let odds = self.odds_for(context);
-        let roll_val = next_unit_f64(rng);
+        let roll_val = unit_f32(rng);
         let rare_threshold = odds.rare + self.current_value;
         if roll_val < rare_threshold {
             RewardRarity::Rare
@@ -378,7 +385,7 @@ impl CardRarityOdds {
         context: RarityContext,
     ) -> RewardRarity {
         let odds = self.odds_for(context);
-        let roll_val = rng.next_float(1.0);
+        let roll_val = rng.next_float_f32();
         let rare_threshold = odds.rare + self.current_value;
         let result = if roll_val < rare_threshold {
             RewardRarity::Rare
@@ -433,7 +440,7 @@ impl CardRarityOdds {
         context: RarityContext,
     ) -> RewardRarity {
         let odds = self.odds_for(context);
-        let roll_val = rng.next_float(1.0);
+        let roll_val = rng.next_float_f32();
         let uncommon_threshold = match version {
             crate::GameVersion::V0_107_1 => odds.uncommon,
             // v0.111.0: cumulative `rare + uncommon` (decomp CardRarityOdds.cs:129).
@@ -464,7 +471,7 @@ impl CardRarityOdds {
         context: RarityContext,
     ) -> RewardRarity {
         let odds = self.odds_for(context);
-        let roll_val = next_unit_f64(rng);
+        let roll_val = unit_f32(rng);
         if roll_val < odds.rare {
             RewardRarity::Rare
         } else if roll_val < odds.uncommon + odds.rare {
@@ -517,7 +524,7 @@ pub fn roll_for_upgrade_with_dotnet(
     ascension_level: u8,
     base_chance: f64,
 ) -> bool {
-    let roll = rng.next_float(1.0);
+    let roll = upgrade_roll_as_decimal(rng.next_float(1.0));
     let mut odds = base_chance;
     if rarity != RewardRarity::Rare {
         let scaling = if ascension_level >= SCARCITY_ASCENSION_LEVEL {
@@ -530,6 +537,18 @@ pub fn roll_for_upgrade_with_dotnet(
     roll <= odds
 }
 
+/// C# `RollForUpgrade` (CardFactory.cs:292) reads `(decimal)rng.NextFloat()`:
+/// the sample rounded to `float`, then to `decimal`, which keeps 7
+/// significant digits. The odds it is compared with are exact multiples of
+/// 1/8, so the decimal value compares the same as its nearest `f64`.
+#[allow(clippy::cast_possible_truncation)]
+fn upgrade_roll_as_decimal(sample: f64) -> f64 {
+    let roll = sample as f32;
+    format!("{roll:.6e}")
+        .parse()
+        .unwrap_or_else(|_| f64::from(roll))
+}
+
 /// Combat-context base chance for [`roll_for_upgrade`]. Mirrors
 /// `COMBAT_CARD_UPGRADE_BASE_CHANCE = 0.0`.
 #[must_use]
@@ -540,13 +559,13 @@ pub const fn combat_card_upgrade_base_chance() -> f64 {
 // ── Python pin: `PotionRewardOdds` ───────────────────────────────────
 
 /// Initial drop probability. Mirrors Python `PotionRewardOdds.INITIAL_VALUE = 0.40`.
-pub const POTION_REWARD_INITIAL_VALUE: f64 = 0.40;
+pub const POTION_REWARD_INITIAL_VALUE: f32 = 0.40;
 /// Elite-encounter bonus (full delta; halved at the comparison site
 /// per Python's `elite_bonus * 0.50`). Mirrors
 /// `PotionRewardOdds.ELITE_BONUS = 0.25`.
-pub const POTION_REWARD_ELITE_BONUS: f64 = 0.25;
+pub const POTION_REWARD_ELITE_BONUS: f32 = 0.25;
 /// Per-combat odds swing. Mirrors `PotionRewardOdds.SWING = 0.10`.
-pub const POTION_REWARD_SWING: f64 = 0.10;
+pub const POTION_REWARD_SWING: f32 = 0.10;
 
 /// Oscillating 40-50% potion-drop pity counter. One per
 /// [`crate::RunState`]. Mirrors Python
@@ -572,7 +591,7 @@ pub const POTION_REWARD_SWING: f64 = 0.10;
 pub struct PotionRewardOdds {
     /// Live drop probability (excluding elite bonus). Starts at
     /// [`POTION_REWARD_INITIAL_VALUE`].
-    pub current_value: f64,
+    pub current_value: f32,
 }
 
 impl Default for PotionRewardOdds {
@@ -630,7 +649,7 @@ impl PotionRewardOdds {
             0.0
         };
         let threshold = self.current_value + elite_bonus * 0.5;
-        let roll_val = rng.next_float(1.0);
+        let roll_val = rng.next_float_f32();
         if force || roll_val < threshold {
             self.current_value -= POTION_REWARD_SWING;
             true
@@ -650,9 +669,9 @@ impl PotionRewardOdds {
 fn trace_rarity(
     method: &str,
     context: RarityContext,
-    offset: f64,
+    offset: f32,
     result: RewardRarity,
-    after: f64,
+    after: f32,
 ) {
     if std::env::var_os("STS2_TRACE_RNG").is_none() {
         return;
@@ -674,6 +693,45 @@ fn next_unit_f64(rng: &mut Xoshiro256PlusPlus) -> f64 {
 
 #[cfg(test)]
 mod tests {
+
+    /// C# keeps the pity offsets in `float` (AbstractOdds.cs `CurrentValue`)
+    /// and grows them with `float` adds (CardRarityOdds.cs `Roll`,
+    /// PotionRewardOdds.cs `Roll`): the stored value is bit-for-bit the
+    /// single-precision sum, not a rounded double.
+    #[test]
+    fn pity_offsets_accumulate_in_single_precision() {
+        let mut odds = CardRarityOdds::new(0);
+        let mut want = -0.05_f32;
+        for _ in 0..30 {
+            odds.current_value = (odds.current_value + odds.rarity_growth).min(MAX_RARITY_OFFSET);
+            want = (want + 0.01_f32).min(0.4_f32);
+        }
+        assert_eq!(odds.current_value.to_bits(), want.to_bits());
+        let mut potion = PotionRewardOdds::new();
+        let mut rng = crate::dotnet_rng::Rng::new(3);
+        let mut want = 0.4_f32;
+        for _ in 0..40 {
+            let before = potion.current_value;
+            let dropped = potion.roll(&mut rng, false, false);
+            want += if dropped { -0.1_f32 } else { 0.1_f32 };
+            assert_eq!(
+                potion.current_value,
+                before + if dropped { -0.1 } else { 0.1 }
+            );
+        }
+        assert_eq!(potion.current_value.to_bits(), want.to_bits());
+    }
+
+    /// `(decimal)rng.NextFloat()` (CardFactory.cs:292): a sample just over
+    /// 0.25 rounds to the `float` 0.25000003, whose 7-digit decimal is 0.25,
+    /// so the act-1 upgrade odds (`<= 0.25m`) take it.
+    #[test]
+    fn upgrade_roll_reads_the_float_as_a_decimal() {
+        assert!((upgrade_roll_as_decimal(0.250_000_02) - 0.25).abs() < f64::EPSILON);
+        assert!(upgrade_roll_as_decimal(0.250_000_2) > 0.25);
+        assert!((upgrade_roll_as_decimal(0.123_456_789) - 0.123_456_8).abs() < 1e-12);
+    }
+
     use super::*;
     use rand_xoshiro::rand_core::SeedableRng;
 
@@ -1004,7 +1062,7 @@ mod tests {
             let mut rng107 = crate::dotnet_rng::Rng::new(seed);
             let mut rng111 = crate::dotnet_rng::Rng::new(seed);
             let mut probe = crate::dotnet_rng::Rng::new(seed);
-            let draw = probe.next_float(1.0);
+            let draw = probe.next_float_f32();
             let r107 = odds.roll_with_base_odds_with_dotnet_for(
                 GameVersion::V0_107_1,
                 &mut rng107,

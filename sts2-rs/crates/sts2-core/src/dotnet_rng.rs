@@ -521,6 +521,24 @@ impl Rng {
         self.base.sample() * upper
     }
 
+    /// C# `Rng.NextFloat()` (Rng.cs:146-165): `(float)(NextDouble() * 1.0 +
+    /// 0.0)`, the sample rounded to single precision. Callers compare it
+    /// against `float` thresholds, so a draw within half an ulp of one lands
+    /// where C#'s does. Increments counter by 1.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn next_float_f32(&mut self) -> f32 {
+        self.counter += 1;
+        self.base.sample() as f32
+    }
+
+    /// C# `Rng.NextFloat(max)` = `NextFloat(0f, max)`:
+    /// `(float)(NextDouble() * (double)max)`. Increments counter by 1.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn next_float_f32_max(&mut self, max: f32) -> f32 {
+        self.counter += 1;
+        (self.base.sample() * f64::from(max)) as f32
+    }
+
     /// Uniform `[low, high)` float. Increments counter by 1.
     pub fn next_float_range(&mut self, low: f64, high: f64) -> f64 {
         assert!(low <= high, "low must be <= high");

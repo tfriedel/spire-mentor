@@ -1,4 +1,22 @@
 {
- "name": "golden mid",
- "step_count": 55
+ "saves": [
+  {
+   "act1": "overgrowth",
+   "ascension": 0,
+   "backend": "rust",
+   "character": "Defect",
+   "name": "golden mid",
+   "progress": {
+    "act": 1,
+    "floor": 5,
+    "hp": 58,
+    "max_hp": 75
+   },
+   "run_mode": false,
+   "saved_at": "2026-01-01T00:00:00Z",
+   "schema_version": 1,
+   "seed": "G0LDEN0002",
+   "step_count": 55
+  }
+ ]
 }

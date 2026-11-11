@@ -1804,6 +1804,53 @@ fn an_unsized_defect_fixture_belt_still_gets_the_three_slot_base() {
     assert_eq!(state.player.orbs.count_kind(orbs::OrbKind::Frost), 1);
 }
 
+/// An Ironclad (C# `BaseOrbSlotCount` 0) playing a generated Capacitor on its
+/// fresh, unsized belt: C# `Capacitor.OnPlay` is just `OrbCmd.AddSlots(2)`
+/// (Capacitor.cs:19-23; OrbCmd.cs:23-33) onto Capacity 0 → 2 slots. The
+/// 3-slot base is the Defect's alone. Rust used to grow it to 3 + 2 = 5
+/// (Ironclad seed 6637, v0.111.0, step 268).
+#[test]
+fn capacitor_on_a_non_defect_gives_only_its_own_slots() {
+    install_pool();
+    let f = lookup(CardId::Capacitor).expect("registered");
+    let (mut state, _) = fresh_state(CardId::Capacitor, 0, 0);
+    state.player.character = Some(sts2_core::potions::CharacterId::Ironclad);
+    assert!(!state.player.orbs.sized);
+    let _ = f(&mut state, None);
+    assert_eq!(state.player.orbs.capacity(), 2);
+    // With 2 slots (Capacity != 0, so no `OrbCmd.Channel` +1), the third
+    // channel evokes the front Lightning (OrbCmd.cs:74-81).
+    let hp_before = state.creatures[0].current_hp;
+    orbs::channel_orb(&mut state, Orb::lightning());
+    orbs::channel_orb(&mut state, Orb::frost());
+    orbs::channel_orb(&mut state, Orb::dark());
+    let kinds: Vec<orbs::OrbKind> = state
+        .player
+        .orbs
+        .slots
+        .iter()
+        .filter(|o| !o.is_empty())
+        .map(orbs::OrbKind::of)
+        .collect();
+    assert_eq!(kinds, vec![orbs::OrbKind::Frost, orbs::OrbKind::Dark]);
+    assert!(
+        state.creatures[0].current_hp < hp_before,
+        "the overflowed Lightning's evoke hits the enemy"
+    );
+}
+
+/// Modded on a non-Defect: `OrbCmd.AddSlots(1)` onto Capacity 0 → 1 slot
+/// (Modded.cs), not the Defect's 3 + 1.
+#[test]
+fn modded_on_a_non_defect_gives_only_its_own_slot() {
+    install_pool();
+    let f = lookup(CardId::Modded).expect("registered");
+    let (mut state, _) = fresh_state(CardId::Modded, 0, 0);
+    state.player.character = Some(sts2_core::potions::CharacterId::Ironclad);
+    let _ = f(&mut state, None);
+    assert_eq!(state.player.orbs.capacity(), 1);
+}
+
 /// Bead `sts2-rs-q1ljh`: upgraded BulkUp grants 3/3 Strength/Dexterity
 /// per C# `BulkUp.cs:OnUpgrade` `UpgradeValueBy(1m)` on both
 /// `StrengthPower` and `DexterityPower`. Orb-slot REMOVE stays at 1

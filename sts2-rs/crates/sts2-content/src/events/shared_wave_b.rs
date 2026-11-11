@@ -2073,17 +2073,15 @@ fn trial_nondescript_guilty(state: &mut RunState) -> EventOutcome {
     // character pool, `ForNonCombatWithDefaultOdds` (base odds, no pity, no
     // upgrade roll). OfferCustom populates them in list order on
     // `PlayerRng.Rewards`, so roll both here; each is a real `CardReward`
-    // (`IsCardReward`), so the card-reward hooks see the slate.
+    // (`IsCardReward`, CardReward.cs:115), so the creation-option hooks
+    // (Dingy Rug / Prismatic Gem, CardFactory.cs:218) widen its pool and the
+    // card-reward hooks see the slate.
     trial_add_curse(state, CardId::Doubt);
     for _ in 0..TRIAL_COUNT {
-        let ids = crate::cards::spec_index::roll_character_reward_options_no_upgrade(
+        let cards = crate::cards::spec_index::roll_noncombat_card_reward_cards_no_upgrade(
             state,
             TRIAL_REWARD_CARDS,
         );
-        let cards: Vec<sts2_core::Card> = ids
-            .into_iter()
-            .filter_map(|id| card_pod_from_id(id, false))
-            .collect();
         let cards = state.offer_card_slate(cards, true);
         state
             .pending_rewards
@@ -4248,6 +4246,83 @@ mod tests {
         let out = trial_accept(&mut rs);
         assert!(!out.finished);
         assert_eq!(rs.event_state.page, TRIAL_PAGE_VERDICT);
+    }
+
+    /// `NondescriptGuilty`'s two rewards are real `CardReward`s
+    /// (Trial.cs:183; `CardReward` stamps `IsCardReward`, CardReward.cs:115),
+    /// rolled through `CardFactory.CreateForReward`, which folds
+    /// `Hook.ModifyCardRewardCreationOptions` (CardFactory.cs:218): Dingy Rug
+    /// (DingyRug.cs:23) adds the colorless pool and Prismatic Gem
+    /// (PrismaticGem.cs:38) every character pool. Rust rolled the bare
+    /// character pool (Defect 6613 / Necrobinder 6601, v0.111.0).
+    #[test]
+    fn trial_guilty_rewards_see_the_creation_option_hooks() {
+        use sts2_core::potions::CharacterId;
+        crate::cards::dispatch::ensure_installed();
+        crate::relics::dispatch::ensure_installed();
+        let offered = |relic: RelicId, seed: i32| -> Vec<CardId> {
+            let mut rs = RunState::new();
+            rs.rng = sts2_core::run_rng_set::RunRngSet::new(seed);
+            rs.character_id = CharacterId::Defect;
+            rs.game_version = sts2_core::GameVersion::V0_111_0;
+            rs.relics.push(relic);
+            assert!(trial_nondescript_guilty(&mut rs).finished);
+            rs.pending_rewards
+                .iter()
+                .filter_map(|r| match r {
+                    Reward::Card(c) => Some(c.options.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        };
+        let pool_of = crate::cards::spec_index::character_for_card_id;
+        let rug: Vec<CardId> = (0..40)
+            .flat_map(|s| offered(RelicId::DingyRug, s))
+            .collect();
+        assert!(
+            rug.iter().any(|&id| pool_of(id).is_none()),
+            "Dingy Rug widens the Trial's reward pool to colorless"
+        );
+        let gem: Vec<CardId> = (0..40)
+            .flat_map(|s| offered(RelicId::PrismaticGem, s))
+            .collect();
+        assert!(
+            gem.iter()
+                .any(|&id| matches!(pool_of(id), Some(c) if c != CharacterId::Defect)),
+            "Prismatic Gem widens the Trial's reward pool to other characters"
+        );
+        // Every slate is exactly the hooked no-upgrade roller's draw.
+        for seed in 0..8 {
+            let mut rs = RunState::new();
+            rs.rng = sts2_core::run_rng_set::RunRngSet::new(seed);
+            rs.character_id = CharacterId::Defect;
+            rs.game_version = sts2_core::GameVersion::V0_111_0;
+            rs.relics.push(RelicId::DingyRug);
+            let mut want = rs.clone();
+            trial_add_curse(&mut want, CardId::Doubt);
+            let expected: Vec<CardId> = (0..TRIAL_COUNT)
+                .flat_map(|_| {
+                    crate::cards::spec_index::roll_noncombat_card_reward_cards_no_upgrade(
+                        &mut want,
+                        TRIAL_REWARD_CARDS,
+                    )
+                })
+                .map(|c| c.card_id)
+                .collect();
+            assert_eq!(offered_from(&mut rs), expected, "seed {seed}");
+        }
+        fn offered_from(rs: &mut RunState) -> Vec<CardId> {
+            assert!(trial_nondescript_guilty(rs).finished);
+            rs.pending_rewards
+                .iter()
+                .filter_map(|r| match r {
+                    Reward::Card(c) => Some(c.options.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        }
     }
 
     #[test]

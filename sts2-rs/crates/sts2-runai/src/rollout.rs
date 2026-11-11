@@ -55,7 +55,7 @@ use serde::{Deserialize, Serialize};
 
 use sts2_content::encounters::{EncounterDef, EncounterTier};
 use sts2_content::monster_dispatch::MonsterSpawnArgs;
-use sts2_content::run_bridge::enter_combat_from_roster;
+use sts2_content::run_bridge::enter_combat_from_roster_in_slots;
 use sts2_core::cards::CardId;
 use sts2_core::dotnet_rng::Rng;
 use sts2_core::map::MapPointType;
@@ -782,7 +782,14 @@ fn probe_one(
 
     // Synthetic what-if probe: no map/room context, so the room-type flags
     // stay unset (the prior `..default()` behavior).
-    let mut combat = enter_combat_from_roster(&rs, &roster, sts2_core::runstate::RoomType::Unknown);
+    // The encounter's slot model rides in like the live builder's, so a
+    // summon (also one inside entry) lands where C# puts it.
+    let mut combat = enter_combat_from_roster_in_slots(
+        &rs,
+        &roster,
+        enc.member_slots(),
+        sts2_core::runstate::RoomType::Unknown,
+    );
     let start_hp = combat.player.current_hp;
     let enemy_total = |c: &sts2_core::CombatState| -> i32 {
         c.enemy_uids

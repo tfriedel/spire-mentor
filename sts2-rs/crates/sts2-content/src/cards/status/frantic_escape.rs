@@ -43,13 +43,11 @@ pub(crate) fn play_frantic_escape(
 
     // `EnergyCost.AddThisCombat(1)` on THIS instance (the card being
     // resolved sits at `play.last()` — the `current_card_*` convention).
-    if let Some(idx) =
-        sts2_core::card_effects::resolving_card_uid(state).map(|u| u.0.get() as usize - 1)
-    {
-        if let Some(card) = state.cards.get_mut(idx) {
-            if card.card_id == CardId::FranticEscape {
-                card.add_cost_this_combat(1);
-            }
+    if let Some(uid) = sts2_core::card_effects::resolving_card_uid(state) {
+        if state.cards.get(uid.0.get() as usize - 1).map(|c| c.card_id)
+            == Some(CardId::FranticEscape)
+        {
+            state.add_card_cost_this_combat(uid, 1);
         }
     }
     EffectResult::Resolved

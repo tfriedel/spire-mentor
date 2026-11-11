@@ -3996,6 +3996,64 @@ fn cascade_upgraded_adds_one_extra() {
 /// (count = 0). Acts as the regression guard against the prior
 /// 1-line `EffectResult::Resolved` stub silently swallowing
 /// X-cost = 0 plays. Bead `sts2-rs-1vv5`.
+/// A combat whose last enemy is already dead, with an empty draw pile and
+/// three cards in discard.
+fn ended_combat_with_three_discards() -> CombatState {
+    install_pool();
+    sts2_core::card_effects::install_default_registry();
+    let (mut state, _enemy) = fresh_state_with_enemy(0);
+    state.game_version = sts2_core::GameVersion::V0_107_1;
+    for _ in 0..3 {
+        let uid = push_draw_top_card(
+            &mut state,
+            CardId::StrikeIronclad,
+            CardType::Attack,
+            TargetType::Enemy,
+            6,
+            0,
+        );
+        state.player.draw.retain(|u| *u != uid);
+        state.player.discard.push(uid);
+    }
+    assert!(sts2_core::combat_loop::combat_is_ending(&state));
+    state
+}
+
+/// C# `CardPileCmd.AutoPlayFromDrawPile` returns at once on
+/// `IsOverOrEnding` (CardPileCmd.cs:953-958 v0.107.1, :1148-1153 v0.111.0):
+/// no `ShuffleIfNecessary`, nothing collected. v0.107.1's `OnPlayWrapper`
+/// replay loop (CardModel.cs:1905) does not stop on combat end, so a Cascade
+/// replayed by Hidden Gem whose 2nd play wins still runs its 3rd play — and
+/// Rust reshuffled the discard there, +9 on the next combat's shuffle stream
+/// (Ironclad seed 6661, v0.107.1).
+#[test]
+fn cascade_on_an_ended_combat_does_not_reshuffle() {
+    let mut state = ended_combat_with_three_discards();
+    let cascade_uid = push_play_card(&mut state, CardId::Cascade, 0, 0);
+    state.cards[cascade_uid.0.get() as usize - 1].energy_spent = 2;
+    let before = state.run_rng.shuffle.counter();
+    let _ = dispatch(&mut state, CardId::Cascade, None);
+    assert_eq!(state.run_rng.shuffle.counter(), before, "no reshuffle");
+    assert_eq!(state.player.discard.len(), 3);
+    assert!(state.player.draw.is_empty());
+}
+
+/// Havoc / Distilled Chaos take nothing off an ended combat either (the same
+/// `AutoPlayFromDrawPile` guard).
+#[test]
+fn draw_top_auto_plays_on_an_ended_combat_take_nothing() {
+    let mut state = ended_combat_with_three_discards();
+    let before = state.run_rng.shuffle.counter();
+    assert!(!sts2_core::combat_loop::auto_play_card_from_draw_top(
+        &mut state, true
+    ));
+    sts2_core::combat_loop::auto_play_n_from_draw_top(&mut state, 3, false);
+    assert_eq!(state.run_rng.shuffle.counter(), before, "no reshuffle");
+    assert_eq!(state.player.discard.len(), 3);
+    assert!(state.player.play.is_empty());
+    assert!(state.player.exhaust.is_empty());
+}
+
 #[test]
 fn cascade_zero_energy_no_op() {
     install_pool();

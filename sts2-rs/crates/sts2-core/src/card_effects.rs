@@ -3723,9 +3723,13 @@ fn banshees_cry_entered_combat(state: &mut CombatState, uid: CardUid) {
     let key = crate::cards::VarKey::BansheesCryEtherealCounted;
     let missed = total - c.combat_var(key);
     if missed > 0 {
-        let shave = missed.saturating_mul(2);
-        c.add_cost_this_combat(-shave);
         c.set_combat_var(key, total);
+        // Crossbow's `SetToFreeThisTurn` runs BEFORE
+        // `AddGeneratedCardsToCombat` (Crossbow.cs:17-37), so this
+        // `AddThisCombat` folds after that local zero: `0 - 2n`, and
+        // Borrowed Time's +1 skips the negative cost (Necrobinder 6580
+        // v0.107.1: C# 0, Rust 1).
+        state.add_card_cost_this_combat(uid, -missed.saturating_mul(2));
     }
 }
 
@@ -6215,6 +6219,75 @@ mod tests {
         state.relics.push(relic(crate::RelicKind::Ectoplasm));
         assert_eq!(gain_gold_in_combat(&mut state, 20), 0);
         assert_eq!(state.gold, 60);
+    }
+
+    /// Crossbow sets its generated card free this turn BEFORE
+    /// `AddGeneratedCardsToCombat` (Crossbow.cs:17-37), so a Banshee's Cry it
+    /// makes takes its `AfterCardEnteredCombat` `AddThisCombat(-2n)`
+    /// (BansheesCry.cs:42-55) on top of that local zero: local cost `-2`, and
+    /// `Hook.ModifyEnergyCostInCombat` skips Borrowed Time's +1 on a negative
+    /// cost — 0, not 1 (Necrobinder 6580, v0.107.1). Once the zero expires the
+    /// card reads `9 - 2 = 7`.
+    #[test]
+    fn banshees_cry_generated_free_shows_its_shave_on_the_zero() {
+        let (mut state, _) = fresh_state_with_one_enemy();
+        state.combat_log.ethereal_cards_played_this_combat = 1;
+        let pid = NonZeroU32::new(1).expect("non-zero");
+        state.powers.push(crate::Power {
+            id: pid,
+            kind: PowerKind::BorrowedTime,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(crate::PowerUid(pid));
+        let mut card = crate::cards::Card::pod_defaults();
+        card.card_id = crate::cards::CardId::BansheesCry;
+        card.cost = 9;
+        card.card_type = crate::cards::CardType::Attack;
+        let uid = state.add_card_to_draw_pile(card);
+        state.player.draw.retain(|u| *u != uid);
+        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 1);
+        assert!(crate::cards::try_add_to_hand(&mut state.player, uid));
+        fire_card_generation_listeners(&mut state, uid, PileKind::Hand, true);
+        assert_eq!(crate::hooks::effective_card_cost(&state, uid), 0);
+        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 0);
+        let card = &state.cards[uid.0.get() as usize - 1];
+        assert_eq!(crate::hooks::local_card_cost(&state, card), 7);
+    }
+
+    /// The same fold for every other `AddThisCombat` on a card that is not
+    /// the one being played: Melancholy's on-death `AddThisCombat(-1)` on a
+    /// free-this-turn copy reads `0 - 1`, so Borrowed Time's +1 is skipped —
+    /// 0, not 1. Once the zero expires it reads `3 - 1 = 2`.
+    #[test]
+    fn melancholy_shave_on_a_free_copy_shows_on_the_zero() {
+        let (mut state, _) = fresh_state_with_one_enemy();
+        let pid = NonZeroU32::new(1).expect("non-zero");
+        state.powers.push(crate::Power {
+            id: pid,
+            kind: PowerKind::BorrowedTime,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(crate::PowerUid(pid));
+        let mut card = crate::cards::Card::pod_defaults();
+        card.card_id = crate::cards::CardId::Melancholy;
+        card.cost = 3;
+        card.card_type = crate::cards::CardType::Skill;
+        let uid = state.add_card_to_draw_pile(card);
+        state.player.draw.retain(|u| *u != uid);
+        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 1);
+        assert!(crate::cards::try_add_to_hand(&mut state.player, uid));
+        assert_eq!(crate::hooks::effective_card_cost(&state, uid), 1);
+        state.reduce_melancholy_cost_walk();
+        assert_eq!(crate::hooks::effective_card_cost(&state, uid), 0);
+        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 0);
+        let card = &state.cards[uid.0.get() as usize - 1];
+        assert_eq!(crate::hooks::local_card_cost(&state, card), 2);
     }
 
     fn fresh_state_with_one_enemy() -> (CombatState, CreatureUid) {

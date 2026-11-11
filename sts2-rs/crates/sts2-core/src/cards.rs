@@ -477,6 +477,13 @@ pub enum VarKey {
     /// card, not in `CombatState`, which sits at clippy's large-stack-array
     /// limit. Appended so no existing discriminant moves.
     ExhaustOwedAfterDraw,
+    /// A drawn card whose normal `AfterCardDrawn` pass waits for the
+    /// Hellraiser auto-play its Early pass parked on a select (C#
+    /// `Hook.AfterCardDrawn` awaits the Early pass first, Hook.cs:346-362).
+    /// Bit flags: 1 owed, 2 hand draw, 4 auto-played. Kept on the card, not
+    /// in `CombatState`, which sits at clippy's large-stack-array limit.
+    /// Appended so no existing discriminant moves.
+    AfterCardDrawnDeferred,
 }
 
 /// [`VarKey::SneckoRollLive`]: the Snecko roll raised `CostAbsolutelySet`, so
@@ -1247,6 +1254,9 @@ impl Card {
         let mut clone = *self;
         clone.set_combat_var(VarKey::ReturnIfPlayedRound, 0);
         clone.set_combat_var(VarKey::GeneratedInCombat, GENERATED_AS_CLONE);
+        // The original's owed on-draw pass is its own: a clone was never
+        // drawn (Juggling cloning a parked Hellraiser play).
+        clone.combat_vars.zero(VarKey::AfterCardDrawnDeferred);
         clone
     }
 

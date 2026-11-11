@@ -405,8 +405,37 @@ pub fn random_combat_orb(state: &mut CombatState) -> Orb {
         _ => Orb::glass(),
     }
 }
+/// C# `OrbCmd.Channel` / `Evoke` / `Passive` all start with
+/// `if (CombatManager.Instance.IsOverOrEnding) return;` (OrbCmd.cs:70, :127,
+/// :157 v0.107.1; same in v0.111.0). A v0.107.1 replay of a lethal card still
+/// runs its `OnPlay` after the win, so its channels and evokes must do
+/// nothing there — not advance the run-level `combat_targets` stream. An
+/// enemy-less fixture is never "ending".
+fn orb_cmd_blocked(state: &CombatState) -> bool {
+    !state.enemy_uids.is_empty() && crate::combat_loop::is_over_or_ending(state)
+}
+
+/// Lazily give the player's belt its character's base before an
+/// `OrbCmd.AddSlots`: the 3-slot base belongs to the Defect alone
+/// (`Defect.BaseOrbSlotCount => 3`; every other character's is 0). A real
+/// Defect belt is sized at combat start, so this only fills in an unsized
+/// fixture belt — a fixture with no character counts as a Defect. Any other
+/// character's unsized belt stays at 0, so `AddSlots(n)` (OrbCmd.cs:23-33)
+/// stacks on 0: an Ironclad's Capacitor gives 2 slots, not 3 + 2.
+pub fn ensure_character_base_slots(state: &mut CombatState) {
+    if matches!(
+        state.player.character,
+        None | Some(crate::potions::CharacterId::Defect)
+    ) {
+        state.player.orbs.ensure_defect_base();
+    }
+}
+
 /// Channel a fresh orb onto the player.
 pub fn channel_orb(state: &mut CombatState, orb: Orb) {
+    if orb_cmd_blocked(state) {
+        return;
+    }
     // C# `OrbCmd.Channel` (`OrbCmd.cs:51-62`): a character with
     // `BaseOrbSlotCount == 0` (i.e. NOT Defect — e.g. an Ironclad channeling a
     // generated Defect card's orb such as MeteorStrike's 3 Plasma) that channels
@@ -492,6 +521,9 @@ pub fn channel_orb(state: &mut CombatState, orb: Orb) {
 /// GLACIER,MULTI_CAST}`: evoke-then-channel produced `[DARK, FROST, …]` vs C#'s
 /// `[FROST, …, DARK]`).
 pub fn evoke_front(state: &mut CombatState) {
+    if orb_cmd_blocked(state) {
+        return;
+    }
     let Some(idx) = state.player.orbs.slots.iter().position(|o| !o.is_empty()) else {
         return;
     };
@@ -509,6 +541,9 @@ pub fn evoke_front(state: &mut CombatState) {
 /// `ConsumingShadowPower.AfterTurnEnd`, which evokes the last orb once per
 /// stack.
 pub fn evoke_last(state: &mut CombatState) {
+    if orb_cmd_blocked(state) {
+        return;
+    }
     let Some(idx) = state.player.orbs.slots.iter().rposition(|o| !o.is_empty()) else {
         return;
     };
@@ -536,6 +571,11 @@ pub fn evoke_front_n(state: &mut CombatState, times: u32) {
     };
     let orb = state.player.orbs.slots[idx];
     for _ in 0..times {
+        // Each `EvokeNext` is its own guarded `Evoke`; the dequeue rides on
+        // the LAST one, so a combat that ends mid-loop keeps the orb.
+        if orb_cmd_blocked(state) {
+            return;
+        }
         evoke_one(state, orb);
     }
     state.player.orbs.slots.remove(idx);
@@ -554,6 +594,9 @@ pub fn evoke_all(state: &mut CombatState) {
         .filter_map(|(i, o)| (!o.is_empty()).then_some(i))
         .collect();
     for i in positions {
+        if orb_cmd_blocked(state) {
+            return;
+        }
         let orb = state.player.orbs.slots[i];
         state.player.orbs.slots[i] = Orb::Empty;
         evoke_one(state, orb);
@@ -746,6 +789,9 @@ pub fn trigger_first_orb_passive(state: &mut CombatState) {
 ///
 /// [`trigger_first_orb_passive`] is this on the front-most filled slot.
 pub fn trigger_orb_passive_at(state: &mut CombatState, idx: usize) {
+    if orb_cmd_blocked(state) {
+        return;
+    }
     match state.player.orbs.slots.get(idx) {
         Some(o) if !o.is_empty() => {}
         _ => return,
@@ -828,6 +874,10 @@ pub fn trigger_first_orb_passive_n(state: &mut CombatState, times: u32) {
     let orb = state.player.orbs.slots[idx];
     let _trace = crate::damage_trace::push_source(orb_trace_label(orb, "passive"));
     for _ in 0..times {
+        // One guarded `OrbCmd.Passive` per tick.
+        if orb_cmd_blocked(state) {
+            return;
+        }
         match orb {
             Orb::Lightning => {
                 let dmg = focus_scaled(3, focus) + lightning_orb_bonus(state);
@@ -925,6 +975,9 @@ pub fn passive_tick(state: &mut CombatState) {
         None
     };
     for (idx, orb) in snapshot {
+        if orb_cmd_blocked(state) {
+            return;
+        }
         let _trace = crate::damage_trace::push_source(orb_trace_label(orb, "passive"));
         match orb {
             Orb::Lightning => {
@@ -1057,6 +1110,38 @@ mod tests {
             state.enemy_uids.push(CreatureUid(id));
         }
         state
+    }
+
+    /// C# `OrbCmd.Channel` / `Evoke` / `Passive` return at once on
+    /// `IsOverOrEnding` (OrbCmd.cs:70, :127, :157): a v0.107.1 replay of a
+    /// lethal card channels, evokes and ticks nothing.
+    #[test]
+    fn orb_commands_do_nothing_once_combat_is_over() {
+        let mut state = make_state(50, &[0]);
+        channel_orb(&mut state, Orb::lightning());
+        channel_orb(&mut state, Orb::frost());
+        channel_orb(&mut state, Orb::plasma());
+        assert_eq!(state.player.orbs.filled_len(), 0, "no channel");
+        let mut state = make_state(50, &[10]);
+        channel_orb(&mut state, Orb::plasma());
+        channel_orb(&mut state, Orb::frost());
+        channel_orb(&mut state, Orb::dark());
+        state.creatures[0].current_hp = 0;
+        let belt = state.player.orbs.clone();
+        let energy = state.player.energy;
+        channel_orb(&mut state, Orb::lightning());
+        evoke_front(&mut state);
+        evoke_last(&mut state);
+        evoke_front_n(&mut state, 2);
+        evoke_all(&mut state);
+        trigger_first_orb_passive(&mut state);
+        trigger_first_orb_passive_n(&mut state, 2);
+        passive_tick(&mut state);
+        assert_eq!(state.player.orbs, belt, "nothing evoked, nothing channeled");
+        assert_eq!(
+            state.player.energy, energy,
+            "Plasma neither evoked nor ticked"
+        );
     }
 
     fn give_power(state: &mut CombatState, kind: PowerKind, amount: i32) {

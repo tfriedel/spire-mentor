@@ -494,10 +494,11 @@ fn create_random_potions_from_pool(
 ) -> Vec<PotionKind> {
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
-        let roll = rng.next_float(1.0);
-        let rarity = if roll <= 0.1 {
+        // `float` roll against `float` thresholds (PotionFactory.cs:73-74).
+        let roll = rng.next_float_f32();
+        let rarity = if roll <= 0.1_f32 {
             PotionRarity::Rare
-        } else if roll <= 0.35 {
+        } else if roll <= 0.35_f32 {
             PotionRarity::Uncommon
         } else {
             PotionRarity::Common

@@ -540,16 +540,18 @@ fn fake_merchant_stock(state: &RunState) -> Vec<RelicId> {
 /// 1015, Necrobinder 1004). The rolled prices, in stock order, go to
 /// `event_state.scratch` for the buy option. Idempotent per event visit.
 pub fn fake_merchant_before_event_started(state: &mut RunState) {
-    use sts2_core::shop::{MERCHANT_RELIC_PRICE_VARIANCE_MAX, MERCHANT_RELIC_PRICE_VARIANCE_MIN};
     if !state.event_state.scratch.is_empty() {
         return;
     }
     for _ in 0..FAKE_MERCHANT_STOCK_SIZE {
-        let jitter = state.rng.shops.next_float_range(
-            MERCHANT_RELIC_PRICE_VARIANCE_MIN,
-            MERCHANT_RELIC_PRICE_VARIANCE_MAX,
-        );
-        let price = (f64::from(FAKE_MERCHANT_BUY_COST) * jitter).round_ties_even() as i16;
+        // `(float)MerchantCost * NextFloat(0.85f, 1.15f)`, banker's — the
+        // single-precision product of `MerchantRelicEntry.CalcCost`.
+        let jitter = sts2_core::shop::merchant_relic_jitter(&mut state.rng.shops);
+        let price = i16::try_from(sts2_core::shop::merchant_round(
+            FAKE_MERCHANT_BUY_COST,
+            jitter,
+        ))
+        .unwrap_or(i16::MAX);
         state.event_state.scratch.push(price);
     }
 }

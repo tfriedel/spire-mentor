@@ -295,6 +295,29 @@ pub fn enter_combat_from_roster(
     roster: &[(MonsterKind, MonsterSpawnArgs, i32)],
     room_type: sts2_core::runstate::RoomType,
 ) -> CombatState {
+    enter_combat_from_roster_in_slots(rs, roster, &[], room_type)
+}
+
+/// [`enter_combat_from_roster`] for an encounter with a slot model:
+/// `member_slots` (an [`crate::encounters::EncounterDef::member_slots`]) is
+/// stamped onto the roster right after it spawns, BEFORE `start_combat`.
+///
+/// C# names every slot in `GenerateMonstersWithSlots`, before the combat
+/// starts, so a summon that happens inside combat entry already sees them:
+/// Whispering Earring auto-plays turn 1 inside `start_player_turn`, and a
+/// Void Form among those plays runs the whole enemy turn there too — a
+/// Fabricator's opening spawn then lands at `Encounter.GetNextSlot`
+/// (Fabricator.cs:115) and `CombatManager.AddCreature` re-sorts by slot
+/// (CombatState.cs:678). Stamping after entry left the summoner slot-less at
+/// that moment, so its bots were appended behind it (Regent seed 6673,
+/// v0.107.1). An empty `member_slots` is the slot-less entry.
+#[must_use]
+pub fn enter_combat_from_roster_in_slots(
+    rs: &RunState,
+    roster: &[(MonsterKind, MonsterSpawnArgs, i32)],
+    member_slots: &[u8],
+    room_type: sts2_core::runstate::RoomType,
+) -> CombatState {
     use sts2_core::runstate::RoomType;
     // Carry the run's ascension level into combat so monster HP
     // (ToughEnemies, >= A8) and attack damage (DeadlyEnemies, >= A9)
@@ -457,6 +480,10 @@ pub fn enter_combat_from_roster(
     state.act_index = rs.act_index;
 
     spawn_roster(&mut state, roster);
+    // Slot model before anything can summon (see the doc comment). Inert for
+    // an empty `member_slots`; every shipped roster is already slot-ascending,
+    // so this only informs a later add.
+    state.assign_encounter_slots(member_slots);
 
     // `FurCoat.BeforeCombatStart` (FurCoat.cs:130-149): on one of the relic's
     // marked map points every hittable (living) enemy is set to 1 HP

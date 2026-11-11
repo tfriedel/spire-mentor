@@ -14,7 +14,7 @@ use sts2_cli::sim::{build_starter_state_from_monsters, PlayerClass};
 use sts2_content::encounters::EncounterDef;
 use sts2_content::encounters::{act1_overgrowth, act1_underdocks, act2_hive, act3_glory};
 use sts2_content::monster_dispatch::MonsterSpawnArgs;
-use sts2_content::run_bridge::enter_combat_from_roster;
+use sts2_content::run_bridge::enter_combat_from_roster_in_slots;
 use sts2_core::combat_loop::{start_combat, start_player_turn};
 use sts2_core::monsters::roll_unique_max_hps;
 use sts2_core::parity::combat_state_to_bridge_state;
@@ -153,8 +153,8 @@ fn builder_monsters_equal_run_path_monsters() {
                     .zip(hps)
                     .map(|(&(k, a), hp)| (k, a, hp))
                     .collect();
-                let mut run = enter_combat_from_roster(&rs, &run_roster, RoomType::Monster);
-                run.assign_encounter_slots(slots);
+                let run =
+                    enter_combat_from_roster_in_slots(&rs, &run_roster, slots, RoomType::Monster);
 
                 let ctx = format!("{} seed {seed} A{ascension}", enc.id);
                 let b = combat_state_to_bridge_state(&built);

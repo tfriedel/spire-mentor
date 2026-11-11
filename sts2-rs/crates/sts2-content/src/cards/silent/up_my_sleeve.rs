@@ -21,15 +21,11 @@ pub(crate) fn play_up_my_sleeve(state: &mut CombatState, _t: Option<CreatureUid>
     for _ in 0..count {
         let _ = spawn_shiv(state, PileKind::Hand);
     }
-    if let Some(idx) =
-        sts2_core::card_effects::resolving_card_uid(state).map(|u| u.0.get() as usize - 1)
-    {
-        if let Some(card) = state.cards.get_mut(idx) {
-            // `EnergyCost.AddThisCombat(-1)` (UpMySleeve.cs:46): unclamped
-            // until the final cost read, so a later +1 (Modded-style) lands
-            // on the debt, not on 0.
-            card.add_cost_this_combat(-1);
-        }
+    if let Some(uid) = sts2_core::card_effects::resolving_card_uid(state) {
+        // `EnergyCost.AddThisCombat(-1)` (UpMySleeve.cs:46): unclamped
+        // until the final cost read, so a later +1 (Modded-style) lands
+        // on the debt, not on 0.
+        state.add_card_cost_this_combat(uid, -1);
     }
     EffectResult::Resolved
 }

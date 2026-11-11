@@ -177,10 +177,11 @@ pub const fn relic_is_allowed_at(id: RelicId, csharp_total_floor: i32) -> bool {
 /// must not advance the rewards RNG.
 #[must_use]
 pub fn roll_relic_rarity(rng: &mut crate::dotnet_rng::Rng) -> RelicRarity {
-    let roll = rng.next_float(1.0);
-    if roll < 0.50 {
+    // `float` roll against `float` thresholds (RelicFactory.cs:92-93).
+    let roll = rng.next_float_f32();
+    if roll < 0.5_f32 {
         RelicRarity::Common
-    } else if roll < 0.83 {
+    } else if roll < 0.83_f32 {
         RelicRarity::Uncommon
     } else {
         RelicRarity::Rare
@@ -2631,10 +2632,11 @@ impl RunState {
     /// driver, and the enum is already cross-referenced by
     /// `card_rewards.rs`. Bead `sts2-rs-ycria` (P9.2.a).
     pub fn roll_treasure_relic_rarity(&mut self) -> crate::card_rewards::RewardRarity {
-        let roll = self.rng.treasure_room.next_float(1.0);
-        if roll < 0.50 {
+        // `float` roll against `float` thresholds (RelicFactory.cs:92-93).
+        let roll = self.rng.treasure_room.next_float_f32();
+        if roll < 0.5_f32 {
             crate::card_rewards::RewardRarity::Common
-        } else if roll < 0.83 {
+        } else if roll < 0.83_f32 {
             crate::card_rewards::RewardRarity::Uncommon
         } else {
             crate::card_rewards::RewardRarity::Rare

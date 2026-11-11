@@ -1589,3 +1589,139 @@ fn exhaust_walk_tail_runs_once_across_a_later_resuspension_v0111() {
 fn exhaust_walk_tail_runs_once_across_a_later_resuspension_v0107() {
     exhaust_walk_tail_runs_once_across_a_later_resuspension(V107);
 }
+
+// ── A parked Hellraiser auto-play defers the card's normal on-draw pass ──
+
+fn is_bound(state: &CombatState, uid: sts2_core::CardUid) -> bool {
+    state.cards[uid.get() as usize - 1]
+        .affliction
+        .is_some_and(|a| a.kind == sts2_core::card_afflictions::CardAfflictionKind::Bound)
+}
+
+/// C# `Hook.AfterCardDrawn` (Hook.cs:346-362) awaits every listener's
+/// `AfterCardDrawnEarly` before any `AfterCardDrawn`. Hellraiser's Early
+/// auto-play of a drawn Seeker Strike opens the draw-pile select inside it,
+/// so Chains of Binding's `AfterCardDrawn` (ChainsOfBindingPower.cs:37-47)
+/// binds the Strike only after the pick and the play's tail: Juggling's
+/// clone of the third Attack (CardModel.cs:1210-1215 copies the affliction)
+/// is unbound, the discarded original takes `Bound`, and the draw's
+/// remaining cards take the rest of the cap. Rust ran the normal pass over
+/// the open select, so the clone came out Bound (Ironclad 6588 v0.107.1).
+fn parked_hellraiser_play_defers_chains_of_binding(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    state.player.energy = 9;
+    add_player_power(&mut state, 50, PowerKind::Hellraiser, 1);
+    add_player_power(&mut state, 51, PowerKind::Juggling, 1);
+    add_player_power(&mut state, 52, PowerKind::ChainsOfBinding, 3);
+    for _ in 0..2 {
+        let i = push_hand(&mut state, CardId::StrikeIronclad);
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+    }
+    assert!(state.pending_choice.is_none(), "{version:?}");
+    let seeker = push_draw(&mut state, CardId::SeekerStrike);
+    let defend = push_draw(&mut state, CardId::DefendIronclad);
+    let inflame = push_draw(&mut state, CardId::Inflame);
+    let bash = push_draw(&mut state, CardId::Bash);
+    let anger = push_draw(&mut state, CardId::Anger);
+    let _ = sts2_core::cards::draw_via_state(&mut state, 3);
+    assert!(
+        state.pending_choice.is_some(),
+        "{version:?}: Seeker Strike's select"
+    );
+    assert!(
+        !is_bound(&state, seeker),
+        "{version:?}: no Bound before the pick"
+    );
+
+    // Take Bash or Anger, whichever is on offer, so the draw's two cards
+    // are Defend and Inflame.
+    let (pick, picked) = state
+        .pending_choice
+        .as_ref()
+        .and_then(|pc| {
+            pc.options
+                .iter()
+                .position(|o| o.card_uid == Some(bash) || o.card_uid == Some(anger))
+                .map(|i| (i, pc.options[i].card_uid.expect("uid")))
+        })
+        .expect("Bash or Anger on offer");
+    let left = if picked == bash { anger } else { bash };
+    resolve(&mut state, u8::try_from(pick).expect("u8"));
+    assert!(state.pending_choice.is_none(), "{version:?}");
+    assert!(
+        state.player.discard.contains(&seeker),
+        "{version:?}: Seeker Strike finished"
+    );
+    assert!(
+        is_bound(&state, seeker),
+        "{version:?}: the original is Bound"
+    );
+    let clone = state
+        .player
+        .hand
+        .iter()
+        .copied()
+        .find(|&u| u != seeker && state.cards[u.get() as usize - 1].card_id == CardId::SeekerStrike)
+        .expect("Juggling's clone in hand");
+    assert!(!is_bound(&state, clone), "{version:?}: the clone is not");
+    assert!(state.player.hand.contains(&picked), "{version:?}: the pick");
+    assert!(!is_bound(&state, picked), "{version:?}: a pick is no draw");
+    for (uid, bound) in [(defend, true), (inflame, true)] {
+        assert!(state.player.hand.contains(&uid), "{version:?}: drawn");
+        assert_eq!(is_bound(&state, uid), bound, "{version:?}");
+    }
+    assert_eq!(state.player.draw.as_slice(), &[left], "{version:?}");
+    assert_eq!(
+        state.combat_log.bound_cards_afflicted_by_chains_this_turn, 3,
+        "{version:?}"
+    );
+}
+
+#[test]
+fn parked_hellraiser_play_defers_chains_of_binding_v0107() {
+    parked_hellraiser_play_defers_chains_of_binding(V107);
+}
+
+#[test]
+fn parked_hellraiser_play_defers_chains_of_binding_v0111() {
+    parked_hellraiser_play_defers_chains_of_binding(V111);
+}
+
+/// The same with nothing left to draw after Seeker Strike: the deferred pass
+/// still runs once the pick resolves (the suspended draw's remainder is 0).
+#[test]
+fn parked_hellraiser_play_defers_chains_on_a_last_card_draw() {
+    for version in [V107, V111] {
+        let (mut state, _enemy) = fresh(version);
+        state.player.energy = 9;
+        add_player_power(&mut state, 50, PowerKind::Hellraiser, 1);
+        add_player_power(&mut state, 51, PowerKind::Juggling, 1);
+        add_player_power(&mut state, 52, PowerKind::ChainsOfBinding, 3);
+        for _ in 0..2 {
+            let i = push_hand(&mut state, CardId::StrikeIronclad);
+            let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+        }
+        let seeker = push_draw(&mut state, CardId::SeekerStrike);
+        for id in [CardId::DefendIronclad, CardId::Inflame, CardId::Bash] {
+            let _ = push_draw(&mut state, id);
+        }
+        let _ = sts2_core::cards::draw_via_state(&mut state, 1);
+        assert!(state.pending_choice.is_some(), "{version:?}");
+        assert!(!is_bound(&state, seeker), "{version:?}");
+        resolve(&mut state, 0);
+        assert!(state.pending_choice.is_none(), "{version:?}");
+        assert!(
+            is_bound(&state, seeker),
+            "{version:?}: Bound after the play"
+        );
+        assert_eq!(
+            state.combat_log.bound_cards_afflicted_by_chains_this_turn, 1,
+            "{version:?}: only the drawn card"
+        );
+        assert_eq!(
+            state.player.draw.len(),
+            2,
+            "{version:?}: nothing else drawn"
+        );
+    }
+}

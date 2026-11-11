@@ -17122,11 +17122,11 @@ fn reduce_midnight_costs_v0111(state: &mut CombatState) {
         })
         .collect();
     for u in midnights {
+        // `ReduceCostBy` is `EnergyCost.AddThisCombat(-1)`: unclamped, so a
+        // shave below 0 (under Enlightenment's this-turn cap) still lands
+        // once the cap expires (loadout Ironclad 5514 v0.111.0).
+        state.add_card_cost_this_combat(u, -1);
         if let Some(c) = state.cards.get_mut(u.0.get() as usize - 1) {
-            // `ReduceCostBy` is `EnergyCost.AddThisCombat(-1)`: unclamped, so a
-            // shave below 0 (under Enlightenment's this-turn cap) still lands
-            // once the cap expires (loadout Ironclad 5514 v0.111.0).
-            c.add_cost_this_combat(-1);
             let counted = c.combat_var(crate::cards::VarKey::MidnightExhaustsCounted);
             c.set_combat_var(
                 crate::cards::VarKey::MidnightExhaustsCounted,
@@ -17155,9 +17155,10 @@ pub fn midnight_entered_combat_v0111(state: &mut CombatState, uid: CardUid) {
     }
     let missed = total - c.combat_var(crate::cards::VarKey::MidnightExhaustsCounted);
     if missed > 0 {
-        // `AddThisCombat(-amount)`, unclamped like the exhaust shave.
-        c.add_cost_this_combat(-missed);
         c.set_combat_var(crate::cards::VarKey::MidnightExhaustsCounted, total);
+        // `AddThisCombat(-amount)`, unclamped like the exhaust shave, and
+        // shown on top of a live local zero.
+        state.add_card_cost_this_combat(uid, -missed);
     }
 }
 
@@ -20695,6 +20696,9 @@ mod tests {
         // Returns (`CombatTargets` reads, enemy HP).
         let run = |storm_first: bool| -> (u32, i32) {
             let mut state = CombatState::default();
+            // A living player: a dead one ends the combat, and orb commands
+            // then do nothing (OrbCmd.cs:127).
+            state.player.current_hp = 80;
             let storm = Power {
                 id: NonZeroU32::new(1).unwrap(),
                 kind: PowerKind::Storm,

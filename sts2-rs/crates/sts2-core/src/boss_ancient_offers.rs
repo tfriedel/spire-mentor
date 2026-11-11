@@ -176,7 +176,8 @@ fn roll_orobas(
         let _ = rng.next_int_exclusive(0, cond.num_other_characters as i32);
     }
     // (2) PrismaticGem (1/3) vs SeaGlass.
-    let item = if rng.next_float(1.0) < 0.333_333_3_f64 {
+    // `NextFloat() < 0.3333333f` (Orobas.cs:196): both sides single precision.
+    let item = if rng.next_float_f32() < 0.333_333_3_f32 {
         PrismaticGem
     } else {
         SeaGlass

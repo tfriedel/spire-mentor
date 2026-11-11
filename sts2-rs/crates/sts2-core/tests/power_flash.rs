@@ -811,6 +811,9 @@ fn coolant_flashes_on_an_empty_orb_belt() {
 fn hailstorm_flashes_only_when_its_guard_holds() {
     let mut state = state_with_power(PowerKind::Hailstorm, 4);
     add_enemy(&mut state, 40);
+    // A living player: at 0 HP the combat is ending and `OrbCmd.Channel`
+    // does nothing (OrbCmd.cs:70).
+    state.player.current_hp = 80;
 
     // C# `HailstormPower.cs:37` is nested inside `frostOrbs >= FrostOrbs(1)`.
     // With a Lightning-only belt the threshold fails and nothing flashes —

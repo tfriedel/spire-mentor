@@ -1604,12 +1604,17 @@ impl MonsterAi {
     }
 
     fn resolve_random_branch(&self, rb: &RandomBranchState, rng: &mut DotNetRng) -> StateId {
-        let weights: SmallVec<[f64; 4]> = rb
+        // C# works in `float` throughout (RandomBranchState.cs:114-128): the
+        // `Func<float>` weights, their `Sum`, `NextFloat(max)` and the
+        // `num -= weight` walk. A draw within an ulp of a branch boundary
+        // picks C#'s branch only in single precision.
+        #[allow(clippy::cast_possible_truncation)]
+        let weights: SmallVec<[f32; 4]> = rb
             .branches
             .iter()
-            .map(|b| b.effective_weight(&self.state_log))
+            .map(|b| b.effective_weight(&self.state_log) as f32)
             .collect();
-        let total: f64 = weights.iter().sum();
+        let total: f32 = weights.iter().fold(0.0_f32, |acc, &w| acc + w);
         if total <= 0.0 {
             // Bead `sts2-rs-zdjjx`: C# `RandomBranchState.GetNextState`
             // (RandomBranchState.cs:114-128) ALWAYS calls `rng.NextFloat(max)`,
@@ -1623,7 +1628,7 @@ impl MonsterAi {
             // tick behind C# for the rest of combat. Draw the tick here to
             // stay aligned, then return the first branch (C#'s `num <= 0`
             // short-circuit picks `States[0]`).
-            let _ = rng.next_float(total.max(0.0));
+            let _ = rng.next_float_f32_max(total.max(0.0));
             return rb
                 .branches
                 .first()
@@ -1633,7 +1638,7 @@ impl MonsterAi {
         // C# RandomBranchState.GetNextState (RandomBranchState.cs:114-128)
         // draws one `rng.NextFloat(total)` tick on RunRng.MonsterAi. Mirror
         // it exactly — see bead `sts2-rs-5w76f`.
-        let roll = rng.next_float(total);
+        let roll = rng.next_float_f32_max(total);
         // C# does NOT skip zero-weight branches and uses an inclusive
         // boundary: it subtracts EVERY branch's weight in order and returns
         // the first branch where the running remainder is `<= 0`

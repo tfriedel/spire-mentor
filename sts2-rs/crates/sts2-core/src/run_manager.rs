@@ -9088,7 +9088,7 @@ mod tests {
              NOT the combat pity roller"
         );
         assert!(
-            (rm.run_state.card_rarity_odds.current_value - pity_before).abs() < f64::EPSILON,
+            (rm.run_state.card_rarity_odds.current_value - pity_before).abs() < f32::EPSILON,
             "non-combat card reward must not mutate the run pity counter"
         );
     }

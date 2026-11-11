@@ -878,14 +878,17 @@ fn build_combat_for_room(
     // (SwordOfStone elite-victory counter, StoneCracker boss gate) see the
     // right value — set inside `enter_combat_from_roster` BEFORE the opening
     // draw.
-    let mut combat = crate::run_bridge::enter_combat_from_roster(rs, &roster, room_type);
-    // GH #552: stamp the encounter's slot model so a mid-combat summon lands
-    // in the turn position C# gives it (`CombatState.SortEnemiesBySlotName` +
-    // the summoners' free-slot search). Inert for encounters with no `Slots`,
-    // and a no-op for the initial roster — every shipped `GenerateMonsters` is
-    // already slot-ascending, so this only ever informs a LATER add.
-    combat.assign_encounter_slots(enc.member_slots());
-    Some(combat)
+    // GH #552: the encounter's slot model rides in so a mid-combat summon
+    // lands in the turn position C# gives it (`CombatState.SortEnemiesBySlotName`
+    // + the summoners' free-slot search). It is stamped BEFORE combat starts:
+    // a summon can happen inside entry (Whispering Earring + Void Form runs
+    // the first enemy turn there).
+    Some(crate::run_bridge::enter_combat_from_roster_in_slots(
+        rs,
+        &roster,
+        enc.member_slots(),
+        room_type,
+    ))
 }
 
 /// Spawn `encounter_id`'s roster off the C# `niche` stream and return each
@@ -967,9 +970,10 @@ pub fn dump_roster_for_encounter(
         .collect();
     // Roster-HP oracle dump: room type is irrelevant to the HP roll it
     // gates, so pass `Unknown` (no draw-modifier influence).
-    let state = crate::run_bridge::enter_combat_from_roster(
+    let state = crate::run_bridge::enter_combat_from_roster_in_slots(
         rs,
         &roster,
+        enc.member_slots(),
         sts2_core::runstate::RoomType::Unknown,
     );
     let out = state
@@ -3797,6 +3801,84 @@ mod tests {
             vec![MonsterKind::HunterKiller],
             "cursor 1 % 2 == 1 must select the 2nd entry (HUNTER_KILLER_NORMAL)"
         );
+    }
+
+    /// The encounter's slot model is stamped BEFORE combat starts, so a
+    /// summon that happens inside combat entry still lands in its C# slot.
+    ///
+    /// Whispering Earring auto-plays turn 1 inside `start_player_turn`, and
+    /// Void Form ends that turn, so the whole enemy turn runs inside entry:
+    /// the Fabricator's opening FABRICATE / FABRICATING_STRIKE spawns bots
+    /// before `build_combat_for_room` returns. C# names the slots in
+    /// `GenerateMonstersWithSlots` before the combat starts
+    /// (`FabricatorNormal.Slots` = `[bot1, bot2, fabricator, bot3, bot4]`),
+    /// `Fabricator.SpawnBot` adds at `Encounter.GetNextSlot`
+    /// (Fabricator.cs:115) and `CombatManager.AddCreature` re-sorts by slot
+    /// (`CombatState.SortEnemiesBySlotName`, CombatState.cs:678) — the bots
+    /// go AHEAD of the Fabricator. Stamping after entry left the Fabricator
+    /// slot-less during that turn, so the bots were appended behind it
+    /// (Regent seed 6673, v0.107.1, step 631).
+    #[test]
+    fn build_combat_for_room_stamps_slots_before_entry_summons() {
+        use sts2_core::run_room_gen::GeneratedActRooms;
+        use sts2_core::MonsterKind;
+        crate::relics::dispatch::ensure_installed();
+        crate::cards::dispatch::install_default_registry();
+        let mut spawned_any = false;
+        for seed in 0..8_i32 {
+            let mut rs = RunState::new();
+            rs.rng = sts2_core::run_rng_set::RunRngSet::new(seed);
+            rs.character_id = CharacterId::Regent;
+            rs.relics = vec![sts2_core::RelicId::WhisperingEarring];
+            let mut card = sts2_core::cards::Card::pod_defaults();
+            card.card_id = sts2_core::cards::CardId::VoidForm;
+            rs.master_deck = vec![card];
+            rs.current_hp = 999;
+            rs.max_hp = 999;
+            rs.act_index = 3;
+            rs.generated_rooms = vec![
+                GeneratedActRooms::default(),
+                GeneratedActRooms::default(),
+                GeneratedActRooms {
+                    normal_encounters: vec!["FABRICATOR_NORMAL"],
+                    elite_encounters: vec![],
+                    boss_id: "QUEEN_BOSS",
+                    second_boss_id: None,
+                    events_shuffled: vec![],
+                    ancient: None,
+                },
+            ];
+            let combat = build_combat_for_room(&mut rs, 3, RoomType::Monster)
+                .expect("act-3 monster room builds a combat");
+            let order: Vec<(MonsterKind, Option<u8>)> = combat
+                .enemy_uids
+                .iter()
+                .map(|&uid| {
+                    let c = combat.creatures.iter().find(|c| c.id == uid.0).unwrap();
+                    (c.species.unwrap(), combat.enemy_slot(uid))
+                })
+                .collect();
+            assert!(
+                order.len() > 1,
+                "seed {seed}: the Fabricator's opening move spawns a bot inside entry, got {order:?}"
+            );
+            spawned_any = true;
+            let (last_kind, last_slot) = *order.last().unwrap();
+            assert_eq!(
+                (last_kind, last_slot),
+                (MonsterKind::Fabricator, Some(2)),
+                "seed {seed}: bots in slots 0/1 precede the Fabricator, got {order:?}"
+            );
+            for (i, &(kind, slot)) in order[..order.len() - 1].iter().enumerate() {
+                assert_ne!(kind, MonsterKind::Fabricator);
+                assert_eq!(
+                    slot,
+                    Some(u8::try_from(i).unwrap()),
+                    "seed {seed}: {order:?}"
+                );
+            }
+        }
+        assert!(spawned_any);
     }
 
     /// Boss-room pin path resolves identity from the generated `boss_id`

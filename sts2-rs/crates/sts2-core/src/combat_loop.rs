@@ -7409,8 +7409,17 @@ fn replay_loop_owner_dead(state: &CombatState) -> bool {
 /// Always `false` before v0.111.0, so the v0.107.1 loops are untouched.
 #[must_use]
 pub fn multi_play_stops_v0111(state: &CombatState) -> bool {
-    state.game_version >= crate::GameVersion::V0_111_0
-        && combat_is_ending(state)
+    state.game_version >= crate::GameVersion::V0_111_0 && is_over_or_ending(state)
+}
+
+/// C# `CombatManager.IsOverOrEnding` as a command's early return reads it:
+/// [`combat_is_ending`], except while a corpse's on-death reinforcement spawn
+/// (Infested, Stock, ...) has not fired yet — C# spawns those inside the
+/// killing hit, so the combat is not ending there (see
+/// [`multi_play_stops_v0111`]). Version-independent.
+#[must_use]
+pub fn is_over_or_ending(state: &CombatState) -> bool {
+    combat_is_ending(state)
         && !(state.player.current_hp > 0
             && !state.is_over
             && crate::enemy_death_effects::has_pending(state))
@@ -10715,6 +10724,13 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
 /// `tests/parity/known_divergences.md` for follow-up if the gap proves
 /// observable.
 pub fn auto_play_card_from_draw_top(state: &mut CombatState, force_exhaust: bool) -> bool {
+    // C# `CardPileCmd.AutoPlayFromDrawPile` returns at once on
+    // `IsOverOrEnding` (CardPileCmd.cs:953-958 v0.107.1, :1148-1153
+    // v0.111.0): no `ShuffleIfNecessary`, nothing taken. A v0.107.1 replay of
+    // a lethal Havoc / Cascade reaches it with the combat already won.
+    if !state.enemy_uids.is_empty() && is_over_or_ending(state) {
+        return false;
+    }
     // Reshuffle discard → draw if needed. C# `CardPileCmd.AutoPlayFromDrawPile`
     // routes through `ShuffleIfNecessary` → `Shuffle` → **`Hook.AfterShuffle`**
     // (`CardPileCmd.cs:857`) — so the relic after-shuffle bus AND
@@ -11113,6 +11129,12 @@ pub fn auto_play_specific_card_from_exhaust_at_target(
 /// `count > 1`, where the per-card-loop-with-reshuffle shape would wrongly
 /// replay discarded cards. Bead `sts2-rs-q6bix` (F-F).
 pub fn auto_play_n_from_draw_top(state: &mut CombatState, count: i32, force_exhaust: bool) {
+    // `IsOverOrEnding` early return, as in [`auto_play_card_from_draw_top`]
+    // (Ironclad seed 6661 v0.107.1: Hidden Gem's 3rd Cascade play after the
+    // 2nd won reshuffled the discard, +9 on the next combat's shuffle).
+    if !state.enemy_uids.is_empty() && is_over_or_ending(state) {
+        return;
+    }
     // Phase 1: collect up to `count` top cards into Play. A reshuffle select
     // that prompts parks the collect (GH #1131); see [`collect_from_draw_top`].
     let mut collect = crate::PendingCollectResume {
