@@ -1017,8 +1017,9 @@ pub fn populate_starter_deck(rs: &mut RunState, character: CharacterId) {
     // RNG consumes positionally.
     let curses = std::mem::take(&mut rs.master_deck);
     for spec in &starter {
-        rs.master_deck
-            .push(crate::cards::status::card_from_spec(spec));
+        let mut card = crate::cards::status::card_from_spec(spec);
+        card.normalize_for_version(rs.game_version);
+        rs.master_deck.push(card);
     }
     rs.master_deck.extend(curses);
 }

@@ -1963,6 +1963,8 @@ fn graft_add_card(rm: &mut RunManager, card_id: &str) {
             c.card_id = cid;
             c
         });
+    let mut card = card;
+    card.normalize_for_version(rm.run_state.game_version);
     rm.run_state.master_deck.push(card);
 }
 

@@ -959,7 +959,7 @@ fn apply_card_injection(
         let (name, upgraded) = parse_inject_token(token);
         let card_id = sts2_content::names::card_id_from_str(name)
             .ok_or_else(|| format!("STS2_RUNAI_INJECT_CARDS: unknown card token '{token}'"))?;
-        let pod = sts2_content::cards::spec_index::card_pod_from_id(card_id, upgraded)
+        let pod = sts2_content::cards::v0111::card_pod_for(card_id, upgraded, rm.game_version)
             .ok_or_else(|| format!("STS2_RUNAI_INJECT_CARDS: no spec for '{token}'"))?;
         rm.run_state.master_deck.push(pod);
         added += 1;

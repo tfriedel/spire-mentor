@@ -1470,6 +1470,8 @@ impl PyRunManager {
                 c.card_id = cid;
                 c
             });
+        let mut card = card;
+        card.normalize_for_version(self.inner.run_state.game_version);
         self.inner.run_state.master_deck.push(card);
         Ok(())
     }

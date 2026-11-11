@@ -5002,6 +5002,14 @@ impl RunState {
     /// relic.modify_card_being_added_to_deck(self, card)`. Bead
     /// `sts2-rs-9wx7`.
     pub fn modify_card_being_added_to_deck(&mut self, card: &mut Card) {
+        // A deck card carries the run's game build's numbers (cost, damage,
+        // block, type, target, keywords), whichever factory minted it: run-side
+        // code reads deck cards directly (deck view, enchant / transform /
+        // removal eligibility), and only combat entry re-normalizes. Every
+        // deck add funnels through here, so this is the one place a path that
+        // built the card at the base build gets corrected. A no-op on the
+        // default build.
+        card.normalize_for_version(self.game_version);
         let _ = crate::run_effects::dispatch_modify_card_being_added_to_deck(self, card);
     }
 

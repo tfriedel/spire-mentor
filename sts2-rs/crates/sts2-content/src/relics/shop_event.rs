@@ -1491,8 +1491,7 @@ fn listener_large_capsule(rs: &mut RunState) -> EffectResult {
                 // C# `CardPileCmd.Add` runs every relic's
                 // `TryModifyCardBeingAddedToDeck` (MoltenEgg upgrades Attacks,
                 // FrozenEgg Powers, ToxicEgg Skills).
-                let _ =
-                    sts2_core::run_effects::dispatch_modify_card_being_added_to_deck(rs, &mut card);
+                rs.modify_card_being_added_to_deck(&mut card);
                 // C# `CardPileCmd.Add(.., PileType.Deck)` fires
                 // `AbstractRelic.AfterCardChangedPiles` for every relic, which
                 // is where `LuckyFysh.cs` grants its `GoldVar(15)` per card that
