@@ -722,6 +722,23 @@ class RunResult:
     record_ascension: int | None = None
     killed_by: str | None = None
     run_seconds: int | None = None
+    #: The advisor's `_unranked` fallbacks this run, by trigger (GH #980):
+    #: decisions answered with "the first option, NOT a recommendation".
+    #: `{}` is the healthy value; `None` means no advisor slice was archived.
+    unranked: dict[str, int] | None = None
+
+
+#: The advisor's structured `_unranked` line
+#: (`realgame_advisor.UNRANKED_LOG_PREFIX`; keep the two in step).
+UNRANKED_RE = re.compile(r"unranked fallback trigger=(\S+)")
+
+
+def count_unranked(text: str) -> dict[str, int]:
+    """Count the advisor's `_unranked` fallbacks in a log slice, by trigger."""
+    counts: dict[str, int] = {}
+    for m in UNRANKED_RE.finditer(text):
+        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return counts
 
 
 def read_log() -> str:
@@ -1022,6 +1039,13 @@ def play_one(
     result.killed_by = str(killed) if killed else None
     secs = record.get("run_time")
     result.run_seconds = secs if isinstance(secs, int) else None
+    try:
+        slice_text = (OUT_DIR / f"{tag}.advisor.log").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        result.unranked = count_unranked(slice_text) if slice_text else None
+    except OSError:
+        result.unranked = None
     # The two graders disagreeing is a defect signal, not a rounding error --
     # a watchdog-killed VICTORY reading as a loss is exactly how live wins were
     # lost before (2026-08-03). Say so loudly; the record wins.
@@ -1044,7 +1068,7 @@ def play_one(
         f"[{result.floors} floors, {result.actions} actions, "
         f"{result.refusals} refusals, {result.minutes} min, "
         f"ascension {before} -> {after}, record win={result.record_win} "
-        f"a{result.record_ascension} seed={result.seed}]"
+        f"a{result.record_ascension} seed={result.seed}, unranked={result.unranked}]"
     )
     return result
 

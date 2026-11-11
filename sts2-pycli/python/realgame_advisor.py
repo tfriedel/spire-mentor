@@ -871,7 +871,13 @@ def _advisor_builders() -> dict[str, Any]:
     return {"potion_swap": realgame_ppo._build_potion_swap}
 
 
-def _unranked(state: dict[str, Any], why: str) -> dict[str, Any]:
+#: Prefix of the one structured line every `_unranked` answer logs (GH #980).
+#: `spire-mentor-mod/tools/ascension_climb.py` counts these per run from the
+#: archived advisor-log slice, so keep the two in step.
+UNRANKED_LOG_PREFIX = "unranked fallback"
+
+
+def _unranked(state: dict[str, Any], why: str, trigger: str | None = None) -> dict[str, Any]:
     """An answer for a surface no head can rank -- honest, but still usable.
 
     Returning only a note would leave F7 sitting on the screen forever, which
@@ -883,7 +889,22 @@ def _unranked(state: dict[str, Any], why: str) -> dict[str, Any]:
     mod's default ``pause_on: "unsupported"`` F7 stops here and gives the
     player the screen, so the first-option pick only plays when they opted
     out of pausing (unattended runs).
+
+    ``trigger`` names which way in this was (GH #980): ``card_select``,
+    ``no_head:<advice_for>``, ``no_decision:<advice_for>`` or
+    ``inference_failed``. It goes into one structured log line with the
+    prompt key and source model, so a climb can count fallbacks per run and
+    `realgame_hand_select`'s direction tables can be extended from data.
     """
+    if trigger is not None:
+        logger.warning(
+            "%s trigger=%s prompt_key=%s source_model=%s :: %s",
+            UNRANKED_LOG_PREFIX,
+            trigger,
+            state.get("prompt_key") or "-",
+            state.get("source_model") or "-",
+            why,
+        )
     options = state.get("options") or state.get("cards") or state.get("nodes") or []
     if not options:
         return {"note": f"{why} (nothing to pick)", "hand_back": why}
@@ -1068,7 +1089,9 @@ def compute_screen_advice(
             return _decline_potion_swap(state)
         builder = _advisor_builders().get(head) or realgame_ppo._PPO_NONCOMBAT_BUILDERS.get(head)
         if builder is None:
-            return _unranked(state, f"no trained head for {advice_for}")
+            return _unranked(
+                state, f"no trained head for {advice_for}", trigger=f"no_head:{advice_for}"
+            )
         build_state = state if head == advice_for else {**state, "type": head}
         decision = builder(build_state)
 
@@ -1094,7 +1117,11 @@ def compute_screen_advice(
             ranked = realgame_hand_select.rank(state)
             if ranked is not None:
                 return ranked
-        return _unranked(state, f"{advice_for}: the net does not cover this surface")
+        return _unranked(
+            state,
+            f"{advice_for}: the net does not cover this surface",
+            trigger="card_select" if advice_for == "card_select" else f"no_decision:{advice_for}",
+        )
 
     if len(decision.actions) == 1:
         probs, value = [1.0], None
@@ -1107,7 +1134,11 @@ def compute_screen_advice(
             # GH #315), and any backend can fail at inference. Advice must
             # always render, so degrade to the unranked shape.
             logger.warning("run-policy inference failed for %s: %s", advice_for, exc)
-            return _unranked(state, f"{advice_for}: run-policy inference failed ({exc})")
+            return _unranked(
+                state,
+                f"{advice_for}: run-policy inference failed ({exc})",
+                trigger="inference_failed",
+            )
 
     def _option_index(response: dict[str, Any], fallback: int) -> int:
         # card_reward answers with a bare `index`; card_select with an
