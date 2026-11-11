@@ -25,10 +25,10 @@
 //! which every trade event must use — a melted relic is skipped by C#'s
 //! `GetValidRelics` and by the `IsAllowed` counts.
 //!
-//! **`IsUsedUp` is NOT modelled**: `RunState::relics` is a bare `Vec<RelicId>`
-//! with no per-instance "spent" flag, so a spent MawBank still reads as
-//! tradable here where C# would skip it. That widens the trade pool slightly;
-//! it never narrows it.
+//! `IsUsedUp` is per-run state too. Of the relics that override it, only
+//! Lizard Tail survives the static cuts, and its `_wasUsed` is the relic's
+//! run counter (1 once it has revived you), so [`relic_is_tradable_in`]
+//! checks that as well.
 
 use sts2_core::relics::RelicId;
 use sts2_core::runstate::RunState;
@@ -37,9 +37,13 @@ use sts2_core::runstate::RunState;
 /// `RelicModel.IsTradable` (`Models/RelicModel.cs:188`, both builds): a Toy
 /// Box wax relic that has melted stays in the inventory but no trade event
 /// may take it, nor does it count toward their `IsAllowed` thresholds.
+/// Also the per-run `!IsUsedUp` clause: a Lizard Tail that has revived you
+/// (`LizardTail.IsUsedUp => _wasUsed`, run counter 1) is not tradable.
 #[must_use]
 pub fn relic_is_tradable_in(state: &RunState, id: RelicId) -> bool {
-    relic_is_tradable(id) && !state.melted_relics.contains(&id)
+    relic_is_tradable(id)
+        && !state.melted_relics.contains(&id)
+        && !(id == RelicId::LizardTail && state.relic_counters.get(&id).is_some_and(|&c| c != 0))
 }
 
 /// True when a trade event may take `id` off you — see the module doc.

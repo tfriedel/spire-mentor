@@ -132,6 +132,67 @@ fn roll_transform_replacement(
     crate::cards::v0111::card_pod_for(new_id, false, rs.game_version)
 }
 
+/// C# `CardSelectCmd.FromDeckForTransformation(prefs(N))` followed by one
+/// transform per selected card, for a select of `picks.len()` cards (each
+/// pick carries its replacement roll: event stream + read index, upgrade).
+///
+/// The select lists the deck's transformable cards (`Type != Quest &&
+/// IsTransformable`). With none it returns empty and opens no screen; with
+/// `list.Count <= MinSelect` it opens no screen either and returns the whole
+/// list (CardSelectCmd.cs), so every transformable card transforms, in deck
+/// order. Only a list longer than `MinSelect` reaches a screen: interactive
+/// hosts then queue the picks, other hosts transform the first
+/// transformable cards. Queueing separate picks for a short list let the
+/// second pick offer the card the first pick had just produced.
+///
+/// Returns how the select resolved.
+pub(crate) fn transform_from_deck(
+    rs: &mut RunState,
+    picks: &[sts2_core::PendingDeckTransform],
+) -> DeckTransformOutcome {
+    let eligible: Vec<usize> = rs
+        .master_deck
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| crate::cards::spec_index::card_is_transformable_in_deck(c))
+        .map(|(i, _)| i)
+        .collect();
+    if rs.interactive_card_transform && eligible.len() > picks.len() {
+        rs.pending_deck_transforms.extend(picks.iter().cloned());
+        return DeckTransformOutcome::Queued;
+    }
+    let mut transformed = 0;
+    // Remove each original from where it sits now (earlier removals shift
+    // it down by one each; replacements land at the tail, behind it).
+    for (removed, (&deck_idx, pick)) in eligible.iter().zip(picks).enumerate() {
+        let at = deck_idx - removed;
+        let original = rs.master_deck[at].card_id;
+        let replacement = match pick.fixed_target {
+            Some(card) => Some(card),
+            None => roll_transform_replacement(rs, original, pick.event_stream_roll),
+        };
+        let Some(mut card) = replacement else {
+            continue;
+        };
+        if pick.upgrade {
+            card.upgrade_for(rs.game_version);
+        }
+        rs.master_deck.remove(at);
+        rs.add_card_to_deck_with_hooks(card, sts2_core::relic_effects::AddSource::Other);
+        transformed += 1;
+    }
+    DeckTransformOutcome::Transformed(transformed)
+}
+
+/// How [`transform_from_deck`] resolved its select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DeckTransformOutcome {
+    /// The picks were queued for the player.
+    Queued,
+    /// This many cards were transformed with no pick.
+    Transformed(usize),
+}
+
 /// Pre-roll the boss encounter for the act the player just entered and
 /// stash it on [`RunState::pinned_act_boss`]. Mirrors the C# game's
 /// "boss locked at act start" behavior — the boss-room dispatch in

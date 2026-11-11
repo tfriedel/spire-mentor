@@ -1491,49 +1491,28 @@ const MORPHIC_GROVE_STREAM: &str = "MORPHIC_GROVE";
 /// Hug shape: interactive hosts queue the picks (replacement rolled off the
 /// event stream only AFTER each pick — no RNG at queue time); non-interactive
 /// hosts (parity-fuzz / random-policy full runs) auto-transform the first 2
-/// deck cards off the SAME event stream so the run never strands. The event has
+/// transformable deck cards off the SAME event stream so the run never
+/// strands. With 2 or fewer transformable cards the select opens no screen
+/// and takes them all ([`crate::run_callbacks::transform_from_deck`]). The event has
 /// no entry-time `base.Rng` roll (no `CalculateVars` override; `MaxHpVar(5)` is
 /// a fixed scalar), so transform #N is `base.Rng` read #(N+1) → `skip_reads`
 /// equals the loop index.
 fn morphic_grove_group(state: &mut RunState) -> EventOutcome {
     let lost = state.gold;
     state.gold = 0;
-    if state.interactive_card_transform {
-        for skip_reads in 0..MORPHIC_GROVE_TRANSFORM_COUNT {
-            state
-                .pending_deck_transforms
-                .push(sts2_core::PendingDeckTransform {
-                    event_stream_roll: Some((MORPHIC_GROVE_STREAM, skip_reads as u32)),
-                    ..Default::default()
-                });
+    let picks: Vec<sts2_core::PendingDeckTransform> = (0..MORPHIC_GROVE_TRANSFORM_COUNT)
+        .map(|skip_reads| sts2_core::PendingDeckTransform {
+            event_stream_roll: Some((MORPHIC_GROVE_STREAM, skip_reads as u32)),
+            ..Default::default()
+        })
+        .collect();
+    match crate::run_callbacks::transform_from_deck(state, &picks) {
+        crate::run_callbacks::DeckTransformOutcome::Queued => {
+            EventOutcome::finished(format!("Lost {lost}g (all); pick 2 cards to transform."))
         }
-        EventOutcome::finished(format!("Lost {lost}g (all); pick 2 cards to transform."))
-    } else {
-        let mut done = 0;
-        for skip_reads in 0..MORPHIC_GROVE_TRANSFORM_COUNT {
-            let Some(original) = state.master_deck.first().map(|c| c.card_id) else {
-                break;
-            };
-            if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
-                state,
-                state.character_id,
-                original,
-                MORPHIC_GROVE_STREAM,
-                skip_reads as u32,
-            ) {
-                if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
-                    state.master_deck.remove(0);
-                    state.add_card_to_deck_with_hooks(
-                        card,
-                        sts2_core::relic_effects::AddSource::EventGain,
-                    );
-                    done += 1;
-                }
-            } else {
-                break;
-            }
+        crate::run_callbacks::DeckTransformOutcome::Transformed(done) => {
+            EventOutcome::finished(format!("Lost {lost}g (all); transformed {done} cards."))
         }
-        EventOutcome::finished(format!("Lost {lost}g (all); transformed {done} cards."))
     }
 }
 
@@ -2838,6 +2817,45 @@ mod tests {
         );
     }
 
+    /// `FromDeckForTransformation` opens no screen when the deck holds no more
+    /// transformable cards than the select takes (`list.Count <= MinSelect`,
+    /// CardSelectCmd.cs): it returns them all and each transforms in deck
+    /// order, reading the event stream in turn. Rust used to queue two
+    /// separate picks, so the second could offer the card the first had just
+    /// produced. The Eternal Ascender's Bane is not transformable.
+    #[test]
+    fn morphic_grove_group_takes_every_card_when_only_two_are_transformable() {
+        use sts2_core::cards::CardId;
+        crate::cards::dispatch::ensure_installed();
+        let card = |id| crate::cards::spec_index::card_pod_from_id(id, false).unwrap();
+        let mut rs = RunState::new();
+        rs.character_id = sts2_core::CharacterId::Ironclad;
+        rs.gold = 150;
+        rs.interactive_card_transform = true;
+        rs.master_deck = vec![
+            card(CardId::StrikeIronclad),
+            card(CardId::AscendersBane),
+            card(CardId::DefendIronclad),
+        ];
+        let roll = |rs: &RunState, id, k| {
+            crate::cards::spec_index::roll_transform_replacement_event_stream(
+                rs,
+                sts2_core::CharacterId::Ironclad,
+                id,
+                MORPHIC_GROVE_STREAM,
+                k,
+            )
+            .unwrap()
+        };
+        let first = roll(&rs, CardId::StrikeIronclad, 0);
+        let second = roll(&rs, CardId::DefendIronclad, 1);
+        let outcome = morphic_grove_group(&mut rs);
+        assert!(outcome.finished);
+        assert!(rs.pending_deck_transforms.is_empty(), "no screen opens");
+        let ids: Vec<CardId> = rs.master_deck.iter().map(|c| c.card_id).collect();
+        assert_eq!(ids, [CardId::AscendersBane, first, second]);
+    }
+
     /// The interactive Group path queues 2 transform picks, each tagged with
     /// the `MORPHIC_GROVE` event stream and its in-stream read index (0, 1) —
     /// so the deferred resolver rolls the SAME sequence the auto path would,
@@ -2845,9 +2863,20 @@ mod tests {
     /// calls.
     #[test]
     fn morphic_grove_group_interactive_queues_event_stream_picks() {
+        crate::cards::dispatch::ensure_installed();
         let mut rs = RunState::new();
         rs.gold = 150;
         rs.interactive_card_transform = true;
+        // More transformable cards than the select takes, so it opens a screen.
+        for _ in 0..3 {
+            rs.master_deck.push(
+                crate::cards::spec_index::card_pod_from_id(
+                    sts2_core::cards::CardId::StrikeIronclad,
+                    false,
+                )
+                .unwrap(),
+            );
+        }
         let outcome = morphic_grove_group(&mut rs);
         assert!(outcome.finished);
         assert_eq!(

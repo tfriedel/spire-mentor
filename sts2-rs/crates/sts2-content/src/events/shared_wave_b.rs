@@ -2095,37 +2095,20 @@ fn trial_nondescript_innocent(state: &mut RunState) -> EventOutcome {
     // `FromDeckForTransformation(2)` → `TransformToRandom(item, base.Rng)` per
     // pick — event-stream reads #2 and #3 (the defendant roll was #1).
     // Interactive hosts queue the picks (rolled only once each resolves);
-    // otherwise transform the first two deck cards off the same reads, the
-    // MorphicGrove shape.
+    // otherwise transform the first two transformable deck cards off the same
+    // reads. With 2 or fewer transformable cards the select opens no screen
+    // and takes them all (`transform_from_deck`).
     trial_add_curse(state, CardId::Doubt);
-    if state.interactive_card_transform {
-        for k in 0..TRIAL_COUNT {
-            state
-                .pending_deck_transforms
-                .push(sts2_core::PendingDeckTransform {
-                    event_stream_roll: Some((TRIAL_STREAM, 1 + k as u32)),
-                    ..Default::default()
-                });
-        }
+    let picks: Vec<sts2_core::PendingDeckTransform> = (0..TRIAL_COUNT)
+        .map(|k| sts2_core::PendingDeckTransform {
+            event_stream_roll: Some((TRIAL_STREAM, 1 + k as u32)),
+            ..Default::default()
+        })
+        .collect();
+    if crate::run_callbacks::transform_from_deck(state, &picks)
+        == crate::run_callbacks::DeckTransformOutcome::Queued
+    {
         return EventOutcome::finished("Innocent: gained Doubt, pick 2 cards to transform.");
-    }
-    for k in 0..TRIAL_COUNT {
-        let Some(original) = state.master_deck.first().map(|c| c.card_id) else {
-            break;
-        };
-        let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
-            state,
-            state.character_id,
-            original,
-            TRIAL_STREAM,
-            1 + k as u32,
-        ) else {
-            break;
-        };
-        if let Some(card) = card_pod_from_id(new_id, false) {
-            state.master_deck.remove(0);
-            state.add_card_to_deck_with_hooks(card, sts2_core::relic_effects::AddSource::EventGain);
-        }
     }
     EventOutcome::finished("Innocent: gained Doubt, transformed 2 cards.")
 }
@@ -4358,6 +4341,11 @@ mod tests {
 
         let mut rs = RunState::new();
         rs.interactive_card_transform = true;
+        // Doubt + 2 Strikes: more than the 2 the select takes, so it opens a screen.
+        for _ in 0..2 {
+            rs.master_deck
+                .push(card_pod_from_id(CardId::StrikeIronclad, false).unwrap());
+        }
         assert!(trial_nondescript_innocent(&mut rs).finished);
         assert_eq!(count(&rs, CardId::Doubt), 1);
         let rolls: Vec<_> = rs
@@ -4376,6 +4364,36 @@ mod tests {
         assert!(trial_merchant_innocent(&mut rs).finished);
         assert_eq!(count(&rs, CardId::Shame), 1);
         assert_eq!(rs.pending_deck_upgrades, 2, "pick 2 to upgrade");
+    }
+
+    /// Innocent's 2-card transform select opens no screen when the deck
+    /// holds 2 or fewer transformable cards (`list.Count <= MinSelect`,
+    /// CardSelectCmd.cs): the lone Strike and the Doubt just added both
+    /// transform, off event-stream reads #2 and #3, in deck order.
+    #[test]
+    fn trial_nondescript_innocent_takes_every_card_when_only_two_are_transformable() {
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = RunState::new();
+        rs.character_id = sts2_core::CharacterId::Ironclad;
+        rs.interactive_card_transform = true;
+        rs.master_deck
+            .push(card_pod_from_id(CardId::StrikeIronclad, false).unwrap());
+        let roll = |rs: &RunState, id, k| {
+            crate::cards::spec_index::roll_transform_replacement_event_stream(
+                rs,
+                sts2_core::CharacterId::Ironclad,
+                id,
+                TRIAL_STREAM,
+                k,
+            )
+            .unwrap()
+        };
+        let first = roll(&rs, CardId::StrikeIronclad, 1);
+        let second = roll(&rs, CardId::Doubt, 2);
+        assert!(trial_nondescript_innocent(&mut rs).finished);
+        assert!(rs.pending_deck_transforms.is_empty(), "no screen opens");
+        let ids: Vec<CardId> = rs.master_deck.iter().map(|c| c.card_id).collect();
+        assert_eq!(ids, [first, second]);
     }
 
     #[test]

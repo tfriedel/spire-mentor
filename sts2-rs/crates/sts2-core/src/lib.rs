@@ -11944,27 +11944,37 @@ fn resolve_choice_atomic(
         if let Some((draw_count, next_relic, side_fired)) =
             state.pending_relic_hand_draw_resume.take()
         {
-            // A draw the suspending relic itself was awaiting goes on first:
-            // Toasty Mittens' exhaust fired Dark Embrace, whose draw
-            // reshuffled into this pick. C# finishes that draw (and the rest
-            // of the exhaust) inside the relic before the walk moves on.
-            if state.pending_autoplay_resume.is_none()
-                && state
-                    .pending_draw_resume
-                    .is_some_and(|p| !p.resume_turn_setup)
-            {
-                if let Some(pdr) = state.pending_draw_resume.take() {
-                    let _ = state.resume_suspended_draw(pdr);
-                    if state.pending_choice.is_some() {
-                        state.pending_relic_hand_draw_resume =
-                            Some((draw_count, next_relic, side_fired));
-                        return StepResult::PendingChoice;
+            // The pick was opened by a card the suspending relic's exhaust
+            // drew and Hellraiser auto-played (Toasty Mittens -> Dark Embrace
+            // -> Seeker Strike). That play, its card's `AfterCardDrawn`, the
+            // rest of the draw and the relic's own tail all run inside the
+            // relic in C#, so the `pending_autoplay_resume` arm below finishes
+            // them first and then resumes this walk.
+            if state.pending_autoplay_resume.is_some() {
+                state.pending_relic_hand_draw_resume = Some((draw_count, next_relic, side_fired));
+            } else {
+                // A draw the suspending relic itself was awaiting goes on first:
+                // Toasty Mittens' exhaust fired Dark Embrace, whose draw
+                // reshuffled into this pick. C# finishes that draw (and the rest
+                // of the exhaust) inside the relic before the walk moves on.
+                if state.pending_autoplay_resume.is_none()
+                    && state
+                        .pending_draw_resume
+                        .is_some_and(|p| !p.resume_turn_setup)
+                {
+                    if let Some(pdr) = state.pending_draw_resume.take() {
+                        let _ = state.resume_suspended_draw(pdr);
+                        if state.pending_choice.is_some() {
+                            state.pending_relic_hand_draw_resume =
+                                Some((draw_count, next_relic, side_fired));
+                            return StepResult::PendingChoice;
+                        }
                     }
                 }
+                return crate::combat_loop::resume_before_hand_draw_relics(
+                    state, draw_count, next_relic, side_fired,
+                );
             }
-            return crate::combat_loop::resume_before_hand_draw_relics(
-                state, draw_count, next_relic, side_fired,
-            );
         }
     }
     // GH #1131: a card's draw-pile auto-play parked on its reshuffle select
@@ -12251,6 +12261,19 @@ fn resolve_choice_atomic(
                     if let Some(r) = state.resume_suspended_draw(pdr) {
                         return r;
                     }
+                }
+            }
+            // The auto-play ran inside a turn-start relic's `BeforeHandDraw`
+            // (Toasty Mittens' exhaust drew it through Dark Embrace), and so
+            // did the draw just finished, Strength included: the relic walk
+            // goes on, then the hand draw.
+            if state.pending_choice.is_none() {
+                if let Some((draw_count, next_relic, side_fired)) =
+                    state.pending_relic_hand_draw_resume.take()
+                {
+                    return crate::combat_loop::resume_before_hand_draw_relics(
+                        state, draw_count, next_relic, side_fired,
+                    );
                 }
             }
             // Finish the parent hand-play's tail (Havoc/Cascade/Scrawl/... played

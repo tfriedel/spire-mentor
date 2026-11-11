@@ -1845,6 +1845,31 @@ mod tests {
         );
     }
 
+    /// A Lizard Tail that has revived you is `IsUsedUp` (`_wasUsed`), so
+    /// `RelicModel.IsTradable` is false and `GetValidRelics` skips it
+    /// (LizardTail.cs, RelicModel.cs, both builds). The spent flag is the
+    /// relic's run counter (1 once consumed). Rust kept it in the shuffled
+    /// list and dealt different slots (random-loadout Necrobinder 8948
+    /// v0.111.0: Bronze Scales traded where C# traded Akabeko).
+    #[test]
+    fn relic_trader_skips_a_spent_lizard_tail() {
+        let mut rs = trader_state();
+        rs.relics.push(RelicId::LizardTail);
+        let mut without = rs.clone();
+        without.relics.pop();
+        rs.relic_counters.insert(RelicId::LizardTail, 1);
+        assert_eq!(
+            relic_trader_owned(&rs),
+            relic_trader_owned(&without),
+            "a spent Lizard Tail must not lengthen the shuffled list"
+        );
+        rs.relic_counters.insert(RelicId::LizardTail, 0);
+        assert!(
+            crate::relics::tradable::relic_is_tradable_in(&rs, RelicId::LizardTail),
+            "an armed Lizard Tail is tradable"
+        );
+    }
+
     #[test]
     fn slippery_bridge_hold_on_takes_base_damage() {
         let mut rs = fresh();

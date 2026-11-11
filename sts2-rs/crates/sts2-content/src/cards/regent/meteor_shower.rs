@@ -8,15 +8,20 @@ use super::prelude::*;
 /// 2/2 amounts so the inline constants match.
 pub(crate) fn play_meteor_shower(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     deal_damage_all_enemies(state, current_damage(state));
-    let uids: Vec<CreatureUid> = state.enemy_uids.iter().copied().collect();
-    for uid in uids {
-        if state
-            .creatures
-            .iter()
-            .any(|c| c.id == uid.0 && c.current_hp > 0)
-        {
-            apply_power_to_enemy(state, uid, PowerKind::Weak, 2);
-            apply_power_to_enemy(state, uid, PowerKind::Vulnerable, 2);
+    // Weak to every hittable enemy, then Vulnerable to every one: two
+    // `PowerCmd.Apply` calls over `HittableEnemies` (MeteorShower.cs), so a
+    // reaction to one enemy's Weak (Sleight of Flesh) runs before any
+    // Vulnerable lands.
+    for kind in [PowerKind::Weak, PowerKind::Vulnerable] {
+        let uids: Vec<CreatureUid> = state.enemy_uids.iter().copied().collect();
+        for uid in uids {
+            if state
+                .creatures
+                .iter()
+                .any(|c| c.id == uid.0 && c.current_hp > 0)
+            {
+                apply_power_to_enemy(state, uid, kind, 2);
+            }
         }
     }
     EffectResult::Resolved

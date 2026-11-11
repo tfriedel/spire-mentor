@@ -3922,13 +3922,13 @@ fn listener_astrolabe(rs: &mut RunState) -> EffectResult {
         return EffectResult::Resolved;
     }
     if rs.interactive_card_transform {
-        for _ in 0..ASTROLABE_CARDS.min(rs.master_deck.len()) {
-            rs.pending_deck_transforms
-                .push(sts2_core::PendingDeckTransform {
-                    upgrade: true,
-                    ..Default::default()
-                });
-        }
+        // With 3 or fewer transformable cards the select opens no screen and
+        // takes them all (`transform_from_deck`).
+        let pick = sts2_core::PendingDeckTransform {
+            upgrade: true,
+            ..Default::default()
+        };
+        crate::run_callbacks::transform_from_deck(rs, &vec![pick; ASTROLABE_CARDS]);
         return EffectResult::Resolved;
     }
     // Candidate set: deck indices whose cards are transformable.
@@ -13574,6 +13574,40 @@ mod tests {
         assert!(rs.pending_deck_transforms.iter().all(|t| t.upgrade));
         assert_eq!(rs.rng.rewards.counter(), rewards);
         assert_eq!(rs.master_deck, deck_before);
+    }
+
+    /// Astrolabe's 3-card select opens no screen when the deck holds 3 or
+    /// fewer transformable cards (`list.Count <= MinSelect`,
+    /// CardSelectCmd.cs): both cards transform, off `Rng.Niche`, upgraded.
+    #[test]
+    fn listener_astrolabe_takes_every_card_when_three_or_fewer_are_transformable() {
+        use sts2_core::run_effects::dispatch_after_obtained;
+        use sts2_core::runstate::RunState;
+        crate::relics::dispatch::ensure_installed();
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = RunState::new();
+        rs.character_id = sts2_core::CharacterId::Ironclad;
+        rs.interactive_card_transform = true;
+        for _ in 0..2 {
+            rs.master_deck.push(
+                crate::cards::spec_index::card_pod_from_id(
+                    sts2_core::cards::CardId::StrikeIronclad,
+                    false,
+                )
+                .unwrap(),
+            );
+        }
+        let niche = rs.rng.niche.counter();
+        rs.relics.push(RelicId::Astrolabe);
+        rs.last_obtained_relic = Some(RelicId::Astrolabe);
+        let _ = dispatch_after_obtained(&mut rs);
+        assert!(rs.pending_deck_transforms.is_empty(), "no screen opens");
+        assert_eq!(rs.rng.niche.counter(), niche + 2);
+        assert_eq!(rs.master_deck.len(), 2);
+        assert!(rs
+            .master_deck
+            .iter()
+            .all(|c| c.upgraded && c.card_id != sts2_core::cards::CardId::StrikeIronclad));
     }
 
     #[test]

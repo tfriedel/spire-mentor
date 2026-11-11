@@ -15,17 +15,22 @@ pub(crate) fn play_deathbringer(
     let doom = if current_card_upgraded(state) { 26 } else { 21 };
     // C# WeakVar base 1, no OnUpgrade bump.
     let weak = 1;
-    // C# applies to CombatState.HittableEnemies (all alive enemies). Snapshot
-    // uids and recheck alive per target, mirroring deal_damage_all_enemies.
-    let uids: Vec<CreatureUid> = state.enemy_uids.iter().copied().collect();
-    for uid in uids {
-        if state
-            .creatures
-            .iter()
-            .any(|c| c.id == uid.0 && c.current_hp > 0)
-        {
-            apply_power_to_enemy(state, uid, PowerKind::Doom, doom);
-            apply_power_to_enemy(state, uid, PowerKind::Weak, weak);
+    // C# applies Doom to every `CombatState.HittableEnemies`, then Weak to
+    // every one: two `PowerCmd.Apply` calls, each over a fresh list
+    // (Deathbringer.cs). A per-enemy Doom+Weak pair reorders the debuff
+    // reactions: Sleight of Flesh's Weak hit killing one Kaiser Crab arm
+    // enrages the other before its Doom hit lands. Snapshot uids per apply
+    // and recheck alive per target, mirroring deal_damage_all_enemies.
+    for (kind, amount) in [(PowerKind::Doom, doom), (PowerKind::Weak, weak)] {
+        let uids: Vec<CreatureUid> = state.enemy_uids.iter().copied().collect();
+        for uid in uids {
+            if state
+                .creatures
+                .iter()
+                .any(|c| c.id == uid.0 && c.current_hp > 0)
+            {
+                apply_power_to_enemy(state, uid, kind, amount);
+            }
         }
     }
     EffectResult::Resolved

@@ -3380,3 +3380,61 @@ fn decisions_decisions_quasar_prompt_after_a_lethal_ends_the_combat() {
         );
     }
 }
+
+/// Deathbringer applies Doom to every hittable enemy, THEN Weak to every one
+/// (two `PowerCmd.Apply` calls over `HittableEnemies`, Deathbringer.cs, both
+/// builds). Sleight of Flesh hits on each debuff, so the Crusher arm dies on
+/// its Weak hit, after the Rocket arm's Doom hit already landed on its HP:
+/// the Rocket's Crab Rage block only soaks its Weak hit. Rust applied both
+/// debuffs per enemy, so both Rocket hits landed on the fresh 99 block
+/// (random-loadout Necrobinder 9014 v0.107.1).
+#[test]
+fn deathbringer_applies_each_debuff_to_every_enemy_in_turn() {
+    for v in [V107, V111] {
+        let mut state = fresh(v, CharacterId::Necrobinder);
+        let crusher = first_enemy(&state);
+        state.creatures[0].current_hp = 6;
+        state.creatures[0].block = 18;
+        let rocket = add_enemy(&mut state, 50, 62);
+        add_enemy_power(&mut state, rocket, 800, PowerKind::CrabRage, 1);
+        add_player_power(&mut state, 801, PowerKind::SleightOfFlesh, 13);
+        let i = push_hand(&mut state, CardId::Deathbringer, false);
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+        assert_eq!(hp_of(&state, crusher), 0, "{v:?}");
+        let r = state
+            .creatures
+            .iter()
+            .find(|c| c.id == rocket.0)
+            .expect("rocket");
+        assert_eq!((r.current_hp, r.block), (49, 86), "{v:?}");
+    }
+}
+
+/// Meteor Shower applies Weak to every hittable enemy, then Vulnerable to
+/// every one (MeteorShower.cs). The first enemy survives its Weak hit and
+/// dies on its Vulnerable hit, so the other enemy's Weak hit lands on HP
+/// before Crab Rage's block, and only its Vulnerable hit is soaked.
+#[test]
+fn meteor_shower_applies_each_debuff_to_every_enemy_in_turn() {
+    for v in [V107, V111] {
+        let mut state = fresh(v, CharacterId::Regent);
+        let first = first_enemy(&state);
+        let rocket = add_enemy(&mut state, 50, 200);
+        add_enemy_power(&mut state, rocket, 800, PowerKind::CrabRage, 1);
+        add_player_power(&mut state, 801, PowerKind::SleightOfFlesh, 13);
+        let i = push_hand(&mut state, CardId::MeteorShower, false);
+        let uid = state.player.hand[usize::from(i)];
+        let dmg = state.cards[uid.0.get() as usize - 1].base_damage;
+        state.creatures[0].current_hp = dmg + 20;
+        state.player.stars = 10;
+        state.player.energy = 10;
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+        assert_eq!(hp_of(&state, first), 0, "{v:?}");
+        let r = state
+            .creatures
+            .iter()
+            .find(|c| c.id == rocket.0)
+            .expect("rocket");
+        assert_eq!((r.current_hp, r.block), (200 - dmg - 13, 86), "{v:?}");
+    }
+}
