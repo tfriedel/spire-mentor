@@ -14,22 +14,18 @@ pub(crate) fn play_fiend_fire(
     // FiendFire card itself is on the Play pile, not in hand).
     let hand: Vec<sts2_core::CardUid> = state.player.hand.to_vec();
     let count = u8::try_from(hand.len()).unwrap_or(u8::MAX).min(0x0F);
-    let draw_was_suspended = state.pending_draw_resume.is_some();
-    for uid in hand {
-        exhaust_hand_card(state, uid);
-    }
-    // C# awaits each `CardCmd.Exhaust` before the attack (FiendFire.cs:36-41),
-    // so a Dark Embrace draw that suspended on a reshuffle pick, and the relic
-    // half of that exhaust parked on it, finish first (loadout Ironclad 6200
-    // v0.107.1). The later exhausts still run before the pick here (C# runs
-    // them after it), as for Stoke.
-    let Some(idx) = state.enemy_uids.iter().position(|&u| u == t) else {
-        return EffectResult::Resolved;
-    };
-    let idx = u8::try_from(idx).unwrap_or(u8::MAX).min(0x0F);
-    crate::cards::draw_then::after_draw(
+    // C# awaits each `CardCmd.Exhaust` before the attack (FiendFire.cs:32-41),
+    // so a Dark Embrace draw that suspended on a reshuffle pick, the relic
+    // half of that exhaust parked on it, and the pick finish before the next
+    // exhaust (loadout Ironclad 6200 v0.107.1).
+    let idx = state
+        .enemy_uids
+        .iter()
+        .position(|&u| u == t)
+        .map_or(0x0F, |i| u8::try_from(i).unwrap_or(u8::MAX).min(0x0F));
+    crate::cards::draw_then::exhaust_then(
         state,
-        draw_was_suspended,
+        &hand,
         sts2_core::DrawThen::FiendFire((idx << 4) | count),
     );
     EffectResult::Resolved

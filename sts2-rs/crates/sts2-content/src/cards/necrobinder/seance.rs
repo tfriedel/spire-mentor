@@ -252,6 +252,8 @@ mod tests {
     fn seance_one_draw_card_auto_applies_no_choice() {
         crate::cards::dispatch::install_default_registry();
         let mut state = CombatState::default();
+        // A live player: a transform is refused once the combat is ending.
+        state.player.current_hp = 1;
         let a = mint(&mut state, CardId::StrikeNecrobinder);
         state.player.draw.push(a);
         let seance = mint(&mut state, CardId::Seance);

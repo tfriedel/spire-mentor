@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import copy
 
-from full_state_diff import canon_card_id, diff_full, path_class, project_csharp, project_rust_dict
+from full_state_diff import (
+    canon_card_id,
+    combat_split_lines,
+    diff_full,
+    path_class,
+    project_csharp,
+    project_rust_dict,
+)
 
 
 def _csharp() -> dict:
@@ -163,3 +170,22 @@ def test_oracle_without_afflictions_skips_the_check():
     rs = _rust()
     rs["deck"]["hand"][0]["affliction"] = "Bound"
     assert diff_full(project_csharp(_csharp()), project_rust_dict(rs)) == []
+
+
+def test_combat_split_reports_a_one_sided_combat_exit():
+    """Regent v0.107.1 seed 6488: C# still in combat, Rust at the card reward.
+    The full-state projection never ran there, so the run printed
+    ``full=clean`` beside a phase divergence."""
+    phase = "phase: cs='combat' rs='card_reward'"
+    assert combat_split_lines("combat", "card_reward", [], [phase]) == [phase]
+
+
+def test_combat_split_prefers_the_full_state_lines():
+    full = ["piles.hand[0]: cs='STRIKE' rs='DEFEND'"]
+    assert combat_split_lines("combat", "combat", full, ["hp: cs=5 rs=6"]) == full
+
+
+def test_combat_split_falls_back_to_the_coarse_fields():
+    """A coarse mismatch the projection does not cover is still a split."""
+    assert combat_split_lines("combat", "combat", [], ["gold: cs=5 rs=6"]) == ["gold: cs=5 rs=6"]
+    assert combat_split_lines("combat", "combat", [], []) == []

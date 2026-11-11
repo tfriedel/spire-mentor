@@ -3015,18 +3015,25 @@ pub enum DrawThen {
     /// exhausts. Packed: the hit count (cards exhausted) in the low nibble,
     /// the target's `enemy_uids` index in the high nibble.
     FiendFire(u8),
+    /// FlakCannon.cs:38-45 (v0.111.0): the random-target `DamageCmd.Attack`
+    /// after its awaited exhausts; the hit count is the statuses counted
+    /// before them.
+    FlakCannon(u8),
 }
 
 impl DrawThen {
     /// A tail that follows the card's own `CardCmd.Exhaust` loop rather than
     /// a draw it made: the draw it waits on belongs to an exhaust's
     /// `AfterCardExhausted` walk, so the rest of that walk (the relic half
-    /// parked on the draw: Forgotten Soul) runs before it.
+    /// parked on the draw: Forgotten Soul) runs before it. Such a tail first
+    /// runs the exhausts its loop still owes
+    /// ([`crate::cards::VarKey::ExhaustOwedAfterDraw`]), and parks itself
+    /// again when one of those suspends a draw.
     #[must_use]
     pub const fn follows_exhaust_walk(self) -> bool {
         matches!(
             self,
-            Self::Stoke(_) | Self::StokePlus(_) | Self::FiendFire(_)
+            Self::Stoke(_) | Self::StokePlus(_) | Self::FiendFire(_) | Self::FlakCannon(_)
         )
     }
 }
@@ -5905,6 +5912,12 @@ impl CombatState {
     /// uncommons, and Necrobinder transformations. Bead
     /// `sts2-rs-ryot`.
     pub fn transform_card(&mut self, old_uid: CardUid, new_card: Card) -> Option<CardUid> {
+        // C# `CardCmd.Transform` returns nothing as its first statement once
+        // `CombatManager.IsEnding` (v0.107.1 CardCmd.cs:371-374, v0.111.0
+        // :373-376), before anything moves or rolls.
+        if crate::combat_loop::combat_is_ending(self) {
+            return None;
+        }
         // Locate the slot. Order matches Python's `all_piles`
         // iteration: hand, draw, discard, exhaust, play. (The
         // exact iteration order doesn't matter functionally — a
@@ -8868,13 +8881,33 @@ impl CombatState {
                 return Some(StepResult::PendingChoice);
             }
         }
+        // Ran: a later step that re-suspends (Burning Pact's own draw) must
+        // not carry the walk's tail on, or it runs twice.
+        let pdr = PendingDrawResume {
+            then_block_unpowered: 0,
+            then_relic_after_card_exhausted: None,
+            ..pdr
+        };
         // The exhausting card's own code after its exhaust loop (Fiend Fire's
         // attack, FiendFire.cs:36-41; Stoke's cards): C# awaits every exhaust,
         // the relic half above included, first (loadout Ironclad 6200
         // v0.107.1: Fiend Fire killed before a parked Forgotten Soul rolled).
-        if pdr.then_card_tail.follows_exhaust_walk() {
+        let pdr = if pdr.then_card_tail.follows_exhaust_walk() {
             self.run_draw_then(pdr.then_card_tail);
-        }
+            // Ran: a later step that re-suspends must not carry it on.
+            let rest = PendingDrawResume {
+                then_card_tail: DrawThen::None,
+                ..pdr
+            };
+            // An owed exhaust suspended another draw and the tail parked on
+            // it again: everything after the card's `OnPlay` waits for it.
+            if self.carry_into_resuspended_draw(&rest) {
+                return Some(StepResult::PendingChoice);
+            }
+            rest
+        } else {
+            pdr
+        };
         if pdr.then_gain_strength != 0 {
             apply_post_choice_effect(
                 self,
@@ -23501,6 +23534,8 @@ mod tests {
         use crate::cards::{CardId, CardType, TargetType};
 
         let mut state = CombatState::default();
+        // A live player: a transform is refused once the combat is ending.
+        state.player.current_hp = 1;
 
         // Seed three cards in the draw pile so we can prove the
         // replacement lands at the SAME index (middle slot).

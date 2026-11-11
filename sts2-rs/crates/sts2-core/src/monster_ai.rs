@@ -1242,11 +1242,13 @@ impl MonsterAi {
     /// resume) before the first stun has run.
     ///
     /// `next_move` is `StunInternal`'s `nextMoveId`; `None` defaults to
-    /// `StateLog.Last().Id`, the move the machine last rolled. C# appends to
-    /// `StateLog` at roll time and never logs a forced stun, so that is the
+    /// `StateLog.Last().Id`, the move the machine last rolled (v0.107.1 and
+    /// v0.111.0 `Creature.cs` `StunInternal`). C# appends to `StateLog` at
+    /// roll time and never logs a `SetMoveImmediate`'d move, so that is the
     /// current move — unless the current move is `stun_state` itself (served
     /// this turn, not yet rolled away), in which case it is the move queued to
-    /// resume after it.
+    /// resume after it, or the current move was itself forced (Queen's
+    /// ENRAGE), in which case it is the last logged move.
     ///
     /// Returns whether the stun was installed.
     pub fn stun_immediate(&mut self, stun_state: StateId, next_move: Option<StateId>) -> bool {
@@ -1264,6 +1266,17 @@ impl MonsterAi {
             if self.current == stun_state {
                 self.forced_next_state
                     .or_else(|| self.current_move_opt().and_then(|m| m.follow_up))
+            } else if self.current_forced {
+                // A `SetMoveImmediate`'d move (Queen's ENRAGE when the
+                // Amalgam dies) is never logged, so C# resumes at the move
+                // rolled before it. The displaced rolled move was logged by
+                // `log_displaced_current`, and a forced perform is not
+                // logged, so the log's last move is that rolled move.
+                self.state_log
+                    .last()
+                    .copied()
+                    .filter(|s| self.states.get(s).is_some_and(MonsterState::is_move))
+                    .or(Some(self.current))
             } else {
                 Some(self.current)
             }
@@ -1855,6 +1868,26 @@ mod tests {
         assert_eq!(ai.roll_move_seeded(0).id, "S");
         ai.on_move_performed();
         assert_eq!(ai.roll_move_seeded(0).id, "A");
+    }
+
+    /// C# `StunInternal` resumes at `StateLog.Last().Id` (v0.111.0
+    /// Creature.cs:533-536), the last ROLLED move: a `SetMoveImmediate`'d
+    /// move (Queen's ENRAGE when the Amalgam dies) is never logged, so a stun
+    /// after it resumes the rolled move it displaced, not the forced one.
+    /// Random-loadout Silent v0.111.0 seed 6475.
+    #[test]
+    fn stun_after_a_forced_move_resumes_the_last_rolled_move() {
+        let mut ai = make_stunnable_chain();
+        ai.on_move_performed(); // A
+        assert_eq!(ai.roll_move_seeded(0).id, "B");
+        assert!(ai.force_current_state_by_name_unlogged("A"));
+        ai.on_move_performed(); // the forced A runs, unlogged
+        assert_eq!(ai.move_history(), ["A", "B"]);
+        assert!(ai.stun_immediate("S", None));
+        assert_eq!(ai.forced_next_state(), Some("B"), "not the forced A");
+        assert_eq!(ai.roll_move_seeded(0).id, "S");
+        ai.on_move_performed();
+        assert_eq!(ai.roll_move_seeded(0).id, "B");
     }
 
     /// #830 (#862) x #806 (#894): `begin_move` marks the move BEFORE its

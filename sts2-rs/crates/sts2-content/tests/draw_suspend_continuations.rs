@@ -1259,3 +1259,333 @@ fn fiend_fire_hits_after_its_exhausts_suspended_draw_v0111() {
 fn fiend_fire_hits_after_its_exhausts_suspended_draw_v0107() {
     fiend_fire_hits_after_its_exhausts_suspended_draw(V107);
 }
+
+// ── Exhaust loops await each exhaust's suspended draw ────────────────────
+
+fn add_relic(state: &mut CombatState, kind: sts2_core::RelicKind, counter: i32) {
+    let raw = u32::try_from(state.relics.len() + 1).expect("u32");
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(raw).expect("nz"),
+        kind,
+        counter,
+        is_wax: false,
+        is_melted: false,
+    });
+}
+
+/// Flak Cannon snapshots the statuses (the hand Wound, then the discard's
+/// three) and awaits each `CardCmd.Exhaust` before its attack
+/// (FlakCannon.cs:38-45 v0.111.0). The first exhaust is Joss Paper's 5th: its
+/// draw reshuffles the discard into Stratagem's grid, and C# finishes that
+/// pick and draw before the next exhaust. So before the pick the other
+/// Wounds sit in the draw pile, unexhausted, and no hit has landed; the
+/// picked Wound is then exhausted from the hand, in snapshot order (Defect
+/// v0.111.0 seed 6477: Rust exhausted the rest out of the fresh draw pile
+/// and pulled the picked Wound back out of the exhaust pile).
+fn flak_cannon_awaits_each_exhausts_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_relic(&mut state, sts2_core::RelicKind::JossPaper, 4);
+    let mut wounds = Vec::new();
+    for id in [
+        CardId::Wound,
+        CardId::Wound,
+        CardId::Wound,
+        CardId::StrikeIronclad,
+        CardId::DefendIronclad,
+    ] {
+        let uid = new_card(&mut state, id);
+        if id == CardId::Wound {
+            wounds.push(uid);
+        }
+        state.player.discard.push(uid);
+    }
+    let flak = push_hand(&mut state, CardId::FlakCannon);
+    let hand_wound = new_card(&mut state, CardId::Wound);
+    state.player.hand.push(hand_wound);
+    let _ = sts2_core::combat_loop::play_card(&mut state, flak, Some(0));
+
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    assert_eq!(state.player.exhaust.as_slice(), &[hand_wound]);
+    for w in &wounds {
+        assert!(
+            state.player.draw.contains(w),
+            "{version:?}: the later Wounds wait in the draw pile"
+        );
+    }
+    assert_eq!(state.creatures[0].current_hp, 500, "no hit before the pick");
+
+    let pick = pc
+        .options
+        .iter()
+        .position(|o| o.card_id == CardId::Wound)
+        .expect("a Wound to pick");
+    resolve(&mut state, u8::try_from(pick).expect("u8"));
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    let mut expected = vec![hand_wound];
+    expected.extend(&wounds);
+    assert_eq!(
+        state.player.exhaust.as_slice(),
+        expected.as_slice(),
+        "{version:?}: every Wound exhausted once, in snapshot order"
+    );
+    assert_eq!(state.creatures[0].current_hp, 500 - 4 * 8, "four hits");
+}
+
+#[test]
+fn flak_cannon_awaits_each_exhausts_draw_v0111() {
+    flak_cannon_awaits_each_exhausts_draw(V111);
+}
+
+#[test]
+fn flak_cannon_awaits_each_exhausts_draw_v0107() {
+    flak_cannon_awaits_each_exhausts_draw(V107);
+}
+
+/// Stoke exhausts three Strikes; the first's Dark Embrace draw reshuffles
+/// into Stratagem's grid. C# awaits that draw, pick included, before the next
+/// `CardCmd.Exhaust` (Stoke.cs:24-27), so the other two Strikes are still in
+/// the hand at the pick, and all three are exhausted (and Stoke's three cards
+/// generated) once it resolves.
+fn stoke_awaits_each_exhausts_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 1);
+    for _ in 0..3 {
+        let uid = new_card(&mut state, CardId::DefendIronclad);
+        state.player.discard.push(uid);
+    }
+    let stoke = push_hand(&mut state, CardId::Stoke);
+    let strikes: Vec<_> = (0..3)
+        .map(|_| {
+            let uid = new_card(&mut state, CardId::StrikeIronclad);
+            state.player.hand.push(uid);
+            uid
+        })
+        .collect();
+    let _ = sts2_core::combat_loop::play_card(&mut state, stoke, None);
+
+    assert!(state.pending_choice.is_some(), "Stratagem grid opens");
+    assert_eq!(state.player.exhaust.as_slice(), &[strikes[0]]);
+    assert!(state.player.hand.contains(&strikes[1]) && state.player.hand.contains(&strikes[2]));
+
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert_eq!(state.player.exhaust.as_slice(), strikes.as_slice());
+    // The pick and the two later Dark Embrace draws plus the first's own:
+    // Defends; then Stoke's three generated cards.
+    assert_eq!(state.player.hand.len(), 3 + 3, "{version:?}");
+}
+
+#[test]
+fn stoke_awaits_each_exhausts_draw_v0111() {
+    stoke_awaits_each_exhausts_draw(V111);
+}
+
+#[test]
+fn stoke_awaits_each_exhausts_draw_v0107() {
+    stoke_awaits_each_exhausts_draw(V107);
+}
+
+/// Fiend Fire, likewise: the second Strike is still in the hand at the pick
+/// its first exhaust's Dark Embrace draw opened (FiendFire.cs:32-35).
+fn fiend_fire_awaits_each_exhausts_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 1);
+    for _ in 0..3 {
+        let uid = new_card(&mut state, CardId::DefendIronclad);
+        state.player.discard.push(uid);
+    }
+    let ff = push_hand(&mut state, CardId::FiendFire);
+    let s1 = new_card(&mut state, CardId::StrikeIronclad);
+    state.player.hand.push(s1);
+    let s2 = new_card(&mut state, CardId::StrikeIronclad);
+    state.player.hand.push(s2);
+    let _ = sts2_core::combat_loop::play_card(&mut state, ff, Some(0));
+
+    assert!(state.pending_choice.is_some(), "Stratagem grid opens");
+    assert_eq!(state.player.exhaust.as_slice(), &[s1]);
+    assert!(state.player.hand.contains(&s2), "the second Strike waits");
+
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert!(state.player.exhaust.starts_with(&[s1, s2]));
+    assert_eq!(state.creatures[0].current_hp, 500 - 2 * 7);
+}
+
+#[test]
+fn fiend_fire_awaits_each_exhausts_draw_v0111() {
+    fiend_fire_awaits_each_exhausts_draw(V111);
+}
+
+#[test]
+fn fiend_fire_awaits_each_exhausts_draw_v0107() {
+    fiend_fire_awaits_each_exhausts_draw(V107);
+}
+
+/// A resumed owed exhaust suspends a SECOND draw: Flak Cannon exhausts three
+/// Wounds with Dark Embrace 2 and Hellraiser up. The first Wound's draw
+/// reshuffles [Strike, Strike, Defend] into Stratagem's grid; after the pick
+/// (the Defend) the draw takes both Strikes, which Hellraiser auto-plays into
+/// the discard. So the second Wound's draw reshuffles them into a second
+/// pick, and C# still holds the third exhaust and every Flak hit behind it.
+fn flak_cannon_waits_for_a_second_suspended_draw(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    let hp = |s: &CombatState| s.creatures[0].current_hp;
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 2);
+    add_player_power(&mut state, 52, PowerKind::Hellraiser, 1);
+    let strikes = [
+        new_card(&mut state, CardId::StrikeIronclad),
+        new_card(&mut state, CardId::StrikeIronclad),
+    ];
+    let defend = new_card(&mut state, CardId::DefendIronclad);
+    state.player.discard.extend(strikes);
+    state.player.discard.push(defend);
+    let flak = push_hand(&mut state, CardId::FlakCannon);
+    let wounds: Vec<_> = (0..3)
+        .map(|_| {
+            let uid = new_card(&mut state, CardId::Wound);
+            state.player.hand.push(uid);
+            uid
+        })
+        .collect();
+    let _ = sts2_core::combat_loop::play_card(&mut state, flak, Some(0));
+
+    let pick = |s: &CombatState, id: CardId| {
+        let pc = s.pending_choice.as_ref().expect("Stratagem grid opens");
+        assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+        let i = pc
+            .options
+            .iter()
+            .position(|o| o.card_id == id)
+            .expect("option");
+        u8::try_from(i).expect("u8")
+    };
+    assert_eq!(state.player.exhaust.as_slice(), &wounds[..1]);
+    assert_eq!(hp(&state), 500, "no hit before the first pick");
+
+    let i = pick(&state, CardId::DefendIronclad);
+    resolve(&mut state, i);
+    assert_eq!(
+        state.player.exhaust.as_slice(),
+        &wounds[..2],
+        "{version:?}: the second Wound's draw opened a second pick"
+    );
+    assert!(
+        state.player.hand.contains(&wounds[2]),
+        "the third Wound waits"
+    );
+    assert_eq!(
+        hp(&state),
+        500 - 2 * 6,
+        "{version:?}: only the Strikes have hit"
+    );
+
+    // The other Strike is drawn and auto-played after the pick; the third
+    // Wound's draw reshuffles it alone (a one-card grid resolves itself).
+    let i = pick(&state, CardId::StrikeIronclad);
+    resolve(&mut state, i);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert_eq!(state.player.exhaust.as_slice(), wounds.as_slice());
+    assert_eq!(
+        hp(&state),
+        500 - 3 * 6 - 3 * 8,
+        "{version:?}: three Flak hits"
+    );
+}
+
+#[test]
+fn flak_cannon_waits_for_a_second_suspended_draw_v0111() {
+    flak_cannon_waits_for_a_second_suspended_draw(V111);
+}
+
+#[test]
+fn flak_cannon_waits_for_a_second_suspended_draw_v0107() {
+    flak_cannon_waits_for_a_second_suspended_draw(V107);
+}
+
+/// The rest of an exhaust walk parked on a suspended draw runs ONCE, even
+/// when a later step behind the same draw suspends again. Burning Pact
+/// exhausts a Defend; Dark Embrace 2's draw reshuffles [Strike, Strike,
+/// Defend] into Stratagem's grid, so Feel No Pain's block and the relic
+/// listeners (Joss Paper's count) wait on it, and so does Burning Pact's own
+/// `Draw(2)` (BurningPact.cs:29-32). After the pick the draw takes both
+/// Strikes, which Hellraiser auto-plays into the discard; Burning Pact's
+/// draw then reshuffles them into a second pick. C# ran the walk's tail once,
+/// before that draw (`Hook.AfterCardExhausted`, then the awaited `Draw`).
+fn exhaust_walk_tail_runs_once_across_a_later_resuspension(version: GameVersion) {
+    let (mut state, _enemy) = fresh(version);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 2);
+    add_player_power(&mut state, 52, PowerKind::FeelNoPain, 3);
+    add_player_power(&mut state, 53, PowerKind::Hellraiser, 1);
+    add_relic(&mut state, sts2_core::RelicKind::JossPaper, 0);
+    for id in [
+        CardId::StrikeIronclad,
+        CardId::StrikeIronclad,
+        CardId::DefendIronclad,
+    ] {
+        let uid = new_card(&mut state, id);
+        state.player.discard.push(uid);
+    }
+    let _ = push_hand(&mut state, CardId::DefendIronclad);
+    let bp = push_hand(&mut state, CardId::BurningPact);
+    let _ = sts2_core::combat_loop::play_card(&mut state, bp, None);
+
+    let pick = |s: &CombatState, id: CardId| {
+        let pc = s.pending_choice.as_ref().expect("Stratagem grid opens");
+        assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+        let i = pc
+            .options
+            .iter()
+            .position(|o| o.card_id == id)
+            .expect("option");
+        u8::try_from(i).expect("u8")
+    };
+    let joss = |s: &CombatState| {
+        s.relics
+            .iter()
+            .find(|r| r.kind == sts2_core::RelicKind::JossPaper)
+            .expect("joss")
+            .counter
+    };
+    assert_eq!(state.player.block, 0, "Feel No Pain waits on the draw");
+    assert_eq!(joss(&state), 0, "so does Joss Paper");
+
+    let i = pick(&state, CardId::DefendIronclad);
+    resolve(&mut state, i);
+    assert!(
+        state.pending_choice.is_some(),
+        "{version:?}: Burning Pact's draw opened a second pick"
+    );
+    assert_eq!(state.player.block, 3, "{version:?}: Feel No Pain ran");
+    assert_eq!(
+        joss(&state),
+        1,
+        "{version:?}: Joss Paper counted the exhaust"
+    );
+
+    let i = pick(&state, CardId::StrikeIronclad);
+    resolve(&mut state, i);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_draw_resume.is_none());
+    assert_eq!(state.player.block, 3, "{version:?}: Feel No Pain ran once");
+    assert_eq!(joss(&state), 1, "{version:?}: Joss Paper counted it once");
+}
+
+#[test]
+fn exhaust_walk_tail_runs_once_across_a_later_resuspension_v0111() {
+    exhaust_walk_tail_runs_once_across_a_later_resuspension(V111);
+}
+
+#[test]
+fn exhaust_walk_tail_runs_once_across_a_later_resuspension_v0107() {
+    exhaust_walk_tail_runs_once_across_a_later_resuspension(V107);
+}

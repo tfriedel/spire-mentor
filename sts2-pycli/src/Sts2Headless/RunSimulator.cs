@@ -5448,10 +5448,50 @@ public class RunSimulator
                 }
                 Thread.Sleep(1);
             }
+            CheckWinConditionAfterFaultedAction(executor, stopOnSelection);
         }
         catch (Exception ex)
         {
             LogException("WaitForActionExecutor exception", ex);
+        }
+    }
+
+    /// <summary>
+    /// The real game's (interactive) <c>ActionExecutor.ExecuteActions</c> logs a
+    /// faulted action and still runs <c>CombatManager.CheckWinCondition</c>
+    /// (ActionExecutor.cs:147-171, both builds). Under TestMode
+    /// (<c>NonInteractiveMode</c>) it awaits the action directly (:139-144), so
+    /// the fault propagates past that check: a combat whose last enemy died
+    /// inside the faulted action stays "ending" and never ends. The Bomb
+    /// replayed by Hidden Gem: play 2's Letter Opener kills the last enemy,
+    /// play 3's <c>PowerCmd.Apply&lt;TheBombPower&gt;</c> returns null
+    /// (PowerCmd.cs:69-71) and TheBomb.cs:30 NREs (Regent random loadout
+    /// v0.107.1 seed 6488). Run the check the real game would have run; the
+    /// fault itself is still reported.
+    /// </summary>
+    private void CheckWinConditionAfterFaultedAction(ActionExecutor executor, bool stopOnSelection)
+    {
+        var combat = CombatManager.Instance;
+        if (combat == null || executor.IsRunning || _cardSelector.HasPending) return;
+        if (!combat.IsInProgress || !combat.IsEnding) return;
+        Log("Combat ending with the executor idle: running CheckWinCondition as the interactive executor would");
+        TaskHelper.RunSafely(combat.CheckWinCondition());
+        int idleStreak = 0;
+        const int idleStreakRequired = 5;
+        const int maxPumps = 1000;
+        for (int i = 0; i < maxPumps; i++)
+        {
+            _syncCtx.Pump();
+            if (stopOnSelection && _cardSelector.HasPending) break;
+            if (!executor.IsRunning)
+            {
+                if (++idleStreak >= idleStreakRequired) break;
+            }
+            else
+            {
+                idleStreak = 0;
+            }
+            Thread.Sleep(1);
         }
     }
 

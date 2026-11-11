@@ -24,33 +24,23 @@ use super::prelude::*;
 pub(crate) fn play_stoke(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let to_exhaust: Vec<sts2_core::CardUid> = state.player.hand.iter().copied().collect();
     let count = u8::try_from(to_exhaust.len()).unwrap_or(u8::MAX);
-    let draw_was_suspended = state.pending_draw_resume.is_some();
-    for uid in to_exhaust {
-        // C# Stoke.cs:19 exhausts the hand via `CardCmd.Exhaust`, which fires
-        // `AfterCardExhausted` on both the power and relic-effects buses. The
-        // prior raw `move_card` (Hand→Exhaust) silently skipped those hooks
-        // (round-6 STOKE). Mirror Cinder's `exhaust_hand_card`.
-        exhaust_hand_card(state, uid);
-    }
     if count == 0 {
         return EffectResult::Resolved;
     }
-    // C# awaits each `CardCmd.Exhaust` (Stoke.cs:24-27 v0.107.1), so a Dark
-    // Embrace draw that suspended on a reshuffle pick finishes before the
-    // cards are generated: park the generation behind that draw (Ironclad
-    // 5998 v0.107.1 @378, the generated cards landed ahead of the draws).
-    // The later exhausts still run before the pick here (C# runs them after
-    // it); their Dark Embrace draws fold into the suspended draw, so once the
-    // pick resolves the piles and the hand order match C#.
+    // C# Stoke.cs:24-27 exhausts the hand via `CardCmd.Exhaust`, which fires
+    // `AfterCardExhausted` on both the power and relic-effects buses (round-6
+    // STOKE), and awaits each: a Dark Embrace draw that suspended on a
+    // reshuffle pick finishes, pick included, before the next exhaust and the
+    // generation (Ironclad 5998 v0.107.1 @378, the generated cards landed
+    // ahead of the draws).
     let tail = if current_upgraded(state) {
         sts2_core::DrawThen::StokePlus(count)
     } else {
         sts2_core::DrawThen::Stoke(count)
     };
-    crate::cards::draw_then::after_draw(state, draw_was_suspended, tail);
+    crate::cards::draw_then::exhaust_then(state, &to_exhaust, tail);
     EffectResult::Resolved
 }
-
 /// The rest of Stoke's `OnPlay` after its exhausts (Stoke.cs:28-33):
 /// generate `count` cards from the owner's pool, upgrade them on Stoke+, and
 /// add them to the hand.

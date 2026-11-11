@@ -470,6 +470,13 @@ pub enum VarKey {
     /// clears them and the next-turn copies inherit them. Appended so no
     /// existing discriminant moves.
     CloneTurnFlags,
+    /// A card an exhaust loop (Flak Cannon, Stoke, Fiend Fire) still owes a
+    /// `CardCmd.Exhaust` while an earlier exhaust's draw is suspended on a
+    /// reshuffle select: its 1-based place in the card's snapshot. C# awaits
+    /// each exhaust, so the rest run once that draw finishes. Kept on the
+    /// card, not in `CombatState`, which sits at clippy's large-stack-array
+    /// limit. Appended so no existing discriminant moves.
+    ExhaustOwedAfterDraw,
 }
 
 /// [`VarKey::SneckoRollLive`]: the Snecko roll raised `CostAbsolutelySet`, so

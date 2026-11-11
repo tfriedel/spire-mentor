@@ -49,21 +49,28 @@ pub(crate) fn preview_flak_cannon(
 
 pub(crate) fn play_flak_cannon(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     use smallvec::SmallVec;
-    let base = current_card_damage(state);
     // Status cards across hand + draw + discard + play (not exhaust),
     // in C# `AllPiles` order so the exhaust-pile order matches.
     let statuses: SmallVec<[sts2_core::CardUid; 8]> = flak_cannon_statuses(state);
-    let hits = statuses.len();
-    for uid in statuses {
-        let _ = exhaust_card_uid(state, uid);
-    }
+    let hits = u8::try_from(statuses.len()).unwrap_or(u8::MAX);
+    // C# awaits each `CardCmd.Exhaust` before the attack (FlakCannon.cs:38-45
+    // v0.111.0): a Joss Paper draw that reshuffles into a Stratagem pick
+    // finishes, pick included, before the next status is exhausted (Defect
+    // v0.111.0 seed 6477).
+    crate::cards::draw_then::exhaust_then(state, &statuses, sts2_core::DrawThen::FlakCannon(hits));
+    EffectResult::Resolved
+}
+
+/// Flak Cannon's `DamageCmd.Attack(Damage.BaseValue).WithHitCount(hits)
+/// .TargetingRandomOpponents`, each hit re-rolling a random alive enemy.
+pub(crate) fn flak_cannon_hits(state: &mut CombatState, hits: u8) {
+    let base = current_card_damage(state);
     for _ in 0..hits {
         let Some(t) = state.get_random_enemy() else {
             break;
         };
         let _ = deal_damage_player_to_enemy(state, t, base);
     }
-    EffectResult::Resolved
 }
 
 #[must_use]

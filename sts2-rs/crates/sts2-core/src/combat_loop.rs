@@ -3475,6 +3475,29 @@ pub fn end_player_turn_phase_two(state: &mut CombatState) -> StepResult {
             })
         })
         .collect();
+    // C# sorts the hand into `turnEndCards` and the Ethereal list in ONE
+    // pass before any exhaust (v0.107.1 CombatManager.cs:1228-1248, v0.111.0
+    // :1614-1631), so a turn-end-in-hand card a listener of an Ethereal
+    // exhaust draws (Forgotten Soul kills an enemy -> Gremlin Horn draws a
+    // Debt) is not in `turnEndCards`: it is just discarded with the hand.
+    // Random-loadout Ironclad v0.111.0 seed 6369.
+    let turn_end_cards: smallvec::SmallVec<[crate::CardUid; 8]> = state
+        .player
+        .hand
+        .iter()
+        .copied()
+        .filter(|_| !do_turn_end_cut)
+        .filter(|uid| {
+            // `state.cards` is a 1-based arena (uid `1` -> index `0`). Some
+            // legacy unit-test fixtures push hand UIDs without a parallel
+            // `state.cards` entry; `.get()` keeps those callers panic-free.
+            let idx = uid.0.get() as usize - 1;
+            state
+                .cards
+                .get(idx)
+                .is_some_and(|card| has_turn_end_in_hand_effect(card.card_id))
+        })
+        .collect();
     for uid in ethereal {
         // Each card is its own `CardCmd.Exhaust`, refused once the combat is
         // ending (`CardCmd.cs:239`): a listener of an earlier card's exhaust
@@ -3507,8 +3530,8 @@ pub fn end_player_turn_phase_two(state: &mut CombatState) -> StepResult {
     //       count as its unblockable HP-loss amount; the snapshot must
     //       capture the post-ethereal-expel hand size (matches Python
     //       `len(self.hand)` evaluated after Step 2).
-    //   (b) Collect every hand card whose `card_id` matches the
-    //       turn-end-in-hand set into `turn_end_cards` in pile order.
+    //   (b) `turn_end_cards` (every hand card in the turn-end-in-hand set,
+    //       pile order) was snapshotted above, before the Ethereal sweep.
     //   (c) For each card: move Hand → Play, execute the effect, then
     //       move Play → Discard and fire `after_card_discarded`. If the
     //       effect flipped `is_over` (BECKON / BAD_LUCK / REGRET can
@@ -3533,23 +3556,6 @@ pub fn end_player_turn_phase_two(state: &mut CombatState) -> StepResult {
     //     therefore decrements the freshly-applied power by 1 — one
     //     extra tick than Python. Tracked alongside the existing
     //     `skip_next_tick` divergence note.
-    let turn_end_cards: smallvec::SmallVec<[crate::CardUid; 8]> = state
-        .player
-        .hand
-        .iter()
-        .copied()
-        .filter(|_| !do_turn_end_cut)
-        .filter(|uid| {
-            // `state.cards` is a 1-based arena (uid `1` -> index `0`). Some
-            // legacy unit-test fixtures push hand UIDs without a parallel
-            // `state.cards` entry; `.get()` keeps those callers panic-free.
-            let idx = uid.0.get() as usize - 1;
-            state
-                .cards
-                .get(idx)
-                .is_some_and(|card| has_turn_end_in_hand_effect(card.card_id))
-        })
-        .collect();
     run_turn_end_in_hand_cards(
         state,
         &turn_end_cards,

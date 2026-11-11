@@ -4357,6 +4357,12 @@ pub fn transform_card_in_place(
     old_uid: CardUid,
     mut new_card: crate::cards::Card,
 ) -> Option<CardUid> {
+    // C# `CardCmd.Transform` returns nothing as its first statement once
+    // `CombatManager.IsEnding` (v0.107.1 CardCmd.cs:371-374, v0.111.0
+    // :373-376), before anything moves or rolls.
+    if crate::combat_loop::combat_is_ending(state) {
+        return None;
+    }
     let pile = find_card_pile(state, old_uid)?;
     // Allocate a fresh arena row.
     let raw = u32::try_from(state.cards.len() + 1).expect("cards arena fits in u32");
@@ -5683,6 +5689,15 @@ pub fn register_transform_to_random(f: TransformToRandomFn) {
 /// Returns the new uid, or `None` when no trampoline is installed
 /// (core-only test build) / the card is missing / the pool is empty.
 pub fn transform_card_to_random(state: &mut CombatState, card_uid: CardUid) -> Option<CardUid> {
+    // C# `CardCmd.Transform` returns nothing as its first statement once
+    // `CombatManager.IsEnding` (v0.107.1 CardCmd.cs:371-374, v0.111.0
+    // :373-376), before `GetReplacement` rolls
+    // `CombatCardSelection` (Entropy's second transform after the first
+    // one's Trash to Treasure Dark evoke killed the last enemy: Defect
+    // v0.107.1 seed 6416).
+    if crate::combat_loop::combat_is_ending(state) {
+        return None;
+    }
     match TRANSFORM_TO_RANDOM.get() {
         Some(f) => f(state, card_uid),
         None => None,
@@ -8170,6 +8185,8 @@ mod tests {
             rng: crate::dotnet_rng::Rng::new(0_i32),
             ..Default::default()
         };
+        // A live player: a transform is refused once the combat is ending.
+        state.player.current_hp = 1;
         // Hand: [Shiv, Burn, Slimed]. Transform Burn → Hotfix; the
         // pile slot at index 1 must point at the new card.
         let u_shiv = spawn_card_into_pile(

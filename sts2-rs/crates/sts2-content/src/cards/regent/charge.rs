@@ -295,6 +295,8 @@ mod tests {
     fn charge_two_draw_cards_auto_applies_no_choice() {
         crate::cards::dispatch::install_default_registry();
         let mut state = CombatState::default();
+        // A live player: a transform is refused once the combat is ending.
+        state.player.current_hp = 1;
         let a = mint(&mut state, CardId::StrikeNecrobinder, false);
         let b = mint(&mut state, CardId::DefendNecrobinder, false);
         state.player.draw.extend([a, b]);

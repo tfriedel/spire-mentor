@@ -155,6 +155,26 @@ def diff_full(cs: dict[str, Any], rs: dict[str, Any]) -> list[Divergence]:
     return diff(cs, rs)
 
 
+def combat_split_lines(
+    cs_phase: str, rs_phase: str, full_lines: list[str], headline_fields: list[str]
+) -> list[str]:
+    """The full-state split for a step where either engine is in combat.
+
+    ``full_lines`` is the full-state diff (only computed while both engines
+    are in combat), ``headline_fields`` the coarse per-step diff of the same
+    step (``run_parity.diff_snaps``). The projection alone misses a step where
+    one engine has left the combat and the other has not (Regent v0.107.1
+    seed 6488: C# still ``combat``, Rust at the ``card_reward``, reported as
+    ``full=clean``), and it covers only combat fields. So the full-state check
+    stays a superset of the coarse one: on a phase disagreement, or when the
+    projection matched but the coarse diff did not, the coarse fields are the
+    split.
+    """
+    if cs_phase == rs_phase and full_lines:
+        return full_lines
+    return list(headline_fields)
+
+
 def path_class(path: str) -> str:
     """``piles.hand[3]`` → ``piles.hand``; ``monsters[0].powers[1].amount`` →
     ``monsters.powers.amount``. Groups first splits across runs by field."""

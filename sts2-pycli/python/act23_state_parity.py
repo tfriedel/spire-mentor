@@ -83,7 +83,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from full_state_diff import diff_full, path_class, project_csharp, project_rust
+from full_state_diff import (
+    combat_split_lines,
+    diff_full,
+    path_class,
+    project_csharp,
+    project_rust,
+)
 from parity_audit import assert_wheel_fresh, cs_version_namespace
 from parity_fuzz import _csharp_card_id
 from parity_fuzz_scenario import Loadout, generate_loadout
@@ -1002,11 +1008,11 @@ def run_one_invincible(
             if (
                 (full_state or full_state_blocking)
                 and out.full_split is None
-                and cs_snap.phase == "combat"
-                and rs_snap.phase == "combat"
+                and "combat" in (cs_snap.phase, rs_snap.phase)
             ):
-                cs_state, divs = full_state_divs(g, r)
-                split = _split_lines(divs)
+                both_in_combat = cs_snap.phase == rs_snap.phase
+                cs_state, divs = full_state_divs(g, r) if both_in_combat else ({}, [])
+                split = combat_split_lines(cs_snap.phase, rs_snap.phase, _split_lines(divs), fields)
                 errs = _cs_world_errors(g)
                 # Did the C# world throw since the last compared step?
                 threw = errs is not None and errs["count"] > cs_errs_seen
