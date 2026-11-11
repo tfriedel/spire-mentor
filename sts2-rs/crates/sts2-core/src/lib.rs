@@ -12630,16 +12630,17 @@ fn resolve_add_generated_choice(
     if retained {
         crate::card_effects::apply_retain_keyword(&mut card);
     }
-    let uid = crate::card_effects::spawn_card_into_hand_with_origin(state, card, true);
-    // C# `CardModel.SetToFreeThisTurn()` — push the FREE_THIS_TURN cost
-    // modifier so `effective_card_cost` charges 0 energy for the rest of the
-    // turn (Attack/Skill/Power/ColorlessPotion). Bead `sts2-rs-91tc1`.
+    // C# `CardModel.SetToFreeThisTurn()` (Splash, Discovery, Abundance, the
+    // Attack/Skill/Power/Colorless potions) runs BEFORE
+    // `AddGeneratedCardToCombat`, so the entered-combat hooks see a free card
+    // and a Stomp's `AddThisTurn(-attacks)` folds after the local zero (loadout
+    // Necrobinder 7931 v0.107.1: the shave pushed first left the pick at 0 + 2
+    // Borrowed Time where C# reads a negative local cost and stays 0). Bead
+    // `sts2-rs-91tc1`.
     if free_this_turn {
-        let idx = uid.0.get() as usize - 1;
-        if let Some(c) = state.cards.get_mut(idx) {
-            c.set_to_free_this_turn();
-        }
+        card.set_to_free_this_turn();
     }
+    let _ = crate::card_effects::spawn_card_into_hand_with_origin(state, card, true);
 }
 
 /// Resolve a [`ChoiceKind::UpgradeInHand`] pending choice (base Armaments:

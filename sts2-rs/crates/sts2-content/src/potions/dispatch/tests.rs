@@ -3114,3 +3114,55 @@ fn entropic_brew_vetoed_by_sozu_rolls_once_and_adds_nothing() {
         "one roll, then the vetoed procure breaks the loop"
     );
 }
+
+/// Every generate-and-choose screen that makes its pick free (Splash,
+/// Discovery, Abundance, the Attack/Skill/Power/Colorless potions) calls
+/// `SetToFreeThisTurn()` BEFORE `AddGeneratedCardToCombat` (`Splash.cs`,
+/// `Discovery.cs`, `AttackPotion.cs`, ...). So a picked Stomp's
+/// `AfterCardEnteredCombat` shave (`AddThisTurn(-attacks)`, `Stomp.cs`) folds
+/// AFTER the local zero: the local cost goes below 0, and
+/// `Hook.ModifyEnergyCostInCombat` returns a negative cost untouched, so
+/// Borrowed Time's +2 never lands. Pushing the zero after the shave left the
+/// local cost at 0 and the card at 2 (loadout Necrobinder 7931 v0.107.1:
+/// Splash picked a Stomp, C# 0, Rust 2).
+#[test]
+fn free_generated_pick_is_free_before_it_enters_combat() {
+    use sts2_core::cards::{CardId, CardType};
+    ensure_installed();
+    let mut state = fresh_state_for_character(CharacterId::Necrobinder);
+    let pid = std::num::NonZeroU32::new(1).expect("nz");
+    state.powers.push(sts2_core::Power {
+        id: pid,
+        kind: sts2_core::PowerKind::BorrowedTime,
+        amount: 2,
+        counter: 0,
+        applier: None,
+        skip_next_tick: false,
+    });
+    state.player.powers.push(sts2_core::PowerUid(pid));
+    state.player.cards_played_this_turn[CardType::Attack.index()] = 1;
+    state.request_card_choice(
+        sts2_core::ChoiceKind::AddGeneratedFreeToHand,
+        vec![sts2_core::ChoiceOption {
+            card_id: CardId::Stomp,
+            upgraded: true,
+            card_uid: None,
+            source_pile: None,
+        }],
+        1,
+        1,
+        true,
+    );
+
+    resolve_choice_pick(&mut state, 0);
+
+    let uid = *state.player.hand.last().expect("the pick is in hand");
+    let stomp = &state.cards[uid.0.get() as usize - 1];
+    assert_eq!(stomp.card_id, CardId::Stomp);
+    assert_eq!(stomp.local_cost(), -1, "0, then the -1 shave");
+    assert_eq!(
+        sts2_core::hooks::effective_card_cost(&state, uid),
+        0,
+        "a negative local cost skips Borrowed Time"
+    );
+}
