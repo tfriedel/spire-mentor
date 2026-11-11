@@ -49,25 +49,33 @@ pub(crate) fn play_omnislice(state: &mut CombatState, target: Option<CreatureUid
                 .any(|c| c.id == u.0 && c.current_hp > 0)
         })
         .collect();
-    for e in other_enemies {
-        // C# `Omnislice.cs:41` deals splash damage with
-        // `ValueProp.Unpowered | ValueProp.Move`, so powered effects (e.g.
-        // Miniature Cannon) do NOT apply to splash hits — only the primary
-        // hit. `deal_damage_player_to_enemy` hardcodes `MOVE` (powered), so
-        // we route splash through `apply_damage` with the Unpowered flag and
-        // the primary's realized `splash_amount` (see capture above).
-        // Bead `sts2-rs-0bpvs`.
-        let splash_props =
-            sts2_core::hooks::ValueProps::MOVE.union(sts2_core::hooks::ValueProps::UNPOWERED);
-        let _ = sts2_core::damage::apply_damage(
-            state,
-            sts2_core::hooks::CreatureRef::Player,
-            e,
-            splash_amount,
-            splash_props,
-            Some(CardId::Omnislice),
-        );
-    }
+    // The splash is ONE multi-target `CreatureCmd.Damage(list2, ..)`
+    // (Omnislice.cs:41): every teammate loses its HP before
+    // `Kill(killedCreatures)`, so when the splash fells the last enemies their
+    // `AfterDeath` (Gremlin Horn's energy + draw) runs with the combat already
+    // ending. Killing each as it was hit let the first one's Gremlin Horn draw
+    // (random-loadout Regent v0.107.1 8183).
+    sts2_core::damage::with_deferred_enemy_deaths(state, |state| {
+        for e in other_enemies {
+            // C# `Omnislice.cs:41` deals splash damage with
+            // `ValueProp.Unpowered | ValueProp.Move`, so powered effects (e.g.
+            // Miniature Cannon) do NOT apply to splash hits — only the primary
+            // hit. `deal_damage_player_to_enemy` hardcodes `MOVE` (powered), so
+            // we route splash through `apply_damage` with the Unpowered flag and
+            // the primary's realized `splash_amount` (see capture above).
+            // Bead `sts2-rs-0bpvs`.
+            let splash_props =
+                sts2_core::hooks::ValueProps::MOVE.union(sts2_core::hooks::ValueProps::UNPOWERED);
+            let _ = sts2_core::damage::apply_damage(
+                state,
+                sts2_core::hooks::CreatureRef::Player,
+                e,
+                splash_amount,
+                splash_props,
+                Some(CardId::Omnislice),
+            );
+        }
+    });
     EffectResult::Resolved
 }
 

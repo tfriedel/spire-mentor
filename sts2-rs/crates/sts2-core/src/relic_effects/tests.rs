@@ -6095,7 +6095,44 @@ fn gremlin_horn_state(enemy_hp: i32) -> (CombatState, crate::CreatureUid) {
     give_player_relic(&mut state, RelicKind::GremlinHorn);
     state.player.energy = 2;
     let uid = gremlin_horn_push_enemy(&mut state, enemy_hp);
+    // A second, live enemy keeps the combat from ending on the first one's
+    // death: `PlayerCmd.GainEnergy` and `CardPileCmd.Draw` are no-ops once
+    // `CombatManager.IsEnding` (see `gremlin_horn_noop_on_the_last_enemy_death`).
+    let mut bystander = state
+        .creatures
+        .iter()
+        .find(|c| c.id == uid.0)
+        .cloned()
+        .expect("enemy");
+    bystander.id = NonZeroU32::new(uid.0.get() + 1).unwrap();
+    bystander.current_hp = 50;
+    state.creatures.push(bystander);
+    state.enemy_uids.push(crate::CreatureUid(
+        NonZeroU32::new(uid.0.get() + 1).unwrap(),
+    ));
     (state, uid)
+}
+
+/// The last enemy's death leaves no alive primary enemy, so
+/// `CombatManager.IsEnding` holds and Gremlin Horn's `PlayerCmd.GainEnergy`
+/// (PlayerCmd.cs:31) and `CardPileCmd.Draw` (CardPileCmd.cs:822) do nothing.
+#[test]
+#[serial_test::serial(global_registry)]
+fn gremlin_horn_noop_on_the_last_enemy_death() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 70);
+    give_player_relic(&mut state, RelicKind::GremlinHorn);
+    state.player.energy = 2;
+    let uid = gremlin_horn_push_enemy(&mut state, 9);
+    let _ = crate::damage::apply_damage(
+        &mut state,
+        crate::hooks::CreatureRef::Player,
+        uid,
+        9,
+        crate::hooks::ValueProps::NONE,
+        None,
+    );
+    assert_eq!(state.player.energy, 2, "the combat is ending: no energy");
 }
 
 #[test]

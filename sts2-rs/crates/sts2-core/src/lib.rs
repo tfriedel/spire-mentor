@@ -5850,6 +5850,16 @@ impl CombatState {
         if amount <= 0 {
             return;
         }
+        // C# `PlayerCmd.GainEnergy` (PlayerCmd.cs:31, both builds) is a no-op
+        // once `CombatManager.IsEnding`: a Gremlin Horn on the last enemy's
+        // death (or a kill-on-play energy rider) grants nothing. `IsEnding` is
+        // false after the combat is over (`!IsInProgress`), so this gate leaves
+        // a post-combat call alone (random-loadout Regent v0.107.1 8183). Only
+        // the enemy half is read: a player at 0 HP may still be saved by a
+        // death-prevention relic before the loss is pending.
+        if !self.is_over && crate::combat_loop::enemy_side_is_ending(self) {
+            return;
+        }
         // C# ModifyEnergyGain hook: NoEnergyGainPower returns 0m when
         // applied to the player.
         if self.player_power_amount(PowerKind::NoEnergyGain) > 0 {
@@ -9864,23 +9874,24 @@ impl CombatState {
         // its drawn cards take their `Bound`s before the Status card is
         // checked (Defect v0.107.1 5533 @595: C# bound the Void Iteration
         // drew, Rust the Dazed that triggered it).
-        let (pagestorm_id, iteration_id, chains_id) =
-            if chains_stacks > 0 && (pagestorm_amount > 0 || iteration_amount > 0) {
-                let kind_id = |kind: PowerKind| {
-                    self.player_power_uids()
-                        .iter()
-                        .filter_map(|u| self.powers.get_by_id(u.0))
-                        .find(|p| p.kind == kind)
-                        .map(|p| p.id.get())
-                };
-                (
-                    kind_id(PowerKind::Pagestorm),
-                    kind_id(PowerKind::Iteration),
-                    kind_id(PowerKind::ChainsOfBinding),
-                )
-            } else {
-                (None, None, None)
+        let (pagestorm_id, iteration_id, chains_id) = if chains_stacks > 0
+            && (pagestorm_amount > 0 || iteration_amount > 0 || cacophony_present)
+        {
+            let kind_id = |kind: PowerKind| {
+                self.player_power_uids()
+                    .iter()
+                    .filter_map(|u| self.powers.get_by_id(u.0))
+                    .find(|p| p.kind == kind)
+                    .map(|p| p.id.get())
             };
+            (
+                kind_id(PowerKind::Pagestorm),
+                kind_id(PowerKind::Iteration),
+                kind_id(PowerKind::ChainsOfBinding),
+            )
+        } else {
+            (None, None, None)
+        };
         let listens_before_chains =
             |listener: Option<u32>| matches!((listener, chains_id), (Some(l), Some(c)) if l < c);
         let pagestorm_before_chains = pagestorm_amount > 0 && listens_before_chains(pagestorm_id);
@@ -10010,7 +10021,21 @@ impl CombatState {
             let fires_iteration = iteration_before_chains
                 && card_type == crate::cards::CardType::Status
                 && self.combat_log.status_cards_drawn_this_turn == 0;
-            if (pagestorm_before_chains && is_ethereal) || fires_iteration {
+            // A Cacophony applied before Chains of Binding that this card
+            // brings to its 33rd draw hits first: a kill there runs Gremlin
+            // Horn's nested draw, whose cards take their `Bound`s before this
+            // one is checked (loadout Necrobinder v0.111.0 8178: C# bound the
+            // Squeeze the Horn drew, Rust the Pull From Below that set the hit
+            // off).
+            let fires_cacophony = cacophony_present
+                && chains_id.is_some_and(|chains| {
+                    self.powers.iter().any(|p| {
+                        p.kind == PowerKind::Cacophony
+                            && p.id.get() < chains
+                            && p.counter.saturating_add(1) >= CACOPHONY_CARDS
+                    })
+                });
+            if (pagestorm_before_chains && is_ethereal) || fires_iteration || fires_cacophony {
                 chains_after_nested_draw.push(uid);
             } else {
                 self.afflict_bound_from_chains(uid, chains_stacks);

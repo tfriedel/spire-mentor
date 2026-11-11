@@ -305,9 +305,18 @@ fn play_strike_defect_deals_6_damage() {
 #[test]
 fn sunder_grants_energy_only_on_the_killing_blow_not_a_corpse() {
     install_pool();
-    // Killing blow: enemy at 10 HP, Sunder 24 → dies, +3 energy.
+    // Killing blow: enemy at 10 HP, Sunder 24 → dies, +3 energy. A second,
+    // live enemy keeps the combat from ending: `PlayerCmd.GainEnergy` grants
+    // nothing once `CombatManager.IsEnding` (PlayerCmd.cs:31).
     let (mut state, euid) = fresh_state(CardId::Sunder, 24, 0);
     state.creatures[0].current_hp = 10;
+    let mut bystander = state.creatures[0].clone();
+    bystander.id = NonZeroU32::new(9).expect("nz");
+    bystander.current_hp = 50;
+    state.creatures.push(bystander);
+    state
+        .enemy_uids
+        .push(CreatureUid(NonZeroU32::new(9).expect("nz")));
     state.player.energy = 0;
     let f = lookup(CardId::Sunder).expect("registered");
     let r = f(&mut state, Some(euid));

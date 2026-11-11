@@ -1090,3 +1090,101 @@ fn an_unbroken_target_removed_by_a_nested_outbreak_finishes_the_play() {
     assert_eq!(state.player.block, 3, "Rage's AfterCardPlayed block");
     assert_eq!(state.combat_log.player_card_plays_this_combat, 1);
 }
+
+/// Omnislice's splash is ONE multi-target `CreatureCmd.Damage(list2, ..)`
+/// (Omnislice.cs, both builds): both teammates lose their HP before
+/// `Kill(killedCreatures)` runs. When the primary hit already killed its
+/// target, the splash fells the last two enemies, so by their `AfterDeath`
+/// every primary enemy is dead and `CombatManager.IsEnding` holds: Gremlin
+/// Horn's `PlayerCmd.GainEnergy` and `CardPileCmd.Draw` both no-op
+/// (PlayerCmd.cs, CardPileCmd.cs). Only the primary kill gains energy and
+/// draws. Rust killed each splash target as it was hit, so the first of them
+/// still drew a card and gained energy. Random-loadout Regent v0.107.1 seed
+/// 8183 (an auto-played Omnislice under Catastrophe).
+#[test]
+fn omnislice_splash_kills_resolve_after_every_hit() {
+    for v in BOTH {
+        let mut state = fresh(v);
+        for id in 2..=4 {
+            state
+                .creatures
+                .push(enemy(id, 1, MonsterKind::Inklet, "Inklet"));
+            state
+                .enemy_uids
+                .push(CreatureUid(NonZeroU32::new(id).expect("nz")));
+        }
+        add_relic(&mut state, sts2_core::RelicKind::GremlinHorn);
+        for _ in 0..3 {
+            let c = new_card(&mut state, CardId::StrikeIronclad);
+            state.player.draw.push(c);
+        }
+        let omni = new_card(&mut state, CardId::Omnislice);
+        state.player.hand.push(omni);
+        let energy_before = state.player.energy;
+        let cost = 0; // Omnislice costs 0.
+
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+
+        assert!(
+            state.creatures.iter().skip(1).all(|c| c.current_hp <= 0),
+            "{v:?}: Omnislice killed all three Inklets"
+        );
+        assert_eq!(
+            state.player.draw.len(),
+            2,
+            "{v:?}: only the primary kill's Gremlin Horn drew a card"
+        );
+        assert_eq!(
+            state.player.energy,
+            energy_before - cost + 1,
+            "{v:?}: only the primary kill's Gremlin Horn gained energy"
+        );
+    }
+}
+
+/// `Hook.AfterCardDrawn` walks the player's powers in application order and
+/// awaits each (CacophonyPower.cs:22-37, ChainsOfBindingPower.cs:20-30). With
+/// Cacophony applied before Chains of Binding, the 33rd card's Cacophony hit
+/// kills an enemy, Gremlin Horn draws the next card (GremlinHorn.cs) and that
+/// nested card takes the turn's last `Bound` before Chains checks the card
+/// that set the hit off, which then stays unafflicted. Rust checked Chains
+/// first and bound the outer card. Random-loadout Necrobinder v0.111.0 seed
+/// 8178 (the Queen's Chains of Binding).
+#[test]
+fn cacophony_kill_draw_takes_the_bound_before_its_trigger() {
+    let mut state = fresh(GameVersion::V0_111_0);
+    for id in 2..=3 {
+        state
+            .creatures
+            .push(enemy(id, 1, MonsterKind::Nibbit, "Nibbit"));
+        state
+            .enemy_uids
+            .push(CreatureUid(NonZeroU32::new(id).expect("nz")));
+    }
+    let p = state.player.creature_uid.expect("player");
+    sts2_core::card_effects::apply_power_to_creature(&mut state, p, PowerKind::Cacophony, 66);
+    for pw in &mut state.powers {
+        if pw.kind == PowerKind::Cacophony {
+            pw.counter = 32;
+        }
+    }
+    // The Queen's Chains of Binding lands on the legacy player list (the
+    // monster's `apply_power_to_player_via_legacy_surface`), applied later.
+    let chains = NonZeroU32::new(50).expect("nz");
+    state
+        .powers
+        .push(sts2_core::Power::new(chains, PowerKind::ChainsOfBinding, 1));
+    state.player.powers.push(sts2_core::PowerUid(chains));
+    add_relic(&mut state, sts2_core::RelicKind::GremlinHorn);
+    let outer = new_card(&mut state, CardId::StrikeIronclad);
+    let nested = new_card(&mut state, CardId::DefendIronclad);
+    state.player.draw.push(outer);
+    state.player.draw.push(nested);
+
+    let _ = state.draw_into_hand(1);
+
+    assert_eq!(state.player.hand.as_slice(), &[outer, nested]);
+    let bound = |uid: sts2_core::CardUid| state.cards[uid.get() as usize - 1].affliction.is_some();
+    assert!(bound(nested), "the Gremlin Horn draw took the Bound");
+    assert!(!bound(outer), "Chains reached the outer card at its cap");
+}
