@@ -1364,3 +1364,54 @@ fn stoke_reads_its_upgrade_after_the_exhausts() {
         .collect();
     assert_eq!(generated, [true]);
 }
+
+/// `Scourge.OnPlay` reads `DynamicVars.Cards` for its draw after the awaited
+/// Doom apply (Scourge.cs). Sleight of Flesh's damage on that Doom kills the
+/// Dampen caster and re-upgrades the dampened Scourge, so it draws the
+/// upgraded 2 cards (loadout Necrobinder v0.111.0 8527: C# drew 2, Rust 1).
+#[test]
+fn scourge_reads_its_upgrade_after_the_doom() {
+    for v in BOTH {
+        let mut state = fresh(v, CharacterId::Necrobinder);
+        let caster = add_enemy(&mut state, 2, 5);
+        let _survivor = add_enemy(&mut state, 3, 100);
+        let player = state.player.creature_uid.expect("player");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            PowerKind::SleightOfFlesh,
+            9,
+        );
+        let scourge = new_card(&mut state, CardId::Scourge, true);
+        state.player.hand.push(scourge);
+        for _ in 0..3 {
+            let c = new_card(&mut state, CardId::DefendNecrobinder, false);
+            state.player.draw.push(c);
+        }
+        sts2_core::monster_power_effects::install_dampen_power_handlers();
+        sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+        let pid = state
+            .powers
+            .iter()
+            .find(|p| p.kind == PowerKind::Dampen)
+            .map(|p| p.id)
+            .expect("Dampen applied");
+        state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+        let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+            &mut state,
+            player,
+            PowerKind::Dampen,
+            Some(caster),
+        );
+        let si = scourge.0.get() as usize - 1;
+        assert!(!state.cards[si].upgraded, "{v:?}: dampened");
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+        assert_eq!(
+            hp_of(&state, caster),
+            0,
+            "{v:?}: Sleight of Flesh killed the caster"
+        );
+        assert!(state.cards[si].upgraded, "{v:?}: re-upgraded");
+        assert_eq!(state.player.hand.len(), 2, "{v:?}: drew the upgraded 2");
+    }
+}

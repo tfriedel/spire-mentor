@@ -6461,6 +6461,34 @@ impl CombatState {
         uid
     }
 
+    /// One `CacophonyPower` hit (v0.111.0): `Rng.CombatTargets.NextItem(
+    /// HittableEnemies)` then `CreatureCmd.Damage(enemy, Amount,
+    /// ValueProp.Unpowered, Owner)` (CacophonyPower.cs); no roll and no hit
+    /// with no enemy.
+    fn cacophony_hit(&mut self, amount: i32) {
+        if let Some(enemy) = self.get_random_enemy() {
+            crate::damage::apply_damage(
+                self,
+                crate::hooks::CreatureRef::Player,
+                enemy,
+                amount,
+                crate::hooks::ValueProps::UNPOWERED,
+                None,
+            );
+        }
+    }
+
+    /// Arena id of the player's first `kind` power (`u32::MAX` if none).
+    /// Among live powers, id order is application order -- the order C#
+    /// `IterateHookListeners` walks a creature's power list.
+    pub(crate) fn player_power_arena_id(&self, kind: PowerKind) -> u32 {
+        self.player_power_uids()
+            .iter()
+            .filter_map(|u| self.powers.get_by_id(u.0))
+            .find(|p| p.kind == kind)
+            .map_or(u32::MAX, |p| p.id.get())
+    }
+
     /// Yield the player's power [`PowerUid`]s as the UNION of the mirror
     /// Creature's `powers` and the legacy `state.player.powers`, deduped
     /// by uid (mirror first, then legacy uids not already seen).
@@ -9808,6 +9836,18 @@ impl CombatState {
         // Cacophony damage triggers (one `Amount` per instance that wrapped),
         // dealt after the per-card loop like Speedster's.
         let mut cacophony_hits: smallvec::SmallVec<[i32; 2]> = smallvec::SmallVec::new();
+        // A Cacophony instance applied after Pagestorm counts an Ethereal
+        // card only once Pagestorm's nested draw has run: C#
+        // `Hook.AfterCardDrawn` awaits the listeners in list order, so the
+        // nested cards tick (and may fire) the counter first. These are the
+        // instances whose tick for this batch waits for that draw.
+        let cacophony_after_pagestorm: Option<u32> = if cacophony_present && pagestorm_amount > 0 {
+            Some(self.player_power_arena_id(PowerKind::Pagestorm))
+        } else {
+            None
+        };
+        let mut cacophony_deferred: smallvec::SmallVec<[std::num::NonZeroU32; 2]> =
+            smallvec::SmallVec::new();
         // `CacophonyPower`'s `CardsVar(33)` (decomp CacophonyPower.cs:20).
         const CACOPHONY_CARDS: i32 = 33;
 
@@ -10096,8 +10136,13 @@ impl CombatState {
             // per-instance `counter` counts up to 33 (Instanced, like
             // Automation's).
             if cacophony_present {
+                let after_pagestorm = cacophony_after_pagestorm.filter(|_| is_ethereal);
                 for p in &mut self.powers {
                     if p.kind == PowerKind::Cacophony {
+                        if after_pagestorm.is_some_and(|ps| p.id.get() > ps) {
+                            cacophony_deferred.push(p.id);
+                            continue;
+                        }
                         let new_counter = p.counter.saturating_add(1);
                         if new_counter >= CACOPHONY_CARDS {
                             p.counter = 0;
@@ -10160,53 +10205,59 @@ impl CombatState {
         // `modify_power_amount_given` chain — matching SneckoSkull's per-apply
         // +1 additive (seed 1131). Recompute the alive set each card so a kill
         // mid-batch is reflected, mirroring C#'s per-card `HittableEnemies`.
-        for _ in 0..corrosive_wave_cards {
-            // C# `CorrosiveWavePower.cs:32` calls `Flash()` inside
-            // `AfterCardDrawn`'s `card.Owner.Creature == Owner` guard — once per
-            // DRAWN CARD, before that card's Poison application, and regardless
-            // of whether any enemy is hittable. The per-card replay below is the
-            // same batch C# fires one hook per, so one flash per iteration.
-            crate::event_log::flash_player_power(self, PowerKind::CorrosiveWave);
-            for enemy_uid in self.enemy_uids.clone() {
-                let alive = self
-                    .creatures
-                    .iter()
-                    .any(|c| c.id == enemy_uid.0 && c.current_hp > 0);
-                if alive {
-                    // `PowerCmd.Apply<PoisonPower>(..., base.Owner, null)`:
-                    // no card source, so Unsettling Lamp (`cardSource ==
-                    // null` -> return) neither captures nor doubles it even
-                    // when the draw came from a resolving card (Prepared).
-                    crate::card_effects::apply_power_to_creature_cardless(
-                        self,
-                        enemy_uid,
-                        PowerKind::Poison,
-                        corrosive_wave_amount,
-                    );
+        // Both listeners fire once per drawn card, in the powers' list
+        // (application) order: C# `Hook.AfterCardDrawn` awaits Speedster's
+        // `CreatureCmd.Damage` -- and the Stock respawn its kill triggers --
+        // before a later-applied Corrosive Wave picks its `HittableEnemies`
+        // for the same card. Speedster applied first, the card that killed an
+        // Axebot poisons the respawned one (loadout Silent v0.107.1 8690).
+        let speedster_first = speedster_hits > 0
+            && corrosive_wave_cards > 0
+            && self.player_power_arena_id(PowerKind::Speedster)
+                < self.player_power_arena_id(PowerKind::CorrosiveWave);
+        for card in 0..corrosive_wave_cards.max(speedster_hits) {
+            if speedster_first && card < speedster_hits {
+                self.deal_unpowered_damage_to_all_enemies(speedster_amount);
+            }
+            if card < corrosive_wave_cards {
+                // C# `CorrosiveWavePower.cs:32` calls `Flash()` inside
+                // `AfterCardDrawn`'s `card.Owner.Creature == Owner` guard — once per
+                // DRAWN CARD, before that card's Poison application, and regardless
+                // of whether any enemy is hittable. The per-card replay below is the
+                // same batch C# fires one hook per, so one flash per iteration.
+                crate::event_log::flash_player_power(self, PowerKind::CorrosiveWave);
+                for enemy_uid in self.enemy_uids.clone() {
+                    let alive = self
+                        .creatures
+                        .iter()
+                        .any(|c| c.id == enemy_uid.0 && c.current_hp > 0);
+                    if alive {
+                        // `PowerCmd.Apply<PoisonPower>(..., base.Owner, null)`:
+                        // no card source, so Unsettling Lamp (`cardSource ==
+                        // null` -> return) neither captures nor doubles it even
+                        // when the draw came from a resolving card (Prepared).
+                        crate::card_effects::apply_power_to_creature_cardless(
+                            self,
+                            enemy_uid,
+                            PowerKind::Poison,
+                            corrosive_wave_amount,
+                        );
+                    }
                 }
             }
-        }
-        // Silent SpeedsterPower damage-on-draw (deferred past the per-card
-        // `self.cards` borrow): one hit of `speedster_amount` to all living
-        // enemies per drawn card. Recomputes the target set each hit so a kill
-        // mid-batch matches C#'s per-card `HittableEnemies` recompute.
-        for _ in 0..speedster_hits {
-            self.deal_unpowered_damage_to_all_enemies(speedster_amount);
+            // Silent SpeedsterPower damage-on-draw: one hit of
+            // `speedster_amount` to all living enemies per drawn card. The
+            // target set is recomputed each hit so a kill mid-batch matches
+            // C#'s per-card `HittableEnemies`.
+            if !speedster_first && card < speedster_hits {
+                self.deal_unpowered_damage_to_all_enemies(speedster_amount);
+            }
         }
         // Cacophony (v0.111.0): `Rng.CombatTargets.NextItem(HittableEnemies)`
         // then `CreatureCmd.Damage(enemy, Amount, ValueProp.Unpowered, Owner)`
         // (decomp CacophonyPower.cs:30-37); no roll and no hit with no enemy.
         for amount in cacophony_hits {
-            if let Some(enemy) = self.get_random_enemy() {
-                crate::damage::apply_damage(
-                    self,
-                    crate::hooks::CreatureRef::Player,
-                    enemy,
-                    amount,
-                    crate::hooks::ValueProps::UNPOWERED,
-                    None,
-                );
-            }
+            self.cacophony_hit(amount);
         }
         // Pagestorm extra draws (bead `sts2-rs-4wppb`). Route through the
         // card-effect draw chokepoint `draw_via_state` — NOT `draw_into_hand`:
@@ -10251,6 +10302,27 @@ impl CombatState {
             match step {
                 AfterDrawn::Pagestorm => {
                     crate::cards::draw_via_state(self, pagestorm_draws);
+                    // The later-applied Cacophony instances now count the
+                    // Ethereal card(s) that set Pagestorm off. A hit at its
+                    // nested draw may have ended the combat: the listener walk
+                    // already under way still runs (`IterateCombatHookListeners`
+                    // checks `IsOverOrEnding` only before its first listener),
+                    // with no hittable enemy left to roll for.
+                    for id in core::mem::take(&mut cacophony_deferred) {
+                        let fired = self.powers.get_mut_by_id(id).and_then(|p| {
+                            let new_counter = p.counter.saturating_add(1);
+                            if new_counter >= CACOPHONY_CARDS {
+                                p.counter = 0;
+                                Some(p.amount)
+                            } else {
+                                p.counter = new_counter;
+                                None
+                            }
+                        });
+                        if let Some(amount) = fired {
+                            self.cacophony_hit(amount);
+                        }
+                    }
                 }
                 // Defect Iteration extra draws (deferred past the per-card
                 // `self.cards` borrow). Routed through `draw_via_state` (the

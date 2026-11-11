@@ -4676,9 +4676,34 @@ public class RunSimulator
             Log("Event-nested combat: resuming parent event for its reward");
             try
             {
-                RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
+                // On the pool, as an event option's Chosen() runs: the resumed
+                // event can offer a card reward (v0.111.0 BattlewornDummy.Resume
+                // passes the combat room's ExtraRewards to RewardsCmd.OfferCustom),
+                // and the headless card-reward selector blocks its caller until
+                // the client answers. Run on the game thread, that blocked the
+                // thread that has to answer it: no reply to the play_card that
+                // won the fight (OracleHang, loadout Silent v0.111.0 seed 8529),
+                // then a silent skip after the selector's 300 s timeout. The real
+                // game shows the reward screen, so stash the task at the reward
+                // and let select/skip_card_reward drive it on, as for an option.
+                var task = RunOnPool(() => RunManager.Instance.ProceedFromTerminalRewardsScreen());
+                WaitUntilOptionTaskSettles(task, "parent event resume or its reward");
+                if (!task.IsCompleted && AnySelectionPending())
+                {
+                    _pendingEventOptionTask = task;
+                    SyncEventOptionInFlight();
+                    _rewardsProcessed = false;
+                    _pendingRewards = null;
+                    DropCardRewards();
+                    _queuedRemovalRewards.Clear();
+                    _removalRewardTask = null;
+                    WaitForActionExecutor();
+                    return DetectDecisionPoint();
+                }
+                WaitForTask(task, 2000, "parent event resume");
             }
             catch (Exception ex) { LogException("Resume parent event", ex); }
+            finally { SyncEventOptionInFlight(); }
             // The event's Resume() is dispatched fire-and-forget
             // (EventSynchronizer.ResumeEvents → TaskHelper.RunSafely), so pump it
             // (and any reward commands it queues) to completion before re-detecting.

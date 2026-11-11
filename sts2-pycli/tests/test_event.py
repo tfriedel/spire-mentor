@@ -1,5 +1,9 @@
 """Tests for events."""
 
+import pytest
+import sts2_client
+from sts2_client import Game
+
 
 class TestNeowEvent:
     def test_neow_is_first_event(self, game):
@@ -72,3 +76,39 @@ class TestEventCombatBridge:
         )
         state = game.auto_play_combat(state)
         assert state.get("decision") != "combat_play"
+
+
+@pytest.mark.oracle
+def test_the_hunt_reward_after_the_battleworn_dummy_surfaces(monkeypatch):
+    """On v0.111.0, BattlewornDummy.Resume offers the fight's rewards together
+    with the combat room's ExtraRewards: The Hunt's Fatal kill adds a card
+    reward. The headless resumed the event on the game thread, where the
+    blocking card-reward selector parked the thread that has to answer it: no
+    reply to the winning play_card (OracleHang, loadout Silent seed 8529), then
+    a silent skip after the selector's 300 s timeout. The real game shows the
+    card reward screen; so must we."""
+    if not (sts2_client.oracle_available("v0.111.0") and sts2_client.oracle_built("v0.111.0")):
+        pytest.skip("C# oracle for v0.111.0 unavailable")
+    monkeypatch.setenv(sts2_client.REPLY_TIMEOUT_ENV, "60")
+    prev = sts2_client.GAME_VERSION
+    sts2_client.set_game_version("v0.111.0")
+    g = Game()
+    try:
+        g.start(character="Silent", seed="bwh1")
+        g.set_player(hp=200, max_hp=200, deck=["THE_HUNT+1"] * 15)
+        state = g.enter_room("event", event="BATTLEWORN_DUMMY")
+        assert state.get("decision") == "event_choice"
+        state = g.choose_option(0)
+        for _ in range(40):
+            if state.get("decision") != "combat_play":
+                break
+            played = g.play_card(0, target_index=0)
+            state = g.end_turn() if played.get("type") == "error" else played
+        assert state.get("decision") == "card_reward", state.get("decision")
+        deck = (state.get("player") or {}).get("deck_size")
+        state = g.select_card_reward(0)
+        assert state.get("decision") not in (None, "card_reward"), state.get("decision")
+        assert (state.get("player") or {}).get("deck_size") == deck + 1
+    finally:
+        g.close()
+        sts2_client.set_game_version(prev)

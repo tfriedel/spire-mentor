@@ -653,6 +653,63 @@ fn cacophony_kill_mid_draw_stops_before_the_reshuffle() {
     }
 }
 
+/// `Hook.AfterCardDrawn` awaits the player's powers in list order. With
+/// Pagestorm applied before Cacophony, the Ethereal Dazed that would be
+/// Cacophony's 33rd card first runs Pagestorm's nested draw: that reshuffles
+/// the discard and the drawn card is the 33rd, whose hit kills the last
+/// enemy; only then does Cacophony count the Dazed. Rust counted the Dazed
+/// first, killed on it and skipped Pagestorm's draw (combat ending), so the
+/// reshuffle never ran and the next combat opened on another hand
+/// (random-loadout Necrobinder v0.111.0 seed 8638). Applied the other way
+/// round, Cacophony does fire on the Dazed first.
+#[test]
+fn pagestorm_before_cacophony_draws_before_the_ethereal_card_counts() {
+    for pagestorm_first in [true, false] {
+        let mut state = fresh(GameVersion::V0_111_0);
+        state
+            .creatures
+            .push(enemy(2, 14, MonsterKind::Nibbit, "Nibbit"));
+        state
+            .enemy_uids
+            .push(CreatureUid(NonZeroU32::new(2).expect("nz")));
+        let p = state.player.creature_uid.expect("player");
+        let mut kinds = [PowerKind::Pagestorm, PowerKind::Cacophony];
+        if !pagestorm_first {
+            kinds.reverse();
+        }
+        for kind in kinds {
+            let amount = if kind == PowerKind::Cacophony { 66 } else { 1 };
+            sts2_core::card_effects::apply_power_to_creature(&mut state, p, kind, amount);
+        }
+        for pw in &mut state.powers {
+            if pw.kind == PowerKind::Cacophony {
+                pw.counter = 32;
+            }
+        }
+        let dazed = new_card(&mut state, CardId::Dazed);
+        state.player.draw.push(dazed);
+        for _ in 0..3 {
+            let uid = new_card(&mut state, CardId::DefendIronclad);
+            state.player.discard.push(uid);
+        }
+
+        let _ = state.draw_into_hand(2);
+
+        let hp = state.creatures.iter().find(|c| c.id.get() == 2).expect("c");
+        assert_eq!(hp.current_hp, 0, "pagestorm_first={pagestorm_first}");
+        if pagestorm_first {
+            assert_eq!(state.player.hand.len(), 2, "Pagestorm drew before the hit");
+            assert!(
+                state.player.discard.is_empty(),
+                "the discard was reshuffled"
+            );
+        } else {
+            assert_eq!(state.player.hand.as_slice(), &[dazed]);
+            assert_eq!(state.player.discard.len(), 3, "no reshuffle");
+        }
+    }
+}
+
 /// Centennial Puzzle draws three single cards (CentennialPuzzle.cs:47-50),
 /// awaiting each. The second one reshuffles the discard and Stratagem opens
 /// its select: the third draw waits for the pick instead of being drawn over

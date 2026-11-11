@@ -8,12 +8,14 @@ pub(crate) fn play_scourge(state: &mut CombatState, target: Option<CreatureUid>)
     // C# OnPlay: PowerCmd.Apply<DoomPower>(target, Doom.BaseValue), then
     // CardPileCmd.Draw(Cards.BaseValue). OnUpgrade bumps Doom by 3 and Cards
     // by 1 (PowerVar/CardsVar), gated on current_card_upgraded.
-    let upgraded = current_card_upgraded(state);
-    let doom = if upgraded { 16 } else { 13 };
-    let cards = if upgraded { 2 } else { 1 };
+    let doom = if current_card_upgraded(state) { 16 } else { 13 };
 
     let t = target.expect("Scourge: AnyEnemy-targeted");
     apply_power_to_enemy(state, t, PowerKind::Doom, doom);
+    // `Cards.BaseValue` is read after the awaited Doom apply: Sleight of
+    // Flesh's hit on it can kill the Dampen caster, whose removal re-upgrades
+    // this card before the draw (loadout Necrobinder v0.111.0 8527).
+    let cards = if current_card_upgraded(state) { 2 } else { 1 };
     let _ = sts2_core::cards::draw_via_state(state, cards);
     EffectResult::Resolved
 }

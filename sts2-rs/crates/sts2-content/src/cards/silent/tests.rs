@@ -4091,3 +4091,68 @@ fn tactician_gains_no_energy_under_no_energy_gain() {
     let _ = lookup(CardId::Tactician).expect("registered")(&mut state, None);
     assert_eq!(state.player.energy, 2);
 }
+
+/// Speedster and Corrosive Wave both listen on `AfterCardDrawn`; C# walks the
+/// player's powers in application order and awaits each, so with Speedster
+/// applied first the card whose hit kills a Stock Axebot then poisons the
+/// Axebot `StockPower.AfterDeath` respawned (loadout Silent v0.107.1 8690:
+/// C# 6 Poison on the respawn, Rust 3). Applied the other way round, that
+/// card's Poison lands on the dying Axebot instead.
+#[test]
+fn speedster_then_corrosive_wave_poisons_the_stock_respawn() {
+    fn respawn_poison(speedster_first: bool) -> Option<i32> {
+        install_pool();
+        crate::cards::dispatch::ensure_installed();
+        let (mut state, euid) = fresh_state(CardId::SpeedsterCard, 0, 0);
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id == euid.0) {
+            c.current_hp = 2;
+            c.species = Some(MonsterKind::Axebot);
+            c.monster_id = MonsterId("Axebot");
+        }
+        sts2_core::card_effects::apply_power_to_creature(&mut state, euid, PowerKind::Stock, 2);
+        if speedster_first {
+            apply_power_to_player(&mut state, PowerKind::Speedster, 2);
+            apply_power_to_player(&mut state, PowerKind::CorrosiveWave, 3);
+        } else {
+            apply_power_to_player(&mut state, PowerKind::CorrosiveWave, 3);
+            apply_power_to_player(&mut state, PowerKind::Speedster, 2);
+        }
+        for _ in 0..2_u32 {
+            let raw = u32::try_from(state.cards.len() + 1).expect("fits");
+            let uid = sts2_core::CardUid::new(raw).expect("non-zero");
+            state.cards.push(Card {
+                uid,
+                card_id: CardId::DefendSilent,
+                cost: sts2_core::CardEnergyCost::new(1),
+                card_type: CardType::Skill,
+                target_type: TargetType::Self_,
+                base_block: 5,
+                ..Card::pod_defaults()
+            });
+            state.player.draw.push(uid);
+        }
+        let _ = sts2_core::cards::draw_via_state(&mut state, 2);
+        let respawn = state
+            .enemy_uids
+            .iter()
+            .copied()
+            .find(|u| {
+                *u != euid
+                    && state
+                        .creatures
+                        .iter()
+                        .any(|c| c.id == u.0 && c.current_hp > 0)
+            })
+            .expect("Stock respawned an Axebot");
+        let creature = state.creatures.iter().find(|c| c.id == respawn.0)?;
+        creature.powers.iter().find_map(|pu| {
+            state
+                .powers
+                .iter()
+                .find(|p| p.id == pu.0 && p.kind == PowerKind::Poison)
+                .map(|p| p.amount)
+        })
+    }
+    assert_eq!(respawn_poison(true), Some(6));
+    assert_eq!(respawn_poison(false), Some(3));
+}
