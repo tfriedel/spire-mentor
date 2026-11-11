@@ -1,0 +1,12 @@
+# Name-based targets the mod looks up knowing that some game build lacks them
+# (GH #807). RefCheck does not fail a build for these. One `Type::name` per
+# line, the type without its namespace; say why after a `#`. The code must
+# tolerate the miss: `?.`, a `Prepare()` that returns false, or an explicit
+# null check. RefCheck reports an entry the mod no longer looks up, so remove
+# it with the lookup.
+
+# v0.111.0 added the field; on v0.107.1 the vote is sent without it.
+NetVoteToMoveToNextActAction::currentActIndex  # SimAiPartnerBrain.TickActChange, `?.SetValue`
+
+# v0.111.0 only; HotkeyResetPatch.Prepare() skips the patch on v0.107.1.
+NHotkeyManager::ClearHotkeys  # SimHotkeys.HotkeyResetPatch

@@ -145,3 +145,53 @@ class TestCombatCallSites:
         assert len(made) == 1
         assert len(made[0].sent) == 1
         assert made[0].sent[0]["action"] in ("play", "end_turn", "potion")
+
+
+def _unsupported_build_fight() -> list[dict[str, Any]]:
+    """A combat decision from a game build no engine exists for (GH #807)."""
+    return [{**_combat_fixture(), "game_version": "v9.9.9"}, {"type": "run_complete"}]
+
+
+class TestUnsupportedBuildIsRefused:
+    """GH #807: an unsupported game build stops the driver instead of falling
+    into the never-crash handler's random legal move -- which would play the
+    whole run blind while the log looked like an ordinary MCTS fallback."""
+
+    def test_the_picker_reraises_instead_of_playing_random(self, tiny_cfg) -> None:
+        import realgame_mcts as rm
+        from realgame_adapter import UnsupportedGameVersionError
+
+        with pytest.raises(UnsupportedGameVersionError, match=r"v9\.9\.9"):
+            rm.pick_combat_action_mcts(_unsupported_build_fight()[0], tiny_cfg, random.Random(0))
+
+    def test_mcts_driver_refuses(self, tmp_path, monkeypatch, tiny_cfg) -> None:
+        import realgame_mcts as rm
+
+        factory, made = _script(_unsupported_build_fight())
+        monkeypatch.setattr(rm, "RealGameBridgeClient", factory)
+
+        rc = rm.run("localhost", 9999, tmp_path, None, random.Random(0), tiny_cfg, sims_flat=1)
+
+        assert rc == 2
+        assert made[0].sent == []
+
+    def test_ppo_driver_refuses(self, tmp_path, monkeypatch, tiny_cfg) -> None:
+        import realgame_ppo as rp
+
+        factory, made = _script(_unsupported_build_fight())
+        monkeypatch.setattr(rp, "RealGameBridgeClient", factory)
+
+        rc = rp.run(
+            "localhost",
+            9999,
+            tmp_path,
+            None,
+            random.Random(0),
+            rp.PpoPolicyCache(None, strict=False),
+            combat_policy="mcts",
+            mcts_cfg=tiny_cfg,
+            sims_flat=1,
+        )
+
+        assert rc == 2
+        assert made[0].sent == []

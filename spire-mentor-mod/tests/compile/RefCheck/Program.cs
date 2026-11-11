@@ -1,4 +1,4 @@
-// RefCheck <SpireMentor.dll> <sts2.dll> [--assembly sts2]
+// RefCheck <SpireMentor.dll> <sts2.dll> [--assembly sts2] [--optional <file>]
 //
 // Lists every reference SpireMentor.dll makes into the game assembly that the
 // given sts2.dll cannot satisfy: a missing type, or a method / field whose
@@ -12,23 +12,41 @@
 // Exit: 0 all resolve, 1 unresolved references (listed), 2 usage / IO error.
 // Pure metadata: neither assembly is loaded or executed.
 //
-// Not covered (by design -- see build_mod.sh): reflection-by-name strings and
-// Harmony patch targets; those are audited against the decomp separately.
+// Name-based binding (GH #807): a second pass checks the targets the mod names
+// by STRING, which no member reference carries -- `[HarmonyPatch(typeof(T),
+// "Name")]` (class- and method-level, `nameof` included) and the IL pattern
+// `ldtoken T ... ldstr "name" ... call AccessTools.Method/Field/Property...`.
+// Each must name a member of T (or one of T's sts2 base classes) by name; the
+// signature is not checked, because the strings do not carry one. Reflection
+// on a runtime type (`obj.GetType().GetMethod("x")`) has no static type and
+// stays unchecked.
 
 using System.Collections.Immutable;
+using System.Reflection.Emit;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: RefCheck <SpireMentor.dll> <sts2.dll> [--assembly sts2]");
+    Console.Error.WriteLine("usage: RefCheck <SpireMentor.dll> <sts2.dll> [--assembly sts2] [--optional <file>]");
     return 2;
 }
 string gameAsm = "sts2";
+// `ShortTypeName::name` targets a build may lack on purpose (tests/compile/RefCheck/
+// optional-names.txt): `#` starts a comment.
+var optionalNames = new HashSet<string>(StringComparer.Ordinal);
 for (int i = 2; i < args.Length; i++)
 {
     if (args[i] == "--assembly" && i + 1 < args.Length) gameAsm = args[++i];
+    else if (args[i] == "--optional" && i + 1 < args.Length)
+    {
+        foreach (string line in File.ReadAllLines(args[++i]))
+        {
+            string entry = line.Split('#', 2)[0].Trim();
+            if (entry.Length > 0) optionalNames.Add(entry);
+        }
+    }
 }
 
 using var modPe = new PEReader(File.OpenRead(args[0]));
@@ -167,12 +185,240 @@ foreach (MemberReferenceHandle h in mod.MemberReferences)
     }
 }
 
-Console.WriteLine($"RefCheck: {checkedTypes} {gameAsm} type refs, {checkedMembers} member refs checked against {args[1]}");
+// ---- name-based targets (Harmony attributes, AccessTools by name) -------------
+// Does `type` (or an sts2 base) declare a member called `name`? `kind` is
+// "method", "field" or "property" (a property matches its get_/set_ accessor).
+bool HasNamed(string type, string name, string kind)
+{
+    string? t = type;
+    while (t != null && typeDefs.TryGetValue(t, out TypeDefinitionHandle h))
+    {
+        TypeDefinition td = game.GetTypeDefinition(h);
+        if (kind == "field")
+        {
+            foreach (FieldDefinitionHandle fh in td.GetFields())
+                if (game.GetString(game.GetFieldDefinition(fh).Name) == name) return true;
+        }
+        else
+        {
+            foreach (MethodDefinitionHandle mh in td.GetMethods())
+            {
+                string m = game.GetString(game.GetMethodDefinition(mh).Name);
+                if (kind == "method" ? m == name : m == "get_" + name || m == "set_" + name) return true;
+            }
+        }
+        t = BaseTypeName(h);
+    }
+    return false;
+}
+
+int checkedNamed = 0;
+var optionalSeen = new HashSet<string>();
+void CheckNamed(string origin, string type, string name, string kind)
+{
+    // Keyed by the type's name without its namespace, so the list carries no
+    // game namespaces into the public export (its content-marker ratchet).
+    string key = type[(type.LastIndexOf('.') + 1)..] + "::" + name;
+    if (optionalNames.Contains(key))
+    {
+        optionalSeen.Add(key);
+        if (!typeDefs.ContainsKey(type) || !HasNamed(type, name, kind)) return;
+    }
+    if (!typeDefs.ContainsKey(type))
+    {
+        // A game type the mod names that this build lacks is reported by the
+        // type-reference pass above; a non-game type is not ours to check.
+        return;
+    }
+    checkedNamed++;
+    if (!HasNamed(type, name, kind))
+    {
+        problems.Add($"NAMED  {type}::{name} ({kind}, {origin}): not found");
+    }
+}
+
+// The game type an `ldtoken` operand / attribute type argument names, or null.
+string? GameTypeOf(EntityHandle h) => h.Kind switch
+{
+    HandleKind.TypeReference when IsGameRef((TypeReferenceHandle)h) => NameProvider.FullName(mod, (TypeReferenceHandle)h),
+    HandleKind.TypeSpecification => NameProvider.GenericRoot(
+        mod.GetTypeSpecification((TypeSpecificationHandle)h).DecodeSignature(names, null)) is var g && gameTypeRefs.Contains(g) ? g : null,
+    _ => null,
+};
+
+string? AttributeTypeName(CustomAttributeHandle ah)
+{
+    CustomAttribute ca = mod.GetCustomAttribute(ah);
+    EntityHandle parent = ca.Constructor.Kind == HandleKind.MemberReference
+        ? mod.GetMemberReference((MemberReferenceHandle)ca.Constructor).Parent
+        : default;
+    return parent.Kind == HandleKind.TypeReference ? NameProvider.FullName(mod, (TypeReferenceHandle)parent) : null;
+}
+
+// A serialized `typeof` argument ("Ns.Outer+Inner, sts2, Version=...") as the
+// FullName spelling, or null when it names another assembly.
+string? SerializedGameType(string serialized)
+{
+    string[] parts = serialized.Split(',', 3);
+    if (parts.Length < 2 || parts[1].Trim() != gameAsm) return null;
+    return parts[0].Trim().Replace('+', '/');
+}
+
+// Harmony's MethodType: Normal 0, Getter 1, Setter 2, Constructor 3.
+(string? Type, string? Name, int MethodType) HarmonyArgs(CustomAttributeHandle ah)
+{
+    var value = mod.GetCustomAttribute(ah).DecodeValue(new AttrTypeProvider());
+    string? type = null, name = null;
+    int methodType = 0;
+    foreach (var a in value.FixedArguments)
+    {
+        switch (a.Value)
+        {
+            case string s when a.Type == "System.Type": type ??= SerializedGameType(s); break;
+            case string s: name ??= s; break;
+            case int i when a.Type == "HarmonyLib.MethodType": methodType = i; break;
+        }
+    }
+    return (type, name, methodType);
+}
+
+void CheckHarmonyTarget(string origin, string? type, string? name, int methodType)
+{
+    if (type == null) return;
+    switch (methodType)
+    {
+        case 0 when name != null: CheckNamed(origin, type, name, "method"); break;
+        case 1 or 2 when name != null: CheckNamed(origin, type, (methodType == 1 ? "get_" : "set_") + name, "method"); break;
+        case 3: CheckNamed(origin, type, ".ctor", "method"); break;
+    }
+}
+
+foreach (TypeDefinitionHandle th in mod.TypeDefinitions)
+{
+    TypeDefinition td = mod.GetTypeDefinition(th);
+    string owner = NameProvider.FullName(mod, th);
+    (string? Type, string? Name, int MethodType) cls = (null, null, 0);
+    bool classPatched = false;
+    foreach (CustomAttributeHandle ah in td.GetCustomAttributes())
+    {
+        if (AttributeTypeName(ah) != "HarmonyLib.HarmonyPatch") continue;
+        var a = HarmonyArgs(ah);
+        classPatched = true;
+        cls = (a.Type ?? cls.Type, a.Name ?? cls.Name, a.MethodType != 0 ? a.MethodType : cls.MethodType);
+    }
+    bool methodNamed = false;
+    foreach (MethodDefinitionHandle mh in td.GetMethods())
+    {
+        foreach (CustomAttributeHandle ah in mod.GetMethodDefinition(mh).GetCustomAttributes())
+        {
+            if (AttributeTypeName(ah) != "HarmonyLib.HarmonyPatch") continue;
+            var a = HarmonyArgs(ah);
+            methodNamed = true;
+            CheckHarmonyTarget(owner + "." + mod.GetString(mod.GetMethodDefinition(mh).Name) + " [HarmonyPatch]",
+                a.Type ?? cls.Type, a.Name ?? cls.Name, a.MethodType != 0 ? a.MethodType : cls.MethodType);
+        }
+    }
+    if (classPatched && !methodNamed)
+    {
+        CheckHarmonyTarget(owner + " [HarmonyPatch]", cls.Type, cls.Name, cls.MethodType);
+    }
+}
+
+// IL: `ldtoken T; call GetTypeFromHandle; ldstr "name"` feeding an AccessTools
+// lookup within a few instructions. Operand sizes come from the BCL's own
+// opcode table.
+var operandTypes = new Dictionary<short, OperandType>();
+foreach (var f in typeof(OpCodes).GetFields())
+{
+    if (f.GetValue(null) is OpCode op) operandTypes[op.Value] = op.OperandType;
+}
+var accessKinds = new Dictionary<string, string>
+{
+    ["Method"] = "method", ["DeclaredMethod"] = "method",
+    ["Field"] = "field", ["DeclaredField"] = "field",
+    ["Property"] = "property", ["DeclaredProperty"] = "property",
+    ["PropertyGetter"] = "property", ["PropertySetter"] = "property",
+    ["DeclaredPropertyGetter"] = "property", ["DeclaredPropertySetter"] = "property",
+};
+foreach (MethodDefinitionHandle mh in mod.MethodDefinitions)
+{
+    MethodDefinition md = mod.GetMethodDefinition(mh);
+    if (md.RelativeVirtualAddress == 0) continue;
+    BlobReader il = modPe.GetMethodBody(md.RelativeVirtualAddress).GetILReader();
+    string where = NameProvider.FullName(mod, md.GetDeclaringType()) + "." + mod.GetString(md.Name);
+    string? lastTok = null; int lastTokAt = -100;
+    (string Type, string Name, int At)? pair = null;
+    int n = 0;
+    while (il.RemainingBytes > 0)
+    {
+        n++;
+        short code = il.ReadByte();
+        if (code == 0xFE) code = unchecked((short)(0xFE00 | il.ReadByte()));
+        OperandType ot = operandTypes.TryGetValue(code, out OperandType o) ? o : OperandType.InlineNone;
+        if (code == (short)ILOpCode.Ldtoken)
+        {
+            lastTok = GameTypeOf(MetadataTokens.EntityHandle(il.ReadInt32()));
+            lastTokAt = n;
+            continue;
+        }
+        if (code == (short)ILOpCode.Ldstr)
+        {
+            string s = mod.GetUserString(MetadataTokens.UserStringHandle(il.ReadInt32()));
+            pair = lastTok != null && n - lastTokAt <= 2 ? (lastTok, s, n) : null;
+            continue;
+        }
+        if (code is (short)ILOpCode.Call or (short)ILOpCode.Callvirt)
+        {
+            EntityHandle target = MetadataTokens.EntityHandle(il.ReadInt32());
+            if (pair is { } p && n - p.At <= 6 && target.Kind == HandleKind.MemberReference)
+            {
+                MemberReference mr = mod.GetMemberReference((MemberReferenceHandle)target);
+                if (mr.Parent.Kind == HandleKind.TypeReference
+                    && NameProvider.FullName(mod, (TypeReferenceHandle)mr.Parent) == "HarmonyLib.AccessTools"
+                    && accessKinds.TryGetValue(mod.GetString(mr.Name), out string? kind))
+                {
+                    CheckNamed(where + " AccessTools." + mod.GetString(mr.Name), p.Type, p.Name, kind);
+                    pair = null;
+                }
+            }
+            continue;
+        }
+        switch (ot)
+        {
+            case OperandType.InlineNone: break;
+            case OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar: il.Offset += 1; break;
+            case OperandType.InlineVar: il.Offset += 2; break;
+            case OperandType.InlineI8 or OperandType.InlineR: il.Offset += 8; break;
+            case OperandType.InlineSwitch: il.Offset += 4 * il.ReadInt32(); break;
+            default: il.Offset += 4; break;
+        }
+    }
+}
+
+foreach (string stale in optionalNames.Where(o => !optionalSeen.Contains(o)))
+{
+    problems.Add($"OPTIONAL {stale}: listed in --optional but the mod no longer looks it up; remove the entry");
+}
+
+Console.WriteLine($"RefCheck: {checkedTypes} {gameAsm} type refs, {checkedMembers} member refs, {checkedNamed} name-based targets checked against {args[1]}");
 foreach (string p in problems) Console.WriteLine("  UNRESOLVED " + p);
 Console.WriteLine(problems.Count == 0 ? "RefCheck: OK, every reference binds" : $"RefCheck: {problems.Count} unresolved reference(s)");
 return problems.Count == 0 ? 0 : 1;
 
-/// <summary>Renders signature types as stable, assembly-scope-free strings.</summary>
+/// <summary>Decodes custom-attribute blobs: a Type argument's value is its
+/// serialized name, typed "System.Type"; an enum is typed by its name (its
+/// underlying type is assumed int32, true of HarmonyLib's).</summary>
+sealed class AttrTypeProvider : ICustomAttributeTypeProvider<string>
+{
+    public string GetPrimitiveType(PrimitiveTypeCode typeCode) => typeCode.ToString();
+    public string GetSystemType() => "System.Type";
+    public string GetSZArrayType(string elementType) => elementType + "[]";
+    public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind) => NameProvider.FullName(reader, handle);
+    public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind) => NameProvider.FullName(reader, handle);
+    public string GetTypeFromSerializedName(string name) => name;
+    public PrimitiveTypeCode GetUnderlyingEnumType(string type) => PrimitiveTypeCode.Int32;
+    public bool IsSystemType(string type) => type == "System.Type";
+}
 sealed class NameProvider : ISignatureTypeProvider<string, object?>
 {
     public static string FullName(MetadataReader r, TypeDefinitionHandle h)

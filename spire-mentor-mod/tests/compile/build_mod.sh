@@ -112,7 +112,7 @@ RC="$BUILD/refcheck"
 for other in "$STS2_BINARIES"/v*/data_sts2_windows_x86_64/sts2.dll; do
   [[ -f "$other" ]] || continue
   over="$(basename "$(dirname "$(dirname "$other")")")"
-  "$DOTNET" "$RC/RefCheck.dll" "$BUILD/mod/SpireMentor.dll" "$other"     || die "SpireMentor compiled against $VER does not bind against $over"
+  "$DOTNET" "$RC/RefCheck.dll" "$BUILD/mod/SpireMentor.dll" "$other" --optional "$HERE/RefCheck/optional-names.txt" || die "SpireMentor compiled against $VER does not bind against $over"
 done
 
 if [[ "$WIRE" -eq 1 ]]; then

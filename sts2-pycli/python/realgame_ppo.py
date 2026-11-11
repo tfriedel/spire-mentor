@@ -115,6 +115,7 @@ from typing import Any
 import ppo_decode
 from floors import act_number, engine_total_floor
 from ppo.errors import BudgetExceededError  # numpy-free (ppo.schema imports numpy)
+from realgame_adapter import UnsupportedGameVersionError
 from realgame_bridge import DEFAULT_HOST, DEFAULT_PORT, RealGameBridgeClient
 from realgame_mcts import (
     DEFAULT_SIMS_BOSS,
@@ -2221,6 +2222,13 @@ def run(
                     result = "max_steps_reached"
                     print(f"Stopping after max_steps={max_steps}")
                     break
+    except UnsupportedGameVersionError as e:
+        # GH #807: `pick_combat_action_mcts` re-raises a build the engine has
+        # no rules for rather than answering it with a random legal move.
+        logger.error("Refusing to play: %s", e)
+        print(f"Steps: {step}\nResult: refused ({e})\nLog: {jsonl.path}")
+        jsonl.close()
+        return 2
     except (ConnectionError, TimeoutError) as e:
         logger.error("Bridge connection error after %d steps: %s", step, e)
         result = f"error: {e}"

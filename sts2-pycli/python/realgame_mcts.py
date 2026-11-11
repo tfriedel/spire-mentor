@@ -54,6 +54,7 @@ from typing import Any
 
 from combat_mirror import MirrorDivergence, recognize_card_select, skip_arity_from_world
 from realgame_adapter import (
+    UnsupportedGameVersionError,
     character_display_name,
     install_live_unlock_state,
     install_unlock_state_from_wire,
@@ -377,6 +378,11 @@ def pick_combat_action_mcts(
             # SimOverlay renders per-card win-probs. Fire-and-forget.
             action["annotations"] = annotations
         return action, None, engine_action
+    except UnsupportedGameVersionError:
+        # Also ahead of the blanket handler (GH #807): a build this engine has
+        # no rules for is not a bad snapshot, and a random legal move would
+        # play an unsupported game blind. The driver refuses instead.
+        raise
     except MirrorDivergence:
         # Deliberately ahead of the blanket handler below. `MirrorDivergence`
         # is a `RuntimeError`, so it used to be caught, logged as an "MCTS
@@ -688,6 +694,13 @@ def run(
                     result = "max_steps_reached"
                     print(f"Stopping after max_steps={max_steps}")
                     break
+    except UnsupportedGameVersionError as e:
+        # GH #807: `pick_combat_action_mcts` re-raises a build the engine has
+        # no rules for rather than answering it with a random legal move.
+        logger.error("Refusing to play: %s", e)
+        print(f"Steps: {step}\nResult: refused ({e})\nLog: {jsonl.path}")
+        jsonl.close()
+        return 2
     except (ConnectionError, TimeoutError) as e:
         logger.error("Bridge connection error after %d steps: %s", step, e)
         result = f"error: {e}"
