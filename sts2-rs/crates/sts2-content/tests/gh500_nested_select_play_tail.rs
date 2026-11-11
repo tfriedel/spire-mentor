@@ -30,7 +30,7 @@ fn push_card(state: &mut CombatState, id: CardId, card_type: CardType) -> sts2_c
     state.cards.push(Card {
         uid,
         card_id: id,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type,
         target_type: TargetType::Self_,
         upgraded: false,
@@ -87,7 +87,7 @@ fn two_select_batch(parent: CardId, inner: Option<CardId>) {
     // (the decomp auto-picks at <= 1 without prompting).
     let catastrophe = push_card(&mut state, parent, CardType::Skill);
     if parent == CardId::Cascade {
-        state.cards[catastrophe.get() as usize - 1].cost = -1;
+        state.cards[catastrophe.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(-1);
     }
     state.player.hand.push(catastrophe);
     for _ in 0..3 {

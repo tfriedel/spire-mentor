@@ -1,0 +1,81 @@
+{
+ "assumptions": {
+  "energy": 3,
+  "hand": 5,
+  "samples": 200
+ },
+ "block": {
+  "per_turn": 8.7,
+  "scaling_cards": [
+   "Glow"
+  ]
+ },
+ "composition": {
+  "by_rarity": {
+   "Basic": 10,
+   "Common": 3
+  },
+  "by_type": {
+   "Attack": 7,
+   "Skill": 6
+  },
+  "dead_cards": 0,
+  "energy_curve": {
+   "0": 1,
+   "1": 12
+  },
+  "unupgraded_basics": 9
+ },
+ "damage": {
+  "aoe_attacks": [],
+  "attack_count": 7,
+  "per_turn": 17.1,
+  "scaling_cards": [
+   "Crescent Spear"
+  ],
+  "single_target": 17.1,
+  "vs_group": 17.2
+ },
+ "deck_size": 13,
+ "lenses": {
+  "boss": 25.5,
+  "hallway": 29.2,
+  "scaling": 23.5
+ },
+ "scores": {
+  "block": 35.3,
+  "damage": 34.8,
+  "velocity": 6.1,
+  "volume": 19.6
+ },
+ "velocity": {
+  "bottleneck": "energy",
+  "cards_per_turn": 3.5,
+  "dilution": 1.0,
+  "draw_limited_turns": 0.0,
+  "energy_limited_turns": 7.0,
+  "engine_cards": 2,
+  "extra_per_turn": 0.1,
+  "tags": {
+   "draw": 2
+  }
+ },
+ "warnings": [
+  {
+   "severity": "info",
+   "text": "No AOE — multi-enemy fights (Gremlins, hallways) will be slow."
+  },
+  {
+   "severity": "info",
+   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+  },
+  {
+   "severity": "info",
+   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+  },
+  {
+   "severity": "warn",
+   "text": "Deck clogged with basics/curses — prioritise removals."
+  }
+ ]
+}

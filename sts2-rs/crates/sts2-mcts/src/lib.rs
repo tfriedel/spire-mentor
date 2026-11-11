@@ -1387,7 +1387,7 @@ pub enum EdgeAction {
     /// it disambiguates cards that share `(card_id, upgraded)` but
     /// have had per-instance cost mutations (Mayhem / SeeingRed-style)
     /// applied. `free` captures whether the card's LOCAL base cost is
-    /// zeroed by a `FreeThisTurn` / `FreeUntilPlayed` rider (or
+    /// zeroed by a `FREE_THIS_TURN` / `SetUntilPlayed(0)` rider (or
     /// Flatten-after-osty-attack) — a per-instance cost mutation that
     /// does NOT touch the `cost` field. Without it, a PowerPotion's
     /// 0-cost copy of a card collides with an identically-named,
@@ -1408,7 +1408,7 @@ pub enum EdgeAction {
     PlayCard {
         card_id: sts2_core::cards::CardId,
         upgraded: bool,
-        cost: i8,
+        cost: sts2_core::CardEnergyCost,
         free: bool,
         affliction: Option<sts2_core::card_afflictions::CardAfflictionKind>,
         target: Option<u8>,
@@ -1425,7 +1425,7 @@ pub enum EdgeAction {
     PlayCardAtAlly {
         card_id: sts2_core::cards::CardId,
         upgraded: bool,
-        cost: i8,
+        cost: sts2_core::CardEnergyCost,
         free: bool,
         affliction: Option<sts2_core::card_afflictions::CardAfflictionKind>,
         ally: u8,
@@ -1448,7 +1448,7 @@ impl EdgeAction {
                 let idx = card_uid.0.get() as usize - 1;
                 if let Some(card) = state.cards.get(idx) {
                     let (card_id, upgraded, cost) = (card.card_id, card.upgraded, card.cost);
-                    let free = sts2_core::hooks::card_cost_locally_zeroed(state, card);
+                    let free = locally_free(card);
                     let affliction = card.affliction.map(|a| a.kind);
                     if let Some(ally) = action.ally_target() {
                         return Self::PlayCardAtAlly {
@@ -1524,7 +1524,7 @@ impl EdgeAction {
         state: &CombatState,
         card_id: sts2_core::cards::CardId,
         upgraded: bool,
-        cost: i8,
+        cost: sts2_core::CardEnergyCost,
         free: bool,
         affliction: Option<sts2_core::card_afflictions::CardAfflictionKind>,
     ) -> Option<u8> {
@@ -1536,7 +1536,7 @@ impl EdgeAction {
             if card.card_id == card_id
                 && card.upgraded == upgraded
                 && card.cost == cost
-                && sts2_core::hooks::card_cost_locally_zeroed(state, card) == free
+                && locally_free(card) == free
                 && card.affliction.map(|a| a.kind) == affliction
             {
                 return u8::try_from(slot).ok();
@@ -7141,10 +7141,18 @@ impl TieCtx<'_> {
     }
 }
 
-/// Whether `card` costs nothing to play right now: cost 0, or free this
-/// turn ([`sts2_core::hooks::card_cost_locally_zeroed`]).
-fn card_is_free(state: &CombatState, card: &sts2_core::cards::Card) -> bool {
-    card.cost == 0 || sts2_core::hooks::card_cost_locally_zeroed(state, card)
+/// Whether `card` costs nothing to play right now before the global hooks:
+/// its local cost (`GetWithModifiers(Local)`) is 0. X-cost cards are not free.
+fn card_is_free(card: &sts2_core::cards::Card) -> bool {
+    card.base_cost() >= 0 && card.local_cost() <= 0
+}
+
+/// Whether a local cost modifier (free this turn, a Snecko 0, Flatten's zero,
+/// …) takes `card` to 0: the edge identity that keeps such a copy apart from
+/// an otherwise-identical copy that still costs energy. `false` for every
+/// card with no modifier, so those edges hash as they always did.
+pub(crate) fn locally_free(card: &sts2_core::cards::Card) -> bool {
+    card.cost.has_local_modifiers() && card.local_cost() <= 0
 }
 
 /// Rule 5b′ ([`TieRules::FREE_LASTING`]): whether playing `action` at
@@ -7204,15 +7212,11 @@ fn spend_is_free(state: &CombatState, card: &sts2_core::cards::Card) -> bool {
 
 /// Rule 5e ([`TieRules::UPGRADED`]): whether `better` is the upgraded copy
 /// of `base`'s card at no more energy.
-fn upgraded_copy(
-    state: &CombatState,
-    base: &sts2_core::cards::Card,
-    better: &sts2_core::cards::Card,
-) -> bool {
+fn upgraded_copy(base: &sts2_core::cards::Card, better: &sts2_core::cards::Card) -> bool {
     better.card_id == base.card_id
         && better.upgraded
         && !base.upgraded
-        && (card_is_free(state, better) || better.cost <= base.cost)
+        && (card_is_free(better) || better.local_cost() <= base.local_cost())
 }
 
 /// A potion action, in either of its two spellings.
@@ -7272,7 +7276,7 @@ const TIE_RULES: [TieRule; 9] = [
         set: TieRules::FREE_PLAY,
         apply: |ctx| {
             ctx.pick_ends_turn()
-                .then(|| ctx.band_card_pick(|card| card_is_free(ctx.state, card)))
+                .then(|| ctx.band_card_pick(card_is_free))
                 .flatten()
         },
     },
@@ -7286,7 +7290,7 @@ const TIE_RULES: [TieRule; 9] = [
             ctx.pick_ends_turn()
                 .then(|| {
                     ctx.band_pick(|a| {
-                        root_hand_card(ctx.state, a).is_some_and(|c| card_is_free(ctx.state, c))
+                        root_hand_card(ctx.state, a).is_some_and(card_is_free)
                             && outlasts_the_turn(ctx.state, a)
                     })
                 })
@@ -7366,8 +7370,7 @@ const TIE_RULES: [TieRule; 9] = [
             let target = pick.card_play()?.1;
             ctx.band_pick(|a| {
                 a.card_play().is_some_and(|(_, t)| t == target)
-                    && root_hand_card(ctx.state, a)
-                        .is_some_and(|c| upgraded_copy(ctx.state, base, c))
+                    && root_hand_card(ctx.state, a).is_some_and(|c| upgraded_copy(base, c))
             })
         },
     },
@@ -7726,12 +7729,31 @@ fn depth_cut_value(state: &CombatState, leaf_eval: &LeafEval, cfg: &MctsConfig) 
 pub(crate) type PlayIdentity = (
     sts2_core::cards::CardId,
     bool,
-    i8,
+    sts2_core::CardEnergyCost,
     bool,
     Option<sts2_core::card_afflictions::CardAfflictionKind>,
     Option<u8>,
     Option<u8>,
 );
+
+/// The sort order of a [`PlayIdentity`]: the tuple order, with the cost
+/// ordered by its base and then its modifiers (a card with no modifier sorts
+/// exactly as its bare base did).
+#[allow(clippy::type_complexity)]
+fn identity_order(
+    k: &PlayIdentity,
+) -> (
+    sts2_core::cards::CardId,
+    bool,
+    i8,
+    &[sts2_core::LocalCostMod],
+    bool,
+    Option<sts2_core::card_afflictions::CardAfflictionKind>,
+    Option<u8>,
+    Option<u8>,
+) {
+    (k.0, k.1, k.2.base(), k.2.mods(), k.3, k.4, k.5, k.6)
+}
 
 /// [`PlayIdentity`] of `a` at `state`; `None` for a non-`PlayCard` action
 /// or a stale hand index.
@@ -7744,7 +7766,7 @@ pub(crate) fn play_identity(state: &CombatState, a: &Action) -> Option<PlayIdent
         card.card_id,
         card.upgraded,
         card.cost,
-        sts2_core::hooks::card_cost_locally_zeroed(state, card),
+        locally_free(card),
         card.affliction.map(|a| a.kind),
         target,
         a.ally_target(),
@@ -7792,7 +7814,7 @@ pub(crate) fn canonicalize_actions(
 
     // Sort PlayCard entries by their dedup key so equal cards are
     // adjacent, then collapse runs of equal keys.
-    plays.sort_by_key(|a| a.0);
+    plays.sort_by(|a, b| identity_order(&a.0).cmp(&identity_order(&b.0)));
     plays.dedup_by(|a, b| a.0 == b.0);
 
     // Final list: PlayCard actions plus the non-PlayCard tail, then
@@ -8126,14 +8148,14 @@ mod tests {
     /// Regression (GH bug report): a `PlayCard` edge for a free-this-turn
     /// copy of a card must resolve to THAT copy, not a same-id/same-cost
     /// non-free copy earlier in hand. Repro: PowerPotion stamps a generated
-    /// Barricade `FreeThisTurn` (cost field stays 3), while a 3-cost
+    /// Barricade `FREE_THIS_TURN` (cost field stays 3), while a 3-cost
     /// Barricade already sits in hand. With 0 energy only the free copy is
     /// playable; before the fix the edge identity `(card_id, upgraded, cost)`
     /// collided and `resolve` returned the non-free copy, which the engine
     /// then rejected for lack of energy.
     #[test]
     fn edge_play_card_distinguishes_free_this_turn_copy() {
-        use sts2_core::cards::{Card, CardId, CardType, TargetType, VarKey};
+        use sts2_core::cards::{Card, CardId, CardType, TargetType};
         use sts2_core::CardUid;
 
         let mut state = CombatState::default();
@@ -8143,14 +8165,14 @@ mod tests {
             let mut c = Card {
                 uid,
                 card_id: CardId::BarricadeCard,
-                cost: 3,
+                cost: sts2_core::CardEnergyCost::new(3),
                 card_type: CardType::Power,
                 target_type: TargetType::Self_,
                 upgraded: false,
                 ..Card::pod_defaults()
             };
             if free != 0 {
-                c.set_combat_var(VarKey::FreeThisTurn, free);
+                c.set_to_free_this_turn();
             }
             c
         };
@@ -8725,7 +8747,7 @@ mod tests {
         let strike_card = Card {
             uid: strike_uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -8736,7 +8758,7 @@ mod tests {
         let curse_card = Card {
             uid: curse_uid,
             card_id: CardId::AscendersBane,
-            cost: -2,
+            cost: sts2_core::CardEnergyCost::new(-2),
             card_type: CardType::Curse,
             target_type: TargetType::None,
             upgraded: false,
@@ -9067,7 +9089,7 @@ mod tests {
         let strike_card = Card {
             uid: strike_uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -9078,7 +9100,7 @@ mod tests {
         let curse_card = Card {
             uid: curse_uid,
             card_id: CardId::AscendersBane,
-            cost: -2,
+            cost: sts2_core::CardEnergyCost::new(-2),
             card_type: CardType::Curse,
             target_type: TargetType::None,
             upgraded: false,
@@ -10268,7 +10290,7 @@ mod tests {
             state.cards.push(Card {
                 uid,
                 card_id: CardId::DefendIronclad,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: CardType::Skill,
                 target_type: TargetType::Self_,
                 upgraded: false,
@@ -10375,7 +10397,7 @@ mod tests {
                 } else {
                     CardId::DefendIronclad
                 },
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: if attack {
                     CardType::Attack
                 } else {
@@ -10414,7 +10436,7 @@ mod tests {
         let uid = state.player.hand[2];
         let card = &mut state.cards[uid.0.get() as usize - 1];
         card.card_id = if with_ftl { CardId::Ftl } else { CardId::Slice };
-        card.cost = 0;
+        card.cost = sts2_core::CardEnergyCost::new(0);
         card.card_type = CardType::Attack;
         card.target_type = TargetType::Enemy;
         card.base_damage = if with_ftl { 5 } else { 6 };
@@ -11385,9 +11407,7 @@ mod tests {
             // voluntary end-turns left a playable 0-cost card, one of
             // them a free lethal).
             if matches!(scored[idx].0, Action::EndTurn) {
-                if let Some(i) = band_pick(&|card| {
-                    card.cost == 0 || sts2_core::hooks::card_cost_locally_zeroed(state, card)
-                }) {
+                if let Some(i) = band_pick(&|card| card_is_free(card)) {
                     idx = i;
                 }
             }
@@ -11425,7 +11445,7 @@ mod tests {
                 for slot in 0..s.player.hand.len() {
                     let uid = s.player.hand[slot];
                     if rng.gen_bool(0.3) {
-                        s.cards[uid.get() as usize - 1].cost = 0;
+                        s.cards[uid.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(0);
                     }
                 }
                 let actions = legal_actions(&s).to_vec();
@@ -13287,7 +13307,7 @@ mod tests {
         let mut cards = vec![Card {
             uid: pommel_uid,
             card_id: CardId::PommelStrike,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -13301,7 +13321,7 @@ mod tests {
             cards.push(Card {
                 uid,
                 card_id,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded,

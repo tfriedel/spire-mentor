@@ -4329,7 +4329,7 @@ fn mummified_hand_frees_one_hand_card_this_turn_without_mutating_base_cost() {
     let b = push_card(&mut state, 2, crate::cards::CardType::Attack);
     for uid in [a, b] {
         let idx = uid.0.get() as usize - 1;
-        state.cards[idx].cost = 1;
+        state.cards[idx].cost = crate::CardEnergyCost::new(1);
         state.player.hand.push(uid);
     }
     // Playing a Power (uid 3) triggers the relic.
@@ -4337,7 +4337,11 @@ fn mummified_hand_frees_one_hand_card_this_turn_without_mutating_base_cost() {
     let _ = dispatch_after_card_played(&mut state, &make_card_ctx(pow));
 
     let free = |uid: crate::CardUid| {
-        state.cards[uid.0.get() as usize - 1].combat_var(crate::cards::VarKey::FreeThisTurn)
+        i32::from(
+            state.cards[uid.0.get() as usize - 1]
+                .cost
+                .has(crate::LocalCostMod::FREE_THIS_TURN),
+        )
     };
     assert_eq!(
         free(a) + free(b),
@@ -4347,8 +4351,8 @@ fn mummified_hand_frees_one_hand_card_this_turn_without_mutating_base_cost() {
     // Regression (Regent seed 1005): the freed card's stored base cost must
     // stay 1 — `SetToFreeThisTurn` is a this-turn modifier cleared at turn
     // end, NOT a permanent `card.cost = 0` that survives discard → redraw.
-    assert_eq!(state.cards[a.0.get() as usize - 1].cost, 1);
-    assert_eq!(state.cards[b.0.get() as usize - 1].cost, 1);
+    assert_eq!(state.cards[a.0.get() as usize - 1].base_cost(), 1);
+    assert_eq!(state.cards[b.0.get() as usize - 1].base_cost(), 1);
 }
 
 #[test]
@@ -4362,18 +4366,18 @@ fn mummified_hand_skips_already_free_card() {
     let fresh = push_card(&mut state, 2, crate::cards::CardType::Attack);
     for uid in [already_free, fresh] {
         let idx = uid.0.get() as usize - 1;
-        state.cards[idx].cost = 1;
+        state.cards[idx].cost = crate::CardEnergyCost::new(1);
         state.player.hand.push(uid);
     }
-    state.cards[already_free.0.get() as usize - 1]
-        .set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+    state.cards[already_free.0.get() as usize - 1].set_to_free_this_turn();
     let pow = push_card(&mut state, 3, crate::cards::CardType::Power);
     let _ = dispatch_after_card_played(&mut state, &make_card_ctx(pow));
     // C# excludes the already-free card (local cost 0), so only `fresh` can
     // be (re-)freed — the relic never wastes its pick on an already-free card.
-    assert_eq!(
-        state.cards[fresh.0.get() as usize - 1].combat_var(crate::cards::VarKey::FreeThisTurn),
-        1,
+    assert!(
+        state.cards[fresh.0.get() as usize - 1]
+            .cost
+            .has(crate::LocalCostMod::FREE_THIS_TURN),
         "the only non-free candidate is the one freed"
     );
 }
@@ -4407,7 +4411,7 @@ fn mummified_hand_skips_a_card_a_global_modifier_already_made_free() {
         (4, crate::cards::CardType::Attack),
     ] {
         let card = push_card(&mut state, uid, card_type);
-        state.cards[uid as usize - 1].cost = 1;
+        state.cards[uid as usize - 1].cost = crate::CardEnergyCost::new(1);
         state.player.hand.push(card);
         hand.push(card);
     }
@@ -4415,7 +4419,11 @@ fn mummified_hand_skips_a_card_a_global_modifier_already_made_free() {
     let _ = dispatch_after_card_played(&mut state, &make_card_ctx(pow));
 
     let free = |uid: crate::CardUid| {
-        state.cards[uid.0.get() as usize - 1].combat_var(crate::cards::VarKey::FreeThisTurn)
+        i32::from(
+            state.cards[uid.0.get() as usize - 1]
+                .cost
+                .has(crate::LocalCostMod::FREE_THIS_TURN),
+        )
     };
     assert_eq!(
         free(hand[3]),
@@ -4440,7 +4448,7 @@ fn power_cell_pulls_two_zero_cost_cards_from_draw_on_turn_one() {
     // Draw pile: three 0-cost Attacks (uids 1,2,3) + one cost-1 (uid 4).
     for raw in 1..=4 {
         let uid = push_card(&mut state, raw, crate::cards::CardType::Attack);
-        state.cards[uid.0.get() as usize - 1].cost = i8::from(raw == 4);
+        state.cards[uid.0.get() as usize - 1].cost = crate::CardEnergyCost::new(i8::from(raw == 4));
         state.player.draw.push(uid);
     }
     let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
@@ -4449,7 +4457,7 @@ fn power_cell_pulls_two_zero_cost_cards_from_draw_on_turn_one() {
     assert_eq!(state.player.hand.len(), 2, "two cards pulled to hand");
     for &uid in &state.player.hand {
         assert_eq!(
-            state.cards[uid.0.get() as usize - 1].cost,
+            state.cards[uid.0.get() as usize - 1].local_cost(),
             0,
             "only 0-cost cards are eligible"
         );
@@ -7033,7 +7041,7 @@ fn push_resolving_card(state: &mut CombatState) -> crate::CardUid {
     state.cards.push(crate::cards::Card {
         uid,
         card_id: crate::cards::CardId::StrikeIronclad,
-        cost: 1,
+        cost: crate::CardEnergyCost::new(1),
         card_type: crate::cards::CardType::Attack,
         target_type: crate::cards::TargetType::Enemy,
         upgraded: false,
@@ -8210,7 +8218,7 @@ fn fiddle_vetoes_a_card_effect_draw_on_the_players_own_turn() {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             ..crate::cards::Card::pod_defaults()
@@ -8803,7 +8811,7 @@ fn gambling_chip_round_1_opens_discard_and_draw_choice() {
     let mk_card = |uid_val: u32| crate::Card {
         uid: crate::CardUid(std::num::NonZeroU32::new(uid_val).unwrap()),
         card_id: crate::cards::CardId::StrikeIronclad,
-        cost: 1,
+        cost: crate::CardEnergyCost::new(1),
         card_type: crate::cards::CardType::Attack,
         target_type: crate::cards::TargetType::Enemy,
         upgraded: false,
@@ -8860,7 +8868,7 @@ fn gambling_chip_inert_round_2() {
     let mk_card = |uid_val: u32| crate::Card {
         uid: crate::CardUid(std::num::NonZeroU32::new(uid_val).unwrap()),
         card_id: crate::cards::CardId::StrikeIronclad,
-        cost: 1,
+        cost: crate::CardEnergyCost::new(1),
         card_type: crate::cards::CardType::Attack,
         target_type: crate::cards::TargetType::Enemy,
         upgraded: false,
@@ -8891,7 +8899,7 @@ fn gambling_chip_inert_without_relic() {
     let mk_card = |uid_val: u32| crate::Card {
         uid: crate::CardUid(std::num::NonZeroU32::new(uid_val).unwrap()),
         card_id: crate::cards::CardId::StrikeIronclad,
-        cost: 1,
+        cost: crate::CardEnergyCost::new(1),
         card_type: crate::cards::CardType::Attack,
         target_type: crate::cards::TargetType::Enemy,
         upgraded: false,
@@ -9131,7 +9139,7 @@ fn push_card_of_type(
     state.cards.push(crate::Card {
         uid,
         card_id: CardId::StrikeIronclad,
-        cost,
+        cost: crate::CardEnergyCost::new(cost),
         card_type,
         target_type: TargetType::None,
         upgraded: false,
@@ -9813,8 +9821,9 @@ fn mummified_hand_frees_favorable_hand_card() {
         .iter()
         .find(|c| c.uid == hand_card)
         .unwrap()
-        .combat_var(crate::cards::VarKey::FreeThisTurn);
-    assert_eq!(freed, 1, "the 1-cost hand card was made free this turn");
+        .cost
+        .has(crate::LocalCostMod::FREE_THIS_TURN);
+    assert!(freed, "the 1-cost hand card was made free this turn");
 }
 
 /// `MummifiedHand` multi-pool fallback: when no hand card currently
@@ -9836,7 +9845,7 @@ fn mummified_hand_full_hand_fallback_when_nothing_costs() {
         .iter_mut()
         .find(|c| c.uid == hand_card)
         .unwrap()
-        .cost = 0;
+        .cost = crate::CardEnergyCost::new(0);
     state.player.hand.push(hand_card);
     let power = push_card(&mut state, 2, crate::cards::CardType::Power);
     let result = dispatch_after_card_played(&mut state, &make_card_ctx(power));
@@ -9846,8 +9855,9 @@ fn mummified_hand_full_hand_fallback_when_nothing_costs() {
         .iter()
         .find(|c| c.uid == hand_card)
         .unwrap()
-        .combat_var(crate::cards::VarKey::FreeThisTurn);
-    assert_eq!(freed, 1, "the 0-cost card is freed via the full-hand pool");
+        .cost
+        .has(crate::LocalCostMod::FREE_THIS_TURN);
+    assert!(freed, "the 0-cost card is freed via the full-hand pool");
 }
 
 /// `Bookmark` (v0.107.1) reduces the cost of exactly ONE retained
@@ -9862,7 +9872,7 @@ fn bookmark_reduces_one_retained_card_cost() {
     let a = push_card(&mut state, 80, crate::cards::CardType::Attack);
     let b = push_card(&mut state, 81, crate::cards::CardType::Attack);
     for uid in [a, b] {
-        state.cards.iter_mut().find(|c| c.uid == uid).unwrap().cost = 2;
+        state.cards.iter_mut().find(|c| c.uid == uid).unwrap().cost = crate::CardEnergyCost::new(2);
         state.player.hand.push(uid);
     }
     after_flush_bookmark(&mut state);
@@ -9870,8 +9880,12 @@ fn bookmark_reduces_one_retained_card_cost() {
     // until-played bank. (`effective_card_cost` indexes `cards` by uid, which
     // these sparse test uids do not satisfy.)
     let local = |state: &CombatState, uid| {
-        let c = state.cards.iter().find(|c| c.uid == uid).unwrap();
-        i32::from(c.cost) - c.combat_var(crate::cards::VarKey::CostReductionUntilPlayed)
+        state
+            .cards
+            .iter()
+            .find(|c| c.uid == uid)
+            .unwrap()
+            .local_cost()
     };
     let cost_a = local(&state, a);
     let cost_b = local(&state, b);
@@ -9888,11 +9902,9 @@ fn bookmark_reduces_one_retained_card_cost() {
     // printed cost survives and playing the card retires it
     // (`AfterCardPlayedCleanup`).
     let reduced = if cost_a == 1 { a } else { b };
-    assert_eq!(
-        state.cards.iter().find(|c| c.uid == reduced).unwrap().cost,
-        2
-    );
-    state.restore_wire_cost_expiring_on_play(reduced);
+    let card = state.cards.iter_mut().find(|c| c.uid == reduced).unwrap();
+    assert_eq!(card.base_cost(), 2);
+    card.cost.after_card_played_cleanup();
     assert_eq!(local(&state, reduced), 2);
 }
 
@@ -9900,7 +9912,7 @@ fn bookmark_reduces_one_retained_card_cost() {
 /// (CombatManager.cs:1347-1349): a retained card that is free this turn still
 /// has local cost 0, so it is not eligible, and Bookmark does not roll. Rust
 /// ran it as an `AfterTurnEnd` relic after the cleanup had cleared
-/// FreeThisTurn (loadout Necrobinder v0.107.1 2032).
+/// FREE_THIS_TURN (loadout Necrobinder v0.107.1 2032).
 #[test]
 #[serial_test::serial(global_registry)]
 fn bookmark_runs_before_the_turn_cleanup_clears_free_this_turn() {
@@ -9911,8 +9923,8 @@ fn bookmark_runs_before_the_turn_cleanup_clears_free_this_turn() {
     let a = push_card(&mut state, 80, crate::cards::CardType::Attack);
     {
         let card = state.cards.iter_mut().find(|c| c.uid == a).unwrap();
-        card.cost = 2;
-        card.set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+        card.cost = crate::CardEnergyCost::new(2);
+        card.set_to_free_this_turn();
     }
     state.player.hand.push(a);
     state.player.retain_this_turn.push(a);
@@ -9921,11 +9933,11 @@ fn bookmark_runs_before_the_turn_cleanup_clears_free_this_turn() {
     let _ = crate::combat_loop::end_player_turn_phase_two(&mut state);
     let card = state.cards.iter().find(|c| c.uid == a).unwrap();
     assert!(state.player.hand.contains(&a), "retained");
-    assert_eq!(card.combat_var(crate::cards::VarKey::FreeThisTurn), 0);
-    assert_eq!(
-        card.combat_var(crate::cards::VarKey::CostReductionUntilPlayed),
-        0,
-        "the free card was not eligible"
+    assert!(!card.cost.has(crate::LocalCostMod::FREE_THIS_TURN));
+    assert!(
+        !card.cost.has_local_modifiers(),
+        "the free card was not eligible: {:?}",
+        card.cost
     );
     assert_eq!(state.run_rng.combat_card_selection, rng_before, "no roll");
 }
@@ -9982,11 +9994,16 @@ fn bookmark_noop_without_costing_retained_card() {
     let mut state = fresh_state_with_player(70, 70);
     give_player_relic(&mut state, RelicKind::Bookmark);
     let z = push_card(&mut state, 80, crate::cards::CardType::Attack);
-    state.cards.iter_mut().find(|c| c.uid == z).unwrap().cost = 0;
+    state.cards.iter_mut().find(|c| c.uid == z).unwrap().cost = crate::CardEnergyCost::new(0);
     state.player.hand.push(z);
     after_flush_bookmark(&mut state);
     assert_eq!(
-        state.cards.iter().find(|c| c.uid == z).unwrap().cost,
+        state
+            .cards
+            .iter()
+            .find(|c| c.uid == z)
+            .unwrap()
+            .local_cost(),
         0,
         "0-cost retained card untouched"
     );

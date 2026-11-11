@@ -294,9 +294,10 @@ fn on_card_drawn_stub(state: &mut CombatState, card_uid: CardUid, _from_hand_dra
     if !state.player.hand.contains(&card_uid) {
         return;
     }
-    let new_cost: i8 = state.run_rng.combat_energy_costs.next_int(0, 3) as i8;
+    let new_cost = state.run_rng.combat_energy_costs.next_int(0, 3);
     if let Some(card) = state.cards.get_mut(idx) {
-        card.cost = new_cost;
+        // `EnergyCost.SetThisCombat(NextEnergyCost())` (Slither.cs:50).
+        card.cost.set_this_combat(new_cost, false);
     }
 }
 
@@ -503,7 +504,7 @@ pub fn dispatch_before_flush(state: &mut CombatState) {
 /// (`SlumberingEssence.cs`), a `Relative`, `WhenPlayed` local modifier — so
 /// the discounts stack while the card waits and all expire when it is played
 /// (a permanent `cost -= 1` kept them through every later redraw). Banked in
-/// [`crate::cards::VarKey::CostReductionUntilPlayed`]; the evaluated cost
+/// `CardEnergyCost::add_until_played` modifier; the evaluated cost
 /// floors at 0. X-cost cards are skipped: C# `GetWithModifiers` ignores local
 /// modifiers on a `CostsX` card.
 #[inline]
@@ -828,7 +829,7 @@ mod tests {
         let mut c = Card {
             uid: uid(n),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -961,7 +962,7 @@ mod tests {
         let mut c = Card {
             uid: uid(1),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -1304,7 +1305,7 @@ mod tests {
         let mut filler = Card {
             uid: uid(2),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -1434,9 +1435,9 @@ mod tests {
     #[test]
     fn slither_on_card_drawn_rerolls_cost_in_zero_three() {
         let mut state = state_with_one_enchanted_card(EnchantmentId::Slither, 1);
-        state.cards[0].cost = 1; // starting cost
+        state.cards[0].cost = crate::CardEnergyCost::new(1); // starting cost
         dispatch_on_card_drawn(&mut state, uid(1), true);
-        let new_cost = state.cards[0].cost;
+        let new_cost = state.cards[0].local_cost();
         assert!(
             (0..=3).contains(&new_cost),
             "Slither cost roll out of range: {new_cost}"
@@ -1454,7 +1455,7 @@ mod tests {
     #[test]
     fn slumbering_essence_before_flush_ticks_cost_down() {
         let mut state = state_with_one_enchanted_card(EnchantmentId::SlumberingEssence, 1);
-        state.cards[0].cost = 3;
+        state.cards[0].cost = crate::CardEnergyCost::new(3);
         // Card must be in hand for before_flush to consider it.
         // state_with_one_enchanted_card already pushes uid(1) to hand.
         let cost = |s: &CombatState| crate::hooks::effective_card_cost(s, uid(1));
@@ -1466,8 +1467,13 @@ mod tests {
         assert_eq!(cost(&state), 0, "saturates at 0");
         dispatch_before_flush(&mut state);
         assert_eq!(cost(&state), 0, "stays at 0 — no underflow");
-        assert_eq!(state.cards[0].cost, 3, "printed cost untouched");
-        state.restore_wire_cost_expiring_on_play(uid(1));
+        assert_eq!(state.cards[0].base_cost(), 3, "printed cost untouched");
+        assert_eq!(
+            state.cards[0].local_cost(),
+            -1,
+            "3 - 4, clamped only on read"
+        );
+        state.cards[0].cost.after_card_played_cleanup();
         assert_eq!(
             cost(&state),
             3,
@@ -1479,9 +1485,9 @@ mod tests {
     #[test]
     fn slumbering_essence_skips_x_cost_cards() {
         let mut state = state_with_one_enchanted_card(EnchantmentId::SlumberingEssence, 1);
-        state.cards[0].cost = -1; // X-cost sentinel
+        state.cards[0].cost = crate::CardEnergyCost::new(-1); // X-cost sentinel
         dispatch_before_flush(&mut state);
-        assert_eq!(state.cards[0].cost, -1, "X-cost untouched");
+        assert_eq!(state.cards[0].local_cost(), -1, "X-cost untouched");
     }
 
     /// SlumberingEssence on a non-hand-resident card is inert (the
@@ -1489,10 +1495,10 @@ mod tests {
     #[test]
     fn slumbering_essence_ignores_non_hand_cards() {
         let mut state = state_with_one_enchanted_card(EnchantmentId::SlumberingEssence, 1);
-        state.cards[0].cost = 3;
+        state.cards[0].cost = crate::CardEnergyCost::new(3);
         state.player.hand.clear();
         dispatch_before_flush(&mut state);
-        assert_eq!(state.cards[0].cost, 3, "non-hand card untouched");
+        assert_eq!(state.cards[0].local_cost(), 3, "non-hand card untouched");
     }
 
     /// PerfectFit: floats marked cards to the front while preserving
@@ -1505,7 +1511,7 @@ mod tests {
             let mut c = Card {
                 uid: uid(n),
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -1633,7 +1639,7 @@ mod tests {
         let mut c = Card {
             uid: uid(1),
             card_id: CardId::DefendIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             base_block: 5,
@@ -1668,7 +1674,7 @@ mod tests {
             state.cards.push(Card {
                 uid: uid(n),
                 card_id: CardId::DefendIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Skill,
                 target_type: TargetType::Self_,
                 ..Card::pod_defaults()

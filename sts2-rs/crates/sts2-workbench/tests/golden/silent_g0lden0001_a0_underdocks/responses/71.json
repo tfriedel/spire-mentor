@@ -38,7 +38,7 @@
    "parent": null,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1715,
+   "q": 1.1722,
    "summary": {
     "enemies": [
      {
@@ -60,7 +60,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 56.2327,
+   "value_sum": 56.2646,
    "visits": 48,
    "wins": 48
   },
@@ -75,23 +75,18 @@
     5,
     6,
     7,
-    8,
-    9,
-    10,
-    11,
-    13,
-    15,
+    12,
     16,
-    18,
     19,
-    20,
-    24,
-    27,
-    31,
-    34,
-    39,
-    40,
-    46
+    21,
+    23,
+    30,
+    32,
+    37,
+    46,
+    47,
+    48,
+    49
    ],
    "edges": [
     {
@@ -108,7 +103,7 @@
      "label": "outcome #1",
      "outcome_ordinal": 1,
      "target_index": null,
-     "visits": 3
+     "visits": 4
     },
     {
      "child": 4,
@@ -124,7 +119,7 @@
      "label": "outcome #3",
      "outcome_ordinal": 3,
      "target_index": null,
-     "visits": 3
+     "visits": 4
     },
     {
      "child": 6,
@@ -132,7 +127,7 @@
      "label": "outcome #4",
      "outcome_ordinal": 4,
      "target_index": null,
-     "visits": 1
+     "visits": 4
     },
     {
      "child": 7,
@@ -140,53 +135,13 @@
      "label": "outcome #5",
      "outcome_ordinal": 5,
      "target_index": null,
-     "visits": 2
-    },
-    {
-     "child": 8,
-     "kind": "outcome",
-     "label": "outcome #6",
-     "outcome_ordinal": 6,
-     "target_index": null,
-     "visits": 3
-    },
-    {
-     "child": 9,
-     "kind": "outcome",
-     "label": "outcome #7",
-     "outcome_ordinal": 7,
-     "target_index": null,
-     "visits": 3
-    },
-    {
-     "child": 10,
-     "kind": "outcome",
-     "label": "outcome #8",
-     "outcome_ordinal": 8,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 11,
-     "kind": "outcome",
-     "label": "outcome #9",
-     "outcome_ordinal": 9,
-     "target_index": null,
      "visits": 4
     },
     {
-     "child": 13,
+     "child": 12,
      "kind": "outcome",
-     "label": "outcome #11",
-     "outcome_ordinal": 11,
-     "target_index": null,
-     "visits": 2
-    },
-    {
-     "child": 15,
-     "kind": "outcome",
-     "label": "outcome #13",
-     "outcome_ordinal": 13,
+     "label": "outcome #10",
+     "outcome_ordinal": 10,
      "target_index": null,
      "visits": 2
     },
@@ -196,15 +151,7 @@
      "label": "outcome #14",
      "outcome_ordinal": 14,
      "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 18,
-     "kind": "outcome",
-     "label": "outcome #16",
-     "outcome_ordinal": 16,
-     "target_index": null,
-     "visits": 1
+     "visits": 2
     },
     {
      "child": 19,
@@ -215,58 +162,42 @@
      "visits": 1
     },
     {
-     "child": 20,
+     "child": 21,
      "kind": "outcome",
-     "label": "outcome #18",
-     "outcome_ordinal": 18,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 24,
-     "kind": "outcome",
-     "label": "outcome #22",
-     "outcome_ordinal": 22,
+     "label": "outcome #19",
+     "outcome_ordinal": 19,
      "target_index": null,
      "visits": 2
     },
     {
-     "child": 27,
+     "child": 23,
      "kind": "outcome",
-     "label": "outcome #25",
-     "outcome_ordinal": 25,
+     "label": "outcome #21",
+     "outcome_ordinal": 21,
      "target_index": null,
-     "visits": 1
+     "visits": 4
     },
     {
-     "child": 31,
+     "child": 30,
      "kind": "outcome",
-     "label": "outcome #29",
-     "outcome_ordinal": 29,
+     "label": "outcome #28",
+     "outcome_ordinal": 28,
      "target_index": null,
      "visits": 2
     },
     {
-     "child": 34,
+     "child": 32,
      "kind": "outcome",
-     "label": "outcome #32",
-     "outcome_ordinal": 32,
+     "label": "outcome #30",
+     "outcome_ordinal": 30,
      "target_index": null,
-     "visits": 1
+     "visits": 3
     },
     {
-     "child": 39,
+     "child": 37,
      "kind": "outcome",
-     "label": "outcome #37",
-     "outcome_ordinal": 37,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 40,
-     "kind": "outcome",
-     "label": "outcome #38",
-     "outcome_ordinal": 38,
+     "label": "outcome #35",
+     "outcome_ordinal": 35,
      "target_index": null,
      "visits": 1
     },
@@ -275,6 +206,30 @@
      "kind": "outcome",
      "label": "outcome #44",
      "outcome_ordinal": 44,
+     "target_index": null,
+     "visits": 1
+    },
+    {
+     "child": 47,
+     "kind": "outcome",
+     "label": "outcome #45",
+     "outcome_ordinal": 45,
+     "target_index": null,
+     "visits": 1
+    },
+    {
+     "child": 48,
+     "kind": "outcome",
+     "label": "outcome #46",
+     "outcome_ordinal": 46,
+     "target_index": null,
+     "visits": 1
+    },
+    {
+     "child": 49,
+     "kind": "outcome",
+     "label": "outcome #47",
+     "outcome_ordinal": 47,
      "target_index": null,
      "visits": 1
     }
@@ -290,7 +245,7 @@
    "parent": 0,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1715,
+   "q": 1.1722,
    "summary": {
     "enemies": [
      {
@@ -312,7 +267,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 56.2327,
+   "value_sum": 56.2646,
    "visits": 48,
    "wins": 48
   },
@@ -321,13 +276,13 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    23,
-    38,
-    42
+    28,
+    31,
+    41
    ],
    "edges": [
     {
-     "child": 23,
+     "child": 28,
      "kind": "play",
      "label": "CloakAndDagger",
      "outcome_ordinal": null,
@@ -335,7 +290,7 @@
      "visits": 1
     },
     {
-     "child": 38,
+     "child": 31,
      "kind": "play",
      "label": "SuckerPunch",
      "outcome_ordinal": null,
@@ -343,7 +298,7 @@
      "visits": 1
     },
     {
-     "child": 42,
+     "child": 41,
      "kind": "play",
      "label": "SuckerPunch",
      "outcome_ordinal": null,
@@ -362,7 +317,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1615,
+   "q": 1.1641,
    "summary": {
     "enemies": [
      {
@@ -384,7 +339,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 4.6459,
+   "value_sum": 4.6566,
    "visits": 4,
    "wins": 4
   },
@@ -393,12 +348,21 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    29,
-    33
+    11,
+    22,
+    43
    ],
    "edges": [
     {
-     "child": 29,
+     "child": 11,
+     "kind": "play",
+     "label": "CloakAndDagger",
+     "outcome_ordinal": null,
+     "target_index": null,
+     "visits": 1
+    },
+    {
+     "child": 22,
      "kind": "play",
      "label": "SuckerPunch",
      "outcome_ordinal": null,
@@ -406,7 +370,7 @@
      "visits": 1
     },
     {
-     "child": 33,
+     "child": 43,
      "kind": "play",
      "label": "SuckerPunch",
      "outcome_ordinal": null,
@@ -425,7 +389,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1641,
+   "q": 1.1731,
    "summary": {
     "enemies": [
      {
@@ -447,57 +411,49 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 3.4924,
-   "visits": 3,
-   "wins": 3
+   "value_sum": 4.6923,
+   "visits": 4,
+   "wins": 4
   },
   {
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    14,
+    8,
+    17,
     26,
-    28,
-    41,
-    44,
-    47
+    27,
+    29,
+    45
    ],
    "edges": [
     {
-     "child": 14,
+     "child": 8,
      "kind": "play",
-     "label": "CloakAndDagger",
+     "label": "SuckerPunch",
      "outcome_ordinal": null,
-     "target_index": null,
+     "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 17,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 1,
      "visits": 1
     },
     {
      "child": 26,
      "kind": "play",
-     "label": "UltimateStrike",
-     "outcome_ordinal": null,
-     "target_index": 0,
-     "visits": 1
-    },
-    {
-     "child": 28,
-     "kind": "play",
-     "label": "UltimateStrike",
-     "outcome_ordinal": null,
-     "target_index": 1,
-     "visits": 1
-    },
-    {
-     "child": 41,
-     "kind": "play",
      "label": "Neutralize",
      "outcome_ordinal": null,
      "target_index": 0,
      "visits": 1
     },
     {
-     "child": 44,
+     "child": 27,
      "kind": "play",
      "label": "Neutralize",
      "outcome_ordinal": null,
@@ -505,11 +461,19 @@
      "visits": 1
     },
     {
-     "child": 47,
+     "child": 29,
      "kind": "play",
      "label": "StrikeSilent",
      "outcome_ordinal": null,
      "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 45,
+     "kind": "play",
+     "label": "StrikeSilent",
+     "outcome_ordinal": null,
+     "target_index": 1,
      "visits": 1
     }
    ],
@@ -524,7 +488,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1749,
+   "q": 1.1672,
    "summary": {
     "enemies": [
      {
@@ -546,7 +510,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 8.2241,
+   "value_sum": 8.1703,
    "visits": 7,
    "wins": 7
   },
@@ -555,12 +519,13 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    17,
-    32
+    14,
+    34,
+    36
    ],
    "edges": [
     {
-     "child": 17,
+     "child": 14,
      "kind": "play",
      "label": "CloakAndDagger",
      "outcome_ordinal": null,
@@ -568,11 +533,19 @@
      "visits": 1
     },
     {
-     "child": 32,
+     "child": 34,
      "kind": "play",
-     "label": "Neutralize",
+     "label": "UltimateStrike",
      "outcome_ordinal": null,
      "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 36,
+     "kind": "play",
+     "label": "UltimateStrike",
+     "outcome_ordinal": null,
+     "target_index": 1,
      "visits": 1
     }
    ],
@@ -587,7 +560,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1856,
+   "q": 1.1668,
    "summary": {
     "enemies": [
      {
@@ -609,16 +582,45 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 3.5568,
-   "visits": 3,
-   "wins": 3
+   "value_sum": 4.6673,
+   "visits": 4,
+   "wins": 4
   },
   {
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
-   "children": [],
-   "edges": [],
+   "children": [
+    13,
+    15,
+    18
+   ],
+   "edges": [
+    {
+     "child": 13,
+     "kind": "play",
+     "label": "CloakAndDagger",
+     "outcome_ordinal": null,
+     "target_index": null,
+     "visits": 1
+    },
+    {
+     "child": 15,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 18,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 1,
+     "visits": 1
+    }
+   ],
    "id": 6,
    "is_terminal": false,
    "kind": "outcome",
@@ -630,7 +632,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1499,
+   "q": 1.1802,
    "summary": {
     "enemies": [
      {
@@ -652,24 +654,42 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1499,
-   "visits": 1,
-   "wins": 1
+   "value_sum": 4.7208,
+   "visits": 4,
+   "wins": 4
   },
   {
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    49
+    9,
+    10,
+    44
    ],
    "edges": [
     {
-     "child": 49,
+     "child": 9,
      "kind": "play",
      "label": "CloakAndDagger",
      "outcome_ordinal": null,
      "target_index": null,
+     "visits": 1
+    },
+    {
+     "child": 10,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 44,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 1,
      "visits": 1
     }
    ],
@@ -684,7 +704,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1713,
+   "q": 1.182,
    "summary": {
     "enemies": [
      {
@@ -706,135 +726,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.3426,
-   "visits": 2,
-   "wins": 2
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [
-    21,
-    45
-   ],
-   "edges": [
-    {
-     "child": 21,
-     "kind": "play",
-     "label": "CloakAndDagger",
-     "outcome_ordinal": null,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 45,
-     "kind": "play",
-     "label": "Neutralize",
-     "outcome_ordinal": null,
-     "target_index": 0,
-     "visits": 1
-    }
-   ],
-   "id": 8,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #6",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 6,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 3.5567,
-   "visits": 3,
-   "wins": 3
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [
-    22,
-    48
-   ],
-   "edges": [
-    {
-     "child": 22,
-     "kind": "play",
-     "label": "SuckerPunch",
-     "outcome_ordinal": null,
-     "target_index": 0,
-     "visits": 1
-    },
-    {
-     "child": 48,
-     "kind": "play",
-     "label": "SuckerPunch",
-     "outcome_ordinal": null,
-     "target_index": 1,
-     "visits": 1
-    }
-   ],
-   "id": 9,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #7",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 7,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1689,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 3.5068,
-   "visits": 3,
-   "wins": 3
+   "value_sum": 4.728,
+   "visits": 4,
+   "wins": 4
   },
   {
    "chance_action": null,
@@ -842,15 +736,58 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 10,
+   "id": 8,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #8",
+   "kind": "play",
+   "label": "SuckerPunch",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 8,
-   "parent": 1,
+   "outcome_ordinal": null,
+   "parent": 4,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1605,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 11,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1605,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 9,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "CloakAndDagger",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 7,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.1856,
@@ -867,8 +804,8 @@
       "uid": 3
      }
     ],
-    "energy": 3,
-    "player_block": 0,
+    "energy": 2,
+    "player_block": 4,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
@@ -883,53 +820,24 @@
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
-   "children": [
-    12,
-    30,
-    35
-   ],
-   "edges": [
-    {
-     "child": 12,
-     "kind": "play",
-     "label": "CloakAndDagger",
-     "outcome_ordinal": null,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 30,
-     "kind": "play",
-     "label": "UltimateStrike",
-     "outcome_ordinal": null,
-     "target_index": 0,
-     "visits": 1
-    },
-    {
-     "child": 35,
-     "kind": "play",
-     "label": "UltimateStrike",
-     "outcome_ordinal": null,
-     "target_index": 1,
-     "visits": 1
-    }
-   ],
-   "id": 11,
+   "children": [],
+   "edges": [],
+   "id": 10,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #9",
+   "kind": "play",
+   "label": "SuckerPunch",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 9,
-   "parent": 1,
+   "outcome_ordinal": null,
+   "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1776,
+   "q": 1.1784,
    "summary": {
     "enemies": [
      {
-      "hp": 19,
+      "hp": 11,
       "max_hp": 25,
       "uid": 2
      },
@@ -939,17 +847,17 @@
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
    },
-   "target_index": null,
+   "target_index": 0,
    "ties": 0,
-   "value_sum": 4.7102,
-   "visits": 4,
-   "wins": 4
+   "value_sum": 1.1784,
+   "visits": 1,
+   "wins": 1
   },
   {
    "chance_action": null,
@@ -957,7 +865,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 12,
+   "id": 11,
    "is_terminal": false,
    "kind": "play",
    "label": "CloakAndDagger",
@@ -965,7 +873,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 11,
+   "parent": 3,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.1606,
@@ -999,30 +907,30 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    37
+    42
    ],
    "edges": [
     {
-     "child": 37,
+     "child": 42,
      "kind": "play",
-     "label": "UltimateStrike",
+     "label": "CloakAndDagger",
      "outcome_ordinal": null,
-     "target_index": 0,
+     "target_index": null,
      "visits": 1
     }
    ],
-   "id": 13,
+   "id": 12,
    "is_terminal": false,
    "kind": "outcome",
-   "label": "outcome #11",
+   "label": "outcome #10",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 11,
+   "outcome_ordinal": 10,
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1641,
+   "q": 1.1748,
    "summary": {
     "enemies": [
      {
@@ -1044,9 +952,52 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.3283,
+   "value_sum": 2.3496,
    "visits": 2,
    "wins": 2
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 13,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "CloakAndDagger",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 6,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.182,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 4,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 1.182,
+   "visits": 1,
+   "wins": 1
   },
   {
    "chance_action": null,
@@ -1062,7 +1013,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 4,
+   "parent": 5,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.1606,
@@ -1095,35 +1046,24 @@
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
-   "children": [
-    36
-   ],
-   "edges": [
-    {
-     "child": 36,
-     "kind": "play",
-     "label": "CloakAndDagger",
-     "outcome_ordinal": null,
-     "target_index": null,
-     "visits": 1
-    }
-   ],
+   "children": [],
+   "edges": [],
    "id": 15,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #13",
+   "kind": "play",
+   "label": "SuckerPunch",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 13,
-   "parent": 1,
+   "outcome_ordinal": null,
+   "parent": 6,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1749,
+   "q": 1.182,
    "summary": {
     "enemies": [
      {
-      "hp": 19,
+      "hp": 11,
       "max_hp": 25,
       "uid": 2
      },
@@ -1133,24 +1073,35 @@
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
    },
-   "target_index": null,
+   "target_index": 0,
    "ties": 0,
-   "value_sum": 2.3497,
-   "visits": 2,
-   "wins": 2
+   "value_sum": 1.182,
+   "visits": 1,
+   "wins": 1
   },
   {
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
-   "children": [],
-   "edges": [],
+   "children": [
+    20
+   ],
+   "edges": [
+    {
+     "child": 20,
+     "kind": "play",
+     "label": "CloakAndDagger",
+     "outcome_ordinal": null,
+     "target_index": null,
+     "visits": 1
+    }
+   ],
    "id": 16,
    "is_terminal": false,
    "kind": "outcome",
@@ -1162,7 +1113,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1641,
+   "q": 1.1516,
    "summary": {
     "enemies": [
      {
@@ -1184,9 +1135,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1641,
-   "visits": 1,
-   "wins": 1
+   "value_sum": 2.3033,
+   "visits": 2,
+   "wins": 2
   },
   {
    "chance_action": null,
@@ -1197,15 +1148,15 @@
    "id": 17,
    "is_terminal": false,
    "kind": "play",
-   "label": "CloakAndDagger",
+   "label": "SuckerPunch",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 5,
+   "parent": 4,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1856,
+   "q": 1.182,
    "summary": {
     "enemies": [
      {
@@ -1214,20 +1165,20 @@
       "uid": 2
      },
      {
-      "hp": 27,
+      "hp": 19,
       "max_hp": 27,
       "uid": 3
      }
     ],
     "energy": 2,
-    "player_block": 4,
+    "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
    },
-   "target_index": null,
+   "target_index": 1,
    "ties": 0,
-   "value_sum": 1.1856,
+   "value_sum": 1.182,
    "visits": 1,
    "wins": 1
   },
@@ -1239,16 +1190,16 @@
    "edges": [],
    "id": 18,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #16",
+   "kind": "play",
+   "label": "SuckerPunch",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 16,
-   "parent": 1,
+   "outcome_ordinal": null,
+   "parent": 6,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1712,
+   "q": 1.1748,
    "summary": {
     "enemies": [
      {
@@ -1257,20 +1208,20 @@
       "uid": 2
      },
      {
-      "hp": 27,
+      "hp": 19,
       "max_hp": 27,
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
    },
-   "target_index": null,
+   "target_index": 1,
    "ties": 0,
-   "value_sum": 1.1712,
+   "value_sum": 1.1748,
    "visits": 1,
    "wins": 1
   },
@@ -1291,7 +1242,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1463,
+   "q": 1.1749,
    "summary": {
     "enemies": [
      {
@@ -1313,7 +1264,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1463,
+   "value_sum": 1.1749,
    "visits": 1,
    "wins": 1
   },
@@ -1325,59 +1276,16 @@
    "edges": [],
    "id": 20,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #18",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 18,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1641,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1641,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 21,
-   "is_terminal": false,
    "kind": "play",
    "label": "CloakAndDagger",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 8,
+   "parent": 16,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1856,
+   "q": 1.1463,
    "summary": {
     "enemies": [
      {
@@ -1399,9 +1307,63 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1856,
+   "value_sum": 1.1463,
    "visits": 1,
    "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [
+    35
+   ],
+   "edges": [
+    {
+     "child": 35,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 0,
+     "visits": 1
+    }
+   ],
+   "id": 21,
+   "is_terminal": false,
+   "kind": "outcome",
+   "label": "outcome #19",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": 19,
+   "parent": 1,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 3,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 2.3712,
+   "visits": 2,
+   "wins": 2
   },
   {
    "chance_action": null,
@@ -1417,10 +1379,10 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 9,
+   "parent": 3,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1641,
+   "q": 1.1606,
    "summary": {
     "enemies": [
      {
@@ -1442,50 +1404,7 @@
    },
    "target_index": 0,
    "ties": 0,
-   "value_sum": 1.1641,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 23,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "CloakAndDagger",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 2,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1677,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 4,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1677,
+   "value_sum": 1.1606,
    "visits": 1,
    "wins": 1
   },
@@ -1494,30 +1413,48 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    25
+    24,
+    25,
+    39
    ],
    "edges": [
     {
-     "child": 25,
+     "child": 24,
      "kind": "play",
      "label": "CloakAndDagger",
      "outcome_ordinal": null,
      "target_index": null,
      "visits": 1
+    },
+    {
+     "child": 25,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 39,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 1,
+     "visits": 1
     }
    ],
-   "id": 24,
+   "id": 23,
    "is_terminal": false,
    "kind": "outcome",
-   "label": "outcome #22",
+   "label": "outcome #21",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 22,
+   "outcome_ordinal": 21,
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1606,
+   "q": 1.1695,
    "summary": {
     "enemies": [
      {
@@ -1539,9 +1476,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.3211,
-   "visits": 2,
-   "wins": 2
+   "value_sum": 4.678,
+   "visits": 4,
+   "wins": 4
   },
   {
    "chance_action": null,
@@ -1549,7 +1486,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 25,
+   "id": 24,
    "is_terminal": false,
    "kind": "play",
    "label": "CloakAndDagger",
@@ -1557,10 +1494,10 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 24,
+   "parent": 23,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1606,
+   "q": 1.157,
    "summary": {
     "enemies": [
      {
@@ -1582,7 +1519,50 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1606,
+   "value_sum": 1.157,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 25,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 23,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1677,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 11,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1677,
    "visits": 1,
    "wins": 1
   },
@@ -1595,7 +1575,7 @@
    "id": 26,
    "is_terminal": false,
    "kind": "play",
-   "label": "UltimateStrike",
+   "label": "Neutralize",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
@@ -1603,11 +1583,11 @@
    "parent": 4,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1856,
+   "q": 1.1534,
    "summary": {
     "enemies": [
      {
-      "hp": 5,
+      "hp": 16,
       "max_hp": 25,
       "uid": 2
      },
@@ -1617,7 +1597,7 @@
       "uid": 3
      }
     ],
-    "energy": 2,
+    "energy": 3,
     "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
@@ -1625,7 +1605,7 @@
    },
    "target_index": 0,
    "ties": 0,
-   "value_sum": 1.1856,
+   "value_sum": 1.1534,
    "visits": 1,
    "wins": 1
   },
@@ -1637,619 +1617,6 @@
    "edges": [],
    "id": 27,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #25",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 25,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1677,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1677,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 28,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "UltimateStrike",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 4,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 13,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 1,
-   "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 29,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "SuckerPunch",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 3,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1606,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 11,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 0,
-   "ties": 0,
-   "value_sum": 1.1606,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 30,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "UltimateStrike",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 11,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 5,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 0,
-   "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [
-    43
-   ],
-   "edges": [
-    {
-     "child": 43,
-     "kind": "play",
-     "label": "CloakAndDagger",
-     "outcome_ordinal": null,
-     "target_index": null,
-     "visits": 1
-    }
-   ],
-   "id": 31,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #29",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 29,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1677,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 2.3354,
-   "visits": 2,
-   "wins": 2
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 32,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "Neutralize",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 5,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 16,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 0,
-   "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 33,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "SuckerPunch",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 3,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1749,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 19,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 1,
-   "ties": 0,
-   "value_sum": 1.1749,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 34,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #32",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 32,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 35,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "UltimateStrike",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 11,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1784,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 13,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 1,
-   "ties": 0,
-   "value_sum": 1.1784,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 36,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "CloakAndDagger",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 15,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1749,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 4,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1749,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 37,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "UltimateStrike",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 13,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1641,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 5,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 0,
-   "ties": 0,
-   "value_sum": 1.1641,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 38,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "SuckerPunch",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 2,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.157,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 11,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 0,
-   "ties": 0,
-   "value_sum": 1.157,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 39,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #37",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 37,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 40,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #38",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 38,
-   "parent": 1,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1641,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1641,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 41,
-   "is_terminal": false,
    "kind": "play",
    "label": "Neutralize",
    "losses": 0,
@@ -2259,136 +1626,7 @@
    "parent": 4,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1606,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 16,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 0,
-   "ties": 0,
-   "value_sum": 1.1606,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 42,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "SuckerPunch",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 2,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1856,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 19,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 1,
-   "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 43,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "CloakAndDagger",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 31,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1784,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 27,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 4,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.1784,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 44,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "Neutralize",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 4,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1606,
+   "q": 1.1713,
    "summary": {
     "enemies": [
      {
@@ -2410,7 +1648,7 @@
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 1.1606,
+   "value_sum": 1.1713,
    "visits": 1,
    "wins": 1
   },
@@ -2420,22 +1658,119 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 45,
+   "id": 28,
    "is_terminal": false,
    "kind": "play",
-   "label": "Neutralize",
+   "label": "CloakAndDagger",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 8,
+   "parent": 2,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.157,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 4,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 1.157,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 29,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "StrikeSilent",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 4,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1605,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 13,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1605,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [
+    40
+   ],
+   "edges": [
+    {
+     "child": 40,
+     "kind": "play",
+     "label": "UltimateStrike",
+     "outcome_ordinal": null,
+     "target_index": 0,
+     "visits": 1
+    }
+   ],
+   "id": 30,
+   "is_terminal": false,
+   "kind": "outcome",
+   "label": "outcome #28",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": 28,
+   "parent": 1,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.1856,
    "summary": {
     "enemies": [
      {
-      "hp": 16,
+      "hp": 19,
       "max_hp": 25,
       "uid": 2
      },
@@ -2446,6 +1781,241 @@
      }
     ],
     "energy": 3,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 2.3712,
+   "visits": 2,
+   "wins": 2
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 31,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 2,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1784,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 11,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1784,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [
+    33,
+    38
+   ],
+   "edges": [
+    {
+     "child": 33,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 0,
+     "visits": 1
+    },
+    {
+     "child": 38,
+     "kind": "play",
+     "label": "SuckerPunch",
+     "outcome_ordinal": null,
+     "target_index": 1,
+     "visits": 1
+    }
+   ],
+   "id": 32,
+   "is_terminal": false,
+   "kind": "outcome",
+   "label": "outcome #30",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": 30,
+   "parent": 1,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1713,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 3,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 3.5139,
+   "visits": 3,
+   "wins": 3
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 33,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 32,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1641,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 11,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1641,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 34,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "UltimateStrike",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 5,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1606,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 5,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1606,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 35,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 21,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 11,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
     "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
@@ -2463,6 +2033,436 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
+   "id": 36,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "UltimateStrike",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 5,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 13,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 37,
+   "is_terminal": false,
+   "kind": "outcome",
+   "label": "outcome #35",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": 35,
+   "parent": 1,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1713,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 3,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 1.1713,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 38,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 32,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 19,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 39,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 23,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 19,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 40,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "UltimateStrike",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 30,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 5,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 41,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 2,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 19,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 42,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "CloakAndDagger",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 12,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1748,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 4,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 1.1748,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 43,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 3,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 19,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 44,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "SuckerPunch",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 7,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 19,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 45,
+   "is_terminal": false,
+   "kind": "play",
+   "label": "StrikeSilent",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 4,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.157,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 21,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 2,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": 1,
+   "ties": 0,
+   "value_sum": 1.157,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
    "id": 46,
    "is_terminal": false,
    "kind": "outcome",
@@ -2471,6 +2471,49 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 44,
+   "parent": 1,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.1856,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 19,
+      "max_hp": 25,
+      "uid": 2
+     },
+     {
+      "hp": 27,
+      "max_hp": 27,
+      "uid": 3
+     }
+    ],
+    "energy": 3,
+    "player_block": 0,
+    "player_hp": 52,
+    "player_max_hp": 70,
+    "round": 2
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 1.1856,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 47,
+   "is_terminal": false,
+   "kind": "outcome",
+   "label": "outcome #45",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": 45,
    "parent": 1,
    "proven_loss": false,
    "proven_win": false,
@@ -2506,22 +2549,22 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 47,
+   "id": 48,
    "is_terminal": false,
-   "kind": "play",
-   "label": "StrikeSilent",
+   "kind": "outcome",
+   "label": "outcome #46",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 4,
+   "outcome_ordinal": 46,
+   "parent": 1,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1856,
+   "q": 1.1606,
    "summary": {
     "enemies": [
      {
-      "hp": 13,
+      "hp": 19,
       "max_hp": 25,
       "uid": 2
      },
@@ -2531,58 +2574,15 @@
       "uid": 3
      }
     ],
-    "energy": 2,
+    "energy": 3,
     "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
    },
-   "target_index": 0,
+   "target_index": null,
    "ties": 0,
-   "value_sum": 1.1856,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 48,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "SuckerPunch",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 9,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.1713,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 19,
-      "max_hp": 25,
-      "uid": 2
-     },
-     {
-      "hp": 19,
-      "max_hp": 27,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 52,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": 1,
-   "ties": 0,
-   "value_sum": 1.1713,
+   "value_sum": 1.1606,
    "visits": 1,
    "wins": 1
   },
@@ -2594,13 +2594,13 @@
    "edges": [],
    "id": 49,
    "is_terminal": false,
-   "kind": "play",
-   "label": "CloakAndDagger",
+   "kind": "outcome",
+   "label": "outcome #47",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 7,
+   "outcome_ordinal": 47,
+   "parent": 1,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.1713,
@@ -2617,8 +2617,8 @@
       "uid": 3
      }
     ],
-    "energy": 2,
-    "player_block": 4,
+    "energy": 3,
+    "player_block": 0,
     "player_hp": 52,
     "player_max_hp": 70,
     "round": 2
@@ -2636,8 +2636,8 @@
   },
   {
    "action": "play",
-   "card_index": 1,
-   "target_index": 0
+   "card_index": 0,
+   "target_index": 1
   }
  ],
  "root": 0,

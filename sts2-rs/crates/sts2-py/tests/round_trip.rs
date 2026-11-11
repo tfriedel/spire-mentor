@@ -1177,12 +1177,12 @@ fn an_unknown_synthetic_id_still_degrades_rather_than_failing() {
 fn a_this_turn_discount_does_not_become_permanent() {
     // The largest divergence bucket on the 60-run realdll_v5 mirror sweep:
     // the wire carried only the EFFECTIVE cost, so `build_card` baked a
-    // transient discount into `Card.cost` and the reconstruction believed the
-    // card was cheap forever. 1135 of ~1700 card-cost divergences had the
+    // transient discount into the card's cost and the reconstruction believed
+    // the card was cheap forever. 1135 of ~1700 card-cost divergences had the
     // mirror cheaper than the game, concentrated on `end_turn` — the exact
-    // moment the real discount expires. Both halves are needed: the base cost
-    // to rebuild from, and the `combat_vars` entry that re-applies (and later
-    // expires) the discount.
+    // moment the real discount expires. `cost_mods` carries the whole model
+    // (C# `CardEnergyCost`: base plus the ordered local modifiers), so the
+    // rebuild gets the discount AND the expiry that retires it.
     Python::with_gil(|py| {
         let mut s1 = build_seeded_state(py, 3, 0).expect("seed=3 must build");
         let uid = s1.player.hand[0];
@@ -1191,11 +1191,9 @@ fn a_this_turn_discount_does_not_become_permanent() {
             .iter()
             .position(|c| c.uid == uid)
             .expect("hand card in arena");
-        let base = s1.cards[idx].cost;
+        let base = s1.cards[idx].base_cost();
         assert!(base > 0, "fixture card must cost something to discount");
-        s1.cards[idx]
-            .combat_vars
-            .push((sts2_core::cards::VarKey::FreeThisTurn, 1));
+        s1.cards[idx].set_to_free_this_turn();
 
         let dict = state_to_dict(py, &s1).expect("to_dict must succeed");
         let deck = dict
@@ -1214,8 +1212,6 @@ fn a_this_turn_discount_does_not_become_permanent() {
             .get_item(0)
             .unwrap();
         let hand = hand.downcast::<PyDict>().unwrap();
-        // The wire says both things: what it costs right now, and what the
-        // instance's own cost is underneath.
         assert_eq!(
             hand.get_item("cost_override")
                 .unwrap()
@@ -1225,34 +1221,42 @@ fn a_this_turn_discount_does_not_become_permanent() {
             0,
             "the effective cost is free this turn"
         );
+        let cost_mods = hand
+            .get_item("cost_mods")
+            .unwrap()
+            .expect("cost_mods emitted");
+        let cost_mods = cost_mods.downcast::<PyDict>().unwrap();
         assert_eq!(
-            hand.get_item("base_cost")
+            cost_mods
+                .get_item("base")
                 .unwrap()
                 .unwrap()
                 .extract::<i32>()
                 .unwrap(),
             i32::from(base),
-            "the instance's own cost is unchanged"
+            "the instance's own cost is unchanged underneath"
         );
 
         let s2 = state_from_dict(&dict).expect("from_dict on emitted dict must succeed");
         let uid2 = s2.player.hand[0];
         let c2 = s2.cards.iter().find(|c| c.uid == uid2).unwrap();
-        assert_eq!(c2.cost, base, "the rebuild must NOT bake the discount in");
+        assert_eq!(
+            c2.base_cost(),
+            base,
+            "the rebuild must NOT bake the discount in"
+        );
         assert!(
-            c2.combat_vars
-                .iter()
-                .any(|(k, v)| *k == sts2_core::cards::VarKey::FreeThisTurn && *v == 1),
+            c2.cost.has(sts2_core::LocalCostMod::FREE_THIS_TURN),
             "the discount itself must survive, so it can also expire"
         );
         state_equiv(&s1, &s2).expect("discounted state must round-trip");
     });
 }
 
-/// The C# dialects have no `combat_vars`, so they describe a this-turn
+/// The C# dialects have no `cost_mods`, so they describe a this-turn
 /// discount by its EFFECT instead: the cost now, and the cost once the turn's
-/// modifiers wear off. `build_card` banks the difference so the turn-start
-/// restore expires it on the same boundary C# `EndOfTurnCleanup` does.
+/// modifiers wear off. `build_card` rebuilds a modifier that expires on the
+/// same boundary C# `EndOfTurnCleanup` drops it.
 ///
 /// Without it a Stomp rebuilt mid-turn kept its per-Attack shave for the rest
 /// of the fight — 163 of its 175 cost divergences on the v8 mirror sweep sat
@@ -1285,25 +1289,30 @@ fn a_wire_transient_discount_expires_at_turn_start() {
         let mut state = state_from_dict(&dict).expect("rebuild must succeed");
         let uid = state.player.hand[0];
         let idx = state.cards.iter().position(|c| c.uid == uid).unwrap();
-        assert_eq!(state.cards[idx].cost, 0, "the card is cheap RIGHT NOW");
         assert_eq!(
-            state.cards[idx].combat_var(sts2_core::cards::VarKey::WireTransientCostThisTurn),
-            2,
-            "and the shave is banked so it can expire"
-        );
-
-        state.restore_wire_transient_costs_for_turn_start();
-        assert_eq!(state.cards[idx].cost, 2, "the discount expired on schedule");
-        assert_eq!(
-            state.cards[idx].combat_var(sts2_core::cards::VarKey::WireTransientCostThisTurn),
+            state.cards[idx].local_cost(),
             0,
-            "and the bank is spent, so a second turn cannot restore it twice"
+            "the card is cheap RIGHT NOW"
+        );
+        assert_eq!(state.cards[idx].base_cost(), 2, "over a base of 2");
+
+        state.cards[idx].cost.end_of_turn_cleanup();
+        assert_eq!(
+            state.cards[idx].local_cost(),
+            2,
+            "the discount expired on schedule"
+        );
+        state.cards[idx].cost.end_of_turn_cleanup();
+        assert_eq!(
+            state.cards[idx].local_cost(),
+            2,
+            "and a second turn boundary has nothing left to restore"
         );
     });
 }
 
-/// A permanent discount must NOT be banked: `persistent_cost` equal to the
-/// current cost means nothing expires, which is the overwhelmingly common
+/// A permanent discount must NOT become transient: `persistent_cost` equal to
+/// the current cost means nothing expires, which is the overwhelmingly common
 /// case and the one an Enlightenment-style "costs 1 this combat" produces.
 #[test]
 fn a_permanent_discount_is_not_banked_as_transient() {
@@ -1332,65 +1341,28 @@ fn a_permanent_discount_is_not_banked_as_transient() {
         let mut state = state_from_dict(&dict).expect("rebuild must succeed");
         let uid = state.player.hand[0];
         let idx = state.cards.iter().position(|c| c.uid == uid).unwrap();
-        state.restore_wire_transient_costs_for_turn_start();
+        state.cards[idx].cost.end_of_turn_cleanup();
         assert_eq!(
-            state.cards[idx].cost, 1,
+            state.cards[idx].local_cost(),
+            1,
             "a discount that outlives the turn must survive the turn boundary"
-        );
-    });
-}
-
-/// The engine's own per-effect banks and `persistent_cost` describe the same
-/// shave two different ways. A producer sending both would have it restored
-/// twice, so the rebuild refuses rather than picking one.
-#[test]
-fn both_cost_representations_at_once_is_a_schema_error() {
-    Python::with_gil(|py| {
-        let dict = make_seeded_fixture(py, 3, 0).expect("seed=3 fixture");
-        let deck = dict
-            .get_item("deck")
-            .unwrap()
-            .unwrap()
-            .downcast::<PyDict>()
-            .unwrap()
-            .clone();
-        let hand = deck
-            .get_item("hand")
-            .unwrap()
-            .unwrap()
-            .downcast::<PyList>()
-            .unwrap()
-            .clone();
-        let card = hand.get_item(0).unwrap();
-        let card = card.downcast::<PyDict>().unwrap();
-        card.set_item("base_cost", 0).unwrap();
-        card.set_item("persistent_cost", 3).unwrap();
-        let cv = PyDict::new(py);
-        cv.set_item("stomp_cost_reduction_this_turn", 3).unwrap();
-        card.set_item("combat_vars", cv).unwrap();
-
-        let err = state_from_dict(&dict).expect_err("two representations must be refused");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("stomp_cost_reduction_this_turn") && msg.contains("persistent_cost"),
-            "the error must name both representations, got: {msg}"
         );
     });
 }
 
 /// Two live banks without `stable_cost` is a schema error, not a default.
 ///
-/// `rebank_wire_cost_after_edge` recomputes the surviving bank against
-/// `WireCostStable`, read back through a `combat_var` accessor that DEFAULTS TO
-/// 0 — so an absent `stable_cost` is indistinguishable from a real zero, and
-/// the second edge drives the card's cost to `0 - cost`. Silent corruption, not
-/// degradation.
+/// With both `persistent_cost` and `played_cost` live, how much of the shave
+/// survives BOTH edges is not derivable from the pair (one `EndOfTurn |
+/// WhenPlayed` modifier and two independent ones fold alike), and the rebuild
+/// needs it as the base of the cost model. Guessing would silently corrupt the
+/// cost after the second edge.
 ///
 /// The refusal is scoped to exactly that reach: `persistent_cost` alone is the
-/// pre-v16 dialect, only ever lights ONE bank, and `rebank` early-returns on
-/// the zero one — so `stable_cost` is never read and the older wire must keep
-/// working. Both halves are asserted here, because a gate that also rejected
-/// the safe case would be a silent compatibility break.
+/// pre-v16 dialect (nothing expires on play, so the stable cost is the
+/// persistent one) and the older wire must keep working. Both halves are
+/// asserted here, because a gate that also rejected the safe case would be a
+/// silent compatibility break.
 #[test]
 fn two_cost_banks_without_the_stable_cost_are_refused() {
     Python::with_gil(|py| {
@@ -1422,7 +1394,7 @@ fn two_cost_banks_without_the_stable_cost_are_refused() {
             .expect_err("two banks with no `stable_cost` must be refused");
         let msg = err.to_string();
         assert!(
-            msg.contains("stable_cost") && msg.contains("0 - cost"),
+            msg.contains("stable_cost") && msg.contains("not derivable"),
             "the error must name the missing field and what it would do, got: {msg}"
         );
 
@@ -2174,7 +2146,7 @@ fn cost_fixture(
 /// "This turn" really means "this turn OR until played", so the discount has
 /// to die at whichever edge arrives first — and exactly once.
 ///
-/// The two shapes below arrive as the SAME pair of banks (1, 1) and must be
+/// The two shapes below arrive as the SAME pair of folds (1, 1) and must be
 /// treated differently, which is why the wire carries the after-both-edges
 /// cost as well. Without it the shared modifier gets restored twice.
 #[test]
@@ -2183,58 +2155,69 @@ fn a_this_turn_discount_dies_at_whichever_edge_comes_first() {
         // ONE `EndOfTurn | WhenPlayed` modifier: 1 -> 0, and both edges
         // describe the same single shave.
         let (mut s, i) = cost_fixture(py, 0, 1, 1, 1);
-        let uid = s.cards[i].uid;
-        s.restore_wire_cost_expiring_on_play(uid);
-        assert_eq!(s.cards[i].cost, 1, "playing it retires the whole discount");
-        s.restore_wire_transient_costs_for_turn_start();
+        s.cards[i].cost.after_card_played_cleanup();
         assert_eq!(
-            s.cards[i].cost, 1,
+            s.cards[i].local_cost(),
+            1,
+            "playing it retires the whole discount"
+        );
+        s.cards[i].cost.end_of_turn_cleanup();
+        assert_eq!(
+            s.cards[i].local_cost(),
+            1,
             "and the turn boundary must NOT restore the same shave a second time"
         );
 
         // The mirror image: the turn ends first.
         let (mut s, i) = cost_fixture(py, 0, 1, 1, 1);
-        let uid = s.cards[i].uid;
-        s.restore_wire_transient_costs_for_turn_start();
-        assert_eq!(s.cards[i].cost, 1);
-        s.restore_wire_cost_expiring_on_play(uid);
-        assert_eq!(s.cards[i].cost, 1, "same shave, still restored once");
+        s.cards[i].cost.end_of_turn_cleanup();
+        assert_eq!(s.cards[i].local_cost(), 1);
+        s.cards[i].cost.after_card_played_cleanup();
+        assert_eq!(
+            s.cards[i].local_cost(),
+            1,
+            "same shave, still restored once"
+        );
 
         // TWO independent modifiers on a base-3 card (one EndOfTurn, one
-        // WhenPlayed): 3 -> 1. Identical banks, but each edge owns half.
+        // WhenPlayed): 3 -> 1. Identical folds, but each edge owns half.
         let (mut s, i) = cost_fixture(py, 1, 2, 2, 3);
-        let uid = s.cards[i].uid;
-        s.restore_wire_cost_expiring_on_play(uid);
-        assert_eq!(s.cards[i].cost, 2, "playing it retires only its own half");
-        s.restore_wire_transient_costs_for_turn_start();
-        assert_eq!(s.cards[i].cost, 3, "the turn boundary retires the other");
+        s.cards[i].cost.after_card_played_cleanup();
+        assert_eq!(
+            s.cards[i].local_cost(),
+            2,
+            "playing it retires only its own half"
+        );
+        s.cards[i].cost.end_of_turn_cleanup();
+        assert_eq!(
+            s.cards[i].local_cost(),
+            3,
+            "the turn boundary retires the other"
+        );
     });
 }
 
 /// The free riders are `WhenPlayed`-flagged too: C# `SetToFreeThisTurn` is
-/// `EnergyCost.SetThisTurnOrUntilPlayed(0)` and `FreeUntilPlayed` is
+/// `EnergyCost.SetThisTurnOrUntilPlayed(0)` and `SetUntilPlayed(0)` is
 /// `SetUntilPlayed(0)`, both dropped by `AfterCardPlayedCleanup` the moment
 /// the card is played. Left to die only at end-of-turn cleanup, a generated
 /// free card kept reading cost 0 from the exhaust pile after its play — 71
-/// `$.deck.exhaust_pile` cost_override desyncs on the v28wr sweep, exposed
-/// the day `transplant_hidden` started carrying per-card `combat_vars`.
+/// `$.deck.exhaust_pile` cost_override desyncs on the v28wr sweep.
 #[test]
 fn the_free_riders_die_at_the_played_edge() {
-    use sts2_core::cards::VarKey;
     Python::with_gil(|py| {
         let (mut s, i) = cost_fixture(py, 1, 1, 1, 1);
-        let uid = s.cards[i].uid;
-        s.cards[i].set_combat_var(VarKey::FreeThisTurn, 1);
-        s.cards[i].set_combat_var(VarKey::FreeUntilPlayed, 1);
-        s.restore_wire_cost_expiring_on_play(uid);
-        assert_eq!(
-            s.cards[i].combat_var(VarKey::FreeThisTurn),
-            0,
+        s.cards[i].set_to_free_this_turn();
+        s.cards[i].cost.set_until_played(0, false);
+        assert_eq!(s.cards[i].local_cost(), 0);
+        s.cards[i].cost.after_card_played_cleanup();
+        assert!(
+            !s.cards[i].cost.has(sts2_core::LocalCostMod::FREE_THIS_TURN),
             "SetThisTurnOrUntilPlayed(0) retires when played"
         );
         assert_eq!(
-            s.cards[i].combat_var(VarKey::FreeUntilPlayed),
-            0,
+            s.cards[i].local_cost(),
+            1,
             "SetUntilPlayed(0) retires when played"
         );
     });

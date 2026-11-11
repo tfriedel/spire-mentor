@@ -238,40 +238,32 @@ fn philosophers_stone_strengthens_mid_combat_summons() {
 /// freshly generated card (no bank) still gets the back-fill.
 #[test]
 fn stomp_and_pinpoint_clones_keep_their_cloned_cost() {
-    use sts2_core::cards::{CardType, VarKey};
+    use sts2_core::cards::CardType;
     let cases = [
-        (
-            CardId::Stomp,
-            VarKey::StompCostReductionThisTurn,
-            CardType::Attack,
-        ),
-        (
-            CardId::Pinpoint,
-            VarKey::PinpointCostReductionThisTurn,
-            CardType::Skill,
-        ),
+        (CardId::Stomp, CardType::Attack),
+        (CardId::Pinpoint, CardType::Skill),
     ];
     for v in BOTH {
-        for (id, bank, ty) in cases {
+        for (id, ty) in cases {
             let mut state = fresh(v, CharacterId::Ironclad);
             let _ = add_enemy(&mut state, 2, 50);
             let orig = new_card(&mut state, id, false);
-            let base = state.cards[orig.0.get() as usize - 1].cost;
+            let base = state.cards[orig.0.get() as usize - 1].local_cost();
             state.player.hand.push(orig);
             state.player.cards_played_this_turn[ty.index()] = 2;
             // The in-hand original was shaved by 2 by those plays.
-            let c = &mut state.cards[orig.0.get() as usize - 1];
-            c.cost = base - 2;
-            c.set_combat_var(bank, 2);
+            state.cards[orig.0.get() as usize - 1]
+                .cost
+                .add_this_turn(-2);
 
             let clone = state.cards[orig.0.get() as usize - 1].create_clone();
             let uid = sts2_core::card_effects::spawn_card_into_hand(&mut state, clone);
-            let cost = state.cards[uid.0.get() as usize - 1].cost;
+            let cost = state.cards[uid.0.get() as usize - 1].local_cost();
             assert_eq!(cost, base - 2, "{v:?} {id:?} clone");
 
             let fresh_card = card_pod_for(id, false, v).expect("spec");
             let uid = sts2_core::card_effects::spawn_card_into_hand(&mut state, fresh_card);
-            let cost = state.cards[uid.0.get() as usize - 1].cost;
+            let cost = state.cards[uid.0.get() as usize - 1].local_cost();
             assert_eq!(cost, base - 2, "{v:?} {id:?} fresh");
         }
     }
@@ -281,8 +273,8 @@ fn stomp_and_pinpoint_clones_keep_their_cloned_cost() {
 
 /// Stomp played as the turn's 3rd Attack under Juggling(1); returns the cost
 /// of the Juggling copy in hand.
-fn juggled_stomp_copy_cost(v: GameVersion) -> i8 {
-    use sts2_core::cards::{CardType, VarKey};
+fn juggled_stomp_copy_cost(v: GameVersion) -> i32 {
+    use sts2_core::cards::CardType;
     let mut state = fresh(v, CharacterId::Ironclad);
     let _ = add_enemy(&mut state, 2, 100);
     let p = state.player.creature_uid.expect("player");
@@ -297,12 +289,10 @@ fn juggled_stomp_copy_cost(v: GameVersion) -> i8 {
     state.player.cards_played_this_turn[CardType::Attack.index()] = 2;
     let i = push_hand(&mut state, CardId::Stomp, false);
     // Two Attacks already shaved it 3 -> 1.
-    let c = &mut state.cards[0];
-    c.cost = 1;
-    c.set_combat_var(VarKey::StompCostReductionThisTurn, 2);
+    state.cards[0].cost.add_this_turn(-2);
     let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
     assert_eq!(state.player.hand.len(), 1, "{v:?}: the Juggling copy");
-    state.cards[state.player.hand[0].0.get() as usize - 1].cost
+    state.cards[state.player.hand[0].0.get() as usize - 1].local_cost()
 }
 
 /// v0.111 `JugglingPower.cs:36` clones in `BeforeCardPlayed`; the hook's
@@ -630,8 +620,7 @@ fn juggling_copy_of_an_auto_played_stomp_keeps_its_cloned_cost() {
     let stomp = new_card(&mut state, CardId::Stomp, false);
     {
         let card = &mut state.cards[stomp.0.get() as usize - 1];
-        card.cost = 1;
-        card.set_combat_var(sts2_core::cards::VarKey::StompCostReductionThisTurn, 2);
+        card.cost.add_this_turn(-2);
     }
     state.player.draw.push(stomp);
 
@@ -645,7 +634,7 @@ fn juggling_copy_of_an_auto_played_stomp_keeps_its_cloned_cost() {
         .filter(|c| c.card_id == CardId::Stomp)
         .collect();
     assert_eq!(copies.len(), 1, "Juggling copied the 3rd Attack");
-    assert_eq!(copies[0].cost, 1, "the copy keeps its cloned cost");
+    assert_eq!(copies[0].local_cost(), 1, "the copy keeps its cloned cost");
 }
 
 /// Scrape filters the cards `CardPileCmd.Draw` returned. Hellraiser
@@ -726,7 +715,7 @@ fn borrowed_time_leaves_a_free_banshees_cry_shaved_after_it_free() {
     let mut state = fresh(V111, CharacterId::Necrobinder);
     let cry = new_card(&mut state, CardId::BansheesCry, false);
     state.player.hand.push(cry);
-    state.cards[cry.0.get() as usize - 1].set_combat_var(sts2_core::cards::VarKey::FreeThisTurn, 1);
+    state.cards[cry.0.get() as usize - 1].set_to_free_this_turn();
     let player = state.player.creature_uid.expect("player");
     sts2_core::card_effects::apply_power_to_creature(
         &mut state,
@@ -755,9 +744,7 @@ fn scrape_keeps_a_stomp_shaved_past_zero() {
     let stomp = new_card(&mut state, CardId::Stomp, false);
     {
         let card = &mut state.cards[stomp.0.get() as usize - 1];
-        card.cost = 0;
-        card.set_combat_var(sts2_core::cards::VarKey::StompCostReductionThisTurn, 3);
-        card.set_combat_var(sts2_core::cards::VarKey::CostDebtThisTurn, 1);
+        card.cost.add_this_turn(-4);
     }
     state.player.draw.push(stomp);
     fill_draw(&mut state, 3);
@@ -953,7 +940,7 @@ fn calamity_stomp_counts_the_attack_that_generated_it() {
             }) else {
                 continue;
             };
-            let cost = state.cards[stomp.0.get() as usize - 1].cost;
+            let cost = state.cards[stomp.0.get() as usize - 1].local_cost();
             assert_eq!(cost, 2, "{v:?} seed {seed}: Stomp 3 - 1 Attack played");
             found = true;
             break;
@@ -993,7 +980,7 @@ fn banshees_cry_reads_keywords_after_razor_tooth_upgrades_the_play() {
             1,
             "{v:?} {played:?}"
         );
-        c.cost
+        c.local_cost()
     };
     for v in BOTH {
         assert_eq!(cry_cost_after(v, CardId::Apparition, true), 9, "{v:?}");

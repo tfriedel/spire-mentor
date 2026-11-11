@@ -181,7 +181,7 @@ fn observation(c: &CombatState) -> (u64, Vec<String>, String) {
         .iter()
         .map(|u| {
             let card = sts2_core::card_by_uid(&c.cards, *u).expect("hand card");
-            format!("{:?}/{}/{}", card.card_id, card.upgraded, card.cost)
+            format!("{:?}/{}/{}", card.card_id, card.upgraded, card.local_cost())
         })
         .collect();
     (

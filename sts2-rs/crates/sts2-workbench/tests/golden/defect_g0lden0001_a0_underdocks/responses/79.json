@@ -1,4 +1,22 @@
 {
- "name": "golden mid",
- "step_count": 55
+ "saves": [
+  {
+   "act1": "underdocks",
+   "ascension": 0,
+   "backend": "rust",
+   "character": "Defect",
+   "name": "golden mid",
+   "progress": {
+    "act": 1,
+    "floor": 7,
+    "hp": 63,
+    "max_hp": 75
+   },
+   "run_mode": false,
+   "saved_at": "2026-01-01T00:00:00Z",
+   "schema_version": 1,
+   "seed": "G0LDEN0001",
+   "step_count": 55
+  }
+ ]
 }

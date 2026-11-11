@@ -1269,34 +1269,36 @@
      "actor": "The Ironclad",
      "actor_side": "player",
      "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
+     "amount": 6,
+     "blocked": 0,
+     "hp_after": 19,
+     "kind": "damage",
+     "noun": null,
      "round": 2,
      "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
+     "source": "Strike",
+     "source_card": "STRIKE_IRONCLAD",
      "source_kind": "card",
      "source_monster": null,
      "source_move_id": null,
      "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
+     "target": "Shrinker Beetle",
+     "target_side": "enemy",
+     "target_uid": 2,
+     "text": "The Ironclad dealt 6 damage to Shrinker Beetle using Strike.",
+     "verb": "dealt"
     }
    ],
    "decision": "combat_play",
    "details": [
-    "Play Defend",
-    "You Block 5→10"
+    "Play Strike",
+    "Shrinker Beetle HP 25→19 (−6)"
    ],
    "error": false,
    "floor": 3,
    "id": 27,
    "idx": 27,
-   "label": "Play Defend",
+   "label": "Play Strike → Shrinker Beetle",
    "parent_id": 26,
    "turn": 2,
    "value": null
@@ -1332,9 +1334,9 @@
      "actor": "Shrinker Beetle",
      "actor_side": "enemy",
      "actor_uid": 2,
-     "amount": 0,
-     "blocked": 7,
-     "hp_after": 70,
+     "amount": 2,
+     "blocked": 5,
+     "hp_after": 68,
      "kind": "damage",
      "noun": null,
      "round": 2,
@@ -1348,13 +1350,14 @@
      "target": "The Ironclad",
      "target_side": "player",
      "target_uid": null,
-     "text": "Shrinker Beetle dealt 0 damage to The Ironclad using Chomp.",
+     "text": "Shrinker Beetle dealt 2 damage to The Ironclad using Chomp.",
      "verb": "dealt"
     }
    ],
    "decision": "combat_play",
    "details": [
-    "You Block 10→0",
+    "You HP 70→68 (−2)",
+    "You Block 5→0",
     "Shrinker Beetle −Vulnerable"
    ],
    "error": false,
@@ -1378,7 +1381,7 @@
      "actor_uid": null,
      "amount": 5,
      "blocked": 0,
-     "hp_after": 20,
+     "hp_after": 14,
      "kind": "damage",
      "noun": null,
      "round": 3,
@@ -1420,7 +1423,7 @@
    "decision": "combat_play",
    "details": [
     "Play Bash",
-    "Shrinker Beetle HP 25→20 (−5)",
+    "Shrinker Beetle HP 19→14 (−5)",
     "Shrinker Beetle +2 Vulnerable"
    ],
    "error": false,
@@ -1444,7 +1447,7 @@
      "actor_uid": null,
      "amount": 6,
      "blocked": 0,
-     "hp_after": 14,
+     "hp_after": 8,
      "kind": "damage",
      "noun": null,
      "round": 3,
@@ -1465,7 +1468,7 @@
    "decision": "combat_play",
    "details": [
     "Play Strike",
-    "Shrinker Beetle HP 20→14 (−6)"
+    "Shrinker Beetle HP 14→8 (−6)"
    ],
    "error": false,
    "floor": 3,
@@ -1509,7 +1512,7 @@
      "actor_uid": 2,
      "amount": 13,
      "blocked": 0,
-     "hp_after": 57,
+     "hp_after": 55,
      "kind": "damage",
      "noun": null,
      "round": 3,
@@ -1529,7 +1532,7 @@
    ],
    "decision": "combat_play",
    "details": [
-    "You HP 70→57 (−13)",
+    "You HP 68→55 (−13)",
     "Shrinker Beetle Vulnerable 2→1"
    ],
    "error": false,
@@ -1553,7 +1556,7 @@
      "actor_uid": null,
      "amount": 2,
      "blocked": 0,
-     "hp_after": 55,
+     "hp_after": 53,
      "kind": "damage",
      "noun": null,
      "round": 4,
@@ -1595,7 +1598,7 @@
    "decision": "combat_play",
    "details": [
     "Play Blood Wall",
-    "You HP 57→55 (−2)",
+    "You HP 55→53 (−2)",
     "You Block 0→16"
    ],
    "error": false,
@@ -1619,7 +1622,7 @@
      "actor_uid": null,
      "amount": 6,
      "blocked": 0,
-     "hp_after": 8,
+     "hp_after": 2,
      "kind": "damage",
      "noun": null,
      "round": 4,
@@ -1640,7 +1643,7 @@
    "decision": "combat_play",
    "details": [
     "Play Strike",
-    "Shrinker Beetle HP 14→8 (−6)"
+    "Shrinker Beetle HP 8→2 (−6)"
    ],
    "error": false,
    "floor": 3,
@@ -1684,7 +1687,7 @@
      "actor_uid": 2,
      "amount": 0,
      "blocked": 7,
-     "hp_after": 55,
+     "hp_after": 53,
      "kind": "damage",
      "noun": null,
      "round": 4,
@@ -1726,58 +1729,58 @@
      "actor": "The Ironclad",
      "actor_side": "player",
      "actor_uid": null,
-     "amount": 5,
+     "amount": 2,
      "blocked": 0,
-     "hp_after": 3,
+     "hp_after": 51,
      "kind": "damage",
      "noun": null,
      "round": 5,
      "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
+     "source": "Blood Wall",
+     "source_card": "BLOOD_WALL",
      "source_kind": "card",
      "source_monster": null,
      "source_move_id": null,
      "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 5 damage to Shrinker Beetle using Bash.",
+     "target": "The Ironclad",
+     "target_side": "player",
+     "target_uid": null,
+     "text": "The Ironclad dealt 2 damage to The Ironclad using Blood Wall.",
      "verb": "dealt"
     },
     {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Vulnerable",
+     "actor": "The Ironclad",
+     "actor_side": "player",
+     "actor_uid": null,
+     "amount": 16,
+     "kind": "block",
+     "noun": "Block",
      "round": 5,
      "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
+     "source": "Blood Wall",
+     "source_card": "BLOOD_WALL",
      "source_kind": "card",
      "source_monster": null,
      "source_move_id": null,
      "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Shrinker Beetle gained 2 Vulnerable.",
+     "target": null,
+     "target_side": null,
+     "target_uid": null,
+     "text": "The Ironclad gained 16 Block.",
      "verb": "gained"
     }
    ],
    "decision": "combat_play",
    "details": [
-    "Play Bash",
-    "Shrinker Beetle HP 8→3 (−5)",
-    "Shrinker Beetle +2 Vulnerable"
+    "Play Blood Wall",
+    "You HP 53→51 (−2)",
+    "You Block 0→16"
    ],
    "error": false,
    "floor": 3,
    "id": 35,
    "idx": 35,
-   "label": "Play Bash → Shrinker Beetle",
+   "label": "Play Blood Wall",
    "parent_id": 34,
    "turn": 5,
    "value": null
@@ -1792,7 +1795,7 @@
      "actor": "The Ironclad",
      "actor_side": "player",
      "actor_uid": null,
-     "amount": 6,
+     "amount": 4,
      "blocked": 0,
      "hp_after": 0,
      "kind": "damage",
@@ -1808,15 +1811,16 @@
      "target": "Shrinker Beetle",
      "target_side": "enemy",
      "target_uid": 2,
-     "text": "The Ironclad dealt 6 damage to Shrinker Beetle using Strike.",
+     "text": "The Ironclad dealt 4 damage to Shrinker Beetle using Strike.",
      "verb": "dealt"
     }
    ],
    "decision": "card_reward",
    "details": [
     "Play Strike",
-    "You HP 55→61 (+6)",
-    "Shrinker Beetle HP 3→0  ☠ defeated",
+    "You HP 51→57 (+6)",
+    "You Block 16→0",
+    "Shrinker Beetle HP 2→0  ☠ defeated",
     "You −Shrink",
     "Gold 109→119",
     "+Potion Fire Potion"
@@ -1828,7 +1832,7 @@
    "label": "Play Strike → Shrinker Beetle",
    "parent_id": 35,
    "turn": null,
-   "value": 0.8998
+   "value": 0.9018
   },
   {
    "act": 1,
@@ -2096,7 +2100,7 @@
      "actor_uid": 2,
      "amount": 12,
      "blocked": 0,
-     "hp_after": 49,
+     "hp_after": 45,
      "kind": "damage",
      "noun": null,
      "round": 1,
@@ -2116,7 +2120,7 @@
    ],
    "decision": "combat_play",
    "details": [
-    "You HP 61→49 (−12)"
+    "You HP 57→45 (−12)"
    ],
    "error": false,
    "floor": 4,
@@ -2160,7 +2164,7 @@
    "decision": "card_reward",
    "details": [
     "Play Strike",
-    "You HP 49→55 (+6)",
+    "You HP 45→51 (+6)",
     "Nibbit HP 6→0  ☠ defeated",
     "Gold 119→130"
    ],
@@ -2171,7 +2175,7 @@
    "label": "Play Strike → Nibbit",
    "parent_id": 43,
    "turn": null,
-   "value": 0.8909
+   "value": 0.8908
   },
   {
    "act": 1,
@@ -2205,7 +2209,7 @@
    "label": "Map → (1,4)",
    "parent_id": 45,
    "turn": null,
-   "value": 0.8564
+   "value": 0.8591
   },
   {
    "act": 1,
@@ -2224,7 +2228,7 @@
    "label": "Buy Body Slam",
    "parent_id": 46,
    "turn": null,
-   "value": 0.82
+   "value": 0.8204
   },
   {
    "act": 1,
@@ -2244,7 +2248,7 @@
    "label": "Buy Vulnerable Potion",
    "parent_id": 47,
    "turn": null,
-   "value": 0.8219
+   "value": 0.8236
   },
   {
    "act": 1,
@@ -2530,7 +2534,7 @@
      "actor_uid": 3,
      "amount": 0,
      "blocked": 4,
-     "hp_after": 55,
+     "hp_after": 51,
      "kind": "damage",
      "noun": null,
      "round": 1,
@@ -2705,7 +2709,7 @@
      "actor_uid": 2,
      "amount": 7,
      "blocked": 0,
-     "hp_after": 48,
+     "hp_after": 44,
      "kind": "damage",
      "noun": null,
      "round": 2,
@@ -2767,7 +2771,7 @@
    ],
    "decision": "combat_play",
    "details": [
-    "You HP 55→48 (−7)",
+    "You HP 51→44 (−7)",
     "Shrinker Beetle Vulnerable 4→3",
     "Fuzzy Wurm Crawler +7 Strength"
    ],

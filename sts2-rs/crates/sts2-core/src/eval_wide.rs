@@ -937,7 +937,7 @@ pub fn eval_features_wide(state: &CombatState) -> [f32; WIDE_FEATURE_DIM] {
         .hand
         .iter()
         .filter_map(|uid| state.cards.iter().find(|c| c.uid == *uid))
-        .map(|c| i32::from(c.cost.max(0)))
+        .map(|c| c.local_cost().max(0))
         .sum();
     let deck_total_cost: i32 = state
         .player
@@ -945,7 +945,7 @@ pub fn eval_features_wide(state: &CombatState) -> [f32; WIDE_FEATURE_DIM] {
         .iter()
         .chain(state.player.discard.iter())
         .filter_map(|uid| state.cards.iter().find(|c| c.uid == *uid))
-        .map(|c| i32::from(c.cost.max(0)))
+        .map(|c| c.local_cost().max(0))
         .sum();
     out[84] = hand_total_cost as f32;
     out[85] = deck_total_cost as f32;

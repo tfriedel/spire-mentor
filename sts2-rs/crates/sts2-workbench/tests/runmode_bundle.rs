@@ -13,7 +13,10 @@
 //! The record of each decision is its action and the search it came from
 //! (every root action's visits and values). The searches, not the moves:
 //! these first fights are easy, and on seeds 1-8 the knobs never changed a
-//! move of one. Seed 6 is the longest of those whose searches move.
+//! move of one. Since the card cost model stopped leaving zero-valued cost
+//! keys on played cards, identical cards dedup as one draw outcome, so the
+//! widening caps bind less often: of seeds 1-16 only 12 and 13 still move
+//! the Ironclad searches (seed 6 did before). Seed 12 it is.
 //!
 //! The overrides are read when the agent is built, so the legs run in one
 //! process. `STS2_RUNAI_PRIOR_NET` is read once per process; the first combat
@@ -27,7 +30,7 @@ use sts2_workbench::runmode::RunAgent;
 
 const SIMS: u32 = 1000;
 const BOSS_SIMS: u32 = 4000;
-const SEED: i32 = 6;
+const SEED: i32 = 12;
 
 type Fight = Vec<(String, Option<Value>)>;
 

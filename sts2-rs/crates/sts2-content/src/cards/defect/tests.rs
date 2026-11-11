@@ -64,7 +64,7 @@ fn fresh_state(card_id: CardId, base_damage: i32, base_block: i32) -> (CombatSta
     state.cards.push(Card {
         uid: sts2_core::CardUid(card_uid),
         card_id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -117,10 +117,15 @@ pin_registered!(pin_momentum_strike, MomentumStrike);
 fn j0wn5_momentum_strike_sets_own_cost_to_zero() {
     install_pool();
     let (mut state, euid) = fresh_state(CardId::MomentumStrike, 10, 0);
-    assert_eq!(state.cards[0].cost, 1, "MomentumStrike base cost = 1");
+    assert_eq!(
+        state.cards[0].local_cost(),
+        1,
+        "MomentumStrike base cost = 1"
+    );
     let _ = lookup(CardId::MomentumStrike).expect("registered")(&mut state, Some(euid));
     assert_eq!(
-        state.cards[0].cost, 0,
+        state.cards[0].local_cost(),
+        0,
         "MomentumStrike sets its own cost to 0 for this combat"
     );
 }
@@ -356,7 +361,7 @@ fn play_uproar_lethal_leaves_the_pick_in_the_draw_pile() {
     state.cards.push(Card {
         uid: strike_uid,
         card_id: CardId::StrikeDefect,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -383,7 +388,7 @@ fn play_uproar_auto_plays_an_attack_from_draw_not_a_skill() {
     state.cards.push(Card {
         uid: skill_uid,
         card_id: CardId::DefendDefect,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         upgraded: false,
@@ -398,7 +403,7 @@ fn play_uproar_auto_plays_an_attack_from_draw_not_a_skill() {
     state.cards.push(Card {
         uid: strike_uid,
         card_id: CardId::StrikeDefect,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -443,7 +448,7 @@ fn scrape_v0111_discards_a_drawn_unplayable_status() {
         state.cards.push(Card {
             uid: infection,
             card_id: CardId::Infection,
-            cost: -1,
+            cost: sts2_core::CardEnergyCost::new(-1),
             card_type: CardType::Status,
             target_type: TargetType::None,
             ..Card::pod_defaults()
@@ -452,7 +457,7 @@ fn scrape_v0111_discards_a_drawn_unplayable_status() {
         state.cards.push(Card {
             uid: claw,
             card_id: CardId::Claw,
-            cost: 0,
+            cost: sts2_core::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             base_damage: 3,
@@ -503,7 +508,7 @@ fn scrape_keeps_cards_drawn_by_iteration() {
             state.cards.push(Card {
                 uid,
                 card_id: id,
-                cost: if status { -1 } else { 1 },
+                cost: sts2_core::CardEnergyCost::new(if status { -1 } else { 1 }),
                 card_type: if status {
                     CardType::Status
                 } else {
@@ -569,7 +574,7 @@ fn scrape_discard_waits_for_a_stratagem_suspended_draw() {
             state.cards.push(Card {
                 uid,
                 card_id: id,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: CardType::Skill,
                 target_type: TargetType::None,
                 ..Card::pod_defaults()
@@ -648,7 +653,7 @@ fn resumed_scrape_draw_keeps_the_card_iteration_drew() {
             state.cards.push(Card {
                 uid,
                 card_id: id,
-                cost: if status { -1 } else { 1 },
+                cost: sts2_core::CardEnergyCost::new(if status { -1 } else { 1 }),
                 card_type: if status {
                     CardType::Status
                 } else {
@@ -723,7 +728,7 @@ fn uproar_auto_played_sown_strike_gains_energy() {
     let mut strike = Card {
         uid: strike_uid,
         card_id: CardId::StrikeDefect,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         base_damage: 6,
@@ -968,7 +973,7 @@ fn scavenge_opens_exhaust_choice_then_applies_energy() {
         state.cards.push(Card {
             uid: sts2_core::CardUid(hand_uid),
             card_id: CardId::StrikeDefect,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -1021,7 +1026,7 @@ fn hologram_opens_discard_choice_at_two_plus() {
         state.cards.push(Card {
             uid: sts2_core::CardUid(uid),
             card_id: cid,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -1053,7 +1058,7 @@ fn hologram_auto_returns_lone_discard_card() {
     state.cards.push(Card {
         uid: sts2_core::CardUid(uid),
         card_id: CardId::Zap,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         upgraded: false,
@@ -1086,7 +1091,7 @@ fn push_arena_card(
     state.cards.push(Card {
         uid,
         card_id,
-        cost,
+        cost: sts2_core::CardEnergyCost::new(cost),
         card_type,
         target_type: TargetType::Self_,
         upgraded: false,
@@ -1324,7 +1329,7 @@ fn play_claw_increments_all_claws() {
     state.cards.push(Card {
         uid: sts2_core::CardUid(claw2_uid),
         card_id: CardId::Claw,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -1407,7 +1412,7 @@ fn play_claw_upgraded_increments_all_claws_by_three() {
     state.cards.push(Card {
         uid: sts2_core::CardUid(claw2_uid),
         card_id: CardId::Claw,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -2019,7 +2024,7 @@ fn gh639_trash_to_treasure_power_channels_an_orb_on_a_generated_status() {
     let void = Card {
         uid: sts2_core::CardUid(NonZeroU32::new(u32::MAX).expect("nz")),
         card_id: CardId::Void,
-        cost: -1,
+        cost: sts2_core::CardEnergyCost::new(-1),
         card_type: CardType::Status,
         target_type: TargetType::None,
         upgraded: false,
@@ -2227,7 +2232,7 @@ fn e0vm_modded_draws_and_bumps_slot_and_cost() {
     state.cards.push(Card {
         uid: draw_uid,
         card_id: CardId::Wound,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Status,
         target_type: TargetType::Self_,
         upgraded: false,
@@ -2239,7 +2244,7 @@ fn e0vm_modded_draws_and_bumps_slot_and_cost() {
 
     let played_uid = *state.player.play.last().expect("Modded was pushed");
     let played_idx = played_uid.0.get() as usize - 1;
-    let cost_before = state.cards[played_idx].cost;
+    let cost_before = state.cards[played_idx].local_cost();
     // Fresh combat belt is lazily capacity-0; C# `AddSlots` stacks on the
     // Defect base (3), so the first MODDED yields 3 + 1 = 4 (NOT 1 — the prior
     // port capped a fresh belt at 1, Defect fuzz seed 188).
@@ -2259,7 +2264,7 @@ fn e0vm_modded_draws_and_bumps_slot_and_cost() {
         "Modded on a fresh belt establishes the 3-slot Defect base + 1"
     );
     assert_eq!(
-        state.cards[played_idx].cost,
+        state.cards[played_idx].local_cost(),
         cost_before + 1,
         "Modded's persistent cost bumps by 1"
     );
@@ -2637,7 +2642,7 @@ fn compact_transform_hand_order(version: sts2_core::GameVersion) -> Vec<CardId> 
         state.cards.push(Card {
             uid,
             card_id: id,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: ty,
             target_type: TargetType::Self_,
             ..Card::pod_defaults()

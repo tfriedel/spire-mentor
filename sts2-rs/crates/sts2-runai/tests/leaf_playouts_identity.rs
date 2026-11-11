@@ -25,10 +25,10 @@
 //! visit, so it matches with or without the switches and only shows that the
 //! switches change nothing there. The in-tree proof that the off switches
 //! restore the old search is
-//! `the_off_switches_play_the_pre_layer_search_where_the_knobs_bind` (seed 6,
-//! golden key `policy_fight_seed6_pre_layer`), and
+//! `the_off_switches_play_the_pre_layer_search_where_the_knobs_bind` (seed 24,
+//! golden key `policy_fight_seed24_pre_layer`), and
 //! `the_ironclad_default_moves_the_policy_fight` pins that the shipped
-//! default moved that seed-6 fight.
+//! default moved that seed-24 fight.
 //!
 //! A comparison of `leaf_playouts: 1` against `MctsConfig::default()` could
 //! not fail: the default IS 1, so a bug in the `k = 1` path would move both
@@ -302,7 +302,7 @@ fn deployed_policy_fight_at_1000_sims_matches_the_pre_knob_golden() {
 /// The off switches restore the old search at a seed where the knobs bind
 /// (T9 in full, GH #830). The `policy_fight` seed cannot show it: on seed 5
 /// the knobs do not change a single root visit, so that golden would match
-/// with or without the switches. On seed 6 they do, so this golden pins every
+/// with or without the switches. On seed 24 they do, so this golden pins every
 /// root visit of the fight. Its first bless came from the tree just before
 /// the Ironclad run-agent layer (`451a73fa3`, no env); a later engine change
 /// re-blesses it here, under the two off switches.
@@ -313,21 +313,24 @@ fn the_off_switches_play_the_pre_layer_search_where_the_knobs_bind() {
         sts2_runai::policy::IRONCLAD_SEARCH_KNOBS_OFF,
     );
     std::env::set_var("STS2_RUNAI_PRIOR_NET", "off");
-    let (fight, searches) = played_policy_fight_seed(6);
+    let (fight, searches) = played_policy_fight_seed(24);
     bless_or_compare(
-        "policy_fight_seed6_pre_layer",
+        "policy_fight_seed24_pre_layer",
         &json!({ "fight": fight, "searches": searches }),
     );
 }
 
-/// The shipped Ironclad default (no env) reaches the pilot: the same seed-6
+/// The shipped Ironclad default (no env) reaches the pilot: the same seed-24
 /// fight searches differently from the pre-layer golden above, and its
 /// record is pinned in its own golden `policy_fight_ironclad_default`
 /// (blessed on its own). The record holds the searches because the moves
 /// cannot show it: these first fights are easy, and on seeds 1-16 the knobs
-/// never changed a move of one. Seed 6 is the longest of those whose
-/// searches move. A hallway fight, so the built-in prior (elite and boss
-/// only) is not in play.
+/// never changed a move of one. Seed 24 is the longest fight of seeds 1-24
+/// whose searches move (13 is the only other). A hallway fight, so the
+/// built-in prior (elite and boss only) is not in play. This was seed 6
+/// until the card cost model: dropping the per-card cost trace slots lets
+/// identical cards dedup as one draw outcome, the chance fan-out shrinks,
+/// and on seed 6 the widening caps no longer bind.
 ///
 /// The warrant that this play is the gated bundle's is the ship PR's
 /// full-run identity check (GH #830: the default reproduces the gate's
@@ -336,10 +339,10 @@ fn the_off_switches_play_the_pre_layer_search_where_the_knobs_bind() {
 fn the_ironclad_default_moves_the_policy_fight() {
     std::env::remove_var("STS2_RUNAI_MCTS_OVERRIDES");
     std::env::remove_var("STS2_RUNAI_PRIOR_NET");
-    let (fight, searches) = played_policy_fight_seed(6);
+    let (fight, searches) = played_policy_fight_seed(24);
     if std::env::var_os("STS2_BLESS_LEAF_PLAYOUTS_GOLDEN").is_none() {
-        let pre = &golden()["policy_fight_seed6_pre_layer"];
-        assert!(!pre.is_null(), "golden has no pre-layer seed-6 fight");
+        let pre = &golden()["policy_fight_seed24_pre_layer"];
+        assert!(!pre.is_null(), "golden has no pre-layer seed-24 fight");
         assert_ne!(
             &searches, &pre["searches"],
             "the Ironclad default searched like the pre-layer pilot"

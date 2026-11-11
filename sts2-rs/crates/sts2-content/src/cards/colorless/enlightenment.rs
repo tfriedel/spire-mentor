@@ -18,13 +18,15 @@ pub(crate) fn play_enlightenment(state: &mut CombatState, _t: Option<CreatureUid
             }
             if upgraded {
                 // `SetThisCombat(1, reduceOnly: true)` (Enlightenment.cs).
-                card.set_this_combat_reduce_only(ENLIGHTENMENT_COST_CAP);
+                card.cost
+                    .set_this_combat(i32::from(ENLIGHTENMENT_COST_CAP), true);
             } else {
                 // `SetThisTurnOrUntilPlayed(1, reduceOnly: true)`: reverts at
                 // turn end or on play. The old permanent `cost = 1` kept a
                 // discarded 3-cost Jackpot at 1 for the rest of the combat
                 // (act23 Ironclad:1012).
-                card.set_this_turn_or_until_played_reduce_only(ENLIGHTENMENT_COST_CAP);
+                card.cost
+                    .set_this_turn_or_until_played(i32::from(ENLIGHTENMENT_COST_CAP), true);
             }
         }
     }

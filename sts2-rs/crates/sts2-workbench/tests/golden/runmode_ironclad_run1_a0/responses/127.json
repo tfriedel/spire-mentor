@@ -1,0 +1,78 @@
+{
+ "assumptions": {
+  "energy": 3,
+  "hand": 5,
+  "samples": 200
+ },
+ "block": {
+  "per_turn": 13.2,
+  "scaling_cards": [
+   "Flame Barrier"
+  ]
+ },
+ "composition": {
+  "by_rarity": {
+   "Basic": 10,
+   "Common": 3,
+   "Uncommon": 2
+  },
+  "by_type": {
+   "Attack": 9,
+   "Skill": 6
+  },
+  "dead_cards": 0,
+  "energy_curve": {
+   "1": 11,
+   "2": 3,
+   "3": 1
+  },
+  "unupgraded_basics": 10
+ },
+ "damage": {
+  "aoe_attacks": [
+   "Howl from Beyond"
+  ],
+  "attack_count": 9,
+  "per_turn": 16.5,
+  "scaling_cards": [
+   "Bash",
+   "Body Slam"
+  ],
+  "single_target": 14.4,
+  "vs_group": 18.7
+ },
+ "deck_size": 15,
+ "lenses": {
+  "boss": 36.3,
+  "hallway": 35.3,
+  "scaling": 36.9
+ },
+ "scores": {
+  "block": 48.3,
+  "damage": 33.8,
+  "velocity": 27.0,
+  "volume": 35.3
+ },
+ "velocity": {
+  "bottleneck": "energy",
+  "cards_per_turn": 2.5,
+  "dilution": 1.0,
+  "draw_limited_turns": 0.0,
+  "energy_limited_turns": 7.0,
+  "engine_cards": 1,
+  "extra_per_turn": 0.0,
+  "tags": {
+   "tutor": 1
+  }
+ },
+ "warnings": [
+  {
+   "severity": "info",
+   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+  },
+  {
+   "severity": "warn",
+   "text": "Deck clogged with basics/curses — prioritise removals."
+  }
+ ]
+}

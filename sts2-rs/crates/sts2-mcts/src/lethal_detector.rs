@@ -281,10 +281,10 @@ pub fn detect_lethal(state: &CombatState) -> bool {
         if !shape.is_aoe && card.target_type != TargetType::Enemy {
             return false;
         }
-        // Cost may be mutated per-instance (Mayhem etc.); use the
-        // live `card.cost`.
+        // Cost may be modified per-instance (Mayhem etc.); use the
+        // live local cost.
         playable.push(PlayableCard {
-            cost: card.cost,
+            cost: i8::try_from(card.local_cost()).unwrap_or(i8::MAX),
             damage_per_target: shape.base_damage,
             is_aoe: shape.is_aoe,
         });
@@ -418,7 +418,7 @@ mod tests {
             cards.push(Card {
                 uid,
                 card_id: id,
-                cost,
+                cost: sts2_core::CardEnergyCost::new(cost),
                 card_type,
                 target_type: target,
                 upgraded,

@@ -1473,7 +1473,7 @@ mod tests {
         let smogged = push_card(&mut state, 2, CardType::Attack);
         let other = push_card(&mut state, 3, CardType::Skill);
         for c in &mut state.cards {
-            c.cost = 1;
+            c.cost = crate::CardEnergyCost::new(1);
         }
         state.cards[1].affliction = Some(CardAffliction::new(CardAfflictionKind::Smog, 1));
         state.cards[2].affliction = Some(CardAffliction::new(CardAfflictionKind::Smog, 1));

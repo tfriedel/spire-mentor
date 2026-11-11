@@ -38,7 +38,7 @@
    "parent": null,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0871,
+   "q": 1.0728,
    "summary": {
     "enemies": [
      {
@@ -54,13 +54,13 @@
     ],
     "energy": 0,
     "player_block": 5,
-    "player_hp": 40,
+    "player_hp": 36,
     "player_max_hp": 80,
     "round": 6
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 52.1794,
+   "value_sum": 51.4938,
    "visits": 48,
    "wins": 48
   },
@@ -92,7 +92,7 @@
    "parent": 0,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0871,
+   "q": 1.0728,
    "summary": {
     "enemies": [
      {
@@ -108,13 +108,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 52.1794,
+   "value_sum": 51.4938,
    "visits": 48,
    "wins": 48
   },
@@ -182,7 +182,7 @@
    "parent": 1,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.0871,
+   "q": 1.0728,
    "summary": {
     "enemies": [
      {
@@ -198,13 +198,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 52.1794,
+   "value_sum": 51.4938,
    "visits": 48,
    "wins": 48
   },
@@ -263,7 +263,7 @@
    "parent": 2,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.1054,
+   "q": 1.0912,
    "summary": {
     "enemies": [
      {
@@ -279,13 +279,13 @@
     ],
     "energy": 1,
     "player_block": 12,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 11.0544,
+   "value_sum": 10.9115,
    "visits": 10,
    "wins": 10
   },
@@ -344,7 +344,7 @@
    "parent": 2,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0834,
+   "q": 1.0692,
    "summary": {
     "enemies": [
      {
@@ -360,13 +360,13 @@
     ],
     "energy": 2,
     "player_block": 0,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 9.751,
+   "value_sum": 9.6224,
    "visits": 9,
    "wins": 9
   },
@@ -434,7 +434,7 @@
    "parent": 2,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.1026,
+   "q": 1.0883,
    "summary": {
     "enemies": [
      {
@@ -450,13 +450,13 @@
     ],
     "energy": 2,
     "player_block": 0,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 11.026,
+   "value_sum": 10.8831,
    "visits": 10,
    "wins": 10
   },
@@ -515,7 +515,7 @@
    "parent": 2,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0858,
+   "q": 1.0715,
    "summary": {
     "enemies": [
      {
@@ -531,13 +531,13 @@
     ],
     "energy": 2,
     "player_block": 5,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 9.7724,
+   "value_sum": 9.6439,
    "visits": 9,
    "wins": 9
   },
@@ -549,11 +549,9 @@
     8,
     13,
     16,
-    20,
     26,
     31,
     35,
-    38,
     45
    ],
    "edges": [
@@ -571,21 +569,13 @@
      "label": "outcome #1",
      "outcome_ordinal": 1,
      "target_index": null,
-     "visits": 1
+     "visits": 2
     },
     {
      "child": 16,
      "kind": "outcome",
      "label": "outcome #2",
      "outcome_ordinal": 2,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 20,
-     "kind": "outcome",
-     "label": "outcome #3",
-     "outcome_ordinal": 3,
      "target_index": null,
      "visits": 1
     },
@@ -603,21 +593,13 @@
      "label": "outcome #5",
      "outcome_ordinal": 5,
      "target_index": null,
-     "visits": 1
+     "visits": 2
     },
     {
      "child": 35,
      "kind": "outcome",
      "label": "outcome #6",
      "outcome_ordinal": 6,
-     "target_index": null,
-     "visits": 1
-    },
-    {
-     "child": 38,
-     "kind": "outcome",
-     "label": "outcome #7",
-     "outcome_ordinal": 7,
      "target_index": null,
      "visits": 1
     },
@@ -641,7 +623,7 @@
    "parent": 2,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -657,13 +639,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 9.4795,
+   "value_sum": 9.351,
    "visits": 9,
    "wins": 9
   },
@@ -684,7 +666,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -700,13 +682,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1066,
+   "value_sum": 2.078,
    "visits": 2,
    "wins": 2
   },
@@ -738,7 +720,7 @@
    "parent": 5,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -754,13 +736,13 @@
     ],
     "energy": 0,
     "player_block": 12,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 3.2884,
+   "value_sum": 3.2456,
    "visits": 3,
    "wins": 3
   },
@@ -792,7 +774,7 @@
    "parent": 6,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1116,
+   "q": 1.0973,
    "summary": {
     "enemies": [
      {
@@ -808,13 +790,13 @@
     ],
     "energy": 0,
     "player_block": 17,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 3.3348,
+   "value_sum": 3.292,
    "visits": 3,
    "wins": 3
   },
@@ -835,7 +817,7 @@
    "parent": 3,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.1176,
+   "q": 1.1033,
    "summary": {
     "enemies": [
      {
@@ -851,13 +833,13 @@
     ],
     "energy": 0,
     "player_block": 12,
-    "player_hp": 33,
+    "player_hp": 29,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 3.3528,
+   "value_sum": 3.31,
    "visits": 3,
    "wins": 3
   },
@@ -889,7 +871,7 @@
    "parent": 4,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -905,13 +887,13 @@
     ],
     "energy": 0,
     "player_block": 12,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 3.2884,
+   "value_sum": 3.2456,
    "visits": 3,
    "wins": 3
   },
@@ -919,8 +901,19 @@
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
-   "children": [],
-   "edges": [],
+   "children": [
+    20
+   ],
+   "edges": [
+    {
+     "child": 20,
+     "kind": "play",
+     "label": "Bash",
+     "outcome_ordinal": null,
+     "target_index": 1,
+     "visits": 1
+    }
+   ],
    "id": 13,
    "is_terminal": false,
    "kind": "outcome",
@@ -932,7 +925,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -948,15 +941,15 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
-   "visits": 1,
-   "wins": 1
+   "value_sum": 2.078,
+   "visits": 2,
+   "wins": 2
   },
   {
    "chance_action": null,
@@ -995,7 +988,7 @@
    "parent": 6,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -1011,13 +1004,13 @@
     ],
     "energy": 1,
     "player_block": 5,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 3.2134,
+   "value_sum": 3.1706,
    "visits": 3,
    "wins": 3
   },
@@ -1049,7 +1042,7 @@
    "parent": 5,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.1176,
+   "q": 1.1033,
    "summary": {
     "enemies": [
      {
@@ -1065,13 +1058,13 @@
     ],
     "energy": 1,
     "player_block": 0,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 3.3528,
+   "value_sum": 3.31,
    "visits": 3,
    "wins": 3
   },
@@ -1092,7 +1085,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1108,13 +1101,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -1135,7 +1128,7 @@
    "parent": 5,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.1176,
+   "q": 1.1033,
    "summary": {
     "enemies": [
      {
@@ -1151,13 +1144,13 @@
     ],
     "energy": 1,
     "player_block": 0,
-    "player_hp": 33,
+    "player_hp": 29,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 3.3528,
+   "value_sum": 3.31,
    "visits": 3,
    "wins": 3
   },
@@ -1189,7 +1182,7 @@
    "parent": 4,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -1205,13 +1198,13 @@
     ],
     "energy": 1,
     "player_block": 5,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1423,
+   "value_sum": 2.1137,
    "visits": 2,
    "wins": 2
   },
@@ -1243,7 +1236,7 @@
    "parent": 6,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1021,
+   "q": 1.0878,
    "summary": {
     "enemies": [
      {
@@ -1259,13 +1252,13 @@
     ],
     "energy": 1,
     "player_block": 5,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 3.3064,
+   "value_sum": 3.2635,
    "visits": 3,
    "wins": 3
   },
@@ -1277,16 +1270,16 @@
    "edges": [],
    "id": 20,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #3",
+   "kind": "play",
+   "label": "Bash",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 3,
-   "parent": 7,
+   "outcome_ordinal": null,
+   "parent": 13,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1295,20 +1288,20 @@
       "uid": 2
      },
      {
-      "hp": 18,
+      "hp": 6,
       "max_hp": 55,
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 1,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
-   "target_index": null,
+   "target_index": 1,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -1349,7 +1342,7 @@
    "parent": 6,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -1365,13 +1358,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 14,
+    "player_hp": 10,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1423,
+   "value_sum": 2.1137,
    "visits": 2,
    "wins": 2
   },
@@ -1392,7 +1385,7 @@
    "parent": 21,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -1408,13 +1401,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 14,
+    "player_hp": 10,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0711,
+   "value_sum": 1.0569,
    "visits": 1,
    "wins": 1
   },
@@ -1455,7 +1448,7 @@
    "parent": 3,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -1471,13 +1464,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1923,
+   "value_sum": 2.1637,
    "visits": 2,
    "wins": 2
   },
@@ -1498,7 +1491,7 @@
    "parent": 23,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -1514,13 +1507,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1923,
+   "value_sum": 2.1637,
    "visits": 2,
    "wins": 2
   },
@@ -1561,7 +1554,7 @@
    "parent": 4,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1577,13 +1570,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1066,
+   "value_sum": 2.078,
    "visits": 2,
    "wins": 2
   },
@@ -1604,7 +1597,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1620,13 +1613,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -1667,7 +1660,7 @@
    "parent": 5,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1683,13 +1676,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1066,
+   "value_sum": 2.078,
    "visits": 2,
    "wins": 2
   },
@@ -1710,7 +1703,7 @@
    "parent": 27,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1726,13 +1719,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -1753,7 +1746,7 @@
    "parent": 14,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -1769,13 +1762,13 @@
     ],
     "energy": 0,
     "player_block": 5,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 2.1423,
+   "value_sum": 2.1137,
    "visits": 2,
    "wins": 2
   },
@@ -1816,7 +1809,7 @@
    "parent": 12,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -1832,13 +1825,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 2.1923,
+   "value_sum": 2.1637,
    "visits": 2,
    "wins": 2
   },
@@ -1846,8 +1839,19 @@
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
-   "children": [],
-   "edges": [],
+   "children": [
+    38
+   ],
+   "edges": [
+    {
+     "child": 38,
+     "kind": "play",
+     "label": "StrikeIronclad",
+     "outcome_ordinal": null,
+     "target_index": 1,
+     "visits": 1
+    }
+   ],
    "id": 31,
    "is_terminal": false,
    "kind": "outcome",
@@ -1859,7 +1863,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -1875,15 +1879,15 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
-   "visits": 1,
-   "wins": 1
+   "value_sum": 2.078,
+   "visits": 2,
+   "wins": 2
   },
   {
    "chance_action": null,
@@ -1902,7 +1906,7 @@
    "parent": 23,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -1918,13 +1922,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0961,
+   "value_sum": 1.0819,
    "visits": 1,
    "wins": 1
   },
@@ -1945,7 +1949,7 @@
    "parent": 21,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -1961,13 +1965,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 14,
+    "player_hp": 10,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0711,
+   "value_sum": 1.0569,
    "visits": 1,
    "wins": 1
   },
@@ -1988,7 +1992,7 @@
    "parent": 18,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -2004,13 +2008,13 @@
     ],
     "energy": 0,
     "player_block": 5,
-    "player_hp": 27,
+    "player_hp": 23,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 1.0711,
+   "value_sum": 1.0569,
    "visits": 1,
    "wins": 1
   },
@@ -2031,7 +2035,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -2047,13 +2051,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -2074,7 +2078,7 @@
    "parent": 27,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -2090,13 +2094,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -2117,7 +2121,7 @@
    "parent": 25,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -2133,13 +2137,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -2151,16 +2155,16 @@
    "edges": [],
    "id": 38,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #7",
+   "kind": "play",
+   "label": "StrikeIronclad",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
-   "outcome_ordinal": 7,
-   "parent": 7,
+   "outcome_ordinal": null,
+   "parent": 31,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -2169,20 +2173,20 @@
       "uid": 2
      },
      {
-      "hp": 18,
+      "hp": 9,
       "max_hp": 55,
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
-   "target_index": null,
+   "target_index": 1,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -2214,7 +2218,7 @@
    "parent": 10,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.114,
+   "q": 1.0997,
    "summary": {
     "enemies": [
      {
@@ -2230,13 +2234,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 26,
+    "player_hp": 22,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.114,
+   "value_sum": 1.0997,
    "visits": 1,
    "wins": 1
   },
@@ -2257,7 +2261,7 @@
    "parent": 39,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.114,
+   "q": 1.0997,
    "summary": {
     "enemies": [
      {
@@ -2273,13 +2277,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 26,
+    "player_hp": 22,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.114,
+   "value_sum": 1.0997,
    "visits": 1,
    "wins": 1
   },
@@ -2300,7 +2304,7 @@
    "parent": 15,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.1176,
+   "q": 1.1033,
    "summary": {
     "enemies": [
      {
@@ -2316,13 +2320,13 @@
     ],
     "energy": 0,
     "player_block": 0,
-    "player_hp": 33,
+    "player_hp": 29,
     "player_max_hp": 80,
     "round": 7
    },
    "target_index": 1,
    "ties": 0,
-   "value_sum": 1.1176,
+   "value_sum": 1.1033,
    "visits": 1,
    "wins": 1
   },
@@ -2354,7 +2358,7 @@
    "parent": 14,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -2370,13 +2374,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 14,
+    "player_hp": 10,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0711,
+   "value_sum": 1.0569,
    "visits": 1,
    "wins": 1
   },
@@ -2397,7 +2401,7 @@
    "parent": 42,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0711,
+   "q": 1.0569,
    "summary": {
     "enemies": [
      {
@@ -2413,13 +2417,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 14,
+    "player_hp": 10,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0711,
+   "value_sum": 1.0569,
    "visits": 1,
    "wins": 1
   },
@@ -2440,7 +2444,7 @@
    "parent": 30,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -2456,13 +2460,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0961,
+   "value_sum": 1.0819,
    "visits": 1,
    "wins": 1
   },
@@ -2483,7 +2487,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0533,
+   "q": 1.039,
    "summary": {
     "enemies": [
      {
@@ -2499,13 +2503,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 9,
+    "player_hp": 5,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0533,
+   "value_sum": 1.039,
    "visits": 1,
    "wins": 1
   },
@@ -2537,7 +2541,7 @@
    "parent": 9,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -2553,13 +2557,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0961,
+   "value_sum": 1.0819,
    "visits": 1,
    "wins": 1
   },
@@ -2580,7 +2584,7 @@
    "parent": 46,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.0961,
+   "q": 1.0819,
    "summary": {
     "enemies": [
      {
@@ -2596,13 +2600,13 @@
     ],
     "energy": 3,
     "player_block": 0,
-    "player_hp": 21,
+    "player_hp": 17,
     "player_max_hp": 80,
     "round": 8
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0961,
+   "value_sum": 1.0819,
    "visits": 1,
    "wins": 1
   }

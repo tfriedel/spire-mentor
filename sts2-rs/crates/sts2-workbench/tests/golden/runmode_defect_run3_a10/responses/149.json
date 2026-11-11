@@ -10,7 +10,7 @@
    "enemy_min_pct": 3.5714,
    "final_turn": null,
    "stem": "20260101_000000_Defect_3_2",
-   "turn1_q": 0.7172
+   "turn1_q": 0.7213
   },
   {
    "enemy_min_pct": 11.1111,
@@ -21,7 +21,7 @@
  ],
  "turn1_q": {
   "max": 1.1963,
-  "mean": 0.9567,
-  "min": 0.7172
+  "mean": 0.9588,
+  "min": 0.7213
  }
 }

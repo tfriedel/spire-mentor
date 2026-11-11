@@ -38,6 +38,10 @@ pub mod alloc {
 // is finally populated at deck-build time (`sts2-py::build_encounter_state`)
 // so `combat_loop::play_card` can dispatch on `card.card_id`.
 pub mod cards;
+/// A card's energy cost: base plus ordered local modifiers (C#
+/// `CardEnergyCost`).
+pub mod energy_cost;
+pub use energy_cost::{CardEnergyCost, CostExpiry, LocalCostMod};
 /// Fixed-capacity `Copy` key→i32 map backing `Card::combat_vars` /
 /// `Card::enchantments` (what makes `Card: Copy` — see the module docs).
 pub mod inline_kv;
@@ -2255,7 +2259,7 @@ pub enum ChoiceKind {
     /// Used by ChoicesParadox (5 character cards, retain).
     AddGeneratedRetainedToHand,
     /// Same as [`Self::AddGeneratedToHand`] but the resolved card is
-    /// stamped free-this-turn (`VarKey::FreeThisTurn`), mirroring C#
+    /// stamped free-this-turn (`LocalCostMod::FREE_THIS_TURN`), mirroring C#
     /// `CardModel.SetToFreeThisTurn()`. Used by AttackPotion /
     /// SkillPotion / PowerPotion / ColorlessPotion (generate 3 distinct,
     /// choose 1, the chosen card is free for the turn). Bead
@@ -2295,7 +2299,7 @@ pub enum ChoiceKind {
     /// from [`Self::AddFromDrawByType`] (which sources the *draw* pile and
     /// does NOT make the card free): the resolver
     /// [`resolve_add_from_discard_free`] removes the chosen `card_uid`
-    /// from `discard`, stamps `VarKey::FreeThisTurn=1` (the canonical
+    /// from `discard`, stamps `LocalCostMod::FREE_THIS_TURN` (the canonical
     /// Rust analog of `SetToFreeThisTurn`, cleared by
     /// `combat_loop::clear_per_turn_card_vars`), and pushes it to hand
     /// honoring `HAND_LIMIT`. Single-pick (`min=max=1`), pile-order
@@ -5184,6 +5188,16 @@ pub struct CombatState {
     pub last_drawn_card: Option<crate::CardUid>,
 }
 
+// Size tripwire: `CombatState` is cloned per MCTS node and lives on the
+// stack in several search frames, so its size is a hot-path budget. The
+// card cost model (an ordered `CardEnergyCost` list per card) must not grow
+// it past what it was before (8168 bytes on x86-64; `PendingPlay` holds a
+// `Card` inline). Raise this only deliberately, after the clone bench.
+const _: () = assert!(
+    core::mem::size_of::<CombatState>() <= 8168,
+    "size_of::<CombatState>() grew past 8168 bytes"
+);
+
 impl Default for CombatState {
     fn default() -> Self {
         Self {
@@ -6848,7 +6862,8 @@ impl CombatState {
     ///
     /// This mirrors the `KinglyKick` per-draw cost-decrement precedent
     /// (`invoke_card_drawn_for_newly_drawn`, keyed off `CardId::KinglyKick`):
-    /// a core-side, `CardId`-keyed flat mutation of `Card.cost`, clamped at 0.
+    /// a core-side, `CardId`-keyed `AddThisCombat(-1)` on `Card::cost` (no
+    /// floor: only the final cost read clamps).
     /// `wasRemovalPrevented` is modeled as always-false here, matching the
     /// unconditional C# `Hook.AfterDeath` call and the existing power-side
     /// witness dispatch ([`crate::hooks::dispatch_after_death`]).
@@ -9454,7 +9469,7 @@ impl CombatState {
     /// Per-card on-draw riders also handled here (bead `sts2-rs-8z4u4`):
     /// Regent `KinglyPunch` permanently gains
     /// [`Self::KINGLY_PUNCH_DRAW_INCREASE`] base_damage per draw, and
-    /// `KinglyKick` loses 1 energy cost per draw (clamped at 0).
+    /// `KinglyKick` loses 1 energy cost per draw (`AddThisCombat(-1)`).
     pub(crate) fn invoke_card_drawn_for_newly_drawn(
         &mut self,
         hand_len_before: usize,
@@ -9874,7 +9889,7 @@ impl CombatState {
             // is never applied (C# `GetWithModifiers` short-circuits on `CostsX`).
             // In Rust, X-cost cards use cost=-1 with `is_x_cost()=true`; we must
             // consume the read without overwriting the sentinel. Bead `sts2-rs-ktqmg`.
-            let canonical_cost = card.cost;
+            let canonical_cost = card.base_cost();
             // Quest cards (`base(-1, CardType.Quest, ..)`, no `HasEnergyCostX`)
             // keep `Canonical = -1` in C# (`CardEnergyCost.cs:86`), so Confused
             // skips them; Rust models them as cost -1 Skills, which
@@ -9911,54 +9926,13 @@ impl CombatState {
             // `is_x_cost()` and drain player energy on play).
             // C# ref: `ConfusedPower.cs::AfterCardDrawn` (v0.103.2).
             if confused && (canonical_cost >= 0 || is_x_cost_card) {
-                let rolled = self.run_rng.combat_energy_costs.next_int(0, 3) as i8;
-                let osty_attacks = self.combat_log.osty_attacks_this_turn;
+                let rolled = self.run_rng.combat_energy_costs.next_int(0, 3);
+                // `EnergyCost.SetThisCombat(roll)`: an Absolute for the rest of
+                // combat, so it hides every earlier modifier. An X-cost card
+                // only consumes the read (`GetWithModifiers` short-circuits on
+                // `CostsX`; its negative base drops the modifier).
                 if let Some(c) = self.cards.get_mut(idx) {
-                    // Only apply the rolled cost for non-X-cost cards.
-                    // X-cost cards just consume the RNG read (the modifier
-                    // would be ignored by C#'s GetWithModifiers anyway).
-                    if !is_x_cost_card {
-                        // `SetThisCombat(roll)` also supersedes the earlier
-                        // local riders (FreeThisTurn / FreeUntilPlayed /
-                        // until-played reductions) and Snecko banks — see
-                        // [`crate::cards::Card::set_cost_this_combat`].
-                        c.set_cost_this_combat(rolled);
-                        // Bead `sts2-rs-xk9yo`: Confused's `AfterCardDrawn`
-                        // sets an ABSOLUTE this-turn cost — it supersedes any
-                        // additive this-turn modifier already banked on this
-                        // card (Stomp's `BeforeCardPlayed` -1 shave). Because
-                        // this is a flat `c.cost` overwrite (not a modifier
-                        // stack like C#'s `EnergyCost`), the banked Stomp
-                        // reduction would otherwise be re-added by
-                        // `restore_stomp_costs_for_turn_start` at the NEXT
-                        // turn start, leaving the card wrongly +K over its
-                        // base (e.g. a Stomp shaved on turn 0 by a
-                        // DistilledChaos auto-played Attack, then drawn under
-                        // Confused, resurfaced at cost 3+K on turn 1 and was
-                        // wrongly excluded from `legal_actions` — seed 1754).
-                        // Clear the bank so the overwrite is authoritative.
-                        c.set_combat_var(crate::cards::VarKey::StompCostReductionThisTurn, 0);
-                        // The same Absolute supersedes earlier `AddThisCombat`
-                        // reductions past 0 (Melancholy / Banshee's Cry debt):
-                        // C# folds them before the roll, so the roll alone
-                        // is the cost (loadout Necrobinder 1081: cs=2 rs=0).
-                        c.combat_vars.zero(crate::cards::VarKey::CostDebtThisCombat);
-                        // ... and a Flatten's `SetThisTurn(0)` from an earlier
-                        // Osty attack this turn; a later attack zeroes it again
-                        // (`hooks::card_cost_locally_zeroed`; loadout
-                        // Necrobinder 1347: Fetch draws a Flatten, cs=1 rs=0).
-                        if c.card_id == crate::cards::CardId::Flatten {
-                            c.set_combat_var(
-                                crate::cards::VarKey::FlattenOstyAttacksAtRoll,
-                                osty_attacks + 1,
-                            );
-                        }
-                        // C# `SetThisCombat(roll)` is an ABSOLUTE local cost
-                        // modifier — flag it so an in-combat upgrade clamps
-                        // it per `CardEnergyCost.UpgradeBy` (sweep seeds
-                        // 1170/4720). Bead `sts2-rs-i77h0`.
-                        c.set_combat_var(crate::cards::VarKey::CostAbsolutelySet, 1);
-                    }
+                    c.cost.set_this_combat(rolled, false);
                 }
             }
             // Regent KinglyKick (`KinglyKick.cs::AfterCardDrawn`, bead
@@ -10725,12 +10699,9 @@ impl CombatState {
     /// Apply Stomp's dynamic discount when the player plays an Attack.
     ///
     /// Stomp costs 1 less energy for each Attack its owner plays this turn
-    /// (C# `Stomp.BeforeCardPlayed` → `EnergyCost.AddThisTurn(-1)`,
-    /// clamped at 0). Every Stomp copy in combat is shaved by 1 (clamped),
-    /// and the shaved amount is banked per-card in
-    /// [`VarKey::StompCostReductionThisTurn`] so
-    /// [`Self::restore_stomp_costs_for_turn_start`] can undo it on the
-    /// owner's next turn — matching C#'s `AddThisTurn` auto-reset.
+    /// (C# `Stomp.BeforeCardPlayed` → `EnergyCost.AddThisTurn(-1)`). Every
+    /// Stomp copy in combat gets the modifier, which `EndOfTurnCleanup`
+    /// drops (C#'s `AddThisTurn` reset).
     ///
     /// Because the discount is applied to *every* Stomp (not just those in
     /// hand), a Stomp drawn later this turn already carries the reduced
@@ -10750,76 +10721,34 @@ impl CombatState {
     /// running hook, so `Stomp.cs:62` never shaves it: the copy keeps the
     /// cost it was cloned with.
     pub fn discount_stomp_on_attack_played_among(&mut self, listeners: usize) {
-        self.discount_card_cost_on_play(
-            crate::cards::CardId::Stomp,
-            crate::cards::VarKey::StompCostReductionThisTurn,
-            listeners,
-        );
+        self.discount_card_cost_on_play(crate::cards::CardId::Stomp, listeners);
     }
 
-    /// Shave 1 energy off every in-combat copy of `card_id` (clamped at 0)
-    /// and bank the shaved amount per-card in `bank` so the matching
-    /// `restore_*_costs_for_turn_start` can undo it on the owner's next
-    /// turn — the shared mechanism behind the Stomp / Pinpoint dynamic
-    /// discounts (C# `EnergyCost.AddThisTurn(-1)`).
+    /// `EnergyCost.AddThisTurn(-1)` on every in-combat copy of `card_id`:
+    /// the shared mechanism behind the Stomp / Pinpoint dynamic discounts. The
+    /// modifier is unclamped and drops at `EndOfTurnCleanup`
+    /// ([`crate::combat_loop::clear_per_turn_card_vars`]).
     ///
     /// Runs on every Attack (Stomp) and every Skill (Pinpoint) play, so it
     /// opens with the arena's presence bit for `card_id` (J02): the loop
     /// only touches cards with that id, so when none is in the arena it is a
     /// no-op and skipping it is bit-identical.
-    fn discount_card_cost_on_play(
-        &mut self,
-        card_id: crate::cards::CardId,
-        bank: cards::VarKey,
-        listeners: usize,
-    ) {
+    fn discount_card_cost_on_play(&mut self, card_id: crate::cards::CardId, listeners: usize) {
         if !self.cards.holds_id(card_id) {
             #[cfg(debug_assertions)]
             self.shadow_skipped_card_sweep("discount_card_cost_on_play", |s| {
-                s.discount_card_cost_on_play_walk(card_id, bank, listeners);
+                s.discount_card_cost_on_play_walk(card_id, listeners);
             });
             return;
         }
-        self.discount_card_cost_on_play_walk(card_id, bank, listeners);
+        self.discount_card_cost_on_play_walk(card_id, listeners);
     }
 
     /// The ungated arena walk of [`Self::discount_card_cost_on_play`].
-    fn discount_card_cost_on_play_walk(
-        &mut self,
-        card_id: crate::cards::CardId,
-        bank: cards::VarKey,
-        listeners: usize,
-    ) {
+    fn discount_card_cost_on_play_walk(&mut self, card_id: crate::cards::CardId, listeners: usize) {
         for c in (&mut self.cards).into_iter().take(listeners) {
-            if c.card_id != card_id {
-                continue;
-            }
-            // A card zeroed by a local `Absolute(0)` (Bullet Time /
-            // `SetToFreeThisTurn`, `SetUntilPlayed(0)`) shows only what is
-            // appended after that zero ([`cards::VarKey::CostAddedAfterLocalZero`]).
-            // This `AddThisTurn(-1)` lands after it (local modifiers fold in
-            // insertion order, `CardEnergyCost.cs:110-115`), so the local cost
-            // goes to -1 and `Hook.ModifyEnergyCostInCombat` skips Tangled's
-            // surcharge on a negative cost (loadout Silent v0.111.0 1372:
-            // an Entangled Pinpoint after Bullet Time + a Skill, C# 0, Rust 1).
-            // The base bank below still carries the -1 once the zero expires.
-            if c.combat_var(cards::VarKey::FreeThisTurn) != 0
-                || c.combat_var(cards::VarKey::FreeUntilPlayed) != 0
-            {
-                let key = cards::VarKey::CostAddedAfterLocalZero;
-                c.set_combat_var(key, c.combat_var(key).saturating_sub(1));
-            }
-            if c.cost > 0 {
-                c.cost -= 1;
-                let banked = c.combat_var(bank);
-                c.set_combat_var(bank, banked.saturating_add(1));
-            } else if c.cost == 0 {
-                // `AddThisTurn(-1)` is an unclamped Relative: the part below
-                // 0 still absorbs a global surcharge (Tangled's +1) this turn
-                // (loadout Silent 1056 v0.111.0: a fourth Skill took an
-                // Entangled Pinpoint to 0, Rust kept it at 1).
-                let key = cards::VarKey::CostDebtThisTurn;
-                c.set_combat_var(key, c.combat_var(key).saturating_add(1));
+            if c.card_id == card_id {
+                c.cost.add_this_turn(-1);
             }
         }
     }
@@ -10850,62 +10779,6 @@ impl CombatState {
                 .same_contents(&self.combat_log.event_log),
             "J02 presence gate skipped {sweep}, but its ungated walk writes the event log"
         );
-    }
-
-    /// Undo the per-turn Stomp discount banked by
-    /// [`Self::discount_stomp_on_attack_played`]. Called at player-turn
-    /// start (mirrors C# `EnergyCost.AddThisTurn`'s reset-each-turn
-    /// semantics): restore each Stomp's cost by the banked amount and
-    /// clear the slot. Bead `sts2-rs-stomp`.
-    pub fn restore_stomp_costs_for_turn_start(&mut self) {
-        self.restore_banked_costs_for_turn_start(
-            crate::cards::CardId::Stomp,
-            crate::cards::VarKey::StompCostReductionThisTurn,
-        );
-    }
-
-    /// Undo a per-turn discount banked in `bank` by
-    /// [`Self::discount_card_cost_on_play`]: restore each card's cost by
-    /// the banked amount and clear the slot.
-    ///
-    /// Fast absence gate (perf 2026-07-04, Melancholy pattern): the banked
-    /// var is only ever set non-zero on cards whose `card_id` matched at
-    /// banking time (`discount_card_cost_on_play` and
-    /// `stamp_entered_combat_cost_backfill` both gate on the id), the card
-    /// arena is append-only for the whole combat, and no in-combat path
-    /// mutates `card_id` in place (transforms allocate a fresh arena row,
-    /// leaving the old row — and its banked var — behind). So "no such card
-    /// anywhere in the arena" proves every banked value is 0 and the
-    /// mutable restore walk below is a no-op; skipping it is bit-identical.
-    /// The arena answers that from its presence bit for `card_id` (J02).
-    fn restore_banked_costs_for_turn_start(
-        &mut self,
-        card_id: crate::cards::CardId,
-        bank: cards::VarKey,
-    ) {
-        if !self.cards.holds_id(card_id) {
-            #[cfg(debug_assertions)]
-            self.shadow_skipped_card_sweep("restore_banked_costs_for_turn_start", |s| {
-                s.restore_banked_costs_walk(card_id, bank);
-            });
-            return;
-        }
-        self.restore_banked_costs_walk(card_id, bank);
-    }
-
-    /// The ungated arena walk of [`Self::restore_banked_costs_for_turn_start`].
-    fn restore_banked_costs_walk(&mut self, card_id: crate::cards::CardId, bank: cards::VarKey) {
-        for c in &mut self.cards {
-            let banked = c.combat_var(bank);
-            if banked != 0 {
-                c.cost = c.cost.saturating_add(banked as i8);
-                c.set_combat_var(bank, 0);
-            }
-            // The below-zero rest of the same `AddThisTurn` modifiers.
-            if c.card_id == card_id && c.combat_var(cards::VarKey::CostDebtThisTurn) != 0 {
-                c.combat_vars.zero(cards::VarKey::CostDebtThisTurn);
-            }
-        }
     }
 
     /// C# `BansheesCry.AfterCardPlayed` (BansheesCry.cs:47-58): every
@@ -10992,230 +10865,41 @@ impl CombatState {
     }
 
     /// C# `EnergyCost.AddThisCombat(delta)` on card `uid`: a Relative local
-    /// modifier appended AFTER every live one (`CardEnergyCost.cs:110-115`
-    /// folds them in insertion order, unclamped). Under a live local zero
-    /// (`SetToFreeThisTurn`, `SetUntilPlayed(0)`, Flatten's `SetThisTurn(0)`)
-    /// the card shows `0 + delta` until that zero expires
-    /// ([`crate::cards::VarKey::CostAddedAfterLocalZero`]); the base takes the
-    /// delta either way ([`crate::cards::Card::add_cost_this_combat`]).
-    ///
-    /// Every in-combat `AddThisCombat` that can land on a card other than the
-    /// one being played goes through here: a free-this-turn Melancholy shaved
-    /// by a death read 0 instead of -1, so Borrowed Time's surcharge made it
-    /// cost 1 (C# 0). Same for Midnight, Kingly Kick, Transfigure, Banshee's
-    /// Cry, Up My Sleeve, Modded and Frantic Escape. X-cost cards take no
-    /// modifier.
+    /// modifier appended after every live one. Every in-combat `AddThisCombat`
+    /// goes through here (Melancholy, Midnight, Kingly Kick, Transfigure,
+    /// Banshee's Cry, Up My Sleeve, Modded, Frantic Escape).
     pub fn add_card_cost_this_combat(&mut self, uid: CardUid, delta: i32) {
-        let zeroed = card_by_uid(&self.cards, uid)
-            .is_some_and(|c| !c.is_x_cost() && crate::hooks::card_cost_locally_zeroed(self, c));
         if let Some(c) = card_by_uid_mut(&mut self.cards, uid) {
-            c.add_cost_this_combat(delta);
-            if zeroed {
-                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
-                c.set_combat_var(key, c.combat_var(key) + delta);
-            }
+            c.cost.add_this_combat(delta);
         }
     }
 
     /// C# `EnergyCost.AddUntilPlayed(-amount)` on card `uid` (Bookmark,
-    /// Slumbering Essence, v0.111.0 Rocket Punch): like
-    /// [`Self::add_card_cost_this_combat`], it folds after a live local zero
-    /// (`CardEnergyCost.cs:110-115`), so a Transfigured free card that Bookmark
-    /// picks reads `0 + 1 - 1 = 0`, not 1.
+    /// Slumbering Essence, v0.111.0 Rocket Punch).
     pub fn add_card_cost_reduction_until_played(&mut self, uid: CardUid, amount: i32) {
-        let zeroed = card_by_uid(&self.cards, uid)
-            .is_some_and(|c| !c.is_x_cost() && crate::hooks::card_cost_locally_zeroed(self, c));
         if let Some(c) = card_by_uid_mut(&mut self.cards, uid) {
-            c.add_cost_reduction_until_played(amount);
-            if zeroed {
-                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
-                c.set_combat_var(key, c.combat_var(key) - amount);
-            }
+            c.cost.add_until_played(-amount);
         }
     }
 
     /// Apply Pinpoint's dynamic discount when the player plays a Skill.
     ///
     /// Pinpoint costs 1 less energy for each Skill its owner plays this turn
-    /// (C# `Pinpoint.AfterCardPlayed` → `EnergyCost.AddThisTurn(-1)`, floored
-    /// at 0). This is the Skill-triggered twin of
+    /// (C# `Pinpoint.AfterCardPlayed` → `EnergyCost.AddThisTurn(-1)`). This is the Skill-triggered twin of
     /// [`Self::discount_stomp_on_attack_played`]; see that method for the
-    /// banked-per-card / discount-every-copy rationale (which subsumes C#
+    /// discount-every-copy rationale (which subsumes C#
     /// `Pinpoint.AfterCardEnteredCombat`'s back-fill). Without it, Pinpoint
     /// stayed at cost 3 and was wrongly dropped from `legal_actions` once the
     /// player spent enough energy on Skills (Silent sweep LEGAL_ACTION diff).
     pub fn discount_pinpoint_on_skill_played(&mut self) {
-        self.discount_card_cost_on_play(
-            crate::cards::CardId::Pinpoint,
-            crate::cards::VarKey::PinpointCostReductionThisTurn,
-            usize::MAX,
-        );
-    }
-
-    /// Undo the per-turn Pinpoint discount banked by
-    /// [`Self::discount_pinpoint_on_skill_played`]. Called at player-turn
-    /// start (mirrors C# `EnergyCost.AddThisTurn`'s reset-each-turn
-    /// semantics). Twin of [`Self::restore_stomp_costs_for_turn_start`].
-    pub fn restore_pinpoint_costs_for_turn_start(&mut self) {
-        self.restore_banked_costs_for_turn_start(
-            crate::cards::CardId::Pinpoint,
-            crate::cards::VarKey::PinpointCostReductionThisTurn,
-        );
-    }
-
-    /// Undo Snecko Oil's per-turn cost randomization banked by
-    /// [`crate::cards::VarKey::SneckoCostDeltaThisTurn`]. Called at
-    /// player-turn start, mirroring C# `EnergyCost.SetThisTurnOrUntilPlayed`'s
-    /// auto-revert at the owner's next turn start: subtract the banked
-    /// delta to restore each card's pre-randomization cost and clear the
-    /// slot. Bead `sts2-rs-2e9q2` follow-up.
-    pub fn restore_snecko_costs_for_turn_start(&mut self) {
-        // Fast absence gate (perf 2026-07-04, J02): the Snecko delta has no
-        // card-id key (any hand card can carry it). A card whose "may be
-        // nonzero" bit for it is clear holds a 0 delta, so when no card has
-        // the bit every banked delta reads 0 and the walk below is a pure
-        // no-op — skip it. (The old gate, "every `combat_vars` empty", stayed
-        // open for the whole combat once any card var was written, zeros
-        // included.) A zero-delta roll banks nothing, so the live-roll marker
-        // must open the gate too (GH #759).
-        if !self.cards.iter().any(|c| {
-            c.combat_vars
-                .maybe_nonzero(crate::cards::VarKey::SneckoCostDeltaThisTurn)
-                || c.combat_vars
-                    .maybe_nonzero(crate::cards::VarKey::SneckoRollLive)
-        }) {
-            #[cfg(debug_assertions)]
-            self.shadow_skipped_card_sweep(
-                "restore_snecko_costs_for_turn_start",
-                CombatState::restore_snecko_costs_walk,
-            );
-            return;
-        }
-        self.restore_snecko_costs_walk();
-    }
-
-    /// The ungated arena walk of [`Self::restore_snecko_costs_for_turn_start`].
-    fn restore_snecko_costs_walk(&mut self) {
-        for c in &mut self.cards {
-            c.expire_snecko_roll();
-        }
-    }
-
-    /// Undo the this-turn cost discounts a foreign producer had already
-    /// applied when this state was reconstructed, banked in
-    /// [`crate::cards::VarKey::WireTransientCostThisTurn`].
-    ///
-    /// The per-effect restores ([`Self::restore_stomp_costs_for_turn_start`]
-    /// and friends) only cover discounts *this* engine applied and banked. A
-    /// state rebuilt mid-turn from a C# wire inherits an already-shaved cost
-    /// with no bank behind it, so its discount would never expire — the
-    /// reconstruction records the shave here instead, and this restores it at
-    /// the next player-turn start.
-    ///
-    /// Not literally C#'s boundary: `CardEnergyCost.EndOfTurnCleanup()` drops
-    /// the `EndOfTurn` modifiers when the turn ENDS, so between end-of-player-
-    /// turn and the next player-turn start this engine still holds the discount.
-    /// Deliberate, and the same convention as
-    /// [`Self::restore_snecko_costs_for_turn_start`] /
-    /// [`Self::restore_stomp_costs_for_turn_start`], which is why it is here and
-    /// not in the end-turn path — nothing between those two points can read a
-    /// card's cost (the player is not deciding, and the monster turn does not
-    /// price player cards), so the window is unobservable. Moving it would mean
-    /// moving all three.
-    ///
-    /// Disjoint from the per-effect banks by construction: this one covers
-    /// what happened BEFORE the reconstruction, they cover what this engine
-    /// did AFTER it, so both firing at turn start restores the whole shave
-    /// exactly once.
-    pub fn restore_wire_transient_costs_for_turn_start(&mut self) {
-        // Same fast absence gate as the Snecko restore: the bank has no
-        // card-id key, but a card can only hold a nonzero one if its
-        // "may be nonzero" bit for it is set.
-        if !self.cards.iter().any(|c| {
-            c.combat_vars
-                .maybe_nonzero(crate::cards::VarKey::WireTransientCostThisTurn)
-        }) {
-            #[cfg(debug_assertions)]
-            self.shadow_skipped_card_sweep(
-                "restore_wire_transient_costs_for_turn_start",
-                CombatState::restore_wire_transient_costs_walk,
-            );
-            return;
-        }
-        self.restore_wire_transient_costs_walk();
-    }
-
-    /// The ungated arena walk of
-    /// [`Self::restore_wire_transient_costs_for_turn_start`].
-    fn restore_wire_transient_costs_walk(&mut self) {
-        for c in &mut self.cards {
-            let banked = c.combat_var(crate::cards::VarKey::WireTransientCostThisTurn);
-            if banked != 0 {
-                c.cost = c.cost.saturating_add(banked as i8);
-                c.set_combat_var(crate::cards::VarKey::WireTransientCostThisTurn, 0);
-                rebank_wire_cost_after_edge(c, crate::cards::VarKey::WireCostExpiringOnPlay);
-            }
-        }
-    }
-
-    /// The WHEN-PLAYED half of the same story: undo the part of a foreign
-    /// producer's discount that the game retires the moment the card is
-    /// played, banked in [`crate::cards::VarKey::WireCostExpiringOnPlay`].
-    ///
-    /// Mirrors C# `CardEnergyCost.AfterCardPlayedCleanup()`, which drops every
-    /// modifier flagged `WhenPlayed` — and the "costs N this turn" helpers are
-    /// `EndOfTurn | WhenPlayed`, whichever comes first, so this edge fires far
-    /// more often than the rare pure-`SetUntilPlayed`.
-    pub fn restore_wire_cost_expiring_on_play(&mut self, card_uid: crate::CardUid) {
-        // Flatten's Osty-attack zero is `SetThisTurn(0)` (EndOfTurn only), so
-        // it survives the play, and so does a Transfigure `+1` appended after
-        // it (GH #1150).
-        let flatten_zero_holds = self
-            .cards
-            .iter()
-            .find(|c| c.uid == card_uid)
-            .is_some_and(|c| crate::hooks::flatten_zeroed(self, c));
-        let Some(c) = card_by_uid_mut(&mut self.cards, card_uid) else {
-            return;
-        };
-        // The free riders are `WhenPlayed`-flagged in C# too: `SetToFreeThisTurn`
-        // is `EnergyCost.SetThisTurnOrUntilPlayed(0)` (CardModel.cs:1267-1271)
-        // and `FreeUntilPlayed` is `SetUntilPlayed(0)` — both dropped by
-        // `AfterCardPlayedCleanup` the moment the card is played. The Rust
-        // riders only died at end-of-turn cleanup, so a generated-free card
-        // still read cost 0 in the exhaust/discard pile after its play — masked
-        // for as long as reconstruction wiped `combat_vars` every reconcile,
-        // and 71 `$.deck.exhaust_pile` cost_override desyncs on the v28wr sweep
-        // once the transplant started carrying them.
-        c.set_combat_var(crate::cards::VarKey::FreeThisTurn, 0);
-        // Its star half too: `SetStarCostThisTurn` is a `ThisTurn` cost,
-        // `ClearsWhenCardIsPlayed` (CardModel.cs:1998).
-        c.combat_vars
-            .zero(crate::cards::VarKey::StarCostFreeThisTurn);
-        c.set_combat_var(crate::cards::VarKey::FreeUntilPlayed, 0);
-        // v0.111.0 (GH #793): RocketPunch's until-played reduction; `zero`
-        // never appends, so a v0.107.1 card is untouched.
-        c.combat_vars
-            .zero(crate::cards::VarKey::CostReductionUntilPlayed);
-        if !flatten_zero_holds {
-            c.combat_vars
-                .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
-        }
-        let banked = c.combat_var(crate::cards::VarKey::WireCostExpiringOnPlay);
-        if banked == 0 {
-            return;
-        }
-        c.cost = c.cost.saturating_add(banked as i8);
-        c.set_combat_var(crate::cards::VarKey::WireCostExpiringOnPlay, 0);
-        rebank_wire_cost_after_edge(c, crate::cards::VarKey::WireTransientCostThisTurn);
+        self.discount_card_cost_on_play(crate::cards::CardId::Pinpoint, usize::MAX);
     }
 
     /// Randomize the cost of every non-X-cost card in hand to a uniform value
     /// in `0..=3` — C# `SneckoOil.OnUse`'s `foreach` after the draw. For each
-    /// hand card with `cost >= 0` (`!CostsX`), roll `Rng.CombatEnergyCosts
-    /// .NextInt(4)` and bank `roll - prior_cost` in `SneckoCostDeltaThisTurn` so
-    /// the temporary `SetThisTurnOrUntilPlayed` override reverts at the next
-    /// player-turn start (see [`Self::restore_snecko_costs_for_turn_start`]). The
+    /// hand card with a base cost `>= 0` (`!CostsX`), roll `Rng.CombatEnergyCosts
+    /// .NextInt(4)` and append it as `EnergyCost.SetThisTurnOrUntilPlayed(roll)`,
+    /// which drops at end of turn or when the card is played. The
     /// `combat_energy_costs` roll is consumed ONLY for cards that pass the guard,
     /// matching C#'s `Where(!CostsX)` before `NextInt`.
     ///
@@ -11227,91 +10911,18 @@ impl CombatState {
     /// every drawn card is rolled in one contiguous block — keeping the
     /// `combat_energy_costs` stream in lockstep with C#. Bead `sts2-rs-snecko-suspend`.
     pub fn snecko_randomize_hand_costs(&mut self) {
-        use crate::cards::VarKey;
-        let osty_attacks = self.combat_log.osty_attacks_this_turn;
         let hand_uids: smallvec::SmallVec<[crate::CardUid; 16]> =
             self.player.hand.iter().copied().collect();
         for uid in hand_uids {
             let idx = uid.0.get() as usize - 1;
-            // Read the current cost first; skip X-cost cards WITHOUT drawing a
-            // roll (C# excludes `CostsX` from the `Where` before `NextInt`).
-            let Some(cur_cost) = self.cards.get(idx).map(|c| c.cost) else {
-                continue;
-            };
-            if cur_cost < 0 {
+            // `GetWithModifiers(CostModifiers.None) >= 0`: skip X-cost and
+            // unplayable cards WITHOUT drawing a roll.
+            if self.cards.get(idx).is_none_or(|c| c.base_cost() < 0) {
                 continue;
             }
-            let roll = self.run_rng.combat_energy_costs.next_int(0, 3) as i8;
+            let roll = self.run_rng.combat_energy_costs.next_int(0, 3);
             if let Some(card) = self.cards.get_mut(idx) {
-                // An earlier `AddUntilPlayed(-n)` (v0.111.0 RocketPunch,
-                // Bookmark, SlumberingEssence) folds BEFORE this Absolute roll
-                // (local modifiers apply in insertion order,
-                // `CardEnergyCost.cs:110-115`), so the roll alone is the shown
-                // cost. The collapsed model subtracts the reduction after
-                // `cost`, so store `roll + reduction`; when the roll expires at
-                // turn end the reduction applies to the old cost again, as in
-                // C#. Loadout Defect v0.111.0 1307: a Gunk-Up'd RocketPunch
-                // rolled 2, C# 2, Rust 1.
-                let reduction = card.combat_var(VarKey::CostReductionUntilPlayed);
-                // The same holds for the below-zero part of earlier Relative
-                // `AddThisCombat` / `AddThisTurn` shaves (Midnight, Kingly
-                // Kick, Pinpoint per Skill): folded before the roll, so the
-                // roll supersedes them, and they apply again once it expires
-                // (loadout Silent v0.111.0 5629: a Pinpoint 2 Skills below 0
-                // rolled 1, C# 1, Rust 0).
-                let debts = card.combat_var(VarKey::CostDebtThisCombat)
-                    + card.combat_var(VarKey::CostDebtThisTurn);
-                let new_cost = i32::from(roll) + reduction + debts;
-                let delta = new_cost - i32::from(cur_cost);
-                card.cost = i8::try_from(new_cost).unwrap_or(i8::MAX);
-                let banked = card.combat_var(VarKey::SneckoCostDeltaThisTurn);
-                card.set_combat_var(
-                    VarKey::SneckoCostDeltaThisTurn,
-                    banked.saturating_add(delta),
-                );
-                // Clear any `FreeThisTurn` override so the Snecko roll wins (C#
-                // appends the Absolute roll modifier AFTER the free-this-turn
-                // Absolute(0) in the ordered walk). The roll touches only the
-                // ENERGY cost; `SetToFreeThisTurn`'s `SetStarCostThisTurn(0)`
-                // (`CardModel.cs:1267-1271`) survives it, so keep the star half
-                // (Regent quick seed 576: Discovery'd ParticleWall, then Snecko).
-                if card.combat_var(VarKey::FreeThisTurn) != 0 {
-                    card.set_combat_var(VarKey::StarCostFreeThisTurn, 1);
-                }
-                card.set_combat_var(VarKey::FreeThisTurn, 0);
-                // A `SetUntilPlayed(0)` (v0.107.1 RocketPunch, Eidolon) folds
-                // before the roll too, so the roll is the shown cost. The zero
-                // is `WhenPlayed` only and comes back when the roll expires at
-                // end of turn, so park it on the roll instead of dropping it
-                // (`expire_snecko_roll`).
-                let over_free = if card.combat_var(VarKey::FreeUntilPlayed) != 0 {
-                    card.set_combat_var(VarKey::FreeUntilPlayed, 0);
-                    crate::cards::SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED
-                } else {
-                    0
-                };
-                // A Flatten zeroed by an earlier Osty attack this turn takes
-                // the roll too (the later Absolute wins); a later attack
-                // zeroes it again (`hooks::card_cost_locally_zeroed`).
-                if card.card_id == crate::cards::CardId::Flatten {
-                    card.set_combat_var(VarKey::FlattenOstyAttacksAtRoll, osty_attacks + 1);
-                }
-                // The roll is an ABSOLUTE local modifier — flag it so an in-combat
-                // upgrade clamps it per C# `CardEnergyCost.UpgradeBy`. Mark the
-                // roll live (a zero delta banks nothing) and record whether
-                // the flag was already owned, so its expiry releases only what
-                // this roll raised (GH #759). A second roll this turn keeps
-                // the first roll's answer.
-                let live = card.combat_var(VarKey::SneckoRollLive);
-                let owner = if live != 0 {
-                    live
-                } else if card.combat_var(VarKey::CostAbsolutelySet) != 0 {
-                    crate::cards::SNECKO_ROLL_FLAG_PREOWNED
-                } else {
-                    crate::cards::SNECKO_ROLL_RAISED_FLAG
-                };
-                card.set_combat_var(VarKey::SneckoRollLive, owner | over_free);
-                card.set_combat_var(VarKey::CostAbsolutelySet, 1);
+                card.cost.set_this_turn_or_until_played(roll, false);
             }
         }
     }
@@ -11557,31 +11168,6 @@ impl CombatState {
     pub fn count_player_generated_cards_this_combat(&self) -> u32 {
         self.player.generated_cards_this_combat
     }
-}
-
-/// After one transient edge has restored its shave, recompute the OTHER
-/// bank against [`crate::cards::VarKey::WireCostStable`] instead of leaving it
-/// as the producer sent it.
-///
-/// This is what makes the two banks composable. The two banks alone cannot say
-/// how much of the shave SURVIVES the first edge: for a single shared
-/// `EndOfTurn | WhenPlayed` modifier the whole shave is already restored and
-/// the remaining bank must recompute to zero, while for two independent
-/// modifiers the half that has not expired yet must stay. Only the
-/// after-both-edges cost separates those. Leaving the other bank alone would
-/// restore a shared shave twice.
-///
-/// A card with no wire bank set has `other == 0` and this is a no-op. A card
-/// WITH a bank always has `WireCostStable` too — the parser refuses a wire that
-/// sends part of the trio, precisely because this reads the var back through a
-/// default-0 accessor and could not otherwise tell an absent `stable_cost` from
-/// a real zero.
-fn rebank_wire_cost_after_edge(c: &mut crate::cards::Card, other: crate::cards::VarKey) {
-    if c.combat_var(other) == 0 {
-        return;
-    }
-    let stable = c.combat_var(crate::cards::VarKey::WireCostStable);
-    c.set_combat_var(other, stable - i32::from(c.cost));
 }
 
 // ---------------------------------------------------------------------------
@@ -13018,13 +12604,13 @@ fn resolve_add_generated_choice(
         crate::card_effects::apply_retain_keyword(&mut card);
     }
     let uid = crate::card_effects::spawn_card_into_hand_with_origin(state, card, true);
-    // C# `CardModel.SetToFreeThisTurn()` — stamp the FreeThisTurn combat
-    // var so `effective_card_cost` charges 0 energy for the rest of the
+    // C# `CardModel.SetToFreeThisTurn()` — push the FREE_THIS_TURN cost
+    // modifier so `effective_card_cost` charges 0 energy for the rest of the
     // turn (Attack/Skill/Power/ColorlessPotion). Bead `sts2-rs-91tc1`.
     if free_this_turn {
         let idx = uid.0.get() as usize - 1;
         if let Some(c) = state.cards.get_mut(idx) {
-            c.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+            c.set_to_free_this_turn();
         }
     }
 }
@@ -13085,7 +12671,7 @@ fn resolve_add_from_draw_by_type(state: &mut CombatState, pc: &PendingChoice, se
 /// (LiquidMemories: "pick one card from the discard pile, make it free
 /// this turn, and add it to hand"). `selection` is a length-1 slice of
 /// indices into `pc.options`; the chosen option's `card_uid` is removed
-/// from `discard`, stamped `VarKey::FreeThisTurn=1`, and pushed onto
+/// from `discard`, stamped `LocalCostMod::FREE_THIS_TURN`, and pushed onto
 /// `hand` (subject to `HAND_LIMIT` — past the cap the card is left in
 /// the discard pile, matching the same edge in
 /// `route_generated_into_hand`). Empty/invalid selection, or a uid no
@@ -13103,7 +12689,7 @@ fn resolve_add_from_discard_free(state: &mut CombatState, pc: &PendingChoice, se
     };
     let card = state.player.discard.remove(pos);
     if let Some(c) = state.cards.iter_mut().find(|c| c.uid == card) {
-        c.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        c.set_to_free_this_turn();
     }
     if state.player.hand.len() < crate::cards::HAND_LIMIT {
         state.player.hand.push(card);
@@ -13366,8 +12952,8 @@ fn resolve_transform_draw_cards_to_minion_dive_bomb(
 /// `if (!EnergyCost.CostsX && EnergyCost.GetWithModifiers(None) >= 0)
 /// EnergyCost.AddThisCombat(1)` and `BaseReplayCount++` (the replay bump fires
 /// unconditionally, even when the cost bump is skipped). `is_x_cost()` covers
-/// `CostsX` (cost `-1` for non-curse/status); `cost >= 0` mirrors the
-/// modified-cost-non-negative check. Empty/invalid selection or a uid with no
+/// `CostsX` (cost `-1` for non-curse/status); `base_cost() >= 0` mirrors the
+/// `GetWithModifiers(None) >= 0` check. Empty/invalid selection or a uid with no
 /// backing card is a defensive no-op. Pure player choice with ZERO RNG.
 fn resolve_transfigure_card_in_hand(state: &mut CombatState, pc: &PendingChoice, selection: &[u8]) {
     let Some(uid) = selected_card_uid(pc, selection) else {
@@ -13381,16 +12967,14 @@ fn resolve_transfigure_card_in_hand(state: &mut CombatState, pc: &PendingChoice,
 ///
 /// The +1 is a Relative local modifier appended after any live local zero
 /// (Discovery's free-this-turn, Flatten after an Osty attack), so C# reads
-/// `0 + 1` until that zero expires
-/// ([`crate::cards::VarKey::CostAddedAfterLocalZero`]); Rust read the zero
-/// alone (Necrobinder random-loadout: Transfigured Delay cs=1 rs=0). It also
-/// pays off a below-zero `AddThisCombat` debt first.
+/// `0 + 1` until that zero expires (Necrobinder random-loadout: Transfigured
+/// Delay cs=1).
 pub fn apply_transfigure(state: &mut CombatState, uid: CardUid) {
     let idx = uid.0.get() as usize - 1;
     let Some(card) = state.cards.get(idx) else {
         return;
     };
-    if !card.is_x_cost() && card.cost >= 0 {
+    if !card.is_x_cost() && card.base_cost() >= 0 {
         state.add_card_cost_this_combat(uid, 1);
     }
     let card = &mut state.cards[idx];
@@ -14144,20 +13728,8 @@ fn resolve_make_free_in_hand(state: &mut CombatState, pc: &PendingChoice, select
     };
     let idx = uid.0.get() as usize - 1;
     if let Some(c) = state.cards.get_mut(idx) {
-        // C# `SetToFreeThisCombat` zeros the star cost too — mark it so the
-        // legal-action gate and play-time spend treat this star card as free.
-        // C# `SetThisCombat(0)` (CardModel.cs:1275 → CardEnergyCost.cs:238)
-        // installs an *Absolute* local cost modifier that owns the evaluated
-        // cost for the rest of combat. Mark it so a later in-combat upgrade
-        // (e.g. ARMAMENTS+1 on a freed CALAMITY, EnergyCost.UpgradeBy(-1))
-        // takes `Card::upgrade`'s absolute-modifier clamp branch
-        // (cards.rs:819-838) — which keeps the evaluated cost at 0 — instead
-        // of the additive else-branch that would underflow 0 + (2-3) = -1.
-        // A -1 cost reads as an X-cost (is_x_cost), draining all energy on
-        // play. The collapsed base+modifier model otherwise has no way to
-        // distinguish a freed card from a genuinely 0-base one. Bead
-        // `sts2-rs-2e9q2` (gh#180 colorless/potion slice).
-        c.set_free_this_combat();
+        // C# `SetToFreeThisCombat`: `SetThisCombat(0)` and the star cost.
+        c.set_to_free_this_combat();
     }
 }
 
@@ -16358,6 +15930,14 @@ const fn card_base_star_cost(id: crate::cards::CardId) -> i32 {
     }
 }
 
+/// Whether `id` has a star cost to zero in either build (the v0.111.0
+/// changes in [`card_base_star_cost_v0111`] only move cards that already
+/// have one).
+#[must_use]
+pub const fn card_has_star_cost(id: crate::cards::CardId) -> bool {
+    card_base_star_cost(id) > 0
+}
+
 /// The v0.111.0 `CanonicalStarCost` of the star cards whose cost changed
 /// from v0.107.1 (GH #793), `None` for every other card. Only consulted on
 /// a non-free card ([`effective_star_cost`] > 0), so the free markers keep
@@ -16379,11 +15959,11 @@ pub const fn card_base_star_cost_v0111(id: crate::cards::CardId) -> Option<i32> 
 /// unless the card has been made free. C# `CardModel.SetToFreeThisTurn()`
 /// zeros BOTH energy and star cost (`SetStarCostThisTurn(0)`), and
 /// `SetToFreeThisCombat()` does the same with combat lifetime
-/// (`SetStarCostThisCombat(0)`, `CardModel.cs:978`/`984`). The Rust port
-/// represents the energy side by stamping `cost = 0` directly, but the star
-/// side is computed from the static `card_base_star_cost`, so it must consult
-/// the per-instance free markers to match: `FreeThisTurn` (Splash /
-/// InfernalBlade generated cards) and `StarCostFreeThisCombat` (TouchOfInsanity's
+/// (`SetStarCostThisCombat(0)`, `CardModel.cs:978`/`984`). The energy side
+/// is a local cost modifier, but the star side is computed from the static
+/// `card_base_star_cost`, so it must consult the per-instance free markers to
+/// match: `StarCostFreeThisTurn` (Splash / InfernalBlade generated cards) and
+/// `StarCostFreeThisCombat` (TouchOfInsanity's
 /// `SetToFreeThisCombat`). Without this, a TouchOfInsanity-freed Regent star
 /// card (e.g. DyingStar) stays gated at its base star cost — Rust lists it
 /// unplayable while C# offers it (parity-fuzz Regent seeds 230/320/405).
@@ -16399,8 +15979,7 @@ pub fn effective_star_cost(card: &crate::cards::Card) -> i32 {
     if base == 0 {
         return 0;
     }
-    if card.combat_var(crate::cards::VarKey::FreeThisTurn) != 0
-        || card.combat_var(crate::cards::VarKey::StarCostFreeThisCombat) != 0
+    if card.combat_var(crate::cards::VarKey::StarCostFreeThisCombat) != 0
         || card.combat_var(crate::cards::VarKey::StarCostFreeThisTurn) != 0
     {
         return 0;
@@ -16674,7 +16253,7 @@ pub(crate) fn push_card_play_actions_with(
         // `card.cost`. Otherwise TANGLED's `+1`-on-Attacks surcharge (and any
         // other `modify_card_cost` rider) is ignored by the legal-action
         // gate, so Rust lists attacks as playable that C# correctly rejects
-        // on energy. `effective_card_cost` folds in FreeThisTurn + the
+        // on energy. `effective_card_cost` folds in FREE_THIS_TURN + the
         // modify_card_cost walk, matching the energy actually spent on play.
         if state.player.energy
             < hooks::effective_card_cost_inst_with_mask(state, card, card_uid, cost_mods_present)
@@ -16695,7 +16274,7 @@ pub(crate) fn push_card_play_actions_with(
         // Free exemptions: C# `CardModel.SetToFreeThisTurn()` does BOTH
         // `EnergyCost.SetThisTurnOrUntilPlayed(0)` AND `SetStarCostThisTurn(0)`
         // (CardModel.cs), so a Splash-generated star card (stamped
-        // `VarKey::FreeThisTurn`) costs 0 stars THIS turn and IS playable.
+        // `LocalCostMod::FREE_THIS_TURN`) costs 0 stars THIS turn and IS playable.
         // `SetToFreeThisCombat()` (TouchOfInsanity) zeros the star cost for the
         // whole combat (`VarKey::StarCostFreeThisCombat`). `effective_star_cost`
         // folds in both markers (else seed 1171's turn-1 Splash SEVEN_STARS, or
@@ -17246,7 +16825,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid,
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 upgraded: false,
@@ -17305,7 +16884,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid,
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 upgraded: false,
@@ -17370,7 +16949,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid: CardUid::new(i).expect("nz"),
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 upgraded: false,
@@ -17382,7 +16961,7 @@ mod tests {
         state.cards.push(cards::Card {
             uid: CardUid::new(4).expect("nz"),
             card_id: cards::CardId::Whirlwind,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: cards::CardType::Attack,
             target_type: cards::TargetType::Enemy,
             upgraded: false,
@@ -17428,7 +17007,7 @@ mod tests {
             "one combat_energy_costs draw per non-unplayable card; X-cost card also consumes read",
         );
         for i in 1u32..=3 {
-            let cost = state.cards[i as usize - 1].cost;
+            let cost = state.cards[i as usize - 1].local_cost();
             assert!(
                 (0..=3).contains(&cost),
                 "card {i} cost must be re-rolled into [0,3], got {cost}",
@@ -17436,7 +17015,8 @@ mod tests {
         }
         // X-cost sentinel must be preserved even though the RNG read was consumed.
         assert_eq!(
-            state.cards[3].cost, -1,
+            state.cards[3].local_cost(),
+            -1,
             "X-cost card cost sentinel (-1) must be left untouched; only the RNG read is consumed",
         );
     }
@@ -17488,7 +17068,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid: CardUid::new(i).expect("nz"),
                 card_id: id,
-                cost: -1,
+                cost: crate::CardEnergyCost::new(-1),
                 card_type: cards::CardType::Skill,
                 target_type: cards::TargetType::None,
                 ..cards::Card::pod_defaults()
@@ -17517,7 +17097,11 @@ mod tests {
             "only the Strike rolls; Quest cards have Canonical -1 in C#",
         );
         for i in 2..=5 {
-            assert_eq!(state.cards[i - 1].cost, -1, "Quest card cost untouched");
+            assert_eq!(
+                state.cards[i - 1].local_cost(),
+                -1,
+                "Quest card cost untouched"
+            );
         }
     }
 
@@ -17595,8 +17179,14 @@ mod tests {
         assert_eq!(state.run_rng.combat_energy_costs.counter(), 4);
         let first = state.player.hand[0];
         let second = state.player.hand[1];
-        assert_eq!(state.cards[first.get() as usize - 1].cost, r[1]);
-        assert_eq!(state.cards[second.get() as usize - 1].cost, r[3]);
+        assert_eq!(
+            state.cards[first.get() as usize - 1].local_cost(),
+            i32::from(r[1])
+        );
+        assert_eq!(
+            state.cards[second.get() as usize - 1].local_cost(),
+            i32::from(r[3])
+        );
     }
 
     /// Mutant-coverage counterpart to the test above (2026-06-20 sweep):
@@ -17629,7 +17219,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid: CardUid::new(i).expect("nz"),
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 base_damage: 6,
@@ -17656,7 +17246,7 @@ mod tests {
         );
         for i in 1u32..=3 {
             assert_eq!(
-                state.cards[i as usize - 1].cost,
+                state.cards[i as usize - 1].local_cost(),
                 1,
                 "no Confused → card {i} cost must be left at its original 1",
             );
@@ -17700,7 +17290,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid: CardUid::new(i).expect("nz"),
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 upgraded: false,
@@ -17733,7 +17323,7 @@ mod tests {
             "card-effect draw must fire the Confused cost re-roll per drawn card",
         );
         for uid in [1u32, 2] {
-            let cost = state.cards[uid as usize - 1].cost;
+            let cost = state.cards[uid as usize - 1].local_cost();
             assert!(
                 (0..=3).contains(&cost),
                 "drawn card {uid} cost re-rolled into [0,3], got {cost}",
@@ -17771,7 +17361,7 @@ mod tests {
         state.cards.push(cards::Card {
             uid,
             card_id: cards::CardId::Melancholy,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             card_type: cards::CardType::Skill,
             target_type: cards::TargetType::Self_,
             ..cards::Card::pod_defaults()
@@ -17781,7 +17371,7 @@ mod tests {
         for _ in 0..5 {
             state.reduce_melancholy_cost_on_death();
         }
-        assert_eq!(crate::hooks::local_card_cost(&state, &state.cards[0]), -2);
+        assert_eq!(state.cards[0].local_cost(), -2);
 
         let pow_uid = PowerUid::new(1).expect("nz");
         state.powers.push(Power {
@@ -17796,7 +17386,7 @@ mod tests {
 
         let moved = crate::cards::draw_via_state(&mut state, 1);
         assert_eq!(moved, 1);
-        let roll = i32::from(state.cards[0].cost);
+        let roll = state.cards[0].local_cost();
         assert_eq!(
             crate::hooks::effective_card_cost(&state, uid),
             roll,
@@ -17835,7 +17425,7 @@ mod tests {
         state.cards.push(cards::Card {
             uid,
             card_id: cards::CardId::Flatten,
-            cost: 2,
+            cost: crate::CardEnergyCost::new(2),
             card_type: cards::CardType::Attack,
             target_type: cards::TargetType::Enemy,
             ..cards::Card::pod_defaults()
@@ -17863,11 +17453,11 @@ mod tests {
 
         let moved = crate::cards::draw_via_state(&mut state, 1);
         assert_eq!(moved, 1);
-        let roll = i32::from(state.cards[0].cost);
+        let roll = state.cards[0].local_cost();
         assert!(roll > 0);
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), roll);
 
-        state.combat_log.osty_attacks_this_turn = 2;
+        crate::card_effects::flatten_after_osty_attack(&mut state);
         assert_eq!(
             crate::hooks::effective_card_cost(&state, uid),
             0,
@@ -17972,7 +17562,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid: CardUid::new(i).expect("nz"),
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 upgraded: false,
@@ -18030,7 +17620,7 @@ mod tests {
             state.cards.push(cards::Card {
                 uid: CardUid::new(i).expect("nz"),
                 card_id: cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: cards::CardType::Attack,
                 target_type: cards::TargetType::Enemy,
                 upgraded: false,
@@ -18082,7 +17672,7 @@ mod tests {
         state.cards.push(cards::Card {
             uid: CardUid::new(1).expect("nz"),
             card_id: cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: cards::CardType::Attack,
             target_type: cards::TargetType::Enemy,
             upgraded: false,
@@ -18095,7 +17685,7 @@ mod tests {
         state.cards.push(cards::Card {
             uid: CardUid::new(2).expect("nz"),
             card_id: cards::CardId::Whirlwind,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: cards::CardType::Attack,
             target_type: cards::TargetType::Enemy,
             upgraded: false,
@@ -18108,7 +17698,7 @@ mod tests {
         state.cards.push(cards::Card {
             uid: CardUid::new(3).expect("nz"),
             card_id: cards::CardId::Wound,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: cards::CardType::Status,
             target_type: cards::TargetType::None,
             upgraded: false,
@@ -18146,17 +17736,19 @@ mod tests {
         );
         // Normal card gets a rolled cost in [0,3].
         assert!(
-            (0..=3).contains(&state.cards[0].cost),
+            (0..=3).contains(&state.cards[0].local_cost()),
             "uid-1 (normal Attack) cost must be re-rolled into [0,3]",
         );
         // X-cost sentinel must remain -1.
         assert_eq!(
-            state.cards[1].cost, -1,
+            state.cards[1].local_cost(),
+            -1,
             "uid-2 (X-cost Whirlwind) sentinel -1 must be preserved",
         );
         // Status card cost must remain -1 and no RNG was consumed for it.
         assert_eq!(
-            state.cards[2].cost, -1,
+            state.cards[2].local_cost(),
+            -1,
             "uid-3 (Status Wound) cost must be unchanged",
         );
     }
@@ -20313,7 +19905,7 @@ mod tests {
         for (raw, cost) in [(1_u32, 9_i8), (2, 1)] {
             let mut c = Card {
                 card_id: crate::cards::CardId::BansheesCry,
-                cost,
+                cost: crate::CardEnergyCost::new(cost),
                 ..Card::pod_defaults()
             };
             c.uid = CardUid::new(raw).expect("nz");
@@ -20324,8 +19916,12 @@ mod tests {
 
         state.discount_banshees_cry_on_ethereal_play();
 
-        assert_eq!(state.cards[0].cost, 7);
-        assert_eq!(state.cards[1].cost, 0, "floors at 0");
+        assert_eq!(state.cards[0].local_cost(), 7);
+        assert_eq!(
+            state.cards[1].local_cost(),
+            -1,
+            "1 - 2: no floor until the final read"
+        );
     }
 
     #[test]
@@ -20333,13 +19929,13 @@ mod tests {
         let mut state = CombatState::default();
         let mut pinpoint = Card {
             card_id: crate::cards::CardId::Pinpoint,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             ..Card::pod_defaults()
         };
         pinpoint.uid = CardUid::new(1).expect("nz");
         let mut other = Card {
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             ..Card::pod_defaults()
         };
         other.uid = CardUid::new(2).expect("nz");
@@ -20352,18 +19948,18 @@ mod tests {
             .iter()
             .find(|c| c.card_id == crate::cards::CardId::Pinpoint)
             .unwrap();
-        assert_eq!(p.cost, 0, "Pinpoint cost 1 must discount to 0");
+        assert_eq!(p.local_cost(), 0, "Pinpoint cost 1 must discount to 0");
         assert_eq!(
-            p.combat_var(crate::cards::VarKey::PinpointCostReductionThisTurn),
-            1,
-            "the per-card discount must bank +1"
+            p.cost.mods(),
+            &[crate::LocalCostMod::relative(-1, crate::CostExpiry::Turn)],
+            "the discount is an AddThisTurn(-1)"
         );
         let o = state
             .cards
             .iter()
             .find(|c| c.card_id == crate::cards::CardId::StrikeIronclad)
             .unwrap();
-        assert_eq!(o.cost, 1, "a non-Pinpoint card must be untouched");
+        assert_eq!(o.local_cost(), 1, "a non-Pinpoint card must be untouched");
 
         state.discount_pinpoint_on_skill_played();
         let p = state
@@ -20371,11 +19967,14 @@ mod tests {
             .iter()
             .find(|c| c.card_id == crate::cards::CardId::Pinpoint)
             .unwrap();
-        assert_eq!(p.cost, 0, "the cost>0 floor must prevent going negative");
+        // C# `AddThisTurn` has no floor: the local fold goes below 0 and
+        // only the final read clamps.
+        assert_eq!(p.local_cost(), -1, "1 - 2, unclamped");
+        assert_eq!(crate::hooks::effective_card_cost(&state, p.uid), 0);
         assert_eq!(
-            p.combat_var(crate::cards::VarKey::PinpointCostReductionThisTurn),
-            1,
-            "a floored play must not bank a further discount"
+            p.cost.mods(),
+            &[crate::LocalCostMod::relative(-2, crate::CostExpiry::Turn)],
+            "two AddThisTurn(-1) fold into one"
         );
     }
 
@@ -20392,7 +19991,7 @@ mod tests {
         let mut pinpoint = Card {
             card_id: crate::cards::CardId::Pinpoint,
             card_type: crate::cards::CardType::Attack,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             ..Card::pod_defaults()
         };
         pinpoint.uid = uid;
@@ -20400,7 +19999,7 @@ mod tests {
             crate::card_afflictions::CardAfflictionKind::Entangled,
             1,
         ));
-        pinpoint.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        pinpoint.set_to_free_this_turn();
         state.cards.push(pinpoint);
         state.player.hand.push(uid);
         let pid = std::num::NonZeroU32::new(1).unwrap();
@@ -20425,7 +20024,13 @@ mod tests {
             0,
             "the -1 after the zero takes the local cost below 0"
         );
-        assert_eq!(state.cards[0].cost, 2, "the base still carries the -1");
+        assert_eq!(state.cards[0].local_cost(), -1, "0 - 1, unclamped");
+        state.cards[0].cost.after_card_played_cleanup();
+        assert_eq!(
+            state.cards[0].local_cost(),
+            2,
+            "played: the zero goes, the -1 stays"
+        );
     }
 
     /// Infernal Blade generates a Stomp that is free this turn BEFORE it
@@ -20440,7 +20045,7 @@ mod tests {
         let mut stomp = Card {
             card_id: crate::cards::CardId::Stomp,
             card_type: crate::cards::CardType::Attack,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             ..Card::pod_defaults()
         };
         stomp.uid = uid;
@@ -20448,7 +20053,7 @@ mod tests {
             crate::card_afflictions::CardAfflictionKind::Entangled,
             1,
         ));
-        stomp.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        stomp.set_to_free_this_turn();
         state.cards.push(stomp);
         state.player.hand.push(uid);
         let pid = std::num::NonZeroU32::new(1).unwrap();
@@ -20470,7 +20075,13 @@ mod tests {
             0,
             "0 - 2 + Tangled's 1, clamped"
         );
-        assert_eq!(state.cards[0].cost, 1, "the base still carries the -2");
+        assert_eq!(state.cards[0].local_cost(), -2, "0 - 2, unclamped");
+        state.cards[0].cost.after_card_played_cleanup();
+        assert_eq!(
+            state.cards[0].local_cost(),
+            1,
+            "played: the zero goes, the -2 stays"
+        );
     }
 
     /// Enlightenment+ (`SetThisCombat(1, reduceOnly: true)`, Enlightenment.cs:23)
@@ -20481,108 +20092,70 @@ mod tests {
     /// a later Attack's shave, Rust 1). Same for Pinpoint.
     #[test]
     fn reduce_only_cap_supersedes_this_turns_stomp_and_pinpoint_shaves() {
-        for (id, bank) in [
-            (
-                crate::cards::CardId::Stomp,
-                crate::cards::VarKey::StompCostReductionThisTurn,
-            ),
-            (
-                crate::cards::CardId::Pinpoint,
-                crate::cards::VarKey::PinpointCostReductionThisTurn,
-            ),
-        ] {
+        for id in [crate::cards::CardId::Stomp, crate::cards::CardId::Pinpoint] {
             let mut state = CombatState::default();
             let mut card = Card {
                 card_id: id,
-                cost: 2,
+                cost: crate::CardEnergyCost::new(3),
                 ..Card::pod_defaults()
             };
             card.uid = CardUid::new(1).expect("nz");
-            card.set_combat_var(bank, 1);
+            card.cost.add_this_turn(-1);
             state.cards.push(card);
             state.player.hand.push(card.uid);
 
-            state.cards[0].set_this_combat_reduce_only(1);
-            assert_eq!(state.cards[0].cost, 1, "{id:?}: min(2, 1)");
+            state.cards[0].cost.set_this_combat(1, true);
+            assert_eq!(state.cards[0].local_cost(), 1, "{id:?}: min(2, 1)");
 
-            state.restore_stomp_costs_for_turn_start();
-            state.restore_pinpoint_costs_for_turn_start();
-            assert_eq!(state.cards[0].cost, 1, "{id:?}: min(3, 1) next turn");
-            assert_ne!(
-                state.cards[0].combat_var(crate::cards::VarKey::CostAbsolutelySet),
-                0,
-                "{id:?}: the cap owns the cost"
+            state.cards[0].cost.end_of_turn_cleanup();
+            assert_eq!(
+                state.cards[0].local_cost(),
+                1,
+                "{id:?}: min(3, 1) next turn"
             );
         }
         // A cap above the unshaved cost changes nothing.
-        let mut state = CombatState::default();
         let mut card = Card {
             card_id: crate::cards::CardId::Stomp,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(2),
             ..Card::pod_defaults()
         };
-        card.uid = CardUid::new(1).expect("nz");
-        card.set_combat_var(crate::cards::VarKey::StompCostReductionThisTurn, 1);
-        state.cards.push(card);
-        state.cards[0].set_this_combat_reduce_only(3);
-        state.restore_stomp_costs_for_turn_start();
-        assert_eq!(state.cards[0].cost, 2);
+        card.cost.add_this_turn(-1);
+        card.cost.set_this_combat(3, true);
+        card.cost.end_of_turn_cleanup();
+        assert_eq!(card.local_cost(), 2);
     }
 
+    /// `EndOfTurnCleanup` drops Pinpoint's `AddThisTurn` shaves.
     #[test]
-    fn restore_pinpoint_costs_for_turn_start_reverts_and_clears() {
-        let mut state = CombatState::default();
+    fn pinpoint_shaves_expire_at_end_of_turn() {
         let mut pinpoint = Card {
             card_id: crate::cards::CardId::Pinpoint,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(2),
             ..Card::pod_defaults()
         };
-        pinpoint.uid = CardUid::new(1).expect("nz");
-        pinpoint.set_combat_var(crate::cards::VarKey::PinpointCostReductionThisTurn, 2);
-        state.cards.push(pinpoint);
-
-        state.restore_pinpoint_costs_for_turn_start();
-        let p = &state.cards[0];
-        assert_eq!(
-            p.cost, 2,
-            "restore must add the banked discount back to cost"
-        );
-        assert_eq!(
-            p.combat_var(crate::cards::VarKey::PinpointCostReductionThisTurn),
-            0,
-            "restore must clear the banked Pinpoint var"
-        );
+        pinpoint.cost.add_this_turn(-1);
+        pinpoint.cost.add_this_turn(-1);
+        assert_eq!(pinpoint.local_cost(), 0);
+        assert!(pinpoint.cost.end_of_turn_cleanup());
+        assert_eq!(pinpoint.local_cost(), 2);
+        assert!(!pinpoint.cost.has_local_modifiers());
     }
 
+    /// A Snecko roll is `SetThisTurnOrUntilPlayed(roll)`: it owns the cost
+    /// until the turn ends, then the card is back at its base.
     #[test]
-    fn restore_snecko_costs_for_turn_start_reverts_and_clears() {
-        let mut state = CombatState::default();
+    fn snecko_roll_expires_at_end_of_turn() {
         let mut card = Card {
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(1),
             ..Card::pod_defaults()
         };
-        card.uid = CardUid::new(1).expect("nz");
-        card.set_combat_var(crate::cards::VarKey::SneckoCostDeltaThisTurn, 2);
-        card.set_combat_var(crate::cards::VarKey::CostAbsolutelySet, 1);
-        state.cards.push(card);
-
-        state.restore_snecko_costs_for_turn_start();
-        let c = &state.cards[0];
-        assert_eq!(
-            c.cost, 1,
-            "restore must subtract the banked Snecko delta off cost"
-        );
-        assert_eq!(
-            c.combat_var(crate::cards::VarKey::SneckoCostDeltaThisTurn),
-            0,
-            "restore must clear the banked Snecko var"
-        );
-        assert_eq!(
-            c.combat_var(crate::cards::VarKey::CostAbsolutelySet),
-            0,
-            "the expiring Snecko roll must release the CostAbsolutelySet flag"
-        );
+        card.cost.set_this_turn_or_until_played(3, false);
+        assert_eq!(card.local_cost(), 3);
+        card.cost.end_of_turn_cleanup();
+        assert_eq!(card.local_cost(), 1);
+        assert!(!card.cost.has_local_modifiers());
     }
 
     /// One hand card at `cost`, ready for `snecko_randomize_hand_costs`.
@@ -20591,7 +20164,7 @@ mod tests {
         let uid = CardUid::new(1).expect("nz");
         let mut card = Card {
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             ..Card::pod_defaults()
         };
         card.uid = uid;
@@ -20604,7 +20177,7 @@ mod tests {
     fn next_snecko_roll(state: &CombatState) -> i8 {
         let mut probe = state.clone();
         probe.snecko_randomize_hand_costs();
-        probe.cards[0].cost
+        i8::try_from(probe.cards[0].local_cost()).expect("a roll fits")
     }
 
     /// GH #1150: a Transfigure `+1` appended after Flatten's Osty-attack zero
@@ -20615,11 +20188,11 @@ mod tests {
         let mut state = snecko_hand_state(2);
         state.cards[0].card_id = crate::cards::CardId::Flatten;
         let uid = state.player.hand[0];
-        state.combat_log.osty_attacks_this_turn = 1;
+        crate::card_effects::flatten_after_osty_attack(&mut state);
         apply_transfigure(&mut state, uid);
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 1, "0 + 1");
 
-        state.restore_wire_cost_expiring_on_play(uid);
+        state.cards[0].cost.after_card_played_cleanup();
         assert_eq!(
             crate::hooks::effective_card_cost(&state, uid),
             1,
@@ -20640,24 +20213,19 @@ mod tests {
     fn transfigure_plus_one_after_free_this_turn_is_overridden_by_a_new_zero() {
         let mut state = snecko_hand_state(2);
         let uid = state.player.hand[0];
-        state.cards[0].set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        state.cards[0].set_to_free_this_turn();
         apply_transfigure(&mut state, uid);
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 1, "0 + 1");
 
-        state.cards[0].set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        state.cards[0].set_to_free_this_turn();
         assert_eq!(
             crate::hooks::effective_card_cost(&state, uid),
             0,
             "new zero last"
         );
 
-        state.cards[0].set_combat_var(crate::cards::VarKey::CostAddedAfterLocalZero, 1);
-        state.restore_wire_cost_expiring_on_play(uid);
-        assert_eq!(
-            state.cards[0].combat_var(crate::cards::VarKey::CostAddedAfterLocalZero),
-            0,
-            "the free-this-turn zero clears on play, and the +1 with it"
-        );
+        // Played: both zeros go; Transfigure's `AddThisCombat(1)` stays.
+        state.cards[0].cost.after_card_played_cleanup();
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 3, "2 + 1");
     }
 
@@ -20670,24 +20238,32 @@ mod tests {
     /// 1, C# 1, Rust 0; Necrobinder v0.111.0 5644).
     #[test]
     fn snecko_roll_supersedes_earlier_cost_debts_and_restores_them() {
-        use crate::cards::VarKey;
         let mut state = snecko_hand_state(0);
         let roll = i32::from(next_snecko_roll(&state));
-        state.cards[0].set_combat_var(VarKey::CostDebtThisTurn, 2);
-        state.cards[0].set_combat_var(VarKey::CostDebtThisCombat, 1);
-        let local = |state: &CombatState| crate::hooks::local_card_cost(state, &state.cards[0]);
+        state.cards[0].cost.add_this_turn(-2);
+        state.cards[0].cost.add_this_combat(-1);
+        let local = |state: &CombatState| state.cards[0].local_cost();
         assert_eq!(local(&state), -3);
 
         state.snecko_randomize_hand_costs();
         assert_eq!(local(&state), roll, "the roll supersedes the debts");
 
         // `AddThisCombat(-1)` after the roll: roll - 1.
-        state.cards[0].add_cost_this_combat(-1);
+        state.cards[0].cost.add_this_combat(-1);
         assert_eq!(local(&state), roll - 1);
 
-        state.cards[0].expire_snecko_roll();
-        assert_eq!(local(&state), -4, "every shave applies again: 0 - 3 - 1");
-        assert!(state.cards[0].cost >= 0, "never reads as X-cost");
+        // Played (the roll and the Turn shave stay until turn end only if
+        // not played): the roll goes, every shave applies again.
+        let mut played = state.clone();
+        played.cards[0].cost.after_card_played_cleanup();
+        assert_eq!(local(&played), -4, "0 - 2 - 1 - 1");
+        assert_eq!(played.cards[0].base_cost(), 0, "never reads as X-cost");
+        state.cards[0].cost.end_of_turn_cleanup();
+        assert_eq!(
+            local(&state),
+            -2,
+            "turn end: the roll and the Turn shave go"
+        );
     }
 
     /// Flatten's `SetThisTurn(0)` (Osty attacked) and a Snecko roll are both
@@ -20703,11 +20279,11 @@ mod tests {
             let _ = state.run_rng.combat_energy_costs.next_int(0, 3);
         }
         let uid = state.player.hand[0];
-        state.combat_log.osty_attacks_this_turn = 1;
+        crate::card_effects::flatten_after_osty_attack(&mut state);
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 0);
 
         state.snecko_randomize_hand_costs();
-        let roll = i32::from(state.cards[0].cost);
+        let roll = state.cards[0].local_cost();
         assert!(roll > 0);
         assert_eq!(
             crate::hooks::effective_card_cost(&state, uid),
@@ -20715,7 +20291,7 @@ mod tests {
             "the later roll beats the attack's zero"
         );
 
-        state.combat_log.osty_attacks_this_turn = 2;
+        crate::card_effects::flatten_after_osty_attack(&mut state);
         assert_eq!(
             crate::hooks::effective_card_cost(&state, uid),
             0,
@@ -20730,18 +20306,17 @@ mod tests {
     /// end of turn, and a play drops both. Rust kept showing 0 under the roll.
     #[test]
     fn snecko_roll_over_a_free_until_played_card_shows_the_roll() {
-        use crate::cards::VarKey;
         let mut probe = snecko_hand_state(2);
         while next_snecko_roll(&probe) == 0 {
             let _ = probe.run_rng.combat_energy_costs.next_int(0, 3);
         }
         let uid = probe.player.hand[0];
-        probe.cards[0].set_locally_free(VarKey::FreeUntilPlayed);
+        probe.cards[0].cost.set_until_played(0, false);
         assert_eq!(crate::hooks::effective_card_cost(&probe, uid), 0);
 
         let mut end_of_turn = probe.clone();
         end_of_turn.snecko_randomize_hand_costs();
-        let roll = i32::from(end_of_turn.cards[0].cost);
+        let roll = end_of_turn.cards[0].local_cost();
         assert!(roll > 0);
         assert_eq!(
             crate::hooks::effective_card_cost(&end_of_turn, uid),
@@ -20750,7 +20325,7 @@ mod tests {
         );
         let mut played = end_of_turn.clone();
 
-        end_of_turn.restore_snecko_costs_for_turn_start();
+        end_of_turn.cards[0].cost.end_of_turn_cleanup();
         assert_eq!(
             crate::hooks::effective_card_cost(&end_of_turn, uid),
             0,
@@ -20764,62 +20339,43 @@ mod tests {
             2,
             "a play drops the roll and the zero: base cost"
         );
-        played.restore_snecko_costs_for_turn_start();
+        played.cards[0].cost.end_of_turn_cleanup();
         assert_eq!(crate::hooks::effective_card_cost(&played, uid), 2);
     }
 
     /// GH #759: C# `SetThisTurnOrUntilPlayed` adds its Absolute modifier
     /// whatever the roll (`CardEnergyCost.cs:197-203`) and `EndOfTurnCleanup`
-    /// drops it unconditionally (`:331-335`). A roll equal to the current
-    /// cost banks a zero delta, which the turn-start restore used to skip —
-    /// leaving `CostAbsolutelySet` stuck at 1 for the rest of combat.
+    /// drops it unconditionally (`:331-335`), so a roll equal to the current
+    /// cost still leaves a modifier, and the turn end still removes it.
     #[test]
-    fn zero_delta_snecko_roll_releases_cost_flag_at_turn_start() {
-        use crate::cards::VarKey;
+    fn zero_delta_snecko_roll_is_a_modifier_until_turn_end() {
         let roll = next_snecko_roll(&snecko_hand_state(1));
         let mut state = snecko_hand_state(roll);
         state.snecko_randomize_hand_costs();
         assert_eq!(
-            state.cards[0].cost, roll,
+            state.cards[0].local_cost(),
+            i32::from(roll),
             "fixture: roll equals the prior cost"
         );
-        assert_eq!(
-            state.cards[0].combat_var(VarKey::SneckoCostDeltaThisTurn),
-            0
-        );
-        assert_eq!(
-            state.cards[0].combat_var(VarKey::CostAbsolutelySet),
-            1,
-            "the live roll is an absolute modifier"
-        );
+        assert!(state.cards[0].cost.has_local_modifiers());
 
-        state.restore_snecko_costs_for_turn_start();
-        assert_eq!(state.cards[0].cost, roll);
-        assert_eq!(
-            state.cards[0].combat_var(VarKey::CostAbsolutelySet),
-            0,
-            "the expired zero-delta roll must release the CostAbsolutelySet flag"
-        );
+        state.cards[0].cost.end_of_turn_cleanup();
+        assert_eq!(state.cards[0].local_cost(), i32::from(roll));
+        assert!(!state.cards[0].cost.has_local_modifiers());
     }
 
     /// GH #759: under Confused (SneckoEye) the card already carries C#
     /// `SetThisCombat(roll)` (`ConfusedPower.cs:42`). Snecko Oil's modifier
     /// expiring removes only its own modifier, so the Confused one still owns
-    /// the cost and the flag must survive the Snecko expiry.
+    /// the cost.
     #[test]
-    fn snecko_expiry_keeps_cost_flag_owned_by_confused() {
-        use crate::cards::VarKey;
-        let mut state = snecko_hand_state(2);
-        state.cards[0].set_combat_var(VarKey::CostAbsolutelySet, 1);
+    fn snecko_expiry_keeps_the_confused_roll() {
+        let mut state = snecko_hand_state(3);
+        state.cards[0].cost.set_this_combat(2, false);
         state.snecko_randomize_hand_costs();
-        state.restore_snecko_costs_for_turn_start();
+        state.cards[0].cost.end_of_turn_cleanup();
         let c = &state.cards[0];
-        assert_eq!(c.cost, 2, "the Confused roll is back in force");
-        assert_eq!(
-            c.combat_var(VarKey::CostAbsolutelySet),
-            1,
-            "Confused's absolute modifier outlives the Snecko roll"
-        );
+        assert_eq!(c.local_cost(), 2, "the Confused roll is back in force");
     }
 
     // ---- post-choice effects ----
@@ -20978,7 +20534,7 @@ mod tests {
         crate::cards::Card {
             uid: CardUid::new(1).expect("non-zero"),
             card_id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Skill,
             ..crate::cards::Card::pod_defaults()
         }
@@ -21020,10 +20576,9 @@ mod tests {
         resolve_add_from_discard_free(&mut s, &pc, &[0]);
         assert!(s.player.hand.contains(&uid), "card moved discard→hand");
         assert!(!s.player.discard.contains(&uid), "removed from discard");
-        assert_eq!(
-            s.cards[0].combat_var(crate::cards::VarKey::FreeThisTurn),
-            1,
-            "card stamped FreeThisTurn",
+        assert!(
+            s.cards[0].cost.has(crate::LocalCostMod::FREE_THIS_TURN),
+            "card made free this turn",
         );
     }
 
@@ -21315,7 +20870,7 @@ mod tests {
         let uid = CardUid::new(1).expect("non-zero");
         let mut s = CombatState::default();
         let mut c = mg_card_uid1(crate::cards::CardId::StrikeIronclad);
-        c.cost = 2;
+        c.cost = crate::CardEnergyCost::new(2);
         s.cards.push(c);
         s.player.hand.push(uid);
         let pc = mg_choice(
@@ -21325,7 +20880,7 @@ mod tests {
             crate::cards::PileKind::Hand,
         );
         resolve_make_free_in_hand(&mut s, &pc, &[0]);
-        assert_eq!(s.cards[0].cost, 0, "energy cost zeroed");
+        assert_eq!(s.cards[0].local_cost(), 0, "energy cost zeroed");
         assert_eq!(
             s.cards[0].combat_var(crate::cards::VarKey::StarCostFreeThisCombat),
             1,
@@ -21772,7 +21327,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId, cost: i8| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             card_type: CardType::Attack,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -21826,7 +21381,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             base_block: 5,
@@ -21900,7 +21455,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId, ctype: CardType, tt: TargetType, cost: i8| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             card_type: ctype,
             target_type: tt,
             ..Card::pod_defaults()
@@ -21974,7 +21529,7 @@ mod tests {
         state.cards.push(Card {
             uid: CardUid::new(1).expect("non-zero"),
             card_id: CardId::BelieveInYou,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Skill,
             target_type: TargetType::Self_, // spec-collapsed from AnyAlly
             ..Card::pod_defaults()
@@ -22041,7 +21596,7 @@ mod tests {
         state.cards.push(Card {
             uid: CardUid::new(1).expect("nz"),
             card_id: CardId::PactsEnd,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::AllEnemies,
             ..Card::pod_defaults()
@@ -22088,7 +21643,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId, cost: i8, ty: CardType, tgt: TargetType| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             card_type: ty,
             target_type: tgt,
             upgraded: false,
@@ -22167,7 +21722,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId, cost: i8| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -22209,17 +21764,17 @@ mod tests {
     /// Bead `sts2-rs-starcost`: a card with a `CanonicalStarCost` override
     /// (the 21 Regent star cards) is unplayable when the player lacks the
     /// Stars — C# `PlayerCombatState.HasEnoughResourcesFor` →
-    /// `StarCostTooHigh`. `FreeThisTurn` (Splash's `SetToFreeThisTurn` →
+    /// `StarCostTooHigh`. `FREE_THIS_TURN` (Splash's `SetToFreeThisTurn` →
     /// `SetStarCostThisTurn(0)`) exempts it; enough Stars makes it playable.
     #[test]
     fn legal_actions_gates_star_cost_unless_free_or_paid() {
-        use crate::cards::{Card, CardId, CardType, TargetType, VarKey};
+        use crate::cards::{Card, CardId, CardType, TargetType};
         // Self-targeted stand-in (star gate keys on card_id, not type) so
         // the test needs no live enemy on the board.
         let mk = |uid_raw: u32, id: CardId| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -22234,7 +21789,7 @@ mod tests {
             };
             let mut c = mk(1, CardId::SevenStars);
             if free {
-                c.set_combat_var(VarKey::FreeThisTurn, 1);
+                c.set_to_free_this_turn();
             }
             state.cards.push(c);
             state.player.hand.push(CardUid::new(1).expect("non-zero"));
@@ -22250,7 +21805,7 @@ mod tests {
         );
         assert!(
             star_card_offered(0, true),
-            "FreeThisTurn zeros the star cost → playable at 0 stars"
+            "FREE_THIS_TURN zeros the star cost → playable at 0 stars"
         );
         assert!(
             star_card_offered(7, false),
@@ -22278,7 +21833,7 @@ mod tests {
         let mut c = Card {
             uid: CardUid::new(1).expect("non-zero"),
             card_id: CardId::DyingStar,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::AllEnemies,
             ..Card::pod_defaults()
@@ -22336,7 +21891,7 @@ mod tests {
         let c = Card {
             uid: CardUid::new(1).expect("non-zero"),
             card_id: CardId::DyingStar,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::AllEnemies,
             ..Card::pod_defaults()
@@ -22414,7 +21969,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -22461,7 +22016,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId, ct: CardType| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: ct,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -22529,7 +22084,7 @@ mod tests {
         state.cards.push(Card {
             uid: gf,
             card_id: CardId::GrandFinale,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::AllEnemies,
             upgraded: false,
@@ -22540,7 +22095,7 @@ mod tests {
         state.cards.push(Card {
             uid: drawn,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -23622,7 +23177,7 @@ mod tests {
         state.cards.push(Card {
             uid: existing_uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -23636,7 +23191,7 @@ mod tests {
             // `uid` is ignored — the accessor reassigns it.
             uid: CardUid::new(u32::MAX).expect("non-zero placeholder"),
             card_id: CardId::Dazed,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: CardType::Status,
             target_type: TargetType::None,
             upgraded: false,
@@ -23674,7 +23229,7 @@ mod tests {
         let void_uid = state.add_card_to_draw_pile(Card {
             uid: CardUid::new(u32::MAX).expect("non-zero placeholder"),
             card_id: CardId::Void,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: CardType::Status,
             target_type: TargetType::None,
             upgraded: false,
@@ -23692,7 +23247,7 @@ mod tests {
         let void2 = state.add_card_to_draw_pile(Card {
             uid: CardUid::new(u32::MAX).expect("non-zero placeholder"),
             card_id: CardId::Void,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: CardType::Status,
             target_type: TargetType::None,
             upgraded: false,
@@ -23729,7 +23284,7 @@ mod tests {
             state.add_card_to_draw_pile(Card {
                 uid: CardUid::new(u32::MAX).expect("non-zero placeholder"),
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -23766,7 +23321,7 @@ mod tests {
         let mk = |uid_raw: u32, id: CardId| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -23793,7 +23348,7 @@ mod tests {
                 Card {
                     uid: CardUid::new(u32::MAX).expect("placeholder"),
                     card_id: CardId::Bash,
-                    cost: 2,
+                    cost: crate::CardEnergyCost::new(2),
                     card_type: CardType::Attack,
                     target_type: TargetType::Enemy,
                     upgraded: false,
@@ -23883,7 +23438,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -24822,7 +24377,7 @@ mod tests {
         let mk_strike = |uid_raw: u32| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -24891,7 +24446,7 @@ mod tests {
         let mk_strike = |uid_raw: u32| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -25068,7 +24623,7 @@ mod tests {
         let mk = |raw: u32| Card {
             uid: CardUid::new(raw).expect("non-zero"),
             card_id: CardId::Melancholy,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             ..Card::pod_defaults()
@@ -25091,7 +24646,8 @@ mod tests {
                 .iter()
                 .find(|c| c.uid == CardUid::new(raw).expect("non-zero"))
                 .expect("card present")
-                .cost
+                .local_cost()
+                .max(0)
         };
 
         // N = 3 creature deaths: each in-pile Melancholy drops by N (3 → 0),
@@ -25127,7 +24683,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::Melancholy,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             ..Card::pod_defaults()
@@ -25136,7 +24692,7 @@ mod tests {
         for _ in 0..4 {
             state.reduce_melancholy_cost_on_death();
         }
-        assert_eq!(crate::hooks::local_card_cost(&state, &state.cards[0]), -1);
+        assert_eq!(state.cards[0].local_cost(), -1);
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 0);
 
         let pid = std::num::NonZeroU32::new(1).expect("non-zero");
@@ -25174,7 +24730,7 @@ mod tests {
         let mk = |raw: u32| Card {
             uid: CardUid::new(raw).expect("non-zero"),
             card_id: CardId::Melancholy,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             ..Card::pod_defaults()
@@ -25192,7 +24748,8 @@ mod tests {
                 .iter()
                 .find(|c| c.uid == CardUid::new(raw).expect("non-zero"))
                 .expect("card present")
-                .cost
+                .local_cost()
+                .max(0)
         };
 
         state.reduce_melancholy_cost_on_death();

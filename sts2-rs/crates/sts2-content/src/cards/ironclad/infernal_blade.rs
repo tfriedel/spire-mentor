@@ -9,7 +9,7 @@ use super::prelude::*;
 ///   1. Sample uniform-random from `ironclad_attack_specs()`
 ///      (`CardType::Attack` subset of the Ironclad card pool).
 ///   2. Spawn it into the player's hand.
-///   3. Set `VarKey::FreeThisTurn = 1` on the spawned instance — the
+///   3. Set `LocalCostMod::FREE_THIS_TURN` on the spawned instance — the
 ///      `hooks::effective_card_cost` resolver short-circuits to 0 when
 ///      the flag is non-zero (cleared by player/enemy turn-end
 ///      cleanup).
@@ -31,7 +31,7 @@ pub(crate) fn play_infernal_blade(
     // `AddGeneratedCardToCombat`, so the generation listeners that run
     // inside the add already see a free card (#1105).
     let mut card = card_from_spec(&spec);
-    card.set_combat_var(VarKey::FreeThisTurn, 1);
+    card.set_to_free_this_turn();
     spawn_card_into_pile(state, card, PileKind::Hand);
     EffectResult::Resolved
 }

@@ -154,8 +154,12 @@ fn assert_tree_consistent(m: &Mcts<UniformPolicy>) {
 }
 
 /// Every non-root decision node can be found in the transposition table
-/// under its key at its shallowest depth (or a node with the same key is
-/// there: the first one seen keeps a shared key).
+/// under its key (or a node with the same key is there: the first one seen
+/// keeps a shared key). The depth bucket is the length of the path the node
+/// was FIRST reached by, which is never shorter than its shallowest depth but
+/// can be longer: a transposed parent reached by a longer path first files its
+/// new children one bucket down. So the node sits in its shallowest depth's
+/// bucket or a deeper one.
 fn assert_tt_covers_the_tree(m: &Mcts<UniformPolicy>) {
     let tt = m.transposition.as_ref().expect("table allocated");
     for (id, d) in reachable(m, m.tree.root).into_iter().skip(1) {
@@ -174,14 +178,13 @@ fn assert_tt_covers_the_tree(m: &Mcts<UniformPolicy>) {
             }
         };
         #[allow(clippy::cast_possible_truncation)]
-        let key = (key_of(n), (d / 4) as u8);
-        let hit = tt.peek(key).expect("kept node missing from the table");
+        let shallowest = (d / 4) as u8;
+        let key = key_of(n);
+        let hit = (shallowest..=u8::MAX)
+            .find_map(|bucket| tt.peek((key, bucket)))
+            .expect("kept node missing from the table");
         assert!((hit.0 as usize) < m.tree.arena.len());
-        assert_eq!(
-            key_of(m.tree.node(hit)),
-            key.0,
-            "table entry for another key"
-        );
+        assert_eq!(key_of(m.tree.node(hit)), key, "table entry for another key");
     }
 }
 

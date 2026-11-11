@@ -241,7 +241,8 @@ pub fn build_card(spec: &CardSpec, version: GameVersion) -> GraftResult<Card> {
         let e = resolve_enchantment(name).ok_or_else(|| format!("unknown enchantment {name:?}"))?;
         card.set_enchantment(e, *amount);
         if e == EnchantmentId::TezcatarasEmber {
-            card.cost = 0;
+            // C# `TezcatarasEmber.OnEnchant`: `UpgradeBy(-GetWithModifiers(None))`.
+            card.cost.upgrade_by(-i32::from(card.base_cost()));
         }
     }
     Ok(card)

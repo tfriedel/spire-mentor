@@ -70,7 +70,7 @@ fn push_play_card(
     state.cards.push(Card {
         uid,
         card_id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -96,7 +96,7 @@ fn push_hand_card(state: &mut CombatState, card_id: CardId) -> sts2_core::CardUi
     state.cards.push(Card {
         uid,
         card_id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -1444,17 +1444,17 @@ fn kingly_kick_loses_one_cost_per_draw() {
     let uid = state.add_card_to_draw_pile(Card {
         uid: CardUid::new(u32::MAX).expect("nz placeholder"),
         card_id: CardId::KinglyKick,
-        cost: 4,
+        cost: sts2_core::CardEnergyCost::new(4),
         ..Card::pod_defaults()
     });
     let _ = state.draw_into_hand(1);
     let idx = uid.0.get() as usize - 1;
-    assert_eq!(state.cards[idx].cost, 3, "first draw: cost 4 -> 3");
+    assert_eq!(state.cards[idx].local_cost(), 3, "first draw: cost 4 -> 3");
     // Put it back and draw again to confirm the per-draw decrement.
     state.player.hand.clear();
     state.player.draw.push(uid);
     let _ = state.draw_into_hand(1);
-    assert_eq!(state.cards[idx].cost, 2, "second draw: cost 3 -> 2");
+    assert_eq!(state.cards[idx].local_cost(), 2, "second draw: cost 3 -> 2");
 }
 
 /// KnockoutBlow: kill grants 5 Stars.
@@ -1951,7 +1951,7 @@ fn stardust_x_is_captured_before_the_sealed_throne_star() {
     apply_power_to_player(&mut state, PowerKind::TheSealedThrone, 1);
     let uid = push_hand_card(&mut state, CardId::Stardust);
     state.cards[uid.0.get() as usize - 1].base_damage = 5;
-    state.cards[uid.0.get() as usize - 1].cost = 0;
+    state.cards[uid.0.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(0);
     let hp0 = state.creatures[0].current_hp;
     let step = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
     assert_eq!(step, sts2_core::StepResult::Advanced);
@@ -2040,7 +2040,7 @@ fn stardust_replay_reuses_the_spent_star_x() {
     apply_power_to_player(&mut state, PowerKind::Duplication, 1);
     let uid = push_hand_card(&mut state, CardId::Stardust);
     state.cards[uid.0.get() as usize - 1].base_damage = 5;
-    state.cards[uid.0.get() as usize - 1].cost = 0;
+    state.cards[uid.0.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(0);
     let hp0 = state.creatures[0].current_hp;
     let step = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
     assert_eq!(step, sts2_core::StepResult::Advanced);
@@ -2355,7 +2355,7 @@ fn bombardment_auto_plays_from_exhaust_at_turn_start() {
         state.cards.push(Card {
             uid,
             card_id: CardId::Bombardment,
-            cost: 3,
+            cost: sts2_core::CardEnergyCost::new(3),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -2449,7 +2449,7 @@ fn bombardment_follows_rampart_block() {
         state.cards.push(Card {
             uid,
             card_id: CardId::Bombardment,
-            cost: 3,
+            cost: sts2_core::CardEnergyCost::new(3),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -2719,7 +2719,7 @@ fn auto_played_decisions_decisions_waits_for_each_repeat() {
     state.player.hand.retain(|u| *u != decisions);
     state.player.draw.push(decisions);
     let catastrophe = push_hand_skill(&mut state, CardId::Catastrophe);
-    state.cards[catastrophe.get() as usize - 1].cost = 0;
+    state.cards[catastrophe.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(0);
     state.phase = sts2_core::CombatPhase::PlayerPlayPhase;
     state.side = sts2_core::Side::Player;
     let hand_index = u8::try_from(state.player.hand.len() - 1).expect("fits");
@@ -4330,8 +4330,7 @@ fn mummified_hand_sees_void_form_spent_by_the_power_play() {
         state.cards[power.0.get() as usize - 1].card_type = CardType::Power;
         state.cards[power.0.get() as usize - 1].target_type = TargetType::Self_;
         let strike = push_hand_card(&mut state, CardId::StrikeRegent);
-        state.cards[strike.0.get() as usize - 1]
-            .set_locally_free(sts2_core::cards::VarKey::FreeThisTurn);
+        state.cards[strike.0.get() as usize - 1].set_to_free_this_turn();
         let defend = push_hand_card(&mut state, CardId::DefendRegent);
         state.cards[defend.0.get() as usize - 1].card_type = CardType::Skill;
         state.cards[defend.0.get() as usize - 1].target_type = TargetType::Self_;
@@ -4339,9 +4338,11 @@ fn mummified_hand_sees_void_form_spent_by_the_power_play() {
         let step = sts2_core::combat_loop::play_card(&mut state, 0, None);
         assert_eq!(step, sts2_core::StepResult::Advanced, "{version:?}");
         let free = |uid: sts2_core::CardUid| {
-            state.cards[uid.0.get() as usize - 1].combat_var(sts2_core::cards::VarKey::FreeThisTurn)
+            state.cards[uid.0.get() as usize - 1]
+                .cost
+                .has(sts2_core::LocalCostMod::FREE_THIS_TURN)
         };
-        assert_eq!(free(defend), 1, "{version:?}: Mummified Hand frees Defend");
+        assert!(free(defend), "{version:?}: Mummified Hand frees Defend");
         assert_eq!(
             sts2_core::combat_loop::void_form_cards_played_this_turn(&state),
             1,

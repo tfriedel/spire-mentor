@@ -95,7 +95,8 @@ fn serialize_state_summary(state: &CombatState) -> String {
         .map(|card| {
             format!(
                 "{{\"card_id\":\"{:?}\",\"cost\":{}}}",
-                card.card_id, card.cost
+                card.card_id,
+                card.local_cost()
             )
         })
         .collect();

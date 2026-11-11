@@ -54,7 +54,7 @@ fn state_with_toolbox(draw_pile_size: usize) -> CombatState {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -139,7 +139,7 @@ fn the_grant_precedes_the_draw_so_the_draw_is_what_gets_capped() {
         state.cards.push(Card {
             uid,
             card_id: CardId::DefendIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -227,7 +227,7 @@ fn a_relic_equipped_after_toolbox_waits_for_the_pick() {
     state.cards.push(Card {
         uid: power,
         card_id: CardId::Inflame,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Power,
         target_type: TargetType::Self_,
         ..Card::pod_defaults()

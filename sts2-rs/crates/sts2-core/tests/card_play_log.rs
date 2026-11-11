@@ -38,7 +38,7 @@ fn make_card(
     Card {
         uid: CardUid::new(uid_raw).expect("non-zero uid"),
         card_id,
-        cost,
+        cost: sts2_core::CardEnergyCost::new(cost),
         card_type,
         target_type,
         upgraded: false,

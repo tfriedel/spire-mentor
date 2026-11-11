@@ -64,7 +64,7 @@ fn push_card(cards: &mut sts2_core::CardStore, card_id: CardId, card_type: CardT
     cards.push(Card {
         uid,
         card_id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type,
         target_type: TargetType::Self_,
         upgraded: false,

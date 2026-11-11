@@ -5596,7 +5596,7 @@ mod tests {
         state.cards.push(Card {
             uid: CardUid(card_uid),
             card_id: CardId::Expose,
-            cost: 0,
+            cost: sts2_core::CardEnergyCost::new(0),
             card_type: CardType::Skill,
             target_type: TargetType::Enemy,
             upgraded: false,

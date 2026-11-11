@@ -1,0 +1,76 @@
+{
+ "points": [
+  {
+   "act": 1,
+   "deck_size": 10,
+   "floor": 1,
+   "idx": 0,
+   "scores": {
+    "block": 38.9,
+    "damage": 31.4,
+    "velocity": 0.0,
+    "volume": 0.0
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 11,
+   "floor": 2,
+   "idx": 20,
+   "scores": {
+    "block": 49.5,
+    "damage": 29.8,
+    "velocity": 1.2,
+    "volume": 12.1
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 12,
+   "floor": 3,
+   "idx": 37,
+   "scores": {
+    "block": 52.7,
+    "damage": 28.8,
+    "velocity": 0.0,
+    "volume": 0.0
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 13,
+   "floor": 4,
+   "idx": 45,
+   "scores": {
+    "block": 50.2,
+    "damage": 31.3,
+    "velocity": 26.8,
+    "volume": 34.8
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 14,
+   "floor": 5,
+   "idx": 47,
+   "scores": {
+    "block": 48.5,
+    "damage": 30.2,
+    "velocity": 26.8,
+    "volume": 34.0
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 15,
+   "floor": 6,
+   "idx": 77,
+   "scores": {
+    "block": 47.5,
+    "damage": 34.4,
+    "velocity": 29.1,
+    "volume": 36.2
+   }
+  }
+ ]
+}

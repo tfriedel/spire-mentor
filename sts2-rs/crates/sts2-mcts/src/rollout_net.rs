@@ -1257,7 +1257,7 @@ pub fn action_features(
             let cost = if card.is_x_cost() {
                 ctx.energy
             } else {
-                i32::from(card.cost.max(0))
+                card.local_cost().max(0)
             };
             x[0] = 1.0;
             x[5] = cost as f32 / 3.0;

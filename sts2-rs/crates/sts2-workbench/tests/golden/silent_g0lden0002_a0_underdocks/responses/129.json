@@ -232,7 +232,7 @@
   },
   {
    "act": 1,
-   "best_label": "Neutralize",
+   "best_label": "Survivor",
    "best_line": [],
    "best_mean_hp": null,
    "best_win_prob": 1.0,
@@ -241,8 +241,8 @@
    "hp_drop": null,
    "idx": 13,
    "is_blunder": false,
-   "matched_best": false,
-   "message": "Turn 3: Survivor instead of Neutralize dropped P(win) 100%→100% (−0 pts)",
+   "matched_best": true,
+   "message": "Turn 3: Survivor matched the MCTS line (P(win) 100%)",
    "n_actions": 4,
    "node_id": 13,
    "played_label": "Survivor",
@@ -252,7 +252,7 @@
    "regret": 0.0,
    "severity": 0.0,
    "turn": 3,
-   "verdict": "uncertain",
+   "verdict": "best",
    "visits": 6
   },
   {

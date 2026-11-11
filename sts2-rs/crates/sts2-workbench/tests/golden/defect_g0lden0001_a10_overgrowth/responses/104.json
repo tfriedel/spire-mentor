@@ -13,22 +13,22 @@
   {
    "action": "end turn",
    "hp_n": 48,
-   "hp_sd": 3.294,
+   "hp_sd": 4.0447,
    "in_band": true,
    "is_best": true,
-   "losses": 2,
+   "losses": 0,
    "low_confidence": false,
-   "mean_final_hp": 14.0625,
+   "mean_final_hp": 12.875,
    "pick_rank": 0,
    "pick_reason": "the highest value",
-   "q": 0.958,
+   "q": 1.0458,
    "q_saturated": false,
    "stable_idx": -1,
    "target_index": null,
    "ties": 0,
    "visits": 48,
-   "win_prob": 0.9583,
-   "wins": 46
+   "win_prob": 1.0,
+   "wins": 48
   }
  ]
 }

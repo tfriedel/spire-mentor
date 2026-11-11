@@ -2456,7 +2456,7 @@ mod tests {
         assert!(rs.pending_rewards.is_empty(), "no phantom card reward");
         let added = rs.master_deck.last().map(|c| c.card_id).unwrap();
         assert_eq!(
-            crate::cards::spec_index::card_pod_from_id(added, false).map(|c| c.cost),
+            crate::cards::spec_index::card_pod_from_id(added, false).map(|c| c.base_cost()),
             Some(0),
             "TouchCore grants a 0-cost (non-X) card",
         );

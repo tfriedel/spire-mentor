@@ -64,7 +64,7 @@ fn add_card(state: &mut CombatState, id: u32, card_type: sts2_core::cards::CardT
     state.cards.push(Card {
         uid,
         card_id: CardId::StrikeIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -713,7 +713,7 @@ fn make_card(card_type: sts2_core::cards::CardType) -> Card {
     Card {
         uid: CardUid::new(1).expect("non-zero card uid"),
         card_id: CardId::StrikeIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -1291,7 +1291,7 @@ fn add_hand_card(
 ) -> CardUid {
     let uid = add_card(state, id, card_type);
     let idx = uid.get() as usize - 1;
-    state.cards[idx].cost = cost;
+    state.cards[idx].cost = sts2_core::CardEnergyCost::new(cost);
     state.cards[idx].target_type = TargetType::None;
     state.cards[idx].base_damage = 0;
     state.player.hand.push(uid);

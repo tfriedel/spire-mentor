@@ -199,7 +199,7 @@ pub fn order_is_observable(s: &CombatState) -> bool {
             ORDER_READER_CARDS.contains(&c.card_id)
                 || c.enchantments
                     .iter()
-                    .any(|(e, _)| *e == EnchantmentId::PerfectFit)
+                    .any(|(e, _)| e == EnchantmentId::PerfectFit)
         })
 }
 

@@ -64,14 +64,13 @@ fn a_captured_dict_rebuilds_a_combat_state() {
     assert_eq!(state.player.discard.len(), 1);
 }
 
-/// A wire `combat_vars` value lands behind the card's "may be nonzero" mask
-/// (J02). `Card::combat_var` answers 0 from the mask alone when the key's bit
-/// is clear, so a reconstruction path that wrote a value without going
-/// through the mask-maintaining writers would read the fixture's
-/// `free_this_turn: 1` back as 0, and the card would stop being free.
+/// A wire `cost_mods` block rebuilds the card's exact cost model: the
+/// fixture's hand Strike was made free this turn (`SetToFreeThisTurn`, an
+/// Absolute 0 that expires at turn end or on play), so it reads 0 now and
+/// its printed 1 once the modifier expires.
 #[test]
-fn wire_combat_vars_read_back_through_the_mask() {
-    use sts2_core::cards::{CardId, VarKey};
+fn wire_cost_mods_rebuild_the_cost_model() {
+    use sts2_core::cards::CardId;
 
     let state = state_from_json_str(&fixture()).expect("fixture must rebuild");
     let strike = state
@@ -81,9 +80,12 @@ fn wire_combat_vars_read_back_through_the_mask() {
         .map(|uid| &state.cards[uid.get() as usize - 1])
         .find(|c| c.card_id == CardId::StrikeIronclad)
         .expect("the hand Strike came across");
-    assert!(strike.combat_vars.maybe_nonzero(VarKey::FreeThisTurn));
-    assert_eq!(strike.combat_var(VarKey::FreeThisTurn), 1);
-    assert!(sts2_core::hooks::card_cost_locally_zeroed(&state, strike));
+    assert!(strike.cost.has(sts2_core::LocalCostMod::FREE_THIS_TURN));
+    assert_eq!(strike.base_cost(), 1);
+    assert_eq!(strike.local_cost(), 0);
+    let mut later = *strike;
+    later.cost.end_of_turn_cleanup();
+    assert_eq!(later.local_cost(), 1);
 }
 
 /// The synthetic `status:` / `curse:` ids resolve to their real cards rather

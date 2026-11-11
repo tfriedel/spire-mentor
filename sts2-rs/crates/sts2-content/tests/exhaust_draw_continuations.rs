@@ -705,7 +705,11 @@ fn modded_cost_waits_for_its_draw(version: GameVersion) {
     let modded = push_hand(&mut state, CardId::Modded);
     let i = hand_index(&state, modded);
     let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
-    let cost = |s: &CombatState| sts2_core::card_by_uid(&s.cards, modded).expect("card").cost;
+    let cost = |s: &CombatState| {
+        sts2_core::card_by_uid(&s.cards, modded)
+            .expect("card")
+            .local_cost()
+    };
 
     assert_stratagem_open(&state);
     assert_eq!(cost(&state), 0, "{version:?}: no cost bump before the pick");

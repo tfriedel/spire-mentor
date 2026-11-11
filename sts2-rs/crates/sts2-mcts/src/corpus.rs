@@ -103,11 +103,11 @@ pub const CARD_FEAT_DIM: usize = 19;
 #[must_use]
 pub fn card_feat_vec(card: &Card) -> [f32; CARD_FEAT_DIM] {
     let mut f = [0.0_f32; CARD_FEAT_DIM];
-    // cost: X-cost (negative) emitted as -1.0; else cost / 3.0.
-    f[0] = if card.cost < 0 {
+    // cost: X-cost (negative) emitted as -1.0; else the local cost / 3.0.
+    f[0] = if card.base_cost() < 0 {
         -1.0
     } else {
-        f32::from(card.cost) / 3.0
+        card.local_cost().max(0) as f32 / 3.0
     };
     // card_type one-hot [1..6]. Quest (GH #1111) keeps the Skill slot it
     // had while it was folded into Skill, so the width and trained nets hold.

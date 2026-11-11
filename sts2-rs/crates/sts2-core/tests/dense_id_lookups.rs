@@ -116,9 +116,11 @@ fn check_card_arena(arena: &[Card], tally: &mut Tally) {
         );
         let mut probe = arena.to_vec();
         if let Some(c) = card_by_uid_mut(&mut probe, uid) {
-            c.cost = -7;
+            c.cost = sts2_core::CardEnergyCost::new(-7);
         }
-        let marked: Vec<usize> = (0..probe.len()).filter(|&i| probe[i].cost == -7).collect();
+        let marked: Vec<usize> = (0..probe.len())
+            .filter(|&i| probe[i].local_cost() == -7)
+            .collect();
         assert_eq!(
             marked,
             scan.into_iter().collect::<Vec<_>>(),

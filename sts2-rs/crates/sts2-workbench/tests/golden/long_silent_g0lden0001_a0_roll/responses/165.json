@@ -12,43 +12,43 @@
  "scores": [
   {
    "action": "Neutralize",
-   "hp_n": 25,
-   "hp_sd": 6.4652,
+   "hp_n": 24,
+   "hp_sd": 6.1065,
    "in_band": true,
    "is_best": true,
    "losses": 0,
    "low_confidence": false,
-   "mean_final_hp": 35.04,
+   "mean_final_hp": 34.2917,
    "pick_rank": 0,
-   "pick_reason": "the highest value",
-   "q": 1.1249,
+   "pick_reason": "the most searched of the equal moves",
+   "q": 1.1222,
    "q_saturated": false,
    "stable_idx": 5,
    "target_index": 1,
    "ties": 0,
-   "visits": 25,
+   "visits": 24,
    "win_prob": 1.0,
-   "wins": 25
+   "wins": 24
   },
   {
    "action": "end turn",
-   "hp_n": 23,
-   "hp_sd": 4.8404,
-   "in_band": false,
+   "hp_n": 24,
+   "hp_sd": 6.1372,
+   "in_band": true,
    "is_best": false,
    "losses": 0,
    "low_confidence": false,
-   "mean_final_hp": 28.3043,
+   "mean_final_hp": 31.5417,
    "pick_rank": 1,
    "pick_reason": null,
-   "q": 1.1008,
+   "q": 1.1124,
    "q_saturated": false,
    "stable_idx": -1,
    "target_index": null,
    "ties": 0,
-   "visits": 23,
+   "visits": 24,
    "win_prob": 1.0,
-   "wins": 23
+   "wins": 24
   }
  ]
 }

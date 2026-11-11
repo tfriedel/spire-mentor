@@ -211,7 +211,7 @@ fn build_encounter_state(
         cards_arena.push(Card {
             uid,
             card_id: spec.id,
-            cost: spec.cost,
+            cost: sts2_core::CardEnergyCost::new(spec.cost),
             card_type: spec.card_type,
             target_type: spec.target_type,
             upgraded: false,
@@ -1650,23 +1650,14 @@ impl PyCombatState {
         // scaling accumulator (Rampage / Claw / RitualDagger). Carry them
         // by pile+position, exactly as the draw-pile pins are: a pile whose
         // length changed (or whose card at the position changed identity)
-        // is unreconstructable and drops its carries. Wire-owned vars are
-        // excluded — the three cost banks and the two wire-cost stamps
-        // belong to the `persistent_cost` channel, and
-        // `WitherFakeUpgradeLevel` is re-derived from wire `base_damage` —
-        // and a var the fresh card already carries (the Rust dialect
-        // round-trips `combat_vars`) keeps the wire's value: reality wins.
+        // is unreconstructable and drops its carries. The energy cost is not
+        // a var at all (`Card::cost`, rebuilt from the wire's cost fields), and
+        // the one wire-owned var, `WitherFakeUpgradeLevel`, is re-derived from
+        // wire `base_damage`. A var the fresh card already carries (the Rust
+        // dialect round-trips `combat_vars`) keeps the wire's value: reality
+        // wins.
         {
-            const WIRE_OWNED: &[VarKey] = &[
-                VarKey::StompCostReductionThisTurn,
-                VarKey::PinpointCostReductionThisTurn,
-                VarKey::SneckoCostDeltaThisTurn,
-                VarKey::SneckoRollLive,
-                VarKey::WireTransientCostThisTurn,
-                VarKey::WireCostExpiringOnPlay,
-                VarKey::WireCostStable,
-                VarKey::WitherFakeUpgradeLevel,
-            ];
+            const WIRE_OWNED: &[VarKey] = &[VarKey::WitherFakeUpgradeLevel];
             let pile_pairs = [
                 (&self.inner.player.hand[..], &carried.inner.player.hand[..]),
                 (&self.inner.player.draw[..], &carried.inner.player.draw[..]),
@@ -1718,7 +1709,6 @@ impl PyCombatState {
                             !(*k == VarKey::RampageDamage
                                 && dst.card_id == sts2_core::cards::CardId::Rampage)
                         })
-                        .copied()
                         .collect();
                     if !vars.is_empty() {
                         copies.push((fresh_uid, vars));

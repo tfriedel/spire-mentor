@@ -74,7 +74,7 @@ pub fn print_hand<W: Write>(out: &mut W, state: &CombatState) -> io::Result<()> 
             out,
             "    slot {i}: {name:?}  cost {cost}  ({ctype:?}/{ttype:?}{upg})",
             name = card.card_id,
-            cost = card.cost,
+            cost = card.local_cost(),
             ctype = card.card_type,
             ttype = card.target_type,
             upg = if card.upgraded { " +1" } else { "" },
@@ -98,7 +98,7 @@ pub fn print_card_info<W: Write>(
     }
     let card = card_by_uid(state, state.player.hand[idx]);
     writeln!(out, "  card {hand_index}: {:?}", card.card_id)?;
-    writeln!(out, "    cost          : {}", card.cost)?;
+    writeln!(out, "    cost          : {}", card.local_cost())?;
     writeln!(
         out,
         "    type / target : {:?} / {:?}",

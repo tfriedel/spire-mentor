@@ -16,10 +16,9 @@ use super::prelude::*;
 /// pin's `card.cost = random.randint(0, 3)`) permanently mutated
 /// `Card::cost`, so a randomized card that was NOT played kept the rolled
 /// cost across the turn boundary. The cost-randomize now lives in
-/// [`sts2_core::CombatState::snecko_randomize_hand_costs`], which banks the
-/// `roll - prior_cost` delta in `SneckoCostDeltaThisTurn` so
-/// `restore_snecko_costs_for_turn_start` reverts it at the next player-turn
-/// start, preserves X-cost (`-1`) cards (C#'s `!CostsX` filter), and consumes
+/// [`sts2_core::CombatState::snecko_randomize_hand_costs`], which pushes the
+/// roll as a this-turn-or-until-played Absolute cost modifier (C#
+/// `SetThisTurnOrUntilPlayed`), so it expires at turn end, preserves X-cost (`-1`) cards (C#'s `!CostsX` filter), and consumes
 /// the `combat_energy_costs` roll ONLY for cards that pass the guard.
 ///
 /// Bead `sts2-rs-snecko-suspend` (#180): C# `SneckoOil.OnUse` `await`s the full

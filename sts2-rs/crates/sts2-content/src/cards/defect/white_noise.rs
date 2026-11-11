@@ -3,11 +3,11 @@ use super::prelude::*;
 
 /// White Noise. Cost 1, Skill, Self, Exhaust. Generate one random
 /// Power card from the player's character pool, flag it
-/// `FreeThisTurn` (plays at cost 0 this turn), and add it to hand.
+/// `FREE_THIS_TURN` (plays at cost 0 this turn), and add it to hand.
 /// Mirrors `sts2-rl-agent@01c094d:sts2_env/cards/defect.py::white_noise`:
 /// `create_character_cards(character_id, rng, 1, card_type=POWER,
 /// generation_context="modifier")` → `set_temporary_cost_for_turn(0)`
-/// → `move_card_to_hand`. Uses the same sampler + `VarKey::FreeThisTurn`
+/// → `move_card_to_hand`. Uses the same sampler + `LocalCostMod::FREE_THIS_TURN`
 /// shim as `card_effects::generate_free_attack_in_hand` (bead
 /// `sts2-rs-zh82z`), the established Rust-side analog for Python's
 /// `set_temporary_cost_for_turn(0)`.
@@ -23,7 +23,7 @@ pub(crate) fn play_white_noise(state: &mut CombatState, _t: Option<CreatureUid>)
         true,
     );
     for uid in uids {
-        set_card_var(state, uid, VarKey::FreeThisTurn, 1);
+        sts2_core::card_effects::set_card_free_this_turn(state, uid);
         // The Supermassive tally is bumped by `fire_card_generation_listeners`.
         let pile = if state.player.hand.len() < sts2_core::cards::HAND_LIMIT {
             state.player.hand.push(uid);

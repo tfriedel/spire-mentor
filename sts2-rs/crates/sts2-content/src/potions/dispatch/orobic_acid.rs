@@ -30,7 +30,7 @@ pub(crate) fn drink_orobic_acid(state: &mut CombatState, _target: Option<u8>) ->
         for &uid in &uids {
             let idx = uid.0.get() as usize - 1;
             if let Some(c) = state.cards.get_mut(idx) {
-                c.set_combat_var(sts2_core::cards::VarKey::FreeThisTurn, 1);
+                c.set_to_free_this_turn();
             }
         }
         route_generated_into_hand(state, uids.as_slice());

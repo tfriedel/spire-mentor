@@ -48,7 +48,7 @@ pub(crate) fn on_after_card_played_mummified_hand(
     let is_favorable = |uid: &crate::CardUid| {
         crate::card_by_uid(&state.cards, *uid).is_some_and(|c| {
             let base_cost = crate::build_card_for_version(c.card_id, c.upgraded, version)
-                .map_or(c.cost, |fresh| fresh.cost);
+                .map_or(c.base_cost(), |fresh| fresh.base_cost());
             let base_stars = if version >= crate::GameVersion::V0_111_0 {
                 crate::card_base_star_cost_v0111(c.card_id)
                     .unwrap_or_else(|| crate::card_base_star_cost(c.card_id))
@@ -93,15 +93,10 @@ pub(crate) fn on_after_card_played_mummified_hand(
         .run_rng
         .combat_card_selection
         .next_int_exclusive(0, pool.len() as i32) as usize];
-    // C# `CardModel.SetToFreeThisTurn()` is a THIS-TURN modifier (cleared at
-    // turn end via the `FreeThisTurn` reset), NOT a permanent cost mutation.
-    // Stamping `VarKey::FreeThisTurn` makes `effective_card_cost`/
-    // `effective_star_cost` charge 0 for the rest of the turn; writing
-    // `card.cost = 0` directly would leave a zeroed-but-unplayed card stuck at
-    // 0 forever once it cycles discard → draw into a later turn (Regent seed
-    // 1005: a Mummified-Hand-freed Strike stayed free two turns later).
+    // C# `CardModel.SetToFreeThisTurn()`: a this-turn-or-until-played local
+    // modifier, not a permanent cost mutation.
     if let Some(card) = crate::card_by_uid_mut(&mut state.cards, chosen_uid) {
-        card.set_locally_free(crate::cards::VarKey::FreeThisTurn);
+        card.set_to_free_this_turn();
     }
     EffectResult::Resolved
 }

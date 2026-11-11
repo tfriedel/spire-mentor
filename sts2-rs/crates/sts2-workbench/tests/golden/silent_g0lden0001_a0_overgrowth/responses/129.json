@@ -432,7 +432,7 @@
   },
   {
    "act": 1,
-   "best_label": "Survivor",
+   "best_label": "Cloak and Dagger",
    "best_line": [],
    "best_mean_hp": null,
    "best_win_prob": 1.0,
@@ -441,8 +441,8 @@
    "hp_drop": null,
    "idx": 27,
    "is_blunder": false,
-   "matched_best": true,
-   "message": "Turn 1: Survivor matched the MCTS line (P(win) 100%)",
+   "matched_best": false,
+   "message": "Turn 1: Survivor instead of Cloak and Dagger dropped P(win) 100%→100% (−0 pts)",
    "n_actions": 5,
    "node_id": 27,
    "played_label": "Survivor",
@@ -452,7 +452,7 @@
    "regret": 0.0,
    "severity": 0.0,
    "turn": 1,
-   "verdict": "best",
+   "verdict": "uncertain",
    "visits": 5
   },
   {

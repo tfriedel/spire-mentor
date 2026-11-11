@@ -54,7 +54,7 @@ fn push_strike(state: &mut CombatState, enchantment: Option<EnchantmentId>) {
     let mut card = Card {
         uid,
         card_id: CardId::StrikeIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -128,7 +128,7 @@ fn glam_sculpting_strike_replays_across_surfaced_select() {
     let mut card = Card {
         uid,
         card_id: CardId::SculptingStrike,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,

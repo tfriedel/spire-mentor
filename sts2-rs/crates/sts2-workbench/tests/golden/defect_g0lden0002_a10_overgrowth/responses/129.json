@@ -1057,7 +1057,7 @@
   },
   {
    "act": 1,
-   "best_label": "Dualcast",
+   "best_label": "Strike",
    "best_line": [],
    "best_mean_hp": null,
    "best_win_prob": 1.0,
@@ -1067,7 +1067,7 @@
    "idx": 60,
    "is_blunder": false,
    "matched_best": false,
-   "message": "Turn 2: Defend instead of Dualcast dropped P(win) 100%→100% (−0 pts)",
+   "message": "Turn 2: Defend instead of Strike dropped P(win) 100%→100% (−0 pts)",
    "n_actions": 4,
    "node_id": 60,
    "played_label": "Defend",

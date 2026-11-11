@@ -356,18 +356,7 @@ pub fn osty_attack_command<R>(state: &mut CombatState, f: impl FnOnce(&mut Comba
     if !outer {
         state.combat_log.osty_attacks_this_turn =
             state.combat_log.osty_attacks_this_turn.saturating_add(1);
-        // Every Flatten's `AfterAttack` appends a fresh `SetThisTurn(0)`
-        // (Flatten.cs `ReduceCost`), which overrides a Transfigure `+1`
-        // appended after an earlier zero (GH #1150).
-        for c in &mut state.cards {
-            if c.card_id == crate::cards::CardId::Flatten
-                && c.combat_vars
-                    .maybe_nonzero(crate::cards::VarKey::CostAddedAfterLocalZero)
-            {
-                c.combat_vars
-                    .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
-            }
-        }
+        flatten_after_osty_attack(state);
         // `Hook.AfterAttack` runs after the hit loop even when no hit landed
         // (`AttackCommand.cs:551-673`: no live target breaks the loop), so the
         // command owes `BoneFlute.AfterAttack`'s block either way. Bone Shards
@@ -384,6 +373,16 @@ pub fn osty_attack_command<R>(state: &mut CombatState, f: impl FnOnce(&mut Comba
         crate::hooks::grant_latched_skittish(state);
     }
     r
+}
+
+/// C# `Flatten.AfterAttack` (`Flatten.cs`): when the owner's Osty finishes an
+/// attack, every Flatten in combat gets `EnergyCost.SetThisTurn(0)`.
+pub fn flatten_after_osty_attack(state: &mut CombatState) {
+    for c in &mut state.cards {
+        if c.card_id == crate::cards::CardId::Flatten {
+            c.cost.set_this_turn(0, false);
+        }
+    }
 }
 
 /// Osty-dealer analogue of [`deal_damage_to_all_alive_enemies`] (C#
@@ -2346,6 +2345,14 @@ pub fn set_card_var(state: &mut CombatState, card_uid: CardUid, key: VarKey, val
     }
 }
 
+/// C# `CardModel.SetToFreeThisTurn()` on card `card_uid` ([`Card::set_to_free_this_turn`]).
+/// No-op if `card_uid` is out of bounds.
+pub fn set_card_free_this_turn(state: &mut CombatState, card_uid: CardUid) {
+    if let Some(card) = state.cards.get_mut(card_uid.0.get() as usize - 1) {
+        card.set_to_free_this_turn();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Hand-search primitives (bead sts2-rs-oac / G3 plumbing)
 // ---------------------------------------------------------------------------
@@ -2545,13 +2552,13 @@ pub fn scrape_discard_drawn(state: &mut CombatState, drawn: &[CardUid]) {
             };
             if v0111 {
                 card.is_x_cost()
-                    || card.cost < 0
+                    || card.base_cost() < 0
                     || hooks::effective_card_cost_inst(state, card, uid) != 0
             } else {
                 // `GetWithModifiers(Local)` ends in `Math.Max(0, num)`: a Stomp
                 // shaved past 0 this turn reads 0 and stays (loadout Ironclad
                 // 3138 v0.107.1: Rust discarded it on its -1 debt).
-                card.is_x_cost() || card.cost < 0 || hooks::local_card_cost(state, card).max(0) != 0
+                card.is_x_cost() || card.base_cost() < 0 || card.local_cost().max(0) != 0
             }
         })
         .collect();
@@ -3491,7 +3498,7 @@ pub(crate) fn fire_trash_to_treasure_orbs_on_status_generation(
 ///
 /// Unlike the power reactions (Arsenal/Pillar/Smokestack) this scans the
 /// player's piles for the RocketPunch instances and stamps each one's
-/// per-instance [`crate::cards::VarKey::FreeUntilPlayed`] marker. Owner-equality
+/// per-instance `SetUntilPlayed(0)` modifier marker. Owner-equality
 /// is implicit: only player-owned cards live in the player piles, and the
 /// `added_by_player` gate already excludes monster-generated statuses (Wound,
 /// Slimed) whose generation is not "by the player". No-op for any combat
@@ -3537,7 +3544,8 @@ pub(crate) fn fire_rocketpunch_free_on_status_generation(
             // RocketPunch.cs:49).
             state.add_card_cost_reduction_until_played(cu, 1);
         } else if let Some(c) = state.cards.get_mut(cu.0.get() as usize - 1) {
-            c.set_locally_free(crate::cards::VarKey::FreeUntilPlayed);
+            // v0.107.1: `EnergyCost.SetUntilPlayed(0)` (RocketPunch.cs:49).
+            c.cost.set_until_played(0, false);
         }
     }
 }
@@ -3556,7 +3564,7 @@ pub(crate) fn fire_rocketpunch_free_on_status_generation(
 fn wound_card_pod() -> crate::cards::Card {
     crate::cards::Card {
         card_id: crate::cards::CardId::Wound,
-        cost: -1,
+        cost: crate::CardEnergyCost::new(-1),
         card_type: crate::cards::CardType::Status,
         target_type: crate::cards::TargetType::None,
         ..crate::cards::Card::pod_defaults()
@@ -3583,7 +3591,7 @@ pub fn spawn_wound_into_pile(state: &mut CombatState, pile: PileKind) -> CardUid
 fn wither_card_pod() -> crate::cards::Card {
     crate::cards::Card {
         card_id: crate::cards::CardId::Wither,
-        cost: -1,
+        cost: crate::CardEnergyCost::new(-1),
         card_type: crate::cards::CardType::Status,
         target_type: crate::cards::TargetType::None,
         ..crate::cards::Card::pod_defaults()
@@ -3656,8 +3664,7 @@ fn fire_after_card_entered_combat(
 /// Discovery generations) by the Attack plays already FINISHED this turn,
 /// so a generated Stomp costs the same as one that sat in hand through
 /// those plays. `Pinpoint.AfterCardEnteredCombat` is the Skill-keyed
-/// twin. Bank the applied shave into the same per-turn var the play-time
-/// discounts use so `restore_*_costs_for_turn_start` undoes it (sweep
+/// twin; the shave is an `AddThisTurn` like the play-time discounts (sweep
 /// seeds 2725/5546: a Calamity/Stoke-generated STOMP stayed cost 3 in
 /// Rust while C# offered it at 3 minus attacks-this-turn). Called from
 /// [`fire_after_card_entered_combat`]; content sites that dispatch the
@@ -3668,16 +3675,14 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
     let Some(card) = state.cards.get(idx) else {
         return;
     };
-    let (var, plays) = match card.card_id {
-        crate::cards::CardId::Stomp => (
-            crate::cards::VarKey::StompCostReductionThisTurn,
-            state.player.cards_played_this_turn[crate::cards::CardType::Attack.index()],
-        ),
-        crate::cards::CardId::Pinpoint => (
-            crate::cards::VarKey::PinpointCostReductionThisTurn,
-            state.player.cards_played_this_turn[crate::cards::CardType::Skill.index()],
-        ),
-        // A combat-long shave, not a per-turn bank.
+    let plays = match card.card_id {
+        crate::cards::CardId::Stomp => {
+            state.player.cards_played_this_turn[crate::cards::CardType::Attack.index()]
+        }
+        crate::cards::CardId::Pinpoint => {
+            state.player.cards_played_this_turn[crate::cards::CardType::Skill.index()]
+        }
+        // A combat-long shave, not a per-turn one.
         crate::cards::CardId::Midnight => {
             crate::hooks::midnight_entered_combat_v0111(state, uid);
             return;
@@ -3685,6 +3690,14 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
         // Also combat-long.
         crate::cards::CardId::BansheesCry => {
             banshees_cry_entered_combat(state, uid);
+            return;
+        }
+        // `Flatten.AfterCardEnteredCombat`: `SetThisTurn(0)` when the Osty
+        // has already attacked this turn (no clone check).
+        crate::cards::CardId::Flatten => {
+            if state.combat_log.osty_attacks_this_turn > 0 {
+                state.cards[idx].cost.set_this_turn(0, false);
+            }
             return;
         }
         _ => return,
@@ -3696,30 +3709,12 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
     if card.is_clone() || card.combat_var(crate::cards::VarKey::IsDupe) != 0 {
         return;
     }
-    // A card already zeroed by a local `Absolute(0)` (Infernal Blade's
+    // `ReduceCostBy(plays)` is `EnergyCost.AddThisTurn(-plays)`, appended
+    // after whatever the card already carries (Infernal Blade's
     // `SetToFreeThisTurn` runs BEFORE `AddGeneratedCardToCombat`,
-    // `InfernalBlade.cs:26-27`) shows only what is appended after the zero:
-    // this `AddThisTurn(-plays)` folds after it, unclamped, so a global
-    // surcharge (Tangled's +1) lands on a negative local cost and clamps to 0
-    // (parity Ironclad 6230 v0.107.1). Mirrors the play-time discount walk
-    // (`CombatState::discount_card_cost_on_play_walk`).
-    let zeroed = crate::hooks::card_cost_locally_zeroed(state, card);
-    let card = &mut state.cards[idx];
+    // `InfernalBlade.cs:26-27`, so a free Stomp goes below 0).
     let plays = i32::try_from(plays).unwrap_or(i32::MAX);
-    if zeroed && plays > 0 {
-        let key = crate::cards::VarKey::CostAddedAfterLocalZero;
-        card.set_combat_var(key, card.combat_var(key).saturating_sub(plays));
-    }
-    let shave = plays.min(i32::from(card.cost.max(0)));
-    if shave > 0 {
-        card.cost -= shave as i8;
-        let banked = card.combat_var(var);
-        card.set_combat_var(var, banked.saturating_add(shave));
-    }
-    // `ReduceCostBy` is `AddThisTurn(-amount)`, unclamped: keep the rest.
-    if card.cost == 0 && plays > shave {
-        card.set_combat_var(crate::cards::VarKey::CostDebtThisTurn, plays - shave);
-    }
+    state.cards[idx].cost.add_this_turn(-plays);
 }
 
 /// Banshee's Cry's `AfterCardEnteredCombat` (`BansheesCry.cs:42-55`): a
@@ -5900,7 +5895,7 @@ pub fn gain_player_gold(amount: i32) {
 /// that started with 10 cards in hand ended with 11, and none of the
 /// listeners ran.
 ///
-/// `VarKey::FreeThisTurn` stands in for both halves of
+/// `LocalCostMod::FREE_THIS_TURN` stands in for both halves of
 /// `SetToFreeThisTurn()` (energy and stars). It is set before the card is
 /// placed, as in C#.
 ///
@@ -5913,7 +5908,7 @@ pub fn generate_free_attack_in_hand(state: &mut CombatState) {
     };
     let sampled = sample_character_cards(state, character, 1, Some(crate::cards::CardType::Attack));
     for &uid in &sampled {
-        set_card_var(state, uid, crate::cards::VarKey::FreeThisTurn, 1);
+        set_card_free_this_turn(state, uid);
         let pile = if crate::cards::try_add_to_hand(&mut state.player, uid) {
             PileKind::Hand
         } else {
@@ -6264,17 +6259,19 @@ mod tests {
         state.player.powers.push(crate::PowerUid(pid));
         let mut card = crate::cards::Card::pod_defaults();
         card.card_id = crate::cards::CardId::BansheesCry;
-        card.cost = 9;
+        card.cost = crate::CardEnergyCost::new(9);
         card.card_type = crate::cards::CardType::Attack;
         let uid = state.add_card_to_draw_pile(card);
         state.player.draw.retain(|u| *u != uid);
-        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 1);
+        state.cards[uid.0.get() as usize - 1].set_to_free_this_turn();
         assert!(crate::cards::try_add_to_hand(&mut state.player, uid));
         fire_card_generation_listeners(&mut state, uid, PileKind::Hand, true);
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 0);
-        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 0);
+        state.cards[uid.0.get() as usize - 1]
+            .cost
+            .end_of_turn_cleanup();
         let card = &state.cards[uid.0.get() as usize - 1];
-        assert_eq!(crate::hooks::local_card_cost(&state, card), 7);
+        assert_eq!(card.local_cost(), 7);
     }
 
     /// The same fold for every other `AddThisCombat` on a card that is not
@@ -6296,18 +6293,20 @@ mod tests {
         state.player.powers.push(crate::PowerUid(pid));
         let mut card = crate::cards::Card::pod_defaults();
         card.card_id = crate::cards::CardId::Melancholy;
-        card.cost = 3;
+        card.cost = crate::CardEnergyCost::new(3);
         card.card_type = crate::cards::CardType::Skill;
         let uid = state.add_card_to_draw_pile(card);
         state.player.draw.retain(|u| *u != uid);
-        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 1);
+        state.cards[uid.0.get() as usize - 1].set_to_free_this_turn();
         assert!(crate::cards::try_add_to_hand(&mut state.player, uid));
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 1);
         state.reduce_melancholy_cost_walk();
         assert_eq!(crate::hooks::effective_card_cost(&state, uid), 0);
-        set_card_var(&mut state, uid, crate::cards::VarKey::FreeThisTurn, 0);
+        state.cards[uid.0.get() as usize - 1]
+            .cost
+            .end_of_turn_cleanup();
         let card = &state.cards[uid.0.get() as usize - 1];
-        assert_eq!(crate::hooks::local_card_cost(&state, card), 2);
+        assert_eq!(card.local_cost(), 2);
     }
 
     fn fresh_state_with_one_enemy() -> (CombatState, CreatureUid) {
@@ -6905,7 +6904,7 @@ mod tests {
         crate::cards::Card {
             uid: CardUid::new(u32::MAX).expect("placeholder, reassigned by spawn"),
             card_id,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Status,
             target_type: crate::cards::TargetType::None,
             upgraded: false,
@@ -7264,7 +7263,7 @@ mod tests {
     /// reaction tests — overrides the default 0-cost/Status placeholder.
     fn rocket_punch_card() -> crate::cards::Card {
         crate::cards::Card {
-            cost: 2,
+            cost: crate::CardEnergyCost::new(2),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             ..placeholder_card(crate::cards::CardId::RocketPunch)
@@ -9182,7 +9181,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid: card_uid,
             card_id: crate::cards::CardId::Shiv,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Skill,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -9299,7 +9298,7 @@ mod tests {
         let make_card = || crate::cards::Card {
             uid: CardUid::new(1).expect("nz"),
             card_id: crate::cards::CardId::Shiv,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Skill,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -9646,11 +9645,12 @@ mod banshees_cry_entered_combat_tests {
         state.player.current_hp = 80;
         let banshee = |cost| crate::cards::Card {
             card_id: crate::cards::CardId::BansheesCry,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             ..crate::cards::Card::pod_defaults()
         };
-        let cost_of =
-            |state: &CombatState, uid: CardUid| state.cards[uid.0.get() as usize - 1].cost;
+        let cost_of = |state: &CombatState, uid: CardUid| {
+            state.cards[uid.0.get() as usize - 1].local_cost().max(0)
+        };
         // A deck copy present before any Ethereal play.
         let deck = spawn_card_into_pile(&mut state, banshee(9), PileKind::Draw);
         assert_eq!(cost_of(&state, deck), 9);

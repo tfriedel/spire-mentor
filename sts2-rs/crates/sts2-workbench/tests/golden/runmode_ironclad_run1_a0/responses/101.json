@@ -9,7 +9,7 @@
    "progress": {
     "act": 1,
     "floor": 6,
-    "hp": 14,
+    "hp": 10,
     "max_hp": 80
    },
    "run_mode": true,

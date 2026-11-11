@@ -697,7 +697,7 @@ fn danse_macabre_reads_live_cost_after_veilpiercer_runs_out() {
     let eth = push_ethereal_card(&mut state);
     // Veilpiercer frees only a Hand/Play card (VeilpiercerPower.cs).
     state.player.hand.push(eth);
-    state.cards[0].cost = 3;
+    state.cards[0].cost = sts2_core::CardEnergyCost::new(3);
     push_player_power(&mut state, PowerKind::Veilpiercer, 1);
     push_player_power(&mut state, PowerKind::DanseMacabre, 6);
     assert_eq!(
@@ -731,7 +731,7 @@ fn danse_macabre_before_veilpiercer_sees_the_free_cost() {
     let eth = push_ethereal_card(&mut state);
     // Veilpiercer frees only a Hand/Play card (VeilpiercerPower.cs).
     state.player.hand.push(eth);
-    state.cards[0].cost = 3;
+    state.cards[0].cost = sts2_core::CardEnergyCost::new(3);
     push_player_power(&mut state, PowerKind::DanseMacabre, 6);
     push_player_power(&mut state, PowerKind::Veilpiercer, 1);
 
@@ -756,7 +756,7 @@ fn danse_macabre_on_a_replay_reads_the_cost_after_veilpiercer_ran_out() {
     state.player.max_hp = 50;
     let _ = state.init_player_creature();
     let eth = push_ethereal_card(&mut state);
-    state.cards[0].cost = 3;
+    state.cards[0].cost = sts2_core::CardEnergyCost::new(3);
     push_player_power(&mut state, PowerKind::DanseMacabre, 6);
     push_player_power(&mut state, PowerKind::Veilpiercer, 1);
 
@@ -774,7 +774,7 @@ fn danse_macabre_on_a_replay_under_live_veilpiercer_sees_the_free_cost() {
     state.player.max_hp = 50;
     let _ = state.init_player_creature();
     let eth = push_ethereal_card(&mut state);
-    state.cards[0].cost = 3;
+    state.cards[0].cost = sts2_core::CardEnergyCost::new(3);
     push_player_power(&mut state, PowerKind::DanseMacabre, 6);
     push_player_power(&mut state, PowerKind::Veilpiercer, 3);
 
@@ -1623,7 +1623,7 @@ fn push_hand_card(state: &mut CombatState, card_type: CardType, cost: i8) -> Car
     state.cards.push(Card {
         uid,
         card_type,
-        cost,
+        cost: sts2_core::CardEnergyCost::new(cost),
         ..Card::pod_defaults()
     });
     state.player.hand.push(uid);

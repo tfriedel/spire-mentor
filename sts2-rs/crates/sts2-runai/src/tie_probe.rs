@@ -18,7 +18,7 @@ fn card_label(state: &CombatState, uid: Option<CardUid>) -> String {
             || "?".to_owned(),
             |card| {
                 let plus = if card.upgraded { "+" } else { "" };
-                format!("{:?}{plus}({})", card.card_id, card.cost)
+                format!("{:?}{plus}({})", card.card_id, card.local_cost())
             },
         )
 }

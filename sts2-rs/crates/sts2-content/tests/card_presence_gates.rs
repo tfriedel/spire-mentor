@@ -3,17 +3,16 @@
 //! The per-turn and per-play card sweeps skip their arena walk when a summary
 //! says it has nothing to do: the arena's gate-id bits (`CardStore::holds_id`
 //! for Stomp, Pinpoint, Melancholy, Bolas, ThrummingHatchet) and each card's
-//! "may be nonzero" mask over its `combat_vars` (Snecko deltas, the wire's
-//! transient discount, `FreeThisTurn`). A combat that never holds those cards
+//! "may be nonzero" mask over its `combat_vars`. A combat that never holds those cards
 //! only ever takes the closed side, so these tests put the cards in the arena,
 //! outside the hand where it matters, and check that each sweep still acts
 //! through the engine:
 //!
-//! * Stomp / Pinpoint discounts and their turn-start restores;
+//! * Stomp / Pinpoint discounts and their end-of-turn expiry;
 //! * Melancholy's on-death discount (combat piles only);
 //! * the Bolas / ThrummingHatchet return to hand from any non-hand pile;
 //! * Snecko Oil's randomised costs reverting at the next turn start;
-//! * `FreeThisTurn` cleared at end of turn.
+//! * a free-this-turn modifier dropped at end of turn.
 //!
 //! The last test plays random combats whose decks hold all of them. In debug
 //! builds every skipped sweep also runs its ungated walk on a clone and
@@ -25,6 +24,7 @@ use sts2_core::cards::{CardId, VarKey};
 use sts2_core::combat_loop::{start_combat, start_player_turn};
 use sts2_core::potions::{CharacterId, PotionKind};
 use sts2_core::{apply, legal_actions, Action, CardUid, CombatPhase, CombatState, MonsterKind};
+use sts2_core::{CostExpiry, LocalCostMod};
 
 fn install() {
     sts2_content::cards::dispatch::install_default_registry();
@@ -136,8 +136,8 @@ fn end_turn(state: &mut CombatState) {
     assert_eq!(state.phase, CombatPhase::PlayerPlayPhase);
 }
 
-/// Stomp in the discard pile: each Attack shaves 1 off it and banks it, and
-/// the next player-turn start restores the cost and clears the bank.
+/// Stomp in the discard pile: each Attack shaves 1 off it, and
+/// the turn end drops the shave.
 #[test]
 fn stomp_outside_the_hand_is_discounted_per_attack_and_restored() {
     install();
@@ -149,26 +149,23 @@ fn stomp_outside_the_hand_is_discounted_per_attack_and_restored() {
         &[(CardId::Stomp, Pile::Discard)],
     );
     let stomp = placed[0];
-    let base = card(&state, stomp).cost;
+    let base = card(&state, stomp).local_cost();
     assert!(base >= 2);
     for shaved in 1..=2 {
         play_first(&mut state, Some(0));
-        assert_eq!(card(&state, stomp).cost, base - shaved);
+        assert_eq!(card(&state, stomp).local_cost(), base - shaved);
     }
     assert_eq!(
-        card(&state, stomp).combat_var(VarKey::StompCostReductionThisTurn),
-        2
+        card(&state, stomp).cost.mods(),
+        &[LocalCostMod::relative(-2, CostExpiry::Turn)]
     );
     end_turn(&mut state);
-    assert_eq!(card(&state, stomp).cost, base);
-    assert_eq!(
-        card(&state, stomp).combat_var(VarKey::StompCostReductionThisTurn),
-        0
-    );
+    assert_eq!(card(&state, stomp).local_cost(), base);
+    assert!(!card(&state, stomp).cost.has_local_modifiers());
 }
 
-/// Pinpoint in the draw pile: each Skill shaves 1 off it, restored at the
-/// next player-turn start.
+/// Pinpoint in the draw pile: each Skill shaves 1 off it, dropped at the
+/// turn end.
 #[test]
 fn pinpoint_outside_the_hand_is_discounted_per_skill_and_restored() {
     install();
@@ -180,18 +177,15 @@ fn pinpoint_outside_the_hand_is_discounted_per_skill_and_restored() {
         &[(CardId::Pinpoint, Pile::Draw)],
     );
     let pinpoint = placed[0];
-    let base = card(&state, pinpoint).cost;
+    let base = card(&state, pinpoint).local_cost();
     assert!(base >= 2);
     for shaved in 1..=2 {
         play_first(&mut state, None);
-        assert_eq!(card(&state, pinpoint).cost, base - shaved);
+        assert_eq!(card(&state, pinpoint).local_cost(), base - shaved);
     }
     end_turn(&mut state);
-    assert_eq!(card(&state, pinpoint).cost, base);
-    assert_eq!(
-        card(&state, pinpoint).combat_var(VarKey::PinpointCostReductionThisTurn),
-        0
-    );
+    assert_eq!(card(&state, pinpoint).local_cost(), base);
+    assert!(!card(&state, pinpoint).cost.has_local_modifiers());
 }
 
 /// A creature death shaves 1 off every Melancholy in a combat pile (here the
@@ -210,11 +204,15 @@ fn melancholy_in_a_combat_pile_is_discounted_on_death() {
         ],
     );
     let (in_pile, in_no_pile) = (placed[0], placed[1]);
-    let base = card(&state, in_pile).cost;
+    let base = card(&state, in_pile).local_cost();
     play_first(&mut state, Some(0));
     assert!(!state.is_over, "the 300-HP Nibbit is still up");
-    assert_eq!(card(&state, in_pile).cost, base - 1, "the 1-HP Nibbit died");
-    assert_eq!(card(&state, in_no_pile).cost, base);
+    assert_eq!(
+        card(&state, in_pile).local_cost(),
+        base - 1,
+        "the 1-HP Nibbit died"
+    );
+    assert_eq!(card(&state, in_no_pile).local_cost(), base);
 }
 
 /// Bolas and ThrummingHatchet played on turn 1 come back to hand at the start
@@ -243,10 +241,9 @@ fn bolas_and_thrumming_hatchet_return_from_any_non_hand_pile() {
     assert!(state.player.hand.contains(&hatchet), "Hatchet returned");
 }
 
-/// Snecko Oil randomises the hand's costs and banks each delta; the next
-/// player-turn start reverts every one and drops a reverted card's
-/// `CostAbsolutelySet` flag. Seeds are scanned so that some rolls actually
-/// changed a cost and the revert has something to undo.
+/// Snecko Oil randomises the hand's costs with `SetThisTurnOrUntilPlayed`;
+/// the turn end drops every roll. Seeds are scanned so that some rolls
+/// actually changed a cost and the revert has something to undo.
 #[test]
 fn snecko_randomised_costs_revert_at_the_next_turn_start() {
     install();
@@ -263,7 +260,11 @@ fn snecko_randomised_costs_revert_at_the_next_turn_start() {
         state.player.potion_slots = 3;
         let _ = start_combat(&mut state);
         let _ = start_player_turn(&mut state);
-        let base: Vec<i8> = state.cards.iter().map(|c| c.cost).collect();
+        let base: Vec<i32> = state
+            .cards
+            .iter()
+            .map(sts2_core::Card::local_cost)
+            .collect();
         let _ = apply(
             &mut state,
             Action::DrinkPotion {
@@ -271,23 +272,21 @@ fn snecko_randomised_costs_revert_at_the_next_turn_start() {
                 target: None,
             },
         );
-        let changed: Vec<bool> = state
+        rolled += state
             .cards
             .iter()
-            .map(|c| c.combat_var(VarKey::SneckoCostDeltaThisTurn) != 0)
-            .collect();
-        rolled += changed.iter().filter(|&&c| c).count();
+            .zip(&base)
+            .filter(|(c, &b)| c.local_cost() != b)
+            .count();
         end_turn(&mut state);
-        for ((c, &cost), &was_changed) in state.cards.iter().zip(&base).zip(&changed) {
+        for (c, &cost) in state.cards.iter().zip(&base) {
             assert_eq!(
-                c.cost, cost,
+                c.local_cost(),
+                cost,
                 "seed {seed}: {:?} kept its rolled cost",
                 c.uid
             );
-            assert_eq!(c.combat_var(VarKey::SneckoCostDeltaThisTurn), 0);
-            if was_changed {
-                assert_eq!(c.combat_var(VarKey::CostAbsolutelySet), 0);
-            }
+            assert!(!c.cost.has_local_modifiers(), "seed {seed}: {:?}", c.uid);
         }
     }
     assert!(rolled > 0, "no Snecko roll changed a cost");
@@ -310,13 +309,10 @@ fn free_this_turn_is_cleared_at_end_of_turn() {
         .hand
         .last()
         .expect("Infernal Blade spawned a card");
-    assert_eq!(card(&state, spawned).combat_var(VarKey::FreeThisTurn), 1);
-    assert!(sts2_core::hooks::card_cost_locally_zeroed(
-        &state,
-        card(&state, spawned)
-    ));
+    assert!(card(&state, spawned).cost.has(LocalCostMod::FREE_THIS_TURN));
+    assert_eq!(card(&state, spawned).local_cost(), 0);
     end_turn(&mut state);
-    assert_eq!(card(&state, spawned).combat_var(VarKey::FreeThisTurn), 0);
+    assert!(!card(&state, spawned).cost.has(LocalCostMod::FREE_THIS_TURN));
 }
 
 const IRONCLAD_DECK: &[CardId] = &[
@@ -361,8 +357,9 @@ const NECROBINDER_DECK: &[CardId] = &[
 ];
 
 /// Count, over one random combat, the states in which each gate was open:
-/// a nonzero Stomp bank, Pinpoint bank, Snecko delta, `FreeThisTurn`,
-/// Bolas/Hatchet return stamp, and a Melancholy below its starting cost.
+/// a Stomp shave, a Pinpoint shave, a live Snecko roll, a free-this-turn
+/// card, a Bolas/Hatchet return stamp, and a Melancholy below its starting
+/// cost.
 fn random_combat(character: CharacterId, deck: &[CardId], seed: u64, open: &mut [u32; 6]) {
     let mut state = bare_state(character, i32::try_from(seed).expect("small"), &[30, 30]);
     for &id in deck {
@@ -374,12 +371,12 @@ fn random_combat(character: CharacterId, deck: &[CardId], seed: u64, open: &mut 
     state.player.potion_slots = 3;
     let _ = start_combat(&mut state);
     let _ = start_player_turn(&mut state);
-    let melancholy_base: Vec<(usize, i8)> = state
+    let melancholy_base: Vec<(usize, i32)> = state
         .cards
         .iter()
         .enumerate()
         .filter(|(_, c)| c.card_id == CardId::Melancholy)
-        .map(|(i, c)| (i, c.cost))
+        .map(|(i, c)| (i, c.local_cost()))
         .collect();
     let mut agent = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
     for _ in 0..300 {
@@ -395,23 +392,40 @@ fn random_combat(character: CharacterId, deck: &[CardId], seed: u64, open: &mut 
         agent ^= agent << 17;
         let action = actions[(agent % actions.len() as u64) as usize].clone();
         let _ = apply(&mut state, action);
-        for (i, key) in [
-            VarKey::StompCostReductionThisTurn,
-            VarKey::PinpointCostReductionThisTurn,
-            VarKey::SneckoCostDeltaThisTurn,
-            VarKey::FreeThisTurn,
-            VarKey::ReturnIfPlayedRound,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if state.cards.iter().any(|c| c.combat_var(key) != 0) {
+        let shaved = |id: CardId| {
+            state.cards.iter().any(|c| {
+                c.card_id == id
+                    && c.cost
+                        .mods()
+                        .iter()
+                        .any(|m| !m.is_absolute() && m.expiry() == CostExpiry::Turn)
+            })
+        };
+        let gates = [
+            shaved(CardId::Stomp),
+            shaved(CardId::Pinpoint),
+            state.cards.iter().any(|c| {
+                c.cost.mods().iter().any(|m| {
+                    m.is_absolute() && m.amount() != 0 && m.expiry() == CostExpiry::TurnOrPlayed
+                })
+            }),
+            state
+                .cards
+                .iter()
+                .any(|c| c.cost.has(LocalCostMod::FREE_THIS_TURN)),
+            state
+                .cards
+                .iter()
+                .any(|c| c.combat_var(VarKey::ReturnIfPlayedRound) != 0),
+        ];
+        for (i, open_now) in gates.into_iter().enumerate() {
+            if open_now {
                 open[i] += 1;
             }
         }
         if melancholy_base
             .iter()
-            .any(|&(i, cost)| state.cards[i].cost < cost)
+            .any(|&(i, cost)| state.cards[i].local_cost() < cost)
         {
             open[5] += 1;
         }
@@ -430,10 +444,10 @@ fn random_combats_with_every_gate_card_run_clean_under_the_shadows() {
         random_combat(CharacterId::Necrobinder, NECROBINDER_DECK, seed, &mut open);
     }
     let names = [
-        "Stomp bank",
-        "Pinpoint bank",
-        "Snecko delta",
-        "FreeThisTurn",
+        "Stomp shave",
+        "Pinpoint shave",
+        "Snecko roll",
+        "free this turn",
         "Bolas/Hatchet stamp",
         "Melancholy discount",
     ];

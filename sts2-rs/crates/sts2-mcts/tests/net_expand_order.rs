@@ -98,12 +98,15 @@ fn pin_cases() -> Vec<(CombatState, MctsConfig)> {
     ]
 }
 
-/// Captured on `5638d0252` (before `net_expand_order` existed).
+/// Captured on `5638d0252` (before `net_expand_order` existed); re-captured
+/// when the card cost model (`CardEnergyCost`) stopped leaving zero-valued
+/// cost keys in `combat_vars`, which the search hash (and the streams seeded
+/// from it) folds in.
 const PRE_CHANGE_FINGERPRINTS: [u64; 4] = [
-    0x185f_5865_cb83_2621,
-    0xf0a6_3716_ef7f_49df,
-    0xee12_e726_2d6b_d3da,
-    0x69b9_1e0e_7028_9e8f,
+    0xb2b7_6fd7_8bda_b76f,
+    0x1fcb_f661_aac3_eeb0,
+    0x85b8_ecec_60e3_05b4,
+    0xefbf_179c_ce3b_1533,
 ];
 
 #[cfg(rollout_net_ironclad)]

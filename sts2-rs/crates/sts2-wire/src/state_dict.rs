@@ -680,11 +680,16 @@ pub struct ParsedCard {
     /// its shave).
     ///
     /// `None` when it cannot differ from `base_cost` — which is the common
-    /// case, and always so for the Rust dialect, whose `combat_vars` already
-    /// carry the exact per-effect decomposition.
+    /// case, and always so for the Rust dialect, whose `cost_mods` already
+    /// carries the exact model.
     pub persistent_cost: Option<i32>,
     pub played_cost: Option<i32>,
     pub stable_cost: Option<i32>,
+    /// The exact cost model (C# `CardEnergyCost`: the base plus the ordered
+    /// local modifiers), as the engine's own `state_to_dict` emits it under
+    /// `cost_mods`. When present it is adopted verbatim and the three folded
+    /// numbers above are ignored; the C# producers send only those.
+    pub cost_model: Option<sts2_core::CardEnergyCost>,
     /// The instance's current STAR cost, local modifiers applied (C#
     /// `CardModel.CurrentStarCost`), for a card that has one.
     ///
@@ -714,10 +719,9 @@ pub struct ParsedCard {
     /// stamping 0 would reconstruct the enchantment as not there at all.
     pub enchantment_amount: Option<i32>,
     /// Per-instance scratch ([`sts2_core::Card::combat_vars`]) as
-    /// `(key, value)` pairs. This is where the transient cost modifiers
-    /// live (`FreeThisTurn`, `StompCostReductionThisTurn`,
-    /// `SneckoCostDeltaThisTurn`), alongside Rampage/Claw/GeneticAlgorithm
-    /// scaling. Empty for producers that don't carry it.
+    /// `(key, value)` pairs: Rampage/Claw/GeneticAlgorithm scaling and the
+    /// like. The energy cost modifiers are not here; they travel in
+    /// [`Self::cost_model`]. Empty for producers that don't carry it.
     pub combat_vars: Vec<(VarKey, i32)>,
     /// Extra plays the instance has gained this combat (C#
     /// `CardModel.BaseReplayCount`: Soldier's Stew, Hidden Gem, Transfigure).
@@ -910,6 +914,34 @@ fn as_entries<V: WireValue>(value: &V, path: &str) -> WireResult<Vec<(String, V)
     value
         .entries()
         .ok_or_else(|| schema_err(path, "expected dict"))
+}
+
+/// `cost_mods`: `{"base": int, "mods": [[amount, flags], ...]}`, the
+/// engine's exact [`sts2_core::CardEnergyCost`] (see `card_to_value`).
+fn parse_cost_mods<V: WireValue>(v: &V, path: &str) -> WireResult<sts2_core::CardEnergyCost> {
+    let d = as_dict(v, path)?;
+    let base = extract_i64(&d, path, "base")?;
+    let base = i8::try_from(base).map_err(|_| schema_err(path, "`base` must fit in i8"))?;
+    let mut mods = Vec::new();
+    if let Some(list) = extract_optional(&d, "mods") {
+        for (i, m) in as_list(&list, &format!("{path}.mods"))?.iter().enumerate() {
+            let mp = format!("{path}.mods[{i}]");
+            let pair = as_list(m, &mp)?;
+            let num = |j: usize| pair.get(j).and_then(WireValue::as_i64);
+            let (Some(amount), Some(flags), 2) = (num(0), num(1), pair.len()) else {
+                return Err(schema_err(&mp, "must be `[amount, flags]`"));
+            };
+            let amount =
+                i8::try_from(amount).map_err(|_| schema_err(&mp, "amount must fit in i8"))?;
+            let flags = u8::try_from(flags).map_err(|_| schema_err(&mp, "unknown flag bits"))?;
+            mods.push(
+                sts2_core::LocalCostMod::from_parts(amount, flags)
+                    .ok_or_else(|| schema_err(&mp, "unknown flag bits"))?,
+            );
+        }
+    }
+    sts2_core::CardEnergyCost::from_raw(base, &mods)
+        .ok_or_else(|| schema_err(path, "too many cost modifiers"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1887,30 +1919,25 @@ fn parse_card<V: WireValue>(d: &V, path: &str) -> WireResult<ParsedCard> {
         "persistent_star_cost",
         "`persistent_star_cost` must be int or null",
     )?;
-    // Two banks require the third number. `rebank_wire_cost_after_edge`
-    // recomputes the surviving bank against `stable_cost`, which it reads back
-    // out of a combat var that DEFAULTS TO 0 — so with BOTH banks live and no
-    // `stable_cost` the second edge drives the card's cost to `0 - cost`. That
-    // is not degradation, it is corruption wearing the shape of a value.
-    //
-    // Scoped to exactly that case on purpose, not "all three or none". A wire
+    // Two folds require the third. With both `persistent_cost` and
+    // `played_cost` live, how much of the shave survives BOTH edges is not
+    // derivable from the pair (one combined modifier and two separate ones
+    // fold alike), and `folded_cost_to_model` needs it as the base. A wire
     // carrying `persistent_cost` alone is the pre-v16 dialect and is still
-    // perfectly sound: only one bank is ever live, `rebank` early-returns on
-    // the zero one, and `stable_cost` is never read. Refusing that would break
-    // every older producer for a hazard it cannot reach.
-    //
-    // Both in-tree producers derive all three from the same
-    // `FoldLocalModifiers` behind identical guards, so they ship together and
-    // this can only fire on a hand-written or third-party dict. Refusing it
-    // here is what keeps that a schema error instead of a silent miscost.
+    // sound: nothing expires on play, so the stable cost is the persistent
+    // one. Both in-tree producers send all three together, so this can only
+    // fire on a hand-written or third-party dict.
     if persistent_cost.is_some() && played_cost.is_some() && stable_cost.is_none() {
         return Err(schema_err(
             path,
-            "`persistent_cost` and `played_cost` together need `stable_cost` — with both \
-             banks live the second edge re-banks against a defaulted 0 and drives the \
-             cost to `0 - cost`",
+            "`persistent_cost` and `played_cost` together need `stable_cost`: the cost \
+             once both edges have passed is not derivable from the pair",
         ));
     }
+    let cost_model = match extract_optional(d, "cost_mods") {
+        Some(v) => Some(parse_cost_mods(&v, &format!("{path}.cost_mods"))?),
+        None => None,
+    };
     let mut combat_vars: Vec<(VarKey, i32)> = Vec::new();
     if let Some(v) = extract_optional(d, "combat_vars") {
         for (name, val) in as_entries(&v, &format!("{path}.combat_vars"))? {
@@ -1992,6 +2019,7 @@ fn parse_card<V: WireValue>(d: &V, path: &str) -> WireResult<ParsedCard> {
         persistent_cost,
         played_cost,
         stable_cost,
+        cost_model,
         star_cost,
         persistent_star_cost,
         flags,
@@ -2708,12 +2736,17 @@ fn build_card(parsed: &ParsedCard, uid: CardUid, path: &str) -> WireResult<Card>
     // always exactly one action behind the world's energy. Only the
     // base_cost-less dialect is affected: engine/DLL wires carry
     // `base_cost: -1` for X-cost cards and keep taking the first arm.
-    let registry_x_cost = spec.cost == -1 || upgraded_build.as_ref().is_some_and(|b| b.cost == -1);
+    let registry_x_cost =
+        spec.cost == -1 || upgraded_build.as_ref().is_some_and(|b| b.base_cost() == -1);
     let cost = match (parsed.base_cost, parsed.cost_override) {
         (Some(c), _) => i8::try_from(c).unwrap_or(spec.cost),
         (None, Some(_)) if registry_x_cost => -1,
         (None, Some(c)) => i8::try_from(c).unwrap_or(spec.cost),
-        (None, None) => upgraded_build.as_ref().map_or(spec.cost, |b| b.cost),
+        (None, None) => upgraded_build.as_ref().map_or(spec.cost, Card::base_cost),
+    };
+    let cost = match parsed.cost_model {
+        Some(model) => model,
+        None => folded_cost_to_model(path, cost, parsed)?,
     };
     let mut card = Card {
         uid,
@@ -2816,8 +2849,8 @@ fn build_card(parsed: &ParsedCard, uid: CardUid, path: &str) -> WireResult<Card>
         for f in &parsed.flags {
             match f.as_str() {
                 "ethereal" => card.set_combat_var(VarKey::EtherealThisCombat, 1),
-                "free_turn" => card.set_combat_var(VarKey::FreeThisTurn, 1),
-                "free_once" => card.set_combat_var(VarKey::FreeUntilPlayed, 1),
+                "free_turn" => card.set_to_free_this_turn(),
+                "free_once" => card.cost.set_until_played(0, false),
                 "unplayable" => fold(&mut card, sts2_core::cards::KeywordOverride::UNPLAYABLE),
                 "innate" => fold(&mut card, sts2_core::cards::KeywordOverride::INNATE),
                 "retain" => fold(&mut card, sts2_core::cards::KeywordOverride::RETAIN),
@@ -2877,68 +2910,6 @@ fn build_card(parsed: &ParsedCard, uid: CardUid, path: &str) -> WireResult<Card>
             mad_science_variant_of(&card)
         };
         set_mad_science_variant(&mut card, mode, rider);
-    }
-
-    // Bank the part of `cost` that a this-turn modifier is responsible for,
-    // so the turn-start restore can expire it on schedule. The producer sends
-    // the card's current cost and what that cost becomes once the turn's
-    // modifiers wear off; the difference is the transient shave, and without
-    // banking it a Stomp rebuilt mid-turn keeps its per-Attack discount for
-    // the rest of the fight.
-    //
-    // The engine's own per-effect banks describe the same fact exactly, so a
-    // producer carrying those must not also send `persistent_cost` — two
-    // representations of one shave would restore it twice. They are mutually
-    // exclusive by construction (only the C# dialects send `persistent_cost`,
-    // only `state_to_dict` sends the banks), so disagreement is a schema
-    // error rather than something to reconcile.
-    if let Some(persistent) = parsed.persistent_cost {
-        const ENGINE_OWNED: [VarKey; 4] = [
-            VarKey::StompCostReductionThisTurn,
-            VarKey::PinpointCostReductionThisTurn,
-            VarKey::SneckoCostDeltaThisTurn,
-            VarKey::SneckoRollLive,
-        ];
-        if let Some(k) = ENGINE_OWNED
-            .iter()
-            .find(|k| card.combat_var(**k) != 0)
-            .copied()
-        {
-            return Err(schema_err(
-                path,
-                &format!(
-                    "`persistent_cost` and the engine-owned `{}` bank both describe this \
-                     turn's cost modifiers; a producer must send one or the other",
-                    var_key_wire_name(k)
-                ),
-            ));
-        }
-        let shave = persistent - i32::from(cost);
-        if shave != 0 && cost >= 0 {
-            card.set_combat_var(VarKey::WireTransientCostThisTurn, shave);
-        }
-    }
-
-    // The other transient edge. A "this turn" discount is really "this turn
-    // OR until played" (C# `SetThisTurnOrUntilPlayed`), so restoring it only
-    // at the turn boundary leaves it alive on the card that just spent it.
-    if let Some(played) = parsed.played_cost {
-        let shave = played - i32::from(cost);
-        if shave != 0 && cost >= 0 {
-            card.set_combat_var(VarKey::WireCostExpiringOnPlay, shave);
-        }
-    }
-    // Only meaningful alongside a bank, and only then is it read. Note the
-    // ambiguity that DOES exist runs the other way: `combat_var` defaults to 0,
-    // so an absent `stable_cost` would read back as a legitimate-looking
-    // `stable == 0`. `parse_card`'s all-or-nothing gate on the trio is what
-    // makes that unreachable, not this condition.
-    if let Some(stable) = parsed.stable_cost {
-        if card.combat_var(VarKey::WireTransientCostThisTurn) != 0
-            || card.combat_var(VarKey::WireCostExpiringOnPlay) != 0
-        {
-            card.set_combat_var(VarKey::WireCostStable, stable);
-        }
     }
 
     // The STAR half of a free card. The energy half rides `base_cost` and the
@@ -3002,6 +2973,62 @@ fn build_card(parsed: &ParsedCard, uid: CardUid, path: &str) -> WireResult<Card>
         }
     }
     Ok(card)
+}
+
+/// Rebuild a card's cost model from the C# producers' folded numbers.
+///
+/// Those dialects cannot ship the modifier list itself, only its folds:
+/// `base_cost` (every local modifier applied), `persistent_cost` (the
+/// end-of-turn ones dropped), `played_cost` (the when-played ones dropped)
+/// and `stable_cost` (both dropped). Any list that reproduces all four folds
+/// expires exactly as the real one does, so this builds the shortest one:
+/// a base of `stable` and up to three Absolute modifiers, one per lifetime
+/// whose fold differs from what precedes it.
+///
+/// A producer that omits `played_cost` says no modifier expires on play (and
+/// likewise for `persistent_cost`), which is how the older dialects that
+/// sent `persistent_cost` alone keep their meaning.
+fn folded_cost_to_model(
+    path: &str,
+    cur: i8,
+    parsed: &ParsedCard,
+) -> WireResult<sts2_core::CardEnergyCost> {
+    use sts2_core::CostExpiry;
+    let (persistent, played) = (parsed.persistent_cost, parsed.played_cost);
+    if cur < 0 || (persistent.is_none() && played.is_none()) {
+        return Ok(sts2_core::CardEnergyCost::new(cur));
+    }
+    let cur = i32::from(cur);
+    let p = persistent.unwrap_or(cur);
+    let q = played.unwrap_or(cur);
+    let stable = match (parsed.stable_cost, persistent, played) {
+        (Some(s), _, _) => s,
+        (None, _, None) => p,
+        (None, None, _) => q,
+        // `parse_card` refuses this combination.
+        (None, Some(_), Some(_)) => {
+            return Err(schema_err(
+                path,
+                "`stable_cost` is required with both banks",
+            ))
+        }
+    };
+    let base =
+        i8::try_from(stable).map_err(|_| schema_err(path, "`stable_cost` must fit in i8"))?;
+    let mut model = sts2_core::CardEnergyCost::new(base);
+    let mut fold = stable;
+    if p != stable {
+        model.set(p, CostExpiry::Played, false);
+        fold = p;
+    }
+    if q != stable {
+        model.set(q, CostExpiry::Turn, false);
+        fold = q;
+    }
+    if cur != fold {
+        model.set(cur, CostExpiry::TurnOrPlayed, false);
+    }
+    Ok(model)
 }
 
 /// Per-monster aliases from the C# wire's `MoveState` id (what the
@@ -4995,41 +5022,26 @@ pub const fn var_key_wire_name(k: VarKey) -> &'static str {
         VarKey::ClawBuff => "claw_buff",
         VarKey::GeneticAlgorithmBlock => "genetic_algorithm_block",
         VarKey::RitualDaggerDamage => "ritual_dagger_damage",
-        VarKey::FreeThisTurn => "free_this_turn",
         VarKey::EtherealThisCombat => "ethereal_this_combat",
         VarKey::StarCostFreeThisCombat => "star_cost_free_this_combat",
         VarKey::MakeItSoInterval => "make_it_so_interval",
-        VarKey::StompCostReductionThisTurn => "stomp_cost_reduction_this_turn",
-        VarKey::PinpointCostReductionThisTurn => "pinpoint_cost_reduction_this_turn",
-        VarKey::SneckoCostDeltaThisTurn => "snecko_cost_delta_this_turn",
         VarKey::ReturnIfPlayedRound => "return_if_played_round",
         VarKey::DampenDowngradedMarker => "dampen_downgraded_marker",
         VarKey::IsDupe => "is_dupe",
         VarKey::GeneratedInCombat => "generated_in_combat",
-        VarKey::CostAbsolutelySet => "cost_absolutely_set",
         VarKey::ThrashFoldRemNum => "thrash_fold_rem_num",
         VarKey::ThrashFoldRemDen => "thrash_fold_rem_den",
-        VarKey::FreeUntilPlayed => "free_until_played",
         VarKey::WitherFakeUpgradeLevel => "wither_fake_upgrade_level",
         VarKey::PendingBatchAutoPlay => "pending_batch_auto_play",
         VarKey::AutoPlayStarX => "auto_play_star_x",
         VarKey::AutoPlayEnergyValue => "auto_play_energy_value",
-        VarKey::WireTransientCostThisTurn => "wire_transient_cost_this_turn",
-        VarKey::WireCostExpiringOnPlay => "wire_cost_expiring_on_play",
-        VarKey::WireCostStable => "wire_cost_stable",
         VarKey::Generic => "generic",
-        VarKey::SneckoRollLive => "snecko_roll_live",
-        VarKey::CostReductionUntilPlayed => "cost_reduction_until_played",
         VarKey::MidnightExhaustsCounted => "midnight_exhausts_counted",
         VarKey::EnchantmentUsed => "enchantment_used",
         VarKey::StarCostFreeThisTurn => "star_cost_free_this_turn",
         VarKey::MomentumDamage => "momentum_damage",
         VarKey::BansheesCryEtherealCounted => "banshees_cry_ethereal_counted",
         VarKey::ExhaustOnNextPlay => "exhaust_on_next_play",
-        VarKey::CostDebtThisCombat => "cost_debt_this_combat",
-        VarKey::FlattenOstyAttacksAtRoll => "flatten_osty_attacks_at_roll",
-        VarKey::CostAddedAfterLocalZero => "cost_added_after_local_zero",
-        VarKey::CostDebtThisTurn => "cost_debt_this_turn",
         VarKey::RegretCardsInHand => "regret_cards_in_hand",
         VarKey::SlyOwedAfterDraw => "sly_owed_after_draw",
         VarKey::CloneTurnFlags => "clone_turn_flags",
@@ -5046,38 +5058,26 @@ pub fn var_key_from_wire(name: &str) -> Option<VarKey> {
         VarKey::ClawBuff,
         VarKey::GeneticAlgorithmBlock,
         VarKey::RitualDaggerDamage,
-        VarKey::FreeThisTurn,
         VarKey::EtherealThisCombat,
         VarKey::StarCostFreeThisCombat,
         VarKey::MakeItSoInterval,
-        VarKey::StompCostReductionThisTurn,
-        VarKey::PinpointCostReductionThisTurn,
-        VarKey::SneckoCostDeltaThisTurn,
         VarKey::ReturnIfPlayedRound,
         VarKey::DampenDowngradedMarker,
         VarKey::IsDupe,
         VarKey::GeneratedInCombat,
-        VarKey::CostAbsolutelySet,
         VarKey::ThrashFoldRemNum,
         VarKey::ThrashFoldRemDen,
-        VarKey::FreeUntilPlayed,
         VarKey::WitherFakeUpgradeLevel,
         VarKey::PendingBatchAutoPlay,
         VarKey::AutoPlayStarX,
         VarKey::AutoPlayEnergyValue,
-        VarKey::WireTransientCostThisTurn,
         VarKey::Generic,
-        VarKey::SneckoRollLive,
         VarKey::MidnightExhaustsCounted,
         VarKey::EnchantmentUsed,
         VarKey::StarCostFreeThisTurn,
         VarKey::MomentumDamage,
         VarKey::BansheesCryEtherealCounted,
         VarKey::ExhaustOnNextPlay,
-        VarKey::CostDebtThisCombat,
-        VarKey::FlattenOstyAttacksAtRoll,
-        VarKey::CostAddedAfterLocalZero,
-        VarKey::CostDebtThisTurn,
         VarKey::RegretCardsInHand,
         VarKey::SlyOwedAfterDraw,
         VarKey::CloneTurnFlags,

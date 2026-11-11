@@ -52,7 +52,7 @@ fn push_card(
         sts2_core::CardUid::new(u32::try_from(state.cards.len() + 1).expect("u32")).expect("nz");
     let mut card = sts2_content::cards::spec_index::card_pod_from_id(card_id, false).expect("card");
     card.uid = uid;
-    card.cost = 0;
+    card.cost = sts2_core::CardEnergyCost::new(0);
     if let Some(e) = ench {
         card.set_enchantment(e, 1);
     }

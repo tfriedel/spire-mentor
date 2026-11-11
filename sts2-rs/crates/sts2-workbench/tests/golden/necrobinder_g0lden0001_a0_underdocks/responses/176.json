@@ -1,80 +1,70 @@
 {
- "assumptions": {
-  "energy": 3,
-  "hand": 5,
-  "samples": 200
+ "config": {
+  "c_puct": 2.5,
+  "depth": 200,
+  "draw_widening_c": 2.0,
+  "hidden_info": "beliefdraw",
+  "seed": 1,
+  "sims": 48,
+  "threads": 1
  },
- "block": {
-  "per_turn": 10.9,
-  "scaling_cards": [
-   "Bodyguard"
-  ]
- },
- "composition": {
-  "by_rarity": {
-   "Basic": 9,
-   "Common": 6,
-   "Uncommon": 1
-  },
-  "by_type": {
-   "Attack": 9,
-   "Skill": 7
-  },
-  "dead_cards": 0,
-  "energy_curve": {
-   "1": 15,
-   "3": 1
-  },
-  "unupgraded_basics": 8
- },
- "damage": {
-  "aoe_attacks": [
-   "Sow"
-  ],
-  "attack_count": 9,
-  "per_turn": 19.1,
-  "scaling_cards": [
-   "Unleash",
-   "Snap",
-   "Fear"
-  ],
-  "single_target": 17.0,
-  "vs_group": 21.2
- },
- "deck_size": 16,
- "lenses": {
-  "boss": 26.8,
-  "hallway": 31.2,
-  "scaling": 24.4
- },
- "scores": {
-  "block": 42.1,
-  "damage": 38.0,
-  "velocity": 0.0,
-  "volume": 0.0
- },
- "velocity": {
-  "bottleneck": "energy",
-  "cards_per_turn": 2.8,
-  "dilution": 0.94,
-  "draw_limited_turns": 0.0,
-  "energy_limited_turns": 7.0,
-  "engine_cards": 0,
-  "extra_per_turn": 0.0,
-  "tags": {}
- },
- "warnings": [
+ "pv": null,
+ "scores": [
   {
-   "severity": "info",
-   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+   "action": "BODYGUARD.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": true,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2276,
+   "q_saturated": false,
+   "stable_idx": 1,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   },
   {
-   "severity": "info",
-   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+   "action": "DEFEND_NECROBINDER.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2293,
+   "q_saturated": false,
+   "stable_idx": 0,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   },
   {
-   "severity": "warn",
-   "text": "Deck clogged with basics/curses — prioritise removals."
+   "action": "UNLEASH.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2216,
+   "q_saturated": false,
+   "stable_idx": 2,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
+  },
+  {
+   "action": "end turn",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.193,
+   "q_saturated": false,
+   "stable_idx": -1,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   }
  ]
 }

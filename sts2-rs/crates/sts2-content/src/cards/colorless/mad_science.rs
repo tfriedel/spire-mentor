@@ -107,8 +107,8 @@ pub(crate) fn play_mad_science(
         // Rng.CombatCardGeneration).First()` — set it free this turn, and add
         // it to hand. The character pool + `combat_card_generation`
         // whole-pool shuffle + take-1 (with `FilterForCombat` applied) is the
-        // same surface Discovery uses (`distinct_character_card_ids`). We stamp
-        // `FreeThisTurn` on the POD *before* spawning so the
+        // same surface Discovery uses (`distinct_character_card_ids`). We make
+        // the POD free *before* spawning so the
         // `after_card_entered_combat` listeners observe the free card, matching
         // C#'s `SetToFreeThisTurn()`-then-`CardPileCmd.Add` order.
         TinkerTimeRider::Chaos => {
@@ -116,7 +116,7 @@ pub(crate) fn play_mad_science(
                 let ids = distinct_character_card_ids(state, character, None, 1);
                 if let Some(&card_id) = ids.first() {
                     if let Some(mut card) = card_pod_from_id(card_id, false) {
-                        card.set_combat_var(VarKey::FreeThisTurn, 1);
+                        card.set_to_free_this_turn();
                         if state.game_version >= sts2_core::GameVersion::V0_111_0 {
                             // v0.111.0 MadScience.cs:286 —
                             // `AddGeneratedCardToCombat(card, Hand, Owner)`:

@@ -130,8 +130,8 @@ mod tests {
         let a = mint(&mut state, CardId::StrikeNecrobinder);
         let b = mint(&mut state, CardId::DefendNecrobinder);
         state.player.hand.extend([a, b]);
-        let a_cost0 = state.cards[a.0.get() as usize - 1].cost;
-        let b_cost0 = state.cards[b.0.get() as usize - 1].cost;
+        let a_cost0 = state.cards[a.0.get() as usize - 1].local_cost();
+        let b_cost0 = state.cards[b.0.get() as usize - 1].local_cost();
         // The resolving Transfigure sits on top of the Play pile.
         let trans = mint(&mut state, CardId::Transfigure);
         state.player.play.push(trans);
@@ -161,13 +161,13 @@ mod tests {
         assert!(state.pending_choice.is_none());
         // `a` untouched; `b` got cost +1 and base_replay_count +1.
         assert_eq!(
-            state.cards[a.0.get() as usize - 1].cost,
+            state.cards[a.0.get() as usize - 1].local_cost(),
             a_cost0,
             "unchosen card untouched"
         );
         assert_eq!(state.cards[a.0.get() as usize - 1].base_replay_count, 0);
         assert_eq!(
-            state.cards[b.0.get() as usize - 1].cost,
+            state.cards[b.0.get() as usize - 1].local_cost(),
             b_cost0 + 1,
             "chosen card cost bumped +1"
         );
@@ -185,7 +185,7 @@ mod tests {
         let mut state = CombatState::default();
         let a = mint(&mut state, CardId::StrikeNecrobinder);
         state.player.hand.push(a);
-        let a_cost0 = state.cards[a.0.get() as usize - 1].cost;
+        let a_cost0 = state.cards[a.0.get() as usize - 1].local_cost();
         let trans = mint(&mut state, CardId::Transfigure);
         state.player.play.push(trans);
 
@@ -196,7 +196,7 @@ mod tests {
             "no choice surfaced for the lone card"
         );
         assert_eq!(
-            state.cards[a.0.get() as usize - 1].cost,
+            state.cards[a.0.get() as usize - 1].local_cost(),
             a_cost0 + 1,
             "lone card cost bumped +1"
         );
@@ -209,11 +209,10 @@ mod tests {
     /// (Necrobinder random-loadout: Transfigured Delay cs=1 rs=0).
     #[test]
     fn transfigure_adds_on_top_of_a_free_this_turn_card() {
-        use sts2_core::cards::VarKey;
         let mut state = CombatState::default();
         let a = mint(&mut state, CardId::StrikeNecrobinder);
-        let base = state.cards[a.0.get() as usize - 1].cost;
-        state.cards[a.0.get() as usize - 1].set_combat_var(VarKey::FreeThisTurn, 1);
+        let base = state.cards[a.0.get() as usize - 1].local_cost();
+        state.cards[a.0.get() as usize - 1].set_to_free_this_turn();
         state.player.hand.push(a);
         assert_eq!(sts2_core::hooks::effective_card_cost(&state, a), 0);
         let trans = mint(&mut state, CardId::Transfigure);
@@ -222,11 +221,10 @@ mod tests {
         let _ = play_transfigure(&mut state, None);
         assert_eq!(sts2_core::hooks::effective_card_cost(&state, a), 1);
 
-        state.cards[a.0.get() as usize - 1].set_combat_var(VarKey::FreeThisTurn, 0);
-        assert_eq!(
-            sts2_core::hooks::effective_card_cost(&state, a),
-            i32::from(base) + 1
-        );
+        state.cards[a.0.get() as usize - 1]
+            .cost
+            .end_of_turn_cleanup();
+        assert_eq!(sts2_core::hooks::effective_card_cost(&state, a), base + 1);
     }
 
     /// Empty hand: FirstOrDefault() == null → no-op, no choice.

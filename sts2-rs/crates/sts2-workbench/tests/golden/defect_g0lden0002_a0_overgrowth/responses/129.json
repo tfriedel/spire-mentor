@@ -157,7 +157,7 @@
   },
   {
    "act": 1,
-   "best_label": "Dualcast",
+   "best_label": "Strike",
    "best_line": [],
    "best_mean_hp": null,
    "best_win_prob": 1.0,
@@ -166,8 +166,8 @@
    "hp_drop": null,
    "idx": 10,
    "is_blunder": false,
-   "matched_best": true,
-   "message": "Turn 3: Dualcast matched the MCTS line (P(win) 100%)",
+   "matched_best": false,
+   "message": "Turn 3: Dualcast instead of Strike dropped P(win) 100%→100% (−0 pts)",
    "n_actions": 3,
    "node_id": 10,
    "played_label": "Dualcast",
@@ -177,7 +177,7 @@
    "regret": 0.0,
    "severity": 0.0,
    "turn": 3,
-   "verdict": "best",
+   "verdict": "uncertain",
    "visits": 8
   },
   {

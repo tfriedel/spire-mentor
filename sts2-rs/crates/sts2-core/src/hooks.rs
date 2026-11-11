@@ -13874,56 +13874,6 @@ pub fn card_in_hand_or_play(state: &CombatState, uid: CardUid) -> bool {
     state.player.hand.contains(&uid) || state.player.play.contains(&uid)
 }
 
-/// True when the card's LOCAL base energy cost is zeroed for this play —
-/// the `FreeThisTurn` / `FreeUntilPlayed` riders, or Flatten-after-osty-
-/// attack — BEFORE the global `modify_card_cost` walk runs. This is the
-/// exact base-0 branch [`effective_card_cost`] applies; it is factored out
-/// so the MCTS `EdgeAction` identity can cheaply distinguish a free-this-turn
-/// copy of a card from an otherwise-identical non-free copy. Without that
-/// discriminator two cards sharing `(card_id, upgraded, cost)` collide and
-/// the edge resolves to the wrong (non-free) copy — e.g. a PowerPotion's
-/// 0-cost Barricade vs a 3-cost Barricade already in hand, where the engine
-/// then rejects the 3-cost play for lack of energy (GH bug report).
-#[must_use]
-pub fn card_cost_locally_zeroed(state: &CombatState, card: &crate::cards::Card) -> bool {
-    flatten_zeroed(state, card)
-        || card.combat_var(crate::cards::VarKey::FreeThisTurn) != 0
-        || card.combat_var(crate::cards::VarKey::FreeUntilPlayed) != 0
-}
-
-/// FLATTEN's `SetThisTurn(0)` from an Osty attack this turn
-/// (`Flatten.cs` `AfterAttack` / `AfterCardEnteredCombat`). A live Snecko
-/// roll appended after those attacks overrides the zero until it expires,
-/// and an attack after the roll zeroes it again
-/// ([`crate::cards::VarKey::FlattenOstyAttacksAtRoll`]).
-pub(crate) fn flatten_zeroed(state: &CombatState, card: &crate::cards::Card) -> bool {
-    if card.card_id != crate::cards::CardId::Flatten {
-        return false;
-    }
-    let attacks = state.combat_log.osty_attacks_this_turn;
-    let at_roll = card.combat_var(crate::cards::VarKey::FlattenOstyAttacksAtRoll);
-    attacks > 0 && (at_roll == 0 || attacks > at_roll - 1)
-}
-
-/// A card's cost with only its LOCAL modifiers applied — C#
-/// `EnergyCost.GetWithModifiers(CostModifiers.Local)` (CardEnergyCost.cs:94-115):
-/// the per-card free-this-turn / until-played riders and until-played
-/// reductions, but no global `ModifyEnergyCostInCombat` hook and no clamp. A
-/// negative (unplayable) base is returned as is.
-#[must_use]
-pub fn local_card_cost(state: &CombatState, card: &crate::cards::Card) -> i32 {
-    let base = i32::from(card.cost);
-    if base < 0 {
-        base
-    } else if card_cost_locally_zeroed(state, card) {
-        card.combat_var(crate::cards::VarKey::CostAddedAfterLocalZero)
-    } else {
-        base - card.combat_var(crate::cards::VarKey::CostReductionUntilPlayed)
-            - card.combat_var(crate::cards::VarKey::CostDebtThisCombat)
-            - card.combat_var(crate::cards::VarKey::CostDebtThisTurn)
-    }
-}
-
 /// Resolve the play-time cost of a card in [`CombatState::cards`] by
 /// running the `modify_card_cost` channel. Mirrors Python's call
 /// chain at `sts2-rl-agent@01c094d:sts2_env/core/combat.py::play_card`
@@ -13987,69 +13937,33 @@ pub fn effective_card_cost_inst_with_mask(
     card_uid: CardUid,
     mods_present: bool,
 ) -> i32 {
-    // Bead `sts2-rs-c68o`: per-card `FreeThisTurn` rider zeroes the cost
-    // BEFORE the modify_card_cost listener walk. Set by `InfernalBlade` on
-    // the random Attack it spawns into hand; cleared by end-of-turn cleanup
-    // for every pile. Mirrors C# `CardModel.SetToFreeThisTurn()` =
-    // `EnergyCost.SetThisTurnOrUntilPlayed(0)` — an Absolute(0) LOCAL
-    // modifier (`CardModel.cs:975-979`). C# applies the GLOBAL
-    // `Hook.ModifyEnergyCostInCombat` chain AFTER local modifiers
-    // (`CardEnergyCost.GetWithModifiers`, CardEnergyCost.cs:56-83), so a
-    // free-this-turn card still pays Tangled's `originalCost + Amount`
-    // surcharge (`TangledPower.cs:59-68`). The rider therefore feeds the
-    // listener walk a 0 base instead of short-circuiting past it (sweep
-    // seeds 3749/3839: an ATTACK_POTION-generated ANGER under Tangled
-    // costs 1 in C#, was 0 here).
-    // `FreeUntilPlayed` (RocketPunch's status-generation reaction, C#
-    // `EnergyCost.SetUntilPlayed(0)`) zeroes the energy base the same way as
-    // `FreeThisTurn` but with a cross-turn lifetime — see the VarKey doc.
+    // The card's LOCAL cost (`GetWithModifiers(Local)` before its clamp:
+    // free-this-turn, Snecko rolls, Flatten's zero, the this-combat shaves, …)
+    // feeds the GLOBAL `Hook.ModifyEnergyCostInCombat` chain
+    // (`CardEnergyCost.GetWithModifiers`), so a free-this-turn card still pays
+    // Tangled's `originalCost + Amount` surcharge (`TangledPower.cs:59-68`).
     //
-    // FLATTEN (Necrobinder) costs 0 for the rest of the turn once the Osty has
-    // attacked this turn. C# `Flatten` overrides two card-side reactive hooks
-    // (`Flatten.cs:50-81`): `AfterCardEnteredCombat` (reduce if Osty already
-    // attacked when the card enters combat) and `AfterAttack` (reduce when the
-    // owner's Osty attacks), both calling `EnergyCost.SetThisTurn(0)`. The Rust
-    // pool has no card-side reactive-cost surface, but `SetThisTurn(0)` has an
-    // end-of-turn lifetime and `osty_attacks_this_turn` is monotonic within a
-    // turn (reset only at turn start), so evaluating "Osty attacked this turn"
-    // at cost-read time captures BOTH hooks exactly. Applied as a base-0 rider
-    // (before the global `modify_card_cost` walk) like `FreeThisTurn`, so a
-    // Tangled-style surcharge still stacks on top. Parity: Necro PARITY10
-    // (FLATTEN played after an Osty attack cost 2 here vs 0 in C#, cascading
-    // into an energy/hand/enemy-hp divergence).
     // C# `BrilliantScarf.TryModifyEnergyCostInCombatLate` zeroes the fifth
     // card's cost after every other hook; `CardEnergyCost.GetWithModifiers`
     // never reaches the global hooks for an X-cost or negative base.
-    if card.cost >= 0 && brilliant_scarf_makes_free(state, card_uid) {
+    let base = card.base_cost();
+    if base >= 0 && brilliant_scarf_makes_free(state, card_uid) {
         return 0;
     }
     // An X-cost card has no modified cost at all: `GetWithModifiers` returns
     // `_base` for `CostsX` before any local or global modifier
     // (CardEnergyCost.cs:105-108), and the spend is `GetAmountToSpend()` = all
-    // the energy. A FreeThisTurn rider must not seat Tangled's +1 on it
-    // (loadout Defect v0.111.0 2028: an Entangled, free-this-turn X attack
-    // paid 1 and lost one hit).
+    // the energy.
     if card.is_x_cost() {
         return 0;
     }
-    let base_cost = if card_cost_locally_zeroed(state, card) {
-        card.combat_var(crate::cards::VarKey::CostAddedAfterLocalZero)
-    } else {
-        // A `Relative` until-played reduction (`AddUntilPlayed(-1)`: Bookmark,
-        // SlumberingEssence, v0.111.0 RocketPunch) is a local modifier, so it
-        // lands before the global walk; the final `max(0)` below is C#'s
-        // `Math.Max(0, num)` (CardEnergyCost.cs:83).
-        i32::from(card.cost)
-            - card.combat_var(crate::cards::VarKey::CostReductionUntilPlayed)
-            - card.combat_var(crate::cards::VarKey::CostDebtThisCombat)
-            - card.combat_var(crate::cards::VarKey::CostDebtThisTurn)
-    };
+    let base_cost = card.local_cost();
     // C# `Hook.ModifyEnergyCostInCombat` returns a negative `originalCost`
     // untouched (Hook.cs:1720-1723, both builds), so a card whose local
-    // modifiers took it below 0 (Melancholy / Banshee's Cry debt) skips every
+    // modifiers took it below 0 (Melancholy / Banshee's Cry shaves) skips every
     // global surcharge and clamps to 0: Borrowed Time's +2 leaves a -1
     // Melancholy free (loadout Necrobinder 1105, cs=0 rs=1).
-    if base_cost < 0 && card.cost >= 0 {
+    if base_cost < 0 && base >= 0 {
         return 0;
     }
     // Perf 2026-07-04: the same presence-mask early-out
@@ -19776,7 +19690,7 @@ mod tests {
                 &mut state,
                 crate::cards::Card {
                     card_id: crate::cards::CardId::StrikeIronclad,
-                    cost: 1,
+                    cost: crate::CardEnergyCost::new(1),
                     card_type: crate::cards::CardType::Attack,
                     target_type: crate::cards::TargetType::Enemy,
                     ..crate::cards::Card::pod_defaults()
@@ -21054,7 +20968,7 @@ mod tests {
     }
 
     /// C# `GetWithModifiers` returns `_base` for an X-cost card before any
-    /// modifier (CardEnergyCost.cs:105-108): neither its FreeThisTurn rider
+    /// modifier (CardEnergyCost.cs:105-108): neither its FREE_THIS_TURN rider
     /// nor Tangled's surcharge gives it a cost, so the play spends all energy
     /// as X (loadout Defect v0.111.0 2028: Rust charged 1 and lost a hit).
     #[test]
@@ -21077,7 +20991,7 @@ mod tests {
         let mut card = crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::Whirlwind,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: CardType::Attack,
             target_type: crate::cards::TargetType::AllEnemies,
             upgraded: false,
@@ -21091,7 +21005,7 @@ mod tests {
             keyword_override: None,
             affliction: None,
         };
-        card.set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+        card.set_to_free_this_turn();
         state.cards.push(card);
         assert_eq!(effective_card_cost(&state, uid), 0);
     }
@@ -21108,7 +21022,7 @@ mod tests {
         let mut card = crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::RocketPunch,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -21122,11 +21036,15 @@ mod tests {
             keyword_override: None,
             affliction: None,
         };
-        card.set_combat_var(VarKey::FreeUntilPlayed, 1);
-        card.set_combat_var(VarKey::FreeThisTurn, 1);
-        card.add_cost_reduction_until_played(1);
-        card.set_cost_this_combat(2);
-        assert_eq!(card.combat_var(VarKey::StarCostFreeThisTurn), 1);
+        card.cost.set_until_played(0, false);
+        card.set_to_free_this_turn();
+        card.cost.add_until_played(-1);
+        card.cost.set_this_combat(2, false);
+        assert_eq!(
+            card.combat_var(VarKey::StarCostFreeThisTurn),
+            0,
+            "no star cost to zero"
+        );
         state.cards.push(card);
         assert_eq!(effective_card_cost(&state, uid), 2);
     }
@@ -21641,20 +21559,20 @@ mod tests {
     }
 
     /// Bead `sts2-rs-r5lbi`: `effective_card_cost` short-circuits to
-    /// 0 when the card's per-instance `VarKey::FreeThisTurn != 0`,
+    /// 0 when the card carries the `LocalCostMod::FREE_THIS_TURN` modifier,
     /// BEFORE the `modify_card_cost` listener walk (hooks.rs:4767,
     /// bead c68o, InfernalBlade rider). A regression that moved the
     /// rider check after the listener walk would silently break the
     /// rider when no listener returned a Some lower than base_cost.
     #[test]
     fn effective_card_cost_freethisturn_rider_short_circuits_to_zero() {
-        use crate::cards::{CardId, CardTags, CardType, TargetType, VarKey};
+        use crate::cards::{CardId, CardTags, CardType, TargetType};
         let mut state = CombatState::default();
         let uid = crate::CardUid::new(1).expect("non-zero");
         state.cards.push(crate::Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -21670,12 +21588,12 @@ mod tests {
         });
         // Baseline: no rider → effective cost is the base (no listeners).
         assert_eq!(effective_card_cost(&state, uid), 3);
-        // Flip the FreeThisTurn rider. The rider check fires before the
+        // Flip the FREE_THIS_TURN rider. The rider check fires before the
         // listener walk, so the result is 0 regardless of base_cost.
-        state.cards[0].set_combat_var(VarKey::FreeThisTurn, 1);
+        state.cards[0].set_to_free_this_turn();
         assert_eq!(effective_card_cost(&state, uid), 0);
         // Clear the rider — cost returns to base.
-        state.cards[0].set_combat_var(VarKey::FreeThisTurn, 0);
+        state.cards[0].cost.end_of_turn_cleanup();
         assert_eq!(effective_card_cost(&state, uid), 3);
     }
 
@@ -21693,7 +21611,7 @@ mod tests {
         state.cards.push(crate::Card {
             uid,
             card_id: CardId::Flatten,
-            cost: 2,
+            cost: crate::CardEnergyCost::new(2),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -21710,11 +21628,13 @@ mod tests {
         // No Osty attack yet this turn → full base cost.
         assert_eq!(state.combat_log.osty_attacks_this_turn, 0);
         assert_eq!(effective_card_cost(&state, uid), 2);
-        // Osty has attacked → FLATTEN is free for the rest of the turn.
+        // Osty has attacked → FLATTEN is free for the rest of the turn
+        // (`Flatten.AfterAttack`: `SetThisTurn(0)`).
         state.combat_log.osty_attacks_this_turn = 1;
+        crate::card_effects::flatten_after_osty_attack(&mut state);
         assert_eq!(effective_card_cost(&state, uid), 0);
-        // Turn-start reset of the counter restores the base cost.
-        state.combat_log.osty_attacks_this_turn = 0;
+        // `EndOfTurnCleanup` drops the zero.
+        crate::combat_loop::clear_per_turn_card_vars(&mut state);
         assert_eq!(effective_card_cost(&state, uid), 2);
     }
 
@@ -21742,7 +21662,7 @@ mod tests {
         let mk = |raw: u32, card_id, cost, card_type| crate::Card {
             uid: crate::CardUid::new(raw).expect("non-zero"),
             card_id,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             card_type,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -21797,7 +21717,7 @@ mod tests {
         let mk = |uid, card_id, cost, card_type| crate::Card {
             uid,
             card_id,
-            cost,
+            cost: crate::CardEnergyCost::new(cost),
             card_type,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -22603,7 +22523,7 @@ mod tests {
         state.cards.push(crate::Card {
             uid,
             card_id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -22914,18 +22834,17 @@ mod tests {
     /// 3042).
     #[test]
     fn local_card_cost_folds_only_local_modifiers() {
-        let state = CombatState::default();
         let mut card = crate::cards::Card {
-            cost: 2,
+            cost: crate::CardEnergyCost::new(2),
             ..crate::cards::Card::pod_defaults()
         };
-        assert_eq!(local_card_cost(&state, &card), 2);
-        card.set_combat_var(crate::cards::VarKey::CostReductionUntilPlayed, 1);
-        assert_eq!(local_card_cost(&state, &card), 1);
-        card.set_combat_var(crate::cards::VarKey::FreeUntilPlayed, 1);
-        assert_eq!(local_card_cost(&state, &card), 0);
-        card.cost = -1;
-        assert_eq!(local_card_cost(&state, &card), -1, "unplayable base stays");
+        assert_eq!(card.local_cost(), 2);
+        card.cost.add_until_played(-1);
+        assert_eq!(card.local_cost(), 1);
+        card.cost.set_until_played(0, false);
+        assert_eq!(card.local_cost(), 0);
+        card.cost = crate::CardEnergyCost::new(-1);
+        assert_eq!(card.local_cost(), -1, "unplayable base stays");
     }
 
     /// **Gigantification command scope**: C# `commandToModify` limits the ×3
@@ -27145,7 +27064,7 @@ mod tests {
         let _ = state.add_card_to_draw_pile(crate::Card {
             uid: crate::CardUid::new(u32::MAX).expect("non-zero placeholder"),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -27197,7 +27116,7 @@ mod tests {
             let _ = state.add_card_to_draw_pile(crate::Card {
                 uid: crate::CardUid::new(u32::MAX).expect("non-zero placeholder"),
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -27483,7 +27402,7 @@ mod tests {
         let _ = state.add_card_to_draw_pile(crate::Card {
             uid: crate::CardUid::new(u32::MAX).expect("non-zero placeholder"),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -29802,7 +29721,7 @@ mod tests {
             let card = crate::cards::Card {
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::None,
-                cost: 0,
+                cost: crate::CardEnergyCost::new(0),
                 card_id: CardId::AscendersBane,
                 ..crate::cards::Card::pod_defaults()
             };
@@ -29913,7 +29832,7 @@ mod tests {
         let strike = crate::cards::Card {
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_id: CardId::StrikeIronclad,
             base_damage: 6,
             ..crate::cards::Card::pod_defaults()
@@ -29981,7 +29900,7 @@ mod tests {
             let mut strike = crate::cards::Card {
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_id: CardId::StrikeIronclad,
                 base_damage: 6,
                 ..crate::cards::Card::pod_defaults()
@@ -30535,7 +30454,7 @@ mod tests {
         state.cards.push(crate::Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -31478,7 +31397,7 @@ mod tests {
         state.cards.push(crate::Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -31579,20 +31498,16 @@ mod tests {
         state.cards.push(crate::Card {
             uid,
             card_id: CardId::Midnight,
-            cost: 12,
+            cost: crate::CardEnergyCost::new(12),
             ..crate::Card::pod_defaults()
         });
         state.player.hand.push(uid);
-        state.cards[0].set_this_turn_or_until_played_reduce_only(1);
+        state.cards[0].cost.set_this_turn_or_until_played(1, true);
         reduce_midnight_costs_v0111(&mut state);
         reduce_midnight_costs_v0111(&mut state);
-        assert_eq!(
-            local_card_cost(&state, &state.cards[0]).max(0),
-            0,
-            "capped, then -2"
-        );
-        state.cards[0].expire_snecko_roll();
-        assert_eq!(local_card_cost(&state, &state.cards[0]), 10, "12 - 2");
+        assert_eq!(state.cards[0].local_cost().max(0), 0, "capped, then -2");
+        state.cards[0].cost.end_of_turn_cleanup();
+        assert_eq!(state.cards[0].local_cost(), 10, "12 - 2");
     }
 
     /// Distilled Chaos (`CardPileCmd.AutoPlayFromDrawPile`,
@@ -33259,7 +33174,7 @@ mod power_kind_mask_drift {
         state.cards.push(crate::Card {
             uid: CardUid::new(1).unwrap(),
             card_id: crate::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -34804,7 +34719,7 @@ mod power_hook_liveness {
         state.cards.push(crate::Card {
             uid,
             card_id: crate::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -35130,7 +35045,7 @@ mod owner_scoped_power_folds {
         crate::Card {
             uid: CardUid::new(n).unwrap(),
             card_id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,

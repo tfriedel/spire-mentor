@@ -65,7 +65,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -147,7 +147,7 @@ mod tests {
         state.cards.push(Card {
             uid: pillage_uid,
             card_id: CardId::Pillage,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -255,7 +255,7 @@ mod tests {
         state.cards.push(Card {
             uid: pillage_uid,
             card_id: CardId::Pillage,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -276,7 +276,7 @@ mod tests {
             state.cards.push(Card {
                 uid,
                 card_id: CardId::SetupStrikeCard,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,

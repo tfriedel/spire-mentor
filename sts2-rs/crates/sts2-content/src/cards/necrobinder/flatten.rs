@@ -32,7 +32,7 @@ use super::prelude::*;
 //   turn start), so the two reactive hooks reduce to a single predicate —
 //   "Osty attacked this turn" — evaluated at cost-read time. Implemented as a
 //   base-0 rider in `hooks::effective_card_cost` (CardId::Flatten +
-//   osty_attacks_this_turn > 0), mirroring the `FreeThisTurn` rider. (Cost is
+//   osty_attacks_this_turn > 0), mirroring the `FREE_THIS_TURN` rider. (Cost is
 //   not affected by upgrade in C#.)
 //
 // `deal_damage_from_osty_to_enemy` is a no-op when the Osty is absent

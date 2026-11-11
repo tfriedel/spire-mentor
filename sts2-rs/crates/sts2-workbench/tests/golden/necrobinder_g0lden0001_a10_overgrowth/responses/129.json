@@ -1182,7 +1182,7 @@
   },
   {
    "act": 1,
-   "best_label": "Unleash",
+   "best_label": "Sow",
    "best_line": [],
    "best_mean_hp": null,
    "best_win_prob": 1.0,
@@ -1192,7 +1192,7 @@
    "idx": 74,
    "is_blunder": false,
    "matched_best": false,
-   "message": "Turn 2: Strike instead of Unleash dropped P(win) 100%→100% (−0 pts)",
+   "message": "Turn 2: Strike instead of Sow dropped P(win) 100%→100% (−0 pts)",
    "n_actions": 5,
    "node_id": 74,
    "played_label": "Strike",

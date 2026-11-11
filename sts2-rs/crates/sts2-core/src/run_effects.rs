@@ -2459,7 +2459,7 @@ mod tests {
         let mut card = Card {
             uid: CardUid(std::num::NonZeroU32::new(1).unwrap()),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CT::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -2496,7 +2496,7 @@ mod tests {
         let mut card = Card {
             uid: CardUid(std::num::NonZeroU32::new(2).unwrap()),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CT::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,

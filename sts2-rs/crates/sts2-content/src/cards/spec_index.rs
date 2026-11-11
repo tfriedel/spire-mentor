@@ -2258,7 +2258,7 @@ pub(crate) fn apply_upgrade_delta(
 ) {
     {
         if let Some(c) = delta.cost {
-            card.cost = c;
+            card.cost.set_base(c);
         }
         if let Some(d) = delta.base_damage {
             card.base_damage = d;
@@ -3590,7 +3590,7 @@ mod tests {
         assert_eq!(defend_up.base_block, 8, "upgraded Defend blocks 8");
 
         let barricade_up = card_pod_from_id(CardId::BarricadeCard, true).unwrap();
-        assert_eq!(barricade_up.cost, 2, "upgraded Barricade costs 2");
+        assert_eq!(barricade_up.local_cost(), 2, "upgraded Barricade costs 2");
     }
 
     /// Bead `sts2-rs-RP22`: C# `IsRemovable => !Eternal`. Eternal curses
@@ -3704,7 +3704,7 @@ mod tests {
         assert_eq!(claw.base_damage, 4, "upgraded Claw deals 4");
 
         let zap = card_pod_from_id(CardId::Zap, true).unwrap();
-        assert_eq!(zap.cost, 0, "upgraded Zap costs 0");
+        assert_eq!(zap.local_cost(), 0, "upgraded Zap costs 0");
     }
 
     /// `Card::upgrade()` (the runtime path used by Smith / upgrade relics)

@@ -258,7 +258,7 @@ pub fn build_ironclad_state_with_deck(
         cards_arena.push(Card {
             uid,
             card_id: spec.id,
-            cost: spec.cost,
+            cost: sts2_core::CardEnergyCost::new(spec.cost),
             card_type: spec.card_type,
             target_type: spec.target_type,
             upgraded: false,

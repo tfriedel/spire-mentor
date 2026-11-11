@@ -745,7 +745,7 @@ fn build_combat(input: &FuzzInput) -> CombatState {
         cards_arena.push(Card {
             uid,
             card_id: spec.id,
-            cost: spec.cost,
+            cost: sts2_core::CardEnergyCost::new(spec.cost),
             card_type: spec.card_type,
             target_type: spec.target_type,
             upgraded: *upgraded,

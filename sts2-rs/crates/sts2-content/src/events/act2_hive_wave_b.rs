@@ -757,7 +757,7 @@ fn symbiote_can_enchant(c: &sts2_core::cards::Card) -> bool {
     c.card_type == CardType::Attack
         && !c.is_quest()
         && c.enchantments.is_empty()
-        && (c.cost >= 0 || c.is_x_cost())
+        && (c.base_cost() >= 0 || c.is_x_cost())
 }
 
 fn symbiote_approach(state: &mut RunState) -> EventOutcome {
@@ -1885,7 +1885,7 @@ mod tests {
         assert_eq!(rs.current_hp, 40 - STONE_PUSH_DAMAGE);
         assert!(rs.master_deck[0].enchantments.is_empty());
         assert_eq!(
-            rs.master_deck[1].enchantments.as_slice(),
+            rs.master_deck[1].enchantments.to_vec(),
             &[(EnchantmentId::Vigorous, STONE_PUSH_VIGOROUS)]
         );
 

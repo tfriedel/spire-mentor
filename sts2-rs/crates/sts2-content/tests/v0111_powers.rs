@@ -531,7 +531,7 @@ fn well_laid_plans_keeps_whole_hand_v0111() {
 
 fn add_zero_cost_to_hand(state: &mut CombatState, card_id: CardId) -> CardUid {
     let uid = add_to_hand(state, card_id);
-    state.cards[uid.get() as usize - 1].cost = 0;
+    state.cards[uid.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(0);
     uid
 }
 

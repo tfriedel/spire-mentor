@@ -273,7 +273,7 @@ pub type CardEnchantObs = Option<(String, i64)>;
 #[must_use]
 pub fn card_enchant_obs(e: &sts2_core::cards::CardEnchantments) -> CardEnchantObs {
     e.first()
-        .map(|(id, amount)| (id.python_name().to_string(), i64::from(*amount)))
+        .map(|(id, amount)| (id.python_name().to_string(), i64::from(amount)))
 }
 
 /// `env.py::observe()`'s full observation dict — the encoder's (Task

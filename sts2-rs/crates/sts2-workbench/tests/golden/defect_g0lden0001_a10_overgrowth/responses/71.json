@@ -162,7 +162,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 26.9168,
+   "value_sum": 26.9167,
    "visits": 24,
    "wins": 24
   },
@@ -238,7 +238,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 26.9168,
+   "value_sum": 26.9167,
    "visits": 24,
    "wins": 24
   },
@@ -658,7 +658,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 6.756,
+   "value_sum": 6.7559,
    "visits": 6,
    "wins": 6
   },
@@ -1191,7 +1191,7 @@
       "uid": 2
      }
     ],
-    "energy": 2,
+    "energy": 3,
     "player_block": 0,
     "player_hp": 27,
     "player_max_hp": 75,
@@ -1419,7 +1419,7 @@
       "uid": 2
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 27,
     "player_max_hp": 75,
@@ -1468,7 +1468,7 @@
    "parent": 10,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1141,
+   "q": 1.114,
    "summary": {
     "enemies": [
      {
@@ -1506,7 +1506,7 @@
    "parent": 28,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1141,
+   "q": 1.114,
    "summary": {
     "enemies": [
      {
@@ -1523,7 +1523,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1141,
+   "value_sum": 1.114,
    "visits": 1,
    "wins": 1
   },
@@ -1687,7 +1687,7 @@
       "uid": 2
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 27,
     "player_max_hp": 75,
@@ -1937,7 +1937,7 @@
       "uid": 2
      }
     ],
-    "energy": 2,
+    "energy": 3,
     "player_block": 0,
     "player_hp": 27,
     "player_max_hp": 75,
@@ -1966,7 +1966,7 @@
    "parent": 28,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.1141,
+   "q": 1.114,
    "summary": {
     "enemies": [
      {
@@ -1983,7 +1983,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.1141,
+   "value_sum": 1.114,
    "visits": 1,
    "wins": 1
   },
@@ -2027,6 +2027,11 @@
   }
  ],
  "pv": [
+  {
+   "action": "play",
+   "card_index": 1,
+   "target_index": null
+  },
   {
    "action": "end_turn"
   },

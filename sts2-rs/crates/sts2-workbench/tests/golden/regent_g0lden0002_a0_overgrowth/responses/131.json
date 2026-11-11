@@ -1,3 +1,240 @@
 {
- "detail": "no recommendation here"
+ "details": [
+  "You HP 6→0 (−6)",
+  "Shrinker Beetle HP 8→0  ☠ defeated",
+  "Fuzzy Wurm Crawler HP 56→0  ☠ defeated",
+  "You −Draw Cards Next Turn",
+  "You −Shrink"
+ ],
+ "error": null,
+ "label": "End turn",
+ "step": {
+  "action_label": "",
+  "assets_base": "https://assets.test",
+  "chosen_action": null,
+  "decision": "game_over",
+  "idx": 0,
+  "meta": {
+   "act": 1,
+   "act_name": "Overgrowth",
+   "bg_col": 0,
+   "bg_row": 4,
+   "bg_seed": 206169372,
+   "floor": 5,
+   "step_no": 0,
+   "turn": null
+  },
+  "pv": null,
+  "scores": [],
+  "source": "live",
+  "state": {
+   "act": 1,
+   "act1": "overgrowth",
+   "act_name": "Overgrowth",
+   "ascension": 0,
+   "bg_col": 0,
+   "bg_row": 4,
+   "bg_seed": 206169372,
+   "decision": "game_over",
+   "floor": 5,
+   "options": [],
+   "player": {
+    "block": 0,
+    "deck": [
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_REGENT",
+      "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+      "index": 0,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_REGENT",
+      "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+      "index": 1,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_REGENT",
+      "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+      "index": 2,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_REGENT",
+      "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+      "index": 3,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_REGENT",
+      "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+      "index": 4,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_REGENT",
+      "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+      "index": 5,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_REGENT",
+      "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+      "index": 6,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Gain 8 Block.",
+      "description_rich": "Gain 8 Block.",
+      "id": "DEFEND_REGENT",
+      "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+      "index": 7,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": true
+     },
+     {
+      "color": "orange",
+      "cost": 0,
+      "description": "Deal 8 damage.\nApply 1 Weak.\nApply 1 Vulnerable.",
+      "description_rich": "Deal 8 damage.\nApply 1 Weak.\nApply 1 Vulnerable.",
+      "id": "FALLING_STAR",
+      "image": "https://assets.test/card_atlas/regent/falling_star.png",
+      "index": 8,
+      "name": "Falling Star",
+      "rarity": "Basic",
+      "star_cost": 2,
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Gain Stars.",
+      "description_rich": "Gain Stars.",
+      "id": "VENERATE",
+      "image": "https://assets.test/card_atlas/regent/venerate.png",
+      "index": 9,
+      "name": "Venerate",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Gain 1 Stars.\nDraw 1 card.\nNext turn, draw 1 card.",
+      "description_rich": "Gain 1 Stars.\nDraw 1 card.\nNext turn, draw 1 card.",
+      "id": "GLOW",
+      "image": "https://assets.test/card_atlas/regent/glow.png",
+      "index": 10,
+      "name": "Glow",
+      "rarity": "Common",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Deal 10 damage.\nDraw 1 card.\nPut 1 card from your Hand on top of your Draw Pile.",
+      "description_rich": "Deal 10 damage.\nDraw 1 card.\nPut 1 card from your Hand on top of your Draw Pile.",
+      "id": "PHOTON_CUT",
+      "image": "https://assets.test/card_atlas/regent/photon_cut.png",
+      "index": 11,
+      "name": "Photon Cut",
+      "rarity": "Common",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "orange",
+      "cost": 1,
+      "description": "Deal 8 damage.\nDeals 2 additional damage for ALL your cards that have a ★ cost.",
+      "description_rich": "Deal 8 damage.\nDeals 2 additional damage for ALL your cards that have a ★ cost.",
+      "id": "CRESCENT_SPEAR",
+      "image": "https://assets.test/card_atlas/regent/crescent_spear.png",
+      "index": 12,
+      "name": "Crescent Spear",
+      "rarity": "Common",
+      "star_cost": 1,
+      "type": "Attack",
+      "upgraded": false
+     }
+    ],
+    "gold": 136,
+    "hp": 0,
+    "max_hp": 75,
+    "name": "Regent",
+    "potion_slots": 3,
+    "potions": [],
+    "relics": [
+     {
+      "description": "At the start of each combat, gain 3 Stars.",
+      "id": "DIVINE_RIGHT",
+      "image": "https://assets.test/relic_atlas/divine_right.png",
+      "name": "Divine Right"
+     },
+     {
+      "description": "Every 3 normal combats, Upgrade a random card in your Deck.",
+      "id": "FISHING_ROD",
+      "image": "https://assets.test/relic_atlas/fishing_rod.png",
+      "name": "Fishing Rod"
+     }
+    ]
+   },
+   "victory": false
+  }
+ }
 }

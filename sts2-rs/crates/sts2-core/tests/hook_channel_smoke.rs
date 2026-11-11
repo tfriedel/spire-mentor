@@ -130,7 +130,7 @@ fn build_hook_smoke_fixture() -> HookSmokeFixture {
     state.cards.push(Card {
         uid: a_card_uid,
         card_id: a_card_id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,

@@ -964,7 +964,7 @@ impl RunManager {
         if ascension_level >= 5 {
             let mut curse = crate::cards::Card::pod_defaults();
             curse.card_id = crate::cards::CardId::AscendersBane;
-            curse.cost = -1;
+            curse.cost = crate::CardEnergyCost::new(-1);
             curse.card_type = crate::cards::CardType::Curse;
             curse.target_type = crate::cards::TargetType::None;
             run_state.master_deck.push(curse);
@@ -5168,7 +5168,7 @@ impl RunManager {
                 !matches!(c.card_type, CardType::Status | CardType::Curse)
                     && !c.is_quest()
                     && c.enchantments.is_empty()
-                    && (c.cost >= 0 || (allow_x_cost && c.is_x_cost()))
+                    && (c.base_cost() >= 0 || (allow_x_cost && c.is_x_cost()))
                     // `Nimble.CanEnchant` → `CardModel.GainsBlock` (GH #1021).
                     && (!requires_block || c.gains_block_for(self.run_state.game_version))
                     && (!requires_exhaust || souls_power_keywords_ok(c))
@@ -5267,7 +5267,8 @@ impl RunManager {
         // enchantment: `TezcatarasEmber.OnEnchant` sets the cost to 0
         // (content's `apply_static_enchantment` does the same; GH #1021).
         if entry.enchantment == crate::cards::EnchantmentId::TezcatarasEmber {
-            card.cost = 0;
+            // `UpgradeBy(-GetWithModifiers(None))`: the base goes to 0.
+            card.cost.upgrade_by(-i32::from(card.base_cost()));
         }
         self.settle_after_deck_pick();
         ActionResult::Advanced
@@ -7299,7 +7300,7 @@ mod tests {
         let mut wound = crate::cards::Card::pod_defaults();
         wound.card_id = crate::cards::CardId::Wound;
         wound.card_type = crate::cards::CardType::Status;
-        wound.cost = -1;
+        wound.cost = crate::CardEnergyCost::new(-1);
         let mut bash = crate::cards::Card::pod_defaults();
         bash.card_id = crate::cards::CardId::Bash;
         let mut strike = crate::cards::Card::pod_defaults();
@@ -7327,7 +7328,7 @@ mod tests {
         );
         assert!(rm.run_state.pending_deck_enchants.is_empty());
         assert_eq!(
-            rm.run_state.master_deck[2].enchantments.as_slice(),
+            rm.run_state.master_deck[2].enchantments.to_vec(),
             &[(crate::cards::EnchantmentId::Slither, 1)]
         );
         // The enchanted card drops out of the eligible pool.
@@ -7405,7 +7406,7 @@ mod tests {
         );
         // Subset idx 1 = deck idx 2 (Strike).
         assert_eq!(
-            rm.run_state.master_deck[2].enchantments.as_slice(),
+            rm.run_state.master_deck[2].enchantments.to_vec(),
             &[(crate::cards::EnchantmentId::Sharp, 2)]
         );
     }
@@ -11479,7 +11480,7 @@ mod tests {
             .expect("curse present");
         // Spec fields land on the Card POD (rest come from the
         // CardId lookup in `sts2-content`).
-        assert_eq!(curse.cost, -1);
+        assert_eq!(curse.local_cost(), -1);
         assert_eq!(curse.card_type, crate::cards::CardType::Curse);
         assert_eq!(curse.target_type, crate::cards::TargetType::None);
         assert!(!curse.upgraded);

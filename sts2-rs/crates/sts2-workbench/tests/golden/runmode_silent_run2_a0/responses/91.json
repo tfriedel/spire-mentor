@@ -122,8 +122,8 @@
     21,
     31,
     35,
-    42,
-    55
+    41,
+    53
    ],
    "edges": [
     {
@@ -159,7 +159,7 @@
      "visits": 1
     },
     {
-     "child": 42,
+     "child": 41,
      "kind": "choose",
      "label": "Choose 4",
      "outcome_ordinal": null,
@@ -167,7 +167,7 @@
      "visits": 1
     },
     {
-     "child": 55,
+     "child": 53,
      "kind": "choose",
      "label": "Choose 5",
      "outcome_ordinal": null,
@@ -351,7 +351,7 @@
     28,
     26,
     27,
-    53
+    51
    ],
    "edges": [
     {
@@ -395,7 +395,7 @@
      "visits": 1
     },
     {
-     "child": 53,
+     "child": 51,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -529,8 +529,8 @@
     22,
     27,
     33,
-    43,
-    51
+    42,
+    50
    ],
    "edges": [
     {
@@ -566,7 +566,7 @@
      "visits": 1
     },
     {
-     "child": 43,
+     "child": 42,
      "kind": "play",
      "label": "DefendSilent",
      "outcome_ordinal": null,
@@ -574,7 +574,7 @@
      "visits": 1
     },
     {
-     "child": 51,
+     "child": 50,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -628,7 +628,7 @@
      "label": "outcome #0",
      "outcome_ordinal": 0,
      "target_index": null,
-     "visits": 6
+     "visits": 8
     }
    ],
    "id": 7,
@@ -672,7 +672,7 @@
     25,
     32,
     36,
-    44
+    43
    ],
    "edges": [
     {
@@ -708,7 +708,7 @@
      "visits": 1
     },
     {
-     "child": 44,
+     "child": 43,
      "kind": "play",
      "label": "DefendSilent",
      "outcome_ordinal": null,
@@ -727,7 +727,7 @@
    "parent": 7,
    "proven_loss": false,
    "proven_win": false,
-   "q": 1.2225,
+   "q": 1.2235,
    "summary": {
     "enemies": [
      {
@@ -744,9 +744,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 7.3348,
-   "visits": 6,
-   "wins": 6
+   "value_sum": 9.7881,
+   "visits": 8,
+   "wins": 8
   },
   {
    "chance_action": null,
@@ -844,7 +844,7 @@
     29,
     34,
     39,
-    45
+    44
    ],
    "edges": [
     {
@@ -880,7 +880,7 @@
      "visits": 1
     },
     {
-     "child": 45,
+     "child": 44,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -1251,11 +1251,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    49
+    48
    ],
    "edges": [
     {
-     "child": 49,
+     "child": 48,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -1414,11 +1414,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    47
+    46
    ],
    "edges": [
     {
-     "child": 47,
+     "child": 46,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -2044,16 +2044,16 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    41
+    8
    ],
    "edges": [
     {
-     "child": 41,
+     "child": 8,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
      "target_index": null,
-     "visits": 1
+     "visits": 8
     }
    ],
    "id": 40,
@@ -2096,44 +2096,6 @@
    "edges": [],
    "id": 41,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #0",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 0,
-   "parent": 40,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.232,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 38,
-      "max_hp": 38,
-      "uid": 2
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 66,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.232,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 42,
-   "is_terminal": false,
    "kind": "choose",
    "label": "Choose 4",
    "losses": 0,
@@ -2170,7 +2132,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 43,
+   "id": 42,
    "is_terminal": false,
    "kind": "play",
    "label": "DefendSilent",
@@ -2208,7 +2170,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 44,
+   "id": 43,
    "is_terminal": false,
    "kind": "play",
    "label": "DefendSilent",
@@ -2245,11 +2207,11 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    46
+    45
    ],
    "edges": [
     {
-     "child": 46,
+     "child": 45,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -2257,7 +2219,7 @@
      "visits": 1
     }
    ],
-   "id": 45,
+   "id": 44,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -2295,7 +2257,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 46,
+   "id": 45,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -2303,7 +2265,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 45,
+   "parent": 44,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.207,
@@ -2332,11 +2294,11 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    48
+    47
    ],
    "edges": [
     {
-     "child": 48,
+     "child": 47,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -2344,7 +2306,7 @@
      "visits": 1
     }
    ],
-   "id": 47,
+   "id": 46,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -2382,7 +2344,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 48,
+   "id": 47,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -2390,7 +2352,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 47,
+   "parent": 46,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.2213,
@@ -2419,11 +2381,11 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    50
+    49
    ],
    "edges": [
     {
-     "child": 50,
+     "child": 49,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -2431,7 +2393,7 @@
      "visits": 1
     }
    ],
-   "id": 49,
+   "id": 48,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -2469,7 +2431,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 50,
+   "id": 49,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -2477,7 +2439,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 49,
+   "parent": 48,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.2178,
@@ -2506,19 +2468,19 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    52
+    8
    ],
    "edges": [
     {
-     "child": 52,
+     "child": 8,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
      "target_index": null,
-     "visits": 1
+     "visits": 8
     }
    ],
-   "id": 51,
+   "id": 50,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -2551,53 +2513,15 @@
    "wins": 1
   },
   {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 52,
-   "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #0",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 0,
-   "parent": 51,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.2213,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 38,
-      "max_hp": 38,
-      "uid": 2
-     }
-    ],
-    "energy": 3,
-    "player_block": 0,
-    "player_hp": 66,
-    "player_max_hp": 70,
-    "round": 2
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.2213,
-   "visits": 1,
-   "wins": 1
-  },
-  {
    "chance_action": "End turn",
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    54
+    52
    ],
    "edges": [
     {
-     "child": 54,
+     "child": 52,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -2605,7 +2529,7 @@
      "visits": 1
     }
    ],
-   "id": 53,
+   "id": 51,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -2643,7 +2567,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 54,
+   "id": 52,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -2651,7 +2575,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 53,
+   "parent": 51,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.2356,
@@ -2681,7 +2605,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 55,
+   "id": 53,
    "is_terminal": false,
    "kind": "choose",
    "label": "Choose 5",

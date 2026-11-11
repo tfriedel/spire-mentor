@@ -528,27 +528,14 @@ fn last_turn_grade_over_cap_is_silent() {
     );
 }
 
-/// One Strike, then End turn with two energy and a Strike in hand: the
-/// engine's default 300 sims grades it a tie (≈2.4 HP), the grade's own
-/// default (`TURN_GRADE_SIMS`, the advisor's 8000) a slip (≈3.3 HP).
+/// End turn at once with three energy and two Strikes in hand: the grade's
+/// own default budget (`TURN_GRADE_SIMS`, the advisor's 8000) flags it. (It
+/// used to play one Strike first, a ≈3.3 HP slip that sat close enough to
+/// the 3.0 tie line that a reseeded search stream read it as a 2.75 tie.)
 #[test]
 fn last_turn_grade_flags_an_under_played_turn() {
     let mut wb = new_wb();
-    let step = first_combat_seeded(&mut wb, "B2");
-    let hand = step["state"]["hand"].as_array().unwrap();
-    let strike = hand
-        .iter()
-        .find(|c| c["name"] == json!("Strike"))
-        .expect("B2 opens with a Strike");
-    call(
-        &mut wb,
-        "POST",
-        "/api/live/action",
-        json!({"action": "play_card", "args": {
-            "card_index": strike["index"],
-            "target_index": step["state"]["enemies"][0]["index"],
-        }}),
-    );
+    let _ = first_combat_seeded(&mut wb, "B2");
     call(
         &mut wb,
         "POST",
@@ -565,7 +552,7 @@ fn last_turn_grade_flags_an_under_played_turn() {
         matches!(r["verdict"].as_str(), Some("slip" | "blunder")),
         "{r}"
     );
-    assert_eq!(r["you"], json!(["Strike", "end turn"]), "{r}");
+    assert_eq!(r["you"], json!(["end turn"]), "{r}");
 }
 
 /// A hint weaker than the grade's search is not reused: it re-searches.

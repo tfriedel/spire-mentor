@@ -57,7 +57,7 @@ fn push_weighted_compact(state: &mut CombatState) {
     let mut card = Card {
         uid,
         card_id: CardId::Compact,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         upgraded: false,
@@ -127,7 +127,7 @@ fn weighted_attack_one_two_punch_drains_per_play() {
     let mut card = Card {
         uid,
         card_id: CardId::StrikeIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,

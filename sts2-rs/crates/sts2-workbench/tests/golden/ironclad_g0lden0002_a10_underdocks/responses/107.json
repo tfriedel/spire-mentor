@@ -1,84 +1,64 @@
 {
- "assumptions": {
-  "energy": 3,
-  "hand": 5,
-  "samples": 200
- },
- "block": {
-  "per_turn": 7.5,
-  "scaling_cards": []
- },
- "composition": {
-  "by_rarity": {
-   "Basic": 10,
-   "Common": 3,
-   "Curse": 1
-  },
-  "by_type": {
-   "Attack": 9,
-   "Curse": 1,
-   "Skill": 4
-  },
-  "dead_cards": 1,
-  "energy_curve": {
-   "1": 11,
-   "2": 2
-  },
-  "unupgraded_basics": 9
- },
- "damage": {
-  "aoe_attacks": [],
-  "attack_count": 9,
-  "per_turn": 19.1,
-  "scaling_cards": [
-   "Bash",
-   "Molten Fist"
-  ],
-  "single_target": 19.1,
-  "vs_group": 19.0
- },
- "deck_size": 14,
- "lenses": {
-  "boss": 23.1,
-  "hallway": 29.0,
-  "scaling": 20.0
- },
- "scores": {
-  "block": 31.1,
-  "damage": 37.9,
-  "velocity": 0.0,
-  "volume": 0.0
- },
- "velocity": {
-  "bottleneck": "energy",
-  "cards_per_turn": 2.5,
-  "dilution": 1.0,
-  "draw_limited_turns": 0.0,
-  "energy_limited_turns": 7.0,
-  "engine_cards": 0,
-  "extra_per_turn": 0.0,
-  "tags": {}
- },
- "warnings": [
+ "points": [
   {
-   "severity": "warn",
-   "text": "Thin on block and no block engine — big hits will land in Act 2+."
+   "act": 1,
+   "deck_size": 11,
+   "floor": 1,
+   "idx": 0,
+   "scores": {
+    "block": 36.3,
+    "damage": 29.8,
+    "velocity": 1.9,
+    "volume": 12.7
+   }
   },
   {
-   "severity": "info",
-   "text": "No AOE — multi-enemy fights (Gremlins, hallways) will be slow."
+   "act": 1,
+   "deck_size": 12,
+   "floor": 2,
+   "idx": 21,
+   "scores": {
+    "block": 35.8,
+    "damage": 31.2,
+    "velocity": 2.4,
+    "volume": 13.9
+   }
   },
   {
-   "severity": "info",
-   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+   "act": 1,
+   "deck_size": 13,
+   "floor": 3,
+   "idx": 38,
+   "scores": {
+    "block": 33.4,
+    "damage": 34.2,
+    "velocity": 1.9,
+    "volume": 12.9
+   }
   },
   {
-   "severity": "info",
-   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+   "act": 1,
+   "deck_size": 13,
+   "floor": 4,
+   "idx": 49,
+   "scores": {
+    "block": 33.4,
+    "damage": 35.8,
+    "velocity": 1.9,
+    "volume": 13.1
+   }
   },
   {
-   "severity": "warn",
-   "text": "Deck clogged with basics/curses — prioritise removals."
+   "act": 1,
+   "deck_size": 14,
+   "floor": 4,
+   "idx": 50,
+   "scores": {
+    "block": 31.2,
+    "damage": 37.9,
+    "velocity": 0.0,
+    "volume": 0.0
+   }
   }
  ]
 }

@@ -2050,7 +2050,7 @@ fn max_player_attack_damage_this_turn(state: &CombatState) -> i32 {
         if !matches!(card.card_type, CardType::Attack) {
             continue;
         }
-        let cost = i32::from(card.cost.max(0));
+        let cost = card.local_cost().max(0);
         if cost > energy {
             continue;
         }
@@ -2557,7 +2557,7 @@ fn obvious_kill_action(state: &CombatState, actions: &[Action]) -> Option<usize>
         if !matches!(card.card_type, CardType::Attack) || card.base_damage <= 0 {
             continue;
         }
-        if i32::from(card.cost.max(0)) > energy {
+        if card.local_cost().max(0) > energy {
             continue;
         }
         let Some(enemy_uid) = state.enemy_uids.get(*slot as usize) else {
@@ -3553,7 +3553,7 @@ mod tests {
             Card {
                 uid: CardUid::new(uid).expect("non-zero"),
                 card_id,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: CardType::Skill,
                 target_type: TargetType::Self_,
                 upgraded: false,
@@ -3663,7 +3663,7 @@ mod tests {
         Card {
             uid: CardUid::new(uid).unwrap(),
             card_id,
-            cost,
+            cost: sts2_core::CardEnergyCost::new(cost),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -3691,7 +3691,7 @@ mod tests {
         Card {
             uid: CardUid::new(uid).unwrap(),
             card_id,
-            cost,
+            cost: sts2_core::CardEnergyCost::new(cost),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded: false,

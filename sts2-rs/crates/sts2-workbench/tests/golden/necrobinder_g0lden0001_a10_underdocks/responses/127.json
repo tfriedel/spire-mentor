@@ -1,0 +1,81 @@
+{
+ "assumptions": {
+  "energy": 3,
+  "hand": 5,
+  "samples": 200
+ },
+ "block": {
+  "per_turn": 8.1,
+  "scaling_cards": [
+   "Bodyguard"
+  ]
+ },
+ "composition": {
+  "by_rarity": {
+   "Basic": 10,
+   "Common": 4,
+   "Curse": 1,
+   "Uncommon": 1
+  },
+  "by_type": {
+   "Attack": 9,
+   "Curse": 1,
+   "Skill": 6
+  },
+  "dead_cards": 1,
+  "energy_curve": {
+   "1": 15
+  },
+  "unupgraded_basics": 10
+ },
+ "damage": {
+  "aoe_attacks": [
+   "Sow"
+  ],
+  "attack_count": 9,
+  "per_turn": 18.3,
+  "scaling_cards": [
+   "Unleash",
+   "Snap",
+   "Fear"
+  ],
+  "single_target": 16.1,
+  "vs_group": 20.6
+ },
+ "deck_size": 16,
+ "lenses": {
+  "boss": 23.5,
+  "hallway": 28.7,
+  "scaling": 20.6
+ },
+ "scores": {
+  "block": 33.2,
+  "damage": 36.8,
+  "velocity": 0.0,
+  "volume": 0.0
+ },
+ "velocity": {
+  "bottleneck": "energy",
+  "cards_per_turn": 3.0,
+  "dilution": 0.94,
+  "draw_limited_turns": 0.0,
+  "energy_limited_turns": 7.0,
+  "engine_cards": 0,
+  "extra_per_turn": 0.0,
+  "tags": {}
+ },
+ "warnings": [
+  {
+   "severity": "info",
+   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+  },
+  {
+   "severity": "info",
+   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+  },
+  {
+   "severity": "warn",
+   "text": "Deck clogged with basics/curses — prioritise removals."
+  }
+ ]
+}

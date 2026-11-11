@@ -543,7 +543,7 @@
     }
    ],
    "gold": 33,
-   "hp": 14,
+   "hp": 10,
    "image": "https://assets.test/character_sprites/ironclad.png",
    "max_hp": 80,
    "name": "Ironclad",

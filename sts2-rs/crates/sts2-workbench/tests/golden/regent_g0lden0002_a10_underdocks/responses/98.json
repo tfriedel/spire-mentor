@@ -1,8 +1,12 @@
 {
- "action": "select_card_reward",
- "args": {
-  "card_index": 1
- },
- "fallback": true,
- "policy": "ppo"
+ "available": false,
+ "caveats": [
+  "The outlook score is the AI's shaped-return estimate of the run — a relative signal, not a win percentage.",
+  "A swing mixes your choice with the luck revealed after it (what the shop stocked, what the reward offered, how the fight rolled) — use “verify” to check whether the choice itself mattered.",
+  "Judgments are relative to the AI's own play style; a line that is weak for the AI may still be fine for a human plan."
+ ],
+ "points": [],
+ "reason": "no run-level value data — value recording needs the rust backend and a loadable PPO checkpoint",
+ "summary": {},
+ "turning_points": []
 }

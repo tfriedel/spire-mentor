@@ -39,7 +39,7 @@ pub(crate) fn play_all_for_one(
         .copied()
         .filter(|&uid| {
             sts2_core::card_by_uid(&state.cards, uid).is_some_and(|c| {
-                c.cost >= 0
+                c.base_cost() >= 0
                     && !c.is_x_cost()
                     && matches!(
                         c.card_type,

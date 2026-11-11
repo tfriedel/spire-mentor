@@ -166,11 +166,9 @@ fn free_copy_stays_a_distinct_root_child() {
         (CardId::StrikeIronclad, 6, 0, 1, TargetType::Enemy),
     ];
     let mut state = build_handful(0, &hand, /*cultist_hp=*/ 30, /*player_hp=*/ 50);
-    // Second Strike is a PowerPotion-style free copy: base cost field
-    // untouched, freeness carried by the FreeThisTurn combat var.
-    state.cards[1]
-        .combat_vars
-        .push((sts2_core::cards::VarKey::FreeThisTurn, 1));
+    // Second Strike is a PowerPotion-style free copy: base cost untouched,
+    // freeness carried by a free-this-turn cost modifier.
+    state.cards[1].set_to_free_this_turn();
 
     let cfg = MctsConfig {
         max_simulations: 200,
@@ -330,7 +328,7 @@ fn a_single_player_play_edge_prints_as_before() {
     let edge = sts2_mcts::EdgeAction::PlayCard {
         card_id: CardId::StrikeIronclad,
         upgraded: false,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         free: false,
         affliction: None,
         target: Some(0),

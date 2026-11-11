@@ -806,25 +806,6 @@ pub fn start_player_turn(state: &mut CombatState) -> StepResult {
             }
         }
     }
-    // Bead `sts2-rs-stomp`: undo Stomp's per-turn cost discount (C#
-    // `EnergyCost.AddThisTurn` resets at the owner's turn start). Restores
-    // each Stomp's cost by the amount shaved off last turn. These four walk
-    // the whole card arena, every seat's cards at once.
-    state.restore_stomp_costs_for_turn_start();
-    // Undo Pinpoint's per-turn Skill-cost discount (same C#
-    // `EnergyCost.AddThisTurn` reset shape as Stomp above).
-    state.restore_pinpoint_costs_for_turn_start();
-    // Bead `sts2-rs-2e9q2` follow-up: undo Snecko Oil's per-turn cost
-    // randomization (C# `EnergyCost.SetThisTurnOrUntilPlayed` reverts at the
-    // owner's turn start). Restores each randomized card to its base cost.
-    state.restore_snecko_costs_for_turn_start();
-    // Undo the this-turn discounts a FOREIGN producer had already applied
-    // when this state was reconstructed. The three restores above only know
-    // about discounts this engine itself banked; a state rebuilt mid-turn
-    // from a C# wire inherits the shaved cost with no bank behind it, so
-    // without this the discount never expires.
-    state.restore_wire_transient_costs_for_turn_start();
-
     // Step 3: fire before_side_turn_start(PLAYER). The TurnSideCtx is
     // a placeholder POD at this pin — Phase 6 grows it to carry the
     // CombatSide enum (the Rust `Side` value). For now, the dispatcher
@@ -4107,10 +4088,9 @@ fn end_player_turn_phase_two_flush_tail(state: &mut CombatState) -> StepResult {
     // draw / discard / exhaust / play) and calls `card.end_of_turn_cleanup`
     // on each card — typically resetting `current_cost` to `cost`,
     // clearing per-turn `Rage` extra damage, etc. Bead `sts2-rs-c68o`
-    // wires the first concrete clearing: every card with
-    // `VarKey::FreeThisTurn != 0` (set by InfernalBlade's random Attack
-    // spawn) has the flag reset here. Remaining per-turn vars (Rage
-    // extra damage etc.) follow when their cards land.
+    // wires the first concrete clearing: every card's end-of-turn cost
+    // modifiers (C# `CardEnergyCost.EndOfTurnCleanup`) are dropped here,
+    // e.g. InfernalBlade's free-this-turn rider.
     clear_per_turn_card_vars(state);
 
     // C# parity: EndPlayerTurnPhaseTwoInternal's Hook.AfterTurnEnd (RegenPower,
@@ -7196,7 +7176,7 @@ pub fn enemy_turn_end(state: &mut CombatState) -> StepResult {
     // draw / discard / exhaust / play) on every player_state and calls
     // `card.end_of_turn_cleanup` on each card — typically resetting
     // `current_cost` / clearing per-turn `Rage` extra damage / etc.
-    // Bead `sts2-rs-c68o` clears `VarKey::FreeThisTurn` here too so
+    // Bead `sts2-rs-c68o` drops the end-of-turn cost modifiers here too so
     // that the InfernalBlade rider drops if the player skips playing
     // the spawned card and the enemy turn ends with it still in hand.
     clear_per_turn_card_vars(state);
@@ -9487,61 +9467,22 @@ pub(crate) fn check_for_empty_hand(state: &mut CombatState) {
 /// (Ironclad-2184 act 3). The wire-cost bank and the free riders used to be
 /// cleared at `CardPlayFinished`, before the exhaust.
 pub(crate) fn clear_when_played_costs(state: &mut CombatState, card_idx: usize) {
-    // The wire-cost bank (a reconstruction's foreign `WhenPlayed` discount)
-    // and the free riders; see `CombatState::restore_wire_cost_expiring_on_play`.
-    let card_uid = state.cards[card_idx].uid;
-    state.restore_wire_cost_expiring_on_play(card_uid);
-    // Bead `sts2-rs-rj1aj`: C# `CardModel.OnPlayWrapper` clears WhenPlayed
-    // temporary costs in `EnergyCost.AfterCardPlayedCleanup()`
-    // (`CardModel.cs:1555`) — fired AFTER `AfterCardPlayed` and AFTER the
-    // card moved to its result pile. `SetToFreeThisTurn` adds an
-    // `EndOfTurn | WhenPlayed` modifier (`CardEnergyCost.SetThisTurnOrUntilPlayed`),
-    // so a Discovery/InfernalBlade free card's 0-cost clears the moment it
-    // is played, not just at turn end. Mirror that late clear here so a
-    // free card that returns to hand and is replayed THIS turn pays its
-    // full cost on the second play (seed 1798: a Discovery'd UPPERCUT played
-    // twice — C# charges 0 then 2). Only on the resolved (non-deferred)
-    // path: when a choice is still pending the card sits in play limbo and
-    // C# defers `AfterCardPlayedCleanup` until the choice closes.
-    state.cards[card_idx].set_combat_var(crate::cards::VarKey::FreeThisTurn, 0);
+    // C# `CardModel.OnPlayWrapper` runs `EnergyCost.AfterCardPlayedCleanup()`
+    // (`CardModel.cs:1555`) AFTER `AfterCardPlayed` and after the card moved
+    // to its result pile: every `WhenPlayed` local modifier drops — the
+    // `…ThisTurnOrUntilPlayed` ones (`SetToFreeThisTurn`, a Snecko roll,
+    // Enlightenment) and the `…UntilPlayed` ones (Bookmark, Rocket Punch). A
+    // free card that returns to hand and is replayed THIS turn pays its full
+    // cost (seed 1798: a Discovery'd UPPERCUT played twice — C# charges 0 then
+    // 2). Only on the resolved (non-deferred) path: when a choice is still
+    // pending the card sits in play limbo and C# defers the cleanup until the
+    // choice closes.
+    let card = &mut state.cards[card_idx];
+    card.cost.after_card_played_cleanup();
     // `SetStarCostThisTurn`'s ThisTurn cost also clears on play
     // (CardModel.cs:1998); Regent quick 576 replayed a ParticleWall free.
-    state.cards[card_idx]
-        .combat_vars
+    card.combat_vars
         .zero(crate::cards::VarKey::StarCostFreeThisTurn);
-    // Bead `sts2-rs-rocketpunch-statusgen`: RocketPunch's
-    // `SetUntilPlayed(0)` is a `WhenPlayed`-only Absolute(0) modifier, so a
-    // RocketPunch made free by a prior status-generation clears the moment
-    // it is PLAYED (not at turn end — it survives `clear_per_turn_card_vars`,
-    // unlike `FreeThisTurn`). Clear it on this same late
-    // `AfterCardPlayedCleanup` path so a replayed RocketPunch pays full cost.
-    state.cards[card_idx].set_combat_var(crate::cards::VarKey::FreeUntilPlayed, 0);
-    // v0.111.0 (GH #793): RocketPunch's `AddUntilPlayed(-1)` stack is a
-    // `WhenPlayed` modifier too. `zero` never appends, so a v0.107.1 card
-    // (which never has the var) is untouched.
-    state.cards[card_idx]
-        .combat_vars
-        .zero(crate::cards::VarKey::CostReductionUntilPlayed);
-    // A Transfigure `+1` dies with the zero it followed: free-this-turn /
-    // until-played clear on play, Flatten's `SetThisTurn(0)` does not
-    // (GH #1150).
-    if !crate::hooks::flatten_zeroed(state, &state.cards[card_idx]) {
-        state.cards[card_idx]
-            .combat_vars
-            .zero(crate::cards::VarKey::CostAddedAfterLocalZero);
-    }
-    // Bead `sts2-rs-mnjxg`: SneckoOil sets the randomized
-    // cost via C# `EnergyCost.SetThisTurnOrUntilPlayed` — the SAME
-    // `EndOfTurn | WhenPlayed` modifier as `SetToFreeThisTurn` above. So a
-    // Snecko-rolled card's cost reverts to base the moment it is PLAYED, not
-    // just at turn end. Unwind the banked `SneckoCostDeltaThisTurn` here
-    // (mirroring `restore_snecko_costs_for_turn_start`) so a card that is
-    // played and then returns to hand THIS turn (e.g. via BottledPotential's
-    // shuffle+redraw, or Pillage/Havoc) is at its BASE cost on the replay —
-    // not the stale roll (coverage seed 5880: a SneckoOil'd REND rolled to 1,
-    // played, then BottledPotential redrew it; C# shows base 2, RS kept 1 →
-    // LEGAL_ACTION divergence at energy 1).
-    state.cards[card_idx].expire_snecko_roll_on_play();
 }
 
 /// FeralPower's result-location redirect, decided at play START and spending
@@ -13413,50 +13354,23 @@ fn auto_replay_after_on_play(
 
 // --- per-turn card-vars cleanup helper (bead `sts2-rs-c68o`) -------------
 
-/// End-of-turn cleanup of per-turn `combat_vars` flags on every card in
-/// every pile. Bead `sts2-rs-c68o` wires the first concrete clear:
-/// `VarKey::FreeThisTurn` (set by `InfernalBlade`'s random Attack
-/// spawn). Mirrors Python's loop over `state.all_piles` calling
-/// `card.end_of_turn_cleanup()` at
-/// `sts2-rl-agent@01c094d:sts2_env/cards/base.py:160-170`. Walks the
+/// End-of-turn cleanup of every card in every pile: C#
+/// `PlayerCombatState.EndOfTurnCleanup` → `CardModel.EndOfTurnCleanup` (the
+/// `EndOfTurn` local cost modifiers and the per-turn flags). Walks the
 /// full card arena (not just the player's piles) because the cleanup
 /// is per-card-instance and the arena already gates by live combat;
 /// staying arena-scoped avoids 5 pile-iterator allocations per turn-end.
 pub(crate) fn clear_per_turn_card_vars(state: &mut CombatState) {
     for card in &mut state.cards {
+        // C# `CardModel.EndOfTurnCleanup` → `EnergyCost.EndOfTurnCleanup()`:
+        // the `EndOfTurn` local cost modifiers drop (free this turn, Snecko
+        // rolls, Flatten's zero, Stomp / Pinpoint shaves, Enlightenment).
+        card.cost.end_of_turn_cleanup();
         // Single-scan form of `if combat_var(k) != 0 { set_combat_var(k, 0) }`
-        // (perf 2026-07-04): both `combat_var` and `set_combat_var` operate on
-        // the FIRST slot matching the key, so zeroing that slot directly is
-        // state-identical (writing 0 over an already-0 slot included) while
-        // walking the slots once instead of twice. A card whose
-        // "may be nonzero" bit is clear holds 0 in every FreeThisTurn slot,
-        // so the write would be a no-op and the card is skipped (J02).
-        if card.combat_vars.maybe_nonzero(VarKey::FreeThisTurn) {
-            card.combat_vars.zero(VarKey::FreeThisTurn);
-        }
-        // What was appended after a local zero dies with that zero. A
-        // `SetUntilPlayed(0)` ([`VarKey::FreeUntilPlayed`]) is `WhenPlayed`
-        // only and outlives `EndOfTurnCleanup` (CardEnergyCost.cs:331-335),
-        // so the Relative modifiers folded after it still show: a Rocket
-        // Punch free until played and then Transfigured costs `0 + 1` next
-        // turn, not 0.
-        if card
-            .combat_vars
-            .maybe_nonzero(VarKey::CostAddedAfterLocalZero)
-            && card.combat_var(VarKey::FreeUntilPlayed) == 0
-        {
-            card.combat_vars.zero(VarKey::CostAddedAfterLocalZero);
-        }
+        // (perf 2026-07-04): a card whose "may be nonzero" bit is clear holds
+        // 0 in that slot, so the write would be a no-op and is skipped (J02).
         if card.combat_vars.maybe_nonzero(VarKey::StarCostFreeThisTurn) {
             card.combat_vars.zero(VarKey::StarCostFreeThisTurn);
-        }
-        // Flatten's Osty-attack zero is a `SetThisTurn` modifier, so a roll
-        // recorded against this turn's attacks is moot once the turn ends.
-        if card
-            .combat_vars
-            .maybe_nonzero(VarKey::FlattenOstyAttacksAtRoll)
-        {
-            card.combat_vars.zero(VarKey::FlattenOstyAttacksAtRoll);
         }
         // C# `CardModel.EndOfTurnCleanup` (CardModel.cs:1613).
         if card.combat_vars.maybe_nonzero(VarKey::ExhaustOnNextPlay) {
@@ -13719,7 +13633,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -13767,7 +13681,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost,
+                cost: crate::CardEnergyCost::new(cost),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -13861,7 +13775,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -13924,7 +13838,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -13969,7 +13883,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::ShiningStrike,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14036,7 +13950,7 @@ mod tests {
         let mk_card = |uid_n: u32, id: crate::cards::CardId| crate::cards::Card {
             uid: crate::CardUid::new(uid_n).expect("non-zero"),
             card_id: id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14115,7 +14029,7 @@ mod tests {
         let mut card = crate::cards::Card {
             uid: crate::CardUid::new(1).expect("non-zero"),
             card_id: crate::cards::CardId::ShiningStrike,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14168,7 +14082,7 @@ mod tests {
         let mk_card = |uid_n: u32, id: crate::cards::CardId| crate::cards::Card {
             uid: crate::CardUid::new(uid_n).expect("non-zero"),
             card_id: id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14238,7 +14152,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14306,7 +14220,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 base_damage: 6,
@@ -14359,7 +14273,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14427,7 +14341,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14496,7 +14410,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14558,7 +14472,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -14614,7 +14528,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::ParticleWall,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Skill,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -14664,7 +14578,7 @@ mod tests {
             uid,
             // Dazed is an unplayable status card.
             card_id: crate::cards::CardId::Dazed,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Status,
             target_type: crate::cards::TargetType::None,
             upgraded: false,
@@ -15002,7 +14916,7 @@ mod tests {
                 let mut card = crate::cards::Card {
                     uid,
                     card_id: id,
-                    cost: 0,
+                    cost: crate::CardEnergyCost::new(0),
                     card_type: crate::cards::CardType::Attack,
                     target_type: crate::cards::TargetType::Enemy,
                     upgraded: false,
@@ -15072,7 +14986,7 @@ mod tests {
             let mut card = crate::cards::Card {
                 uid,
                 card_id: cards::CardId::Bolas,
-                cost: 0,
+                cost: crate::CardEnergyCost::new(0),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -15414,7 +15328,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -15554,7 +15468,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid: CardUid::new(i).expect("non-zero"),
                 card_id: crate::cards::CardId::StrikeRegent,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -15637,7 +15551,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid: CardUid::new(i).expect("non-zero"),
                 card_id: crate::cards::CardId::StrikeSilent,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -15906,7 +15820,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -16347,7 +16261,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -16396,7 +16310,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::DefendIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Skill,
                 target_type: crate::cards::TargetType::Self_,
                 upgraded: false,
@@ -16447,7 +16361,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -16518,7 +16432,7 @@ mod tests {
         let mk_card = |uid_n: u32, id: crate::cards::CardId| crate::cards::Card {
             uid: CardUid::new(uid_n).expect("non-zero"),
             card_id: id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Skill,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -16700,7 +16614,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: id,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Skill,
                 target_type: crate::cards::TargetType::Self_,
                 ..crate::cards::Card::pod_defaults()
@@ -17444,7 +17358,7 @@ mod tests {
         state.cards.push(Card {
             uid: debt_uid,
             card_id: crate::cards::CardId::Debt,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Curse,
             target_type: crate::cards::TargetType::None,
             upgraded: false,
@@ -17594,7 +17508,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 ..crate::cards::Card::pod_defaults()
             });
@@ -17652,7 +17566,7 @@ mod tests {
                 state.cards.push(crate::cards::Card {
                     uid,
                     card_id: crate::cards::CardId::StrikeIronclad,
-                    cost: 1,
+                    cost: crate::CardEnergyCost::new(1),
                     card_type: crate::cards::CardType::Attack,
                     ..crate::cards::Card::pod_defaults()
                 });
@@ -17776,7 +17690,7 @@ mod tests {
                 state.cards.push(crate::cards::Card {
                     uid,
                     card_id: crate::cards::CardId::StrikeIronclad,
-                    cost: 1,
+                    cost: crate::CardEnergyCost::new(1),
                     card_type: crate::cards::CardType::Attack,
                     ..crate::cards::Card::pod_defaults()
                 });
@@ -17842,11 +17756,11 @@ mod tests {
         let mut card = crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::Reap,
-            cost: 3,
+            cost: crate::CardEnergyCost::new(3),
             card_type: crate::cards::CardType::Attack,
             ..crate::cards::Card::pod_defaults()
         };
-        card.set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+        card.set_to_free_this_turn();
         state.cards.push(card);
         state.player.hand.push(uid);
         let rolls = state.run_rng.combat_card_selection.counter();
@@ -17854,9 +17768,10 @@ mod tests {
         let _ = end_player_turn_phase_two(&mut state);
 
         assert_eq!(state.player.hand.as_slice(), &[uid]);
-        assert_eq!(
-            state.cards[0].combat_var(crate::cards::VarKey::CostReductionUntilPlayed),
-            0
+        assert!(
+            state.cards[0].cost.mods().iter().all(|m| m.is_absolute()),
+            "no AddUntilPlayed(-1) shave: {:?}",
+            state.cards[0].cost
         );
         assert_eq!(state.run_rng.combat_card_selection.counter(), rolls);
     }
@@ -18250,7 +18165,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -18304,7 +18219,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: crate::cards::CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: crate::cards::CardType::Attack,
                 target_type: crate::cards::TargetType::Enemy,
                 upgraded: false,
@@ -18371,7 +18286,7 @@ mod tests {
         state.cards.push(crate::cards::Card {
             uid,
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -18552,7 +18467,7 @@ mod tests {
             state.cards.push(crate::cards::Card {
                 uid,
                 card_id: *card_id,
-                cost: 0,
+                cost: crate::CardEnergyCost::new(0),
                 card_type: crate::cards::CardType::Status,
                 target_type: crate::cards::TargetType::None,
                 upgraded: false,
@@ -21924,7 +21839,7 @@ mod tests {
         crate::cards::Card {
             uid: crate::CardUid::new(uid_u32).expect("non-zero"),
             card_id: crate::cards::CardId::AscendersBane,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -22528,7 +22443,7 @@ mod tests {
         crate::cards::Card {
             uid: crate::CardUid::new(uid_u32).expect("non-zero"),
             card_id: crate::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::Enemy,
             upgraded: false,
@@ -22612,7 +22527,7 @@ mod tests {
         crate::cards::Card {
             uid: crate::CardUid::new(uid_u32).expect("non-zero"),
             card_id: crate::cards::CardId::Thunderclap,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: crate::cards::CardType::Attack,
             target_type: crate::cards::TargetType::AllEnemies,
             upgraded: false,
@@ -22758,7 +22673,7 @@ mod tests {
         crate::cards::Card {
             uid: crate::CardUid::new(uid_u32).expect("non-zero"),
             card_id: crate::cards::CardId::MayhemCard,
-            cost: 2,
+            cost: crate::CardEnergyCost::new(2),
             card_type: crate::cards::CardType::Skill,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -22782,7 +22697,7 @@ mod tests {
 
     fn zlx5_cost1_power(uid_u32: u32) -> crate::cards::Card {
         let mut c = zlx5_cost2_skill(uid_u32);
-        c.cost = 1;
+        c.cost = crate::CardEnergyCost::new(1);
         c.card_type = crate::cards::CardType::Power;
         c
     }
@@ -23440,27 +23355,27 @@ mod tests {
     }
 
     // ──────────────────────────────────────────────────────────────────
-    // Bead `sts2-rs-c68o` — FreeThisTurn cleanup wiring
+    // Bead `sts2-rs-c68o` — FREE_THIS_TURN cleanup wiring
     // ──────────────────────────────────────────────────────────────────
 
-    /// `clear_per_turn_card_vars` resets `VarKey::FreeThisTurn` to 0 on
+    /// `clear_per_turn_card_vars` drops `LocalCostMod::FREE_THIS_TURN` on
     /// every card in the arena (regardless of pile membership), so a
     /// card spawned by `InfernalBlade` that survives into the next turn
     /// reverts to its base cost. Bead `sts2-rs-c68o`.
     #[test]
     fn clear_per_turn_card_vars_clears_freethisturn_flag() {
-        use crate::cards::{Card, CardId, CardType, TargetType, VarKey};
+        use crate::cards::{Card, CardId, CardType, TargetType};
         use crate::CardUid;
 
         let mut state = CombatState::default();
-        // Two cards: one with FreeThisTurn=1, one untouched.
+        // Two cards: one with FREE_THIS_TURN, one untouched.
         let uid_a = CardUid::new(1).expect("nz");
         let uid_b = CardUid::new(2).expect("nz");
         let mk = |uid: CardUid, free: i32| -> Card {
             let mut c = Card {
                 uid,
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -23469,27 +23384,25 @@ mod tests {
                 ..Card::pod_defaults()
             };
             if free != 0 {
-                c.set_combat_var(VarKey::FreeThisTurn, free);
+                c.set_to_free_this_turn();
             }
             c
         };
         state.cards.push(mk(uid_a, 1));
         state.cards.push(mk(uid_b, 0));
 
-        assert_eq!(state.cards[0].combat_var(VarKey::FreeThisTurn), 1);
-        assert_eq!(state.cards[1].combat_var(VarKey::FreeThisTurn), 0);
+        assert!(state.cards[0].cost.has(crate::LocalCostMod::FREE_THIS_TURN));
+        assert!(!state.cards[1].cost.has(crate::LocalCostMod::FREE_THIS_TURN));
 
         clear_per_turn_card_vars(&mut state);
 
-        assert_eq!(
-            state.cards[0].combat_var(VarKey::FreeThisTurn),
-            0,
-            "FreeThisTurn=1 card must be cleared to 0",
+        assert!(
+            !state.cards[0].cost.has(crate::LocalCostMod::FREE_THIS_TURN),
+            "the free-this-turn modifier expires at end of turn",
         );
-        assert_eq!(
-            state.cards[1].combat_var(VarKey::FreeThisTurn),
-            0,
-            "FreeThisTurn=0 card stays 0 (no-op)",
+        assert!(
+            !state.cards[1].cost.has(crate::LocalCostMod::FREE_THIS_TURN),
+            "an untouched card stays untouched",
         );
     }
 
@@ -23825,7 +23738,7 @@ mod tests {
             // `MayhemCard` is intentionally not in the default registry
             // (matches the `zlx5_cost2_skill` rationale above).
             card_id: crate::cards::CardId::MayhemCard,
-            cost: -1,
+            cost: crate::CardEnergyCost::new(-1),
             card_type: crate::cards::CardType::Skill,
             target_type: crate::cards::TargetType::Self_,
             upgraded: false,
@@ -23935,7 +23848,7 @@ mod tests {
         Card {
             uid,
             card_id: id,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Curse,
             target_type: TargetType::None,
             upgraded: false,
@@ -24356,7 +24269,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -24390,7 +24303,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -24566,7 +24479,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::DefendIronclad,
-            cost: 0,
+            cost: crate::CardEnergyCost::new(0),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -24615,7 +24528,7 @@ mod tests {
             let mut card = Card {
                 uid,
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -24698,7 +24611,7 @@ mod tests {
             let mut card = Card {
                 uid,
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -24802,7 +24715,7 @@ mod tests {
             let mut card = Card {
                 uid,
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,
@@ -24889,7 +24802,7 @@ mod tests {
         state.player.hand.push(normality);
         let strike = Card {
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             base_damage: 6,
@@ -24936,7 +24849,7 @@ mod tests {
             state.cards.push(Card {
                 uid,
                 card_id: CardId::StrikeIronclad,
-                cost: 1,
+                cost: crate::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 upgraded: false,

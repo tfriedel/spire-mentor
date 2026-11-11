@@ -327,10 +327,9 @@ fn a_ball_flushed_after_a_choice_goes_to_its_teammate() {
 /// hand or auto-played.
 #[test]
 fn a_handed_over_ball_drops_its_when_played_cost() {
-    use sts2_core::cards::VarKey;
     let mut state = fight(1, 4242);
     let uid = mint(&mut state, CardId::TheBall);
-    state.cards[uid.0.get() as usize - 1].set_combat_var(VarKey::FreeThisTurn, 1);
+    state.cards[uid.0.get() as usize - 1].set_to_free_this_turn();
     state.player.hand.push(uid);
     let _ = sts2_core::apply(
         &mut state,
@@ -340,14 +339,13 @@ fn a_handed_over_ball_drops_its_when_played_cost() {
         },
     );
     assert!(state.allies[0].draw.contains(&uid));
-    assert_eq!(
-        state.cards[uid.0.get() as usize - 1].combat_var(VarKey::FreeThisTurn),
-        0
-    );
+    assert!(!state.cards[uid.0.get() as usize - 1]
+        .cost
+        .has(sts2_core::LocalCostMod::FREE_THIS_TURN));
 
     let mut state = fight(1, 4242);
     let ball = mint(&mut state, CardId::TheBall);
-    state.cards[ball.0.get() as usize - 1].set_combat_var(VarKey::FreeThisTurn, 1);
+    state.cards[ball.0.get() as usize - 1].set_to_free_this_turn();
     state.player.draw.insert(0, ball);
     let havoc = mint(&mut state, CardId::Havoc);
     state.player.hand.push(havoc);
@@ -359,8 +357,7 @@ fn a_handed_over_ball_drops_its_when_played_cost() {
         },
     );
     assert_eq!(state.allies[0].exhaust.as_slice(), [ball]);
-    assert_eq!(
-        state.cards[ball.0.get() as usize - 1].combat_var(VarKey::FreeThisTurn),
-        0
-    );
+    assert!(!state.cards[ball.0.get() as usize - 1]
+        .cost
+        .has(sts2_core::LocalCostMod::FREE_THIS_TURN));
 }

@@ -96,21 +96,34 @@ pub const NZ_BITS: usize = 24;
 
 /// Fixed-capacity insertion-ordered `(K, i32)` map. `Copy`. See the
 /// module docs for the equality / Debug / tail-canonicalization contract.
+///
+/// Keys and values live in two parallel arrays rather than one array of
+/// `(K, i32)` pairs: a one-byte key paired with an `i32` pads every pair to
+/// 8 bytes, so the split layout stores a 16-entry map in 84 bytes instead of
+/// 132. `Card` holds two of these and the card arena is memcpy-cloned on
+/// every MCTS simulation.
 #[derive(Clone, Copy)]
 pub struct InlineKv<K: InlineKvKey, const N: usize> {
     len: u8,
     /// Derived "may be nonzero" mask (see the module docs); excluded from
     /// `PartialEq`, `Hash` and `Debug`.
     nz: [u8; 3],
-    slots: [(K, i32); N],
+    keys: [K; N],
+    vals: [i32; N],
 }
 
-/// Equality over the live content only (`len` + the canonical slot array),
+/// The live entries of an [`InlineKv`], by value, in insertion order.
+pub type InlineKvIter<'a, K> = core::iter::Zip<
+    core::iter::Copied<core::slice::Iter<'a, K>>,
+    core::iter::Copied<core::slice::Iter<'a, i32>>,
+>;
+
+/// Equality over the live content only (`len` + the canonical arrays),
 /// exactly the derived comparison before `nz` existed.
 impl<K: InlineKvKey, const N: usize> PartialEq for InlineKv<K, N> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.len == other.len && self.slots == other.slots
+        self.len == other.len && self.keys == other.keys && self.vals == other.vals
     }
 }
 impl<K: InlineKvKey, const N: usize> Eq for InlineKv<K, N> {}
@@ -122,7 +135,8 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
         Self {
             len: 0,
             nz: [0; 3],
-            slots: [(K::FILL, 0); N],
+            keys: [K::FILL; N],
+            vals: [0; N],
         }
     }
 
@@ -136,19 +150,35 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
         self.len == 0
     }
 
-    /// Live entries, insertion-ordered (the tail is not exposed).
+    /// Live keys, insertion-ordered (the tail is not exposed).
     #[must_use]
-    pub fn as_slice(&self) -> &[(K, i32)] {
-        &self.slots[..self.len as usize]
+    pub fn keys(&self) -> &[K] {
+        &self.keys[..self.len as usize]
     }
 
-    pub fn iter(&self) -> core::slice::Iter<'_, (K, i32)> {
-        self.as_slice().iter()
+    /// Live values, in the order of [`Self::keys`].
+    #[must_use]
+    pub fn values(&self) -> &[i32] {
+        &self.vals[..self.len as usize]
+    }
+
+    /// Live entries, insertion-ordered, by value.
+    pub fn iter(&self) -> InlineKvIter<'_, K> {
+        self.keys()
+            .iter()
+            .copied()
+            .zip(self.values().iter().copied())
+    }
+
+    /// Live entries as a `Vec` (tests and diagnostics; allocates).
+    #[must_use]
+    pub fn to_vec(&self) -> Vec<(K, i32)> {
+        self.iter().collect()
     }
 
     #[must_use]
-    pub fn first(&self) -> Option<&(K, i32)> {
-        self.as_slice().first()
+    pub fn first(&self) -> Option<(K, i32)> {
+        self.iter().next()
     }
 
     /// Append an entry. Mirrors `SmallVec::push` for the live prefix.
@@ -165,9 +195,10 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
              legitimate; live entries: {:?}",
             core::any::type_name::<K>(),
             kv.0,
-            self.as_slice(),
+            self.to_vec(),
         );
-        self.slots[i] = kv;
+        self.keys[i] = kv.0;
+        self.vals[i] = kv.1;
         self.len += 1;
         self.note_value(kv.0, kv.1);
     }
@@ -191,9 +222,9 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
         debug_assert!(i < NZ_BITS, "nz_index {i} of {key:?} out of range");
         let maybe = self.nz[i / 8] & (1 << (i % 8)) != 0;
         debug_assert!(
-            maybe || self.iter().all(|(k, v)| *k != key || *v == 0),
+            maybe || self.iter().all(|(k, v)| k != key || v == 0),
             "InlineKv mask says {key:?} is zero but the entries are {:?}",
-            self.as_slice()
+            self.to_vec()
         );
         maybe
     }
@@ -208,7 +239,7 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
             return 0;
         }
         self.iter()
-            .find_map(|(k, v)| (*k == key).then_some(*v))
+            .find_map(|(k, v)| (k == key).then_some(v))
             .unwrap_or(0)
     }
 
@@ -220,7 +251,7 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
     #[inline]
     pub fn set(&mut self, key: K, value: i32) {
         if let Some(slot) = self.first_slot_mut(key) {
-            slot.1 = value;
+            *slot = value;
             self.note_value(key, value);
         } else {
             self.push((key, value));
@@ -235,8 +266,8 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
     #[inline]
     pub fn add(&mut self, key: K, delta: i32) {
         if let Some(slot) = self.first_slot_mut(key) {
-            slot.1 = slot.1.saturating_add(delta);
-            let value = slot.1;
+            *slot = slot.saturating_add(delta);
+            let value = *slot;
             self.note_value(key, value);
         } else {
             self.push((key, delta));
@@ -248,14 +279,15 @@ impl<K: InlineKvKey, const N: usize> InlineKv<K, N> {
     #[inline]
     pub fn zero(&mut self, key: K) {
         if let Some(slot) = self.first_slot_mut(key) {
-            slot.1 = 0;
+            *slot = 0;
         }
     }
 
     #[inline]
-    fn first_slot_mut(&mut self, key: K) -> Option<&mut (K, i32)> {
+    fn first_slot_mut(&mut self, key: K) -> Option<&mut i32> {
         let len = self.len as usize;
-        self.slots[..len].iter_mut().find(|(k, _)| *k == key)
+        let i = self.keys[..len].iter().position(|k| *k == key)?;
+        Some(&mut self.vals[i])
     }
 
     /// Record a write of `value` under `key` in the mask.
@@ -282,7 +314,7 @@ impl<K: InlineKvKey, const N: usize> Default for InlineKv<K, N> {
 /// identical preserves every remaining Debug-encoding consumer).
 impl<K: InlineKvKey, const N: usize> fmt::Debug for InlineKv<K, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.as_slice()).finish()
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -294,7 +326,12 @@ impl<K: InlineKvKey, const N: usize> fmt::Debug for InlineKv<K, N> {
 /// length encoding — would silently change every observational key.
 impl<K: InlineKvKey + core::hash::Hash, const N: usize> core::hash::Hash for InlineKv<K, N> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.as_slice().hash(state);
+        // `<[(K, i32)]>::hash`: the length prefix, then each pair's fields.
+        state.write_usize(self.len());
+        for (k, v) in self {
+            k.hash(state);
+            v.hash(state);
+        }
     }
 }
 
@@ -309,8 +346,8 @@ impl<K: InlineKvKey, const N: usize> FromIterator<(K, i32)> for InlineKv<K, N> {
 }
 
 impl<'a, K: InlineKvKey, const N: usize> IntoIterator for &'a InlineKv<K, N> {
-    type Item = &'a (K, i32);
-    type IntoIter = core::slice::Iter<'a, (K, i32)>;
+    type Item = (K, i32);
+    type IntoIter = InlineKvIter<'a, K>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
@@ -342,9 +379,29 @@ mod tests {
         m.push((K::B, 2));
         m.push((K::C, -1));
         assert_eq!(m.len(), 2);
-        assert_eq!(m.first(), Some(&(K::B, 2)));
-        assert_eq!(m.as_slice(), &[(K::B, 2), (K::C, -1)]);
+        assert_eq!(m.first(), Some((K::B, 2)));
+        assert_eq!(m.to_vec(), &[(K::B, 2), (K::C, -1)]);
         assert_eq!(m.iter().count(), 2);
+    }
+
+    /// The split key/value layout hashes exactly as the `[(K, i32)]` slice
+    /// it replaced (the search hashes and the streams seeded from them).
+    #[test]
+    fn hash_matches_the_pair_slice() {
+        use core::hash::{Hash, Hasher};
+        fn h(x: &(impl Hash + ?Sized)) -> u64 {
+            let mut s = std::collections::hash_map::DefaultHasher::new();
+            x.hash(&mut s);
+            s.finish()
+        }
+        for m in [
+            M::new(),
+            [(K::B, 2)].into_iter().collect(),
+            [(K::C, -1), (K::A, 7), (K::B, 0)].into_iter().collect(),
+        ] {
+            assert_eq!(h(&m), h(m.to_vec().as_slice()));
+            assert_eq!(format!("{m:?}"), format!("{:?}", m.to_vec()));
+        }
     }
 
     #[test]
@@ -367,7 +424,7 @@ mod tests {
         assert_eq!(m, want);
         // Absent key: appended at the end, like the old find-or-push.
         m.set(K::C, 2);
-        assert_eq!(m.as_slice(), &[(K::B, 7), (K::C, 2)]);
+        assert_eq!(m.to_vec(), &[(K::B, 7), (K::C, 2)]);
     }
 
     #[test]
@@ -375,11 +432,11 @@ mod tests {
         let mut m = M::new();
         m.add(K::B, 3);
         m.add(K::B, i32::MAX);
-        assert_eq!(m.as_slice(), &[(K::B, i32::MAX)]);
+        assert_eq!(m.to_vec(), &[(K::B, i32::MAX)]);
         m.zero(K::C);
         assert_eq!(m.len(), 1, "zero must not append an absent key");
         m.zero(K::B);
-        assert_eq!(m.as_slice(), &[(K::B, 0)]);
+        assert_eq!(m.to_vec(), &[(K::B, 0)]);
     }
 
     /// The mask is history, not content: two maps with the same live entries

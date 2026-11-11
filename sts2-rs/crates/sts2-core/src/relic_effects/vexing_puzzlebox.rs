@@ -9,7 +9,7 @@ use super::prelude::*;
 /// [decompiled C# omitted — see the cited path]
 ///
 /// `SetToFreeThisTurn` is `EnergyCost.SetThisTurnOrUntilPlayed(0)` — an
-/// `EndOfTurn | WhenPlayed` modifier — so it is the `FreeThisTurn` rider,
+/// `EndOfTurn | WhenPlayed` modifier — so it is the `FREE_THIS_TURN` rider,
 /// not a permanent `cost = 0`: once played, or once the turn ends, the card
 /// costs its printed cost again (a permanent 0 made it free for every later
 /// redraw in the combat).
@@ -43,7 +43,7 @@ pub(crate) fn on_after_side_turn_start_vexing_puzzlebox(
     }
     for &uid in &uids {
         if let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) {
-            card.set_combat_var(crate::cards::VarKey::FreeThisTurn, 1);
+            card.set_to_free_this_turn();
         }
     }
     crate::card_effects::route_generated_into_hand(state, &uids);

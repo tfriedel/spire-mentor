@@ -29,16 +29,10 @@ pub(crate) fn play_metamorphosis(state: &mut CombatState, _t: Option<CreatureUid
     );
     for uid in uids {
         // Metamorphosis.cs:35 `item.SetToFreeThisCombat()`. Its energy half
-        // (`SetThisCombat(0)`, CardEnergyCost.cs:240) is a no-op on an X-cost
-        // card (`Canonical < 0`), so keep the X sentinel there and free only
-        // the star cost. Defect act23 seed 1001: the native-cost attacks were
-        // discarded by Scrape where C# kept the 0-cost copies.
-        let card = &mut state.cards[uid.0.get() as usize - 1];
-        if card.cost >= 0 {
-            card.set_free_this_combat();
-        } else {
-            card.set_combat_var(sts2_core::cards::VarKey::StarCostFreeThisCombat, 1);
-        }
+        // is unobservable on an X-cost card, whose cost stays X. Defect act23
+        // seed 1001: the native-cost attacks were discarded by Scrape where C#
+        // kept the 0-cost copies.
+        state.cards[uid.0.get() as usize - 1].set_to_free_this_combat();
         // Metamorphosis.cs:31 `AddGeneratedCardToCombat(item, Draw, Owner,
         // Random)`: one `Shuffle` read for the slot, then the generation
         // listeners (Regalite, Pillar of Creation, the Supermassive tally).

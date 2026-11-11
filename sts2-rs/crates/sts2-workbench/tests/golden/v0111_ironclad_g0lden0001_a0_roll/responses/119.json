@@ -1,88 +1,70 @@
 {
- "points": [
+ "config": {
+  "c_puct": 2.5,
+  "depth": 200,
+  "draw_widening_c": 2.0,
+  "hidden_info": "beliefdraw",
+  "seed": 1,
+  "sims": 48,
+  "threads": 1
+ },
+ "pv": null,
+ "scores": [
   {
-   "act": 1,
-   "deck_size": 10,
-   "floor": 1,
-   "idx": 0,
-   "scores": {
-    "block": 38.9,
-    "damage": 31.4,
-    "velocity": 0.0,
-    "volume": 0.0
-   }
+   "action": "STRIKE_IRONCLAD.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": true,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2537,
+   "q_saturated": false,
+   "stable_idx": 1,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   },
   {
-   "act": 1,
-   "deck_size": 10,
-   "floor": 1,
-   "idx": 2,
-   "scores": {
-    "block": 38.9,
-    "damage": 33.4,
-    "velocity": 0.0,
-    "volume": 0.0
-   }
+   "action": "STRIKE_IRONCLAD.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2636,
+   "q_saturated": false,
+   "stable_idx": 0,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   },
   {
-   "act": 1,
-   "deck_size": 11,
-   "floor": 2,
-   "idx": 16,
-   "scores": {
-    "block": 38.2,
-    "damage": 34.6,
-    "velocity": 0.2,
-    "volume": 6.4
-   }
+   "action": "DEFEND_IRONCLAD.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.251,
+   "q_saturated": false,
+   "stable_idx": 2,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   },
   {
-   "act": 1,
-   "deck_size": 11,
-   "floor": 3,
-   "idx": 19,
-   "scores": {
-    "block": 38.2,
-    "damage": 28.6,
-    "velocity": 0.0,
-    "volume": 0.0
-   }
-  },
-  {
-   "act": 1,
-   "deck_size": 12,
-   "floor": 4,
-   "idx": 34,
-   "scores": {
-    "block": 38.2,
-    "damage": 29.7,
-    "velocity": 4.7,
-    "volume": 17.5
-   }
-  },
-  {
-   "act": 1,
-   "deck_size": 13,
-   "floor": 5,
-   "idx": 49,
-   "scores": {
-    "block": 36.7,
-    "damage": 29.6,
-    "velocity": 1.4,
-    "volume": 11.5
-   }
-  },
-  {
-   "act": 1,
-   "deck_size": 14,
-   "floor": 6,
-   "idx": 51,
-   "scores": {
-    "block": 35.0,
-    "damage": 28.6,
-    "velocity": 3.5,
-    "volume": 15.2
-   }
+   "action": "end turn",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2334,
+   "q_saturated": false,
+   "stable_idx": -1,
+   "target_index": null,
+   "visits": 12,
+   "win_prob": 1.0
   }
  ]
 }

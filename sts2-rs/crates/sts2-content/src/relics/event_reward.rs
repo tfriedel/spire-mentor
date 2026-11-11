@@ -2490,7 +2490,7 @@ mod tests {
         state.cards.push(sts2_core::Card {
             uid,
             card_id: sts2_core::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: sts2_core::cards::CardType::Attack,
             target_type: sts2_core::cards::TargetType::Enemy,
             upgraded: false,
@@ -2518,7 +2518,7 @@ mod tests {
         state.cards.push(sts2_core::Card {
             uid,
             card_id: sts2_core::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: sts2_core::cards::CardType::Skill,
             target_type: sts2_core::cards::TargetType::Self_,
             upgraded: false,
@@ -3584,7 +3584,7 @@ mod tests {
         let mut stomp = Card::pod_defaults();
         stomp.uid = suid;
         stomp.card_id = CardId::Stomp;
-        stomp.cost = 3;
+        stomp.cost = sts2_core::CardEnergyCost::new(3);
         state.cards.push(stomp);
         state.player.hand.push(suid);
         state.combat_log.prev_round_last_attack_skill_played =
@@ -3595,7 +3595,7 @@ mod tests {
             .iter()
             .find(|c| c.uid == suid)
             .expect("stomp")
-            .cost;
+            .local_cost();
         assert_eq!(
             cost, 2,
             "Stomp cost reduced by 1 — the attack dupe fired BeforeCardPlayed"
@@ -3631,7 +3631,7 @@ mod tests {
         let mut stomp = Card::pod_defaults();
         stomp.uid = suid;
         stomp.card_id = CardId::Stomp;
-        stomp.cost = 3;
+        stomp.cost = sts2_core::CardEnergyCost::new(3);
         state.cards.push(stomp);
         state.player.hand.push(suid);
         state.combat_log.prev_round_last_attack_skill_played =
@@ -3642,7 +3642,7 @@ mod tests {
             .iter()
             .find(|c| c.uid == suid)
             .expect("stomp")
-            .cost;
+            .local_cost();
         assert_eq!(
             cost, 0,
             "one Stomp shave per play iteration (1 play + 2 replays)"
@@ -3669,18 +3669,15 @@ mod tests {
         let mut stomp = Card::pod_defaults();
         stomp.uid = suid;
         stomp.card_id = CardId::Stomp;
-        stomp.cost = 3;
+        stomp.cost = sts2_core::CardEnergyCost::new(3);
         state.cards.push(stomp);
         state.player.draw.push(suid);
         let plays_before = state.combat_log.player_card_plays_this_combat;
         state.combat_log.prev_round_last_attack_skill_played = Some((CardId::Bash, false, None));
         let _ = sts2_core::relic_effects::dispatch_before_play_phase_start(&mut state);
         let stomp = state.cards.iter().find(|c| c.uid == suid).expect("stomp");
-        assert_eq!(stomp.cost, 3, "no BeforeCardPlayed Stomp shave");
-        assert_eq!(
-            stomp.combat_var(sts2_core::cards::VarKey::StompCostReductionThisTurn),
-            0
-        );
+        assert_eq!(stomp.local_cost(), 3, "no BeforeCardPlayed Stomp shave");
+        assert!(!stomp.cost.has_local_modifiers());
         assert_eq!(
             state.combat_log.player_card_plays_this_combat, plays_before,
             "the unplayed dupe is not a finished play"
@@ -3842,7 +3839,7 @@ mod tests {
         state.cards.push(sts2_core::Card {
             uid: power_uid,
             card_id: sts2_core::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: sts2_core::cards::CardType::Power,
             target_type: sts2_core::cards::TargetType::Self_,
             upgraded: false,
@@ -4067,7 +4064,7 @@ mod tests {
         let mut card = Card {
             uid: CardUid(std::num::NonZeroU32::new(42).unwrap()),
             card_id: sts2_core::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CT::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -4103,7 +4100,7 @@ mod tests {
         let mk = |uid: u32| Card {
             uid: CardUid(std::num::NonZeroU32::new(uid).unwrap()),
             card_id: sts2_core::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CT::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -4131,7 +4128,7 @@ mod tests {
         let mut card = Card {
             uid: CardUid(std::num::NonZeroU32::new(42).unwrap()),
             card_id: sts2_core::cards::CardId::DefendIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CT::Skill,
             target_type: TargetType::Self_,
             upgraded: false,
@@ -4529,7 +4526,7 @@ mod tests {
                 (|c: &Card| c.base_damage == 30) as fn(&Card) -> bool,
             ),
             (sts2_core::cards::CardId::ExpectAFight, |c: &Card| {
-                c.cost == 3
+                c.local_cost() == 3
             }),
         ] {
             let mut rs = RunState::new();

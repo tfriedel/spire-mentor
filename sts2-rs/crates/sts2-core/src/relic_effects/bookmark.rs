@@ -15,16 +15,14 @@ use super::prelude::*;
 /// calls [`after_flush_bookmark`] between the flush and
 /// `clear_per_turn_card_vars`, where the hand is exactly C#'s `retainedCards`
 /// and a free-this-turn card still has local cost 0 (loadout Necrobinder
-/// v0.107.1 2032: Rust ran it after the cleanup, so a retained FreeThisTurn
+/// v0.107.1 2032: Rust ran it after the cleanup, so a retained FREE_THIS_TURN
 /// card was eligible and the pick rolled over a different list).
 /// Selection uses the `CombatCardSelection` RNG (`NextItem` ==
 /// `NextInt(0, count)`).
 ///
 /// The −1 is C#'s `AddUntilPlayed(-1)` — a `Relative`, `WhenPlayed` local
-/// modifier — so it banks in [`crate::cards::VarKey::CostReductionUntilPlayed`],
-/// which the play-time cleanup retires; a permanent `card.cost` decrement kept
-/// the discount through every later redraw. The filter's local cost is
-/// [`crate::hooks::local_card_cost`] (`GetWithModifiers(CostModifiers.Local)`).
+/// modifier, which the play-time cleanup retires. The filter's local cost is
+/// [`crate::Card::local_cost`] (`GetWithModifiers(CostModifiers.Local)`).
 /// Bead `sts2-rs-gsda` (initial) / `…wb8lk.9` (v0.107.1 AfterFlush + random pick).
 pub(crate) fn after_flush_bookmark(state: &mut CombatState) {
     if !player_owns_relic(state, crate::RelicKind::Bookmark) {
@@ -37,7 +35,7 @@ pub(crate) fn after_flush_bookmark(state: &mut CombatState) {
         .copied()
         .filter(|uid| {
             crate::card_by_uid(&state.cards, *uid)
-                .is_some_and(|c| !c.is_x_cost() && crate::hooks::local_card_cost(state, c) > 0)
+                .is_some_and(|c| !c.is_x_cost() && c.local_cost() > 0)
         })
         .collect();
     if eligible.is_empty() {

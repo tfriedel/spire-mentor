@@ -194,7 +194,7 @@ fn card_at(state: &CombatState, hand_index: u8) -> String {
         return format!("h{hand_index}?");
     };
     let plus = if card.upgraded { "+" } else { "" };
-    format!("{:?}{plus}({})", card.card_id, card.cost)
+    format!("{:?}{plus}({})", card.card_id, card.local_cost())
 }
 
 fn enemy_name(state: &CombatState, slot: u8) -> String {
@@ -304,7 +304,11 @@ fn print_board(state: &CombatState) {
             let plus = if card.upgraded { "+" } else { "" };
             println!(
                 "    h{i} {:?}{plus}  cost {}  {:?}  dmg {} blk {}",
-                card.card_id, card.cost, card.card_type, card.base_damage, card.base_block
+                card.card_id,
+                card.local_cost(),
+                card.card_type,
+                card.base_damage,
+                card.base_block
             );
         }
     }

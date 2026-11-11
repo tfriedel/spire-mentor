@@ -1,0 +1,54 @@
+{
+ "config": {
+  "c_puct": 2.5,
+  "depth": 200,
+  "draw_widening_c": 2.0,
+  "hidden_info": "beliefdraw",
+  "seed": 1,
+  "sims": 48,
+  "threads": 1
+ },
+ "pv": null,
+ "scores": [
+  {
+   "action": "drink Energy Potion",
+   "hp_n": 24,
+   "hp_sd": 5.8612,
+   "in_band": true,
+   "is_best": true,
+   "losses": 0,
+   "low_confidence": false,
+   "mean_final_hp": 21.25,
+   "pick_rank": 0,
+   "pick_reason": "the most searched of the equal moves",
+   "q": 1.0757,
+   "q_saturated": false,
+   "stable_idx": -100,
+   "target_index": null,
+   "ties": 0,
+   "visits": 24,
+   "win_prob": 1.0,
+   "wins": 24
+  },
+  {
+   "action": "end turn",
+   "hp_n": 24,
+   "hp_sd": 5.6148,
+   "in_band": true,
+   "is_best": false,
+   "losses": 0,
+   "low_confidence": false,
+   "mean_final_hp": 20.875,
+   "pick_rank": 1,
+   "pick_reason": null,
+   "q": 1.0743,
+   "q_saturated": false,
+   "stable_idx": -1,
+   "target_index": null,
+   "ties": 0,
+   "visits": 24,
+   "win_prob": 1.0,
+   "wins": 24
+  }
+ ]
+}

@@ -39,7 +39,13 @@ def _campaign_process():
 
 @lru_cache(maxsize=1)
 def _run() -> dict[str, Any]:
-    return R.record_run(7, 0.6, 8, 8)
+    # Seed 13: the run whose sampled decisions hold exactly one EVENT, the
+    # RoomFullOfCheese one `test_event_previews_are_honest` reads. Its 8-sim
+    # combat searches draw from state-hash-seeded RNG, so an engine change
+    # that moves the card hash moves the run (the cost model moved seed 7's
+    # first divergent search at step 18, on an identical state, and its run
+    # no longer meets an event).
+    return R.record_run(13, 0.6, 8, 8)
 
 
 @lru_cache(maxsize=1)

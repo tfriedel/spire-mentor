@@ -64,7 +64,7 @@ fn spawn_midnight(st: &mut CombatState) -> i8 {
     let c = sts2_content::cards::spec_index::card_pod_from_id(CardId::Midnight, false)
         .expect("Midnight");
     let uid = sts2_core::card_effects::spawn_card_into_hand(st, c);
-    st.cards[uid.0.get() as usize - 1].cost
+    i8::try_from(st.cards[uid.0.get() as usize - 1].local_cost()).expect("fits")
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn a_copy_of_a_midnight_keeps_its_cost_and_is_not_shaved_again() {
         .iter()
         .map(|u| &st.cards[u.0.get() as usize - 1])
         .filter(|c| c.card_id == CardId::Midnight)
-        .map(|c| c.cost)
+        .map(|c| i8::try_from(c.local_cost()).expect("fits"))
         .collect();
     assert_eq!(costs, vec![8, 8]);
 }

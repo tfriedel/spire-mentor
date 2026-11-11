@@ -1,0 +1,576 @@
+{
+ "action_label": "",
+ "assets_base": "https://assets.test",
+ "chosen_action": null,
+ "decision": "combat_play",
+ "idx": 0,
+ "meta": {
+  "act": 1,
+  "act_name": "Overgrowth",
+  "bg_col": 2,
+  "bg_row": 6,
+  "bg_seed": "11180935036767329045",
+  "floor": 7,
+  "step_no": 0,
+  "turn": 5
+ },
+ "pv": null,
+ "scores": [],
+ "source": "live",
+ "state": {
+  "act": 1,
+  "act1": "overgrowth",
+  "act_name": "Overgrowth",
+  "ascension": 0,
+  "bg_col": 2,
+  "bg_row": 6,
+  "bg_seed": "11180935036767329045",
+  "decision": "combat_play",
+  "discard_pile": [],
+  "discard_pile_count": 0,
+  "draw_pile": [
+   {
+    "base_cost": 2,
+    "can_play": false,
+    "color": "red",
+    "cost": 2,
+    "description": "Deal 8 damage.\nApply 2 Vulnerable.",
+    "description_rich": "Deal 8 damage.\nApply 2 [gold]Vulnerable[/gold].",
+    "id": "BASH",
+    "image": "https://assets.test/card_atlas/ironclad/bash.png",
+    "index": -1,
+    "name": "Bash",
+    "rarity": "Basic",
+    "stats": {
+     "damage": 8
+    },
+    "target_type": "None",
+    "type": "Attack",
+    "upgraded": false
+   },
+   {
+    "base_cost": 2,
+    "can_play": false,
+    "color": "red",
+    "cost": 2,
+    "description": "Whenever a card is Exhausted,\ndraw 1 card.",
+    "description_rich": "Whenever a card is [gold]Exhausted[/gold],\ndraw 1 card.",
+    "id": "DARK_EMBRACE",
+    "image": "https://assets.test/card_atlas/ironclad/dark_embrace.png",
+    "index": -1,
+    "name": "Dark Embrace",
+    "rarity": "Rare",
+    "stats": {},
+    "target_type": "None",
+    "type": "Power",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": false,
+    "color": "red",
+    "cost": 1,
+    "description": "Gain 5 Block.",
+    "description_rich": "Gain 5 [gold]Block[/gold].",
+    "id": "DEFEND_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+    "index": -1,
+    "name": "Defend",
+    "rarity": "Basic",
+    "stats": {
+     "block": 5
+    },
+    "target_type": "None",
+    "type": "Skill",
+    "upgraded": false
+   },
+   {
+    "base_cost": -1,
+    "can_play": false,
+    "color": "quest",
+    "cost": 0,
+    "description": "Unplayable.\nMarks a site of 600 extra Gold in the next Act.",
+    "description_rich": "[gold]Unplayable[/gold].\nMarks a site of 600 extra [gold]Gold[/gold] in the next Act.",
+    "id": "SPOILS_MAP",
+    "image": "https://assets.test/card_atlas/quest/spoils_map.png",
+    "index": -1,
+    "name": "Spoils Map",
+    "rarity": "Quest",
+    "stats": {},
+    "target_type": "None",
+    "type": "Quest",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": false,
+    "color": "red",
+    "cost": 1,
+    "description": "Deal 6 damage.",
+    "description_rich": "Deal 6 damage.",
+    "id": "STRIKE_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+    "index": -1,
+    "name": "Strike",
+    "rarity": "Basic",
+    "stats": {
+     "damage": 6
+    },
+    "target_type": "None",
+    "type": "Attack",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": false,
+    "color": "red",
+    "cost": 1,
+    "description": "Deal 6 damage.",
+    "description_rich": "Deal 6 damage.",
+    "id": "STRIKE_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+    "index": -1,
+    "name": "Strike",
+    "rarity": "Basic",
+    "stats": {
+     "damage": 6
+    },
+    "target_type": "None",
+    "type": "Attack",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": false,
+    "color": "red",
+    "cost": 1,
+    "description": "Deal 6 damage.",
+    "description_rich": "Deal 6 damage.",
+    "id": "STRIKE_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+    "index": -1,
+    "name": "Strike",
+    "rarity": "Basic",
+    "stats": {
+     "damage": 6
+    },
+    "target_type": "None",
+    "type": "Attack",
+    "upgraded": false
+   }
+  ],
+  "draw_pile_count": 7,
+  "enemies": [
+   {
+    "block": 0,
+    "hp": 33,
+    "image": "https://assets.test/monsters/byrdonis.png",
+    "index": 0,
+    "intents": [
+     {
+      "base_damage": 17,
+      "damage": 21,
+      "intent_image": "https://assets.test/intent_atlas/attack/intent_attack_4.png",
+      "modifiers": [
+       {
+        "add": 4,
+        "image": "https://assets.test/power_atlas/strength_power.png",
+        "kind": "power",
+        "name": "STRENGTH",
+        "side": "enemy",
+        "title": "Strength"
+       }
+      ],
+      "type": "Attack"
+     }
+    ],
+    "kind": "Byrdonis",
+    "max_hp": 83,
+    "move_state": "SWOOP",
+    "name": "Byrdonis",
+    "powers": [
+     {
+      "amount": 1,
+      "display_amount": 1,
+      "id": "TERRITORIAL",
+      "image": "https://assets.test/power_atlas/territorial_power.png",
+      "image_big": "https://assets.test/power_big/territorial_power.png",
+      "name": "Territorial"
+     },
+     {
+      "amount": 4,
+      "display_amount": 4,
+      "id": "STRENGTH",
+      "image": "https://assets.test/power_atlas/strength_power.png",
+      "image_big": "https://assets.test/power_big/strength_power.png",
+      "name": "Strength"
+     }
+    ],
+    "rig": "https://assets.test/monster_rigs/byrdonis/byrdonis",
+    "rig_bounds_h": 461.0,
+    "rig_bounds_w": 640.0,
+    "rig_scale": 0.3135,
+    "uid": 2
+   }
+  ],
+  "energy": 3,
+  "energy_image": "https://assets.test/sprite_fonts/ironclad_energy_icon.png",
+  "exhaust_pile": [
+   {
+    "base_cost": 1,
+    "can_play": false,
+    "color": "red",
+    "cost": 1,
+    "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+    "description_rich": "Deal 10 damage.\nDouble the enemy's [gold]Vulnerable[/gold].\n[gold]Exhaust[/gold].",
+    "id": "MOLTEN_FIST",
+    "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+    "index": -1,
+    "name": "Molten Fist",
+    "rarity": "Common",
+    "stats": {
+     "damage": 10
+    },
+    "target_type": "None",
+    "type": "Attack",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": false,
+    "color": "red",
+    "cost": 1,
+    "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+    "description_rich": "Deal 10 damage.\nDouble the enemy's [gold]Vulnerable[/gold].\n[gold]Exhaust[/gold].",
+    "id": "MOLTEN_FIST",
+    "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+    "index": -1,
+    "name": "Molten Fist",
+    "rarity": "Common",
+    "stats": {
+     "damage": 10
+    },
+    "target_type": "None",
+    "type": "Attack",
+    "upgraded": false
+   }
+  ],
+  "exhaust_pile_count": 2,
+  "floor": 7,
+  "game_version": "v0.111.0",
+  "hand": [
+   {
+    "base_cost": 1,
+    "can_play": true,
+    "color": "red",
+    "cost": 1,
+    "description": "Gain 5 Block.",
+    "description_rich": "Gain 5 [gold]Block[/gold].",
+    "id": "DEFEND_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+    "index": 0,
+    "name": "Defend",
+    "rarity": "Basic",
+    "stats": {
+     "block": 5
+    },
+    "target_type": "None",
+    "type": "Skill",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": true,
+    "color": "red",
+    "cost": 1,
+    "damage_preview": {
+     "0": 6
+    },
+    "description": "Deal 6 damage.",
+    "description_rich": "Deal 6 damage.",
+    "id": "STRIKE_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+    "index": 1,
+    "name": "Strike",
+    "rarity": "Basic",
+    "stats": {
+     "damage": 6
+    },
+    "target_type": "AnyEnemy",
+    "type": "Attack",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": true,
+    "color": "red",
+    "cost": 1,
+    "description": "Gain 5 Block.",
+    "description_rich": "Gain 5 [gold]Block[/gold].",
+    "id": "DEFEND_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+    "index": 2,
+    "name": "Defend",
+    "rarity": "Basic",
+    "stats": {
+     "block": 5
+    },
+    "target_type": "None",
+    "type": "Skill",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": true,
+    "color": "red",
+    "cost": 1,
+    "description": "Apply 3 Vulnerable.\nExhaust.",
+    "description_rich": "Apply 3 [gold]Vulnerable[/gold].\n[gold]Exhaust[/gold].",
+    "id": "TREMBLE",
+    "image": "https://assets.test/card_atlas/ironclad/tremble.png",
+    "index": 3,
+    "name": "Tremble",
+    "rarity": "Common",
+    "stats": {},
+    "target_type": "AnyEnemy",
+    "type": "Skill",
+    "upgraded": false
+   },
+   {
+    "base_cost": 1,
+    "can_play": true,
+    "color": "red",
+    "cost": 1,
+    "description": "Gain 5 Block.",
+    "description_rich": "Gain 5 [gold]Block[/gold].",
+    "id": "DEFEND_IRONCLAD",
+    "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+    "index": 4,
+    "name": "Defend",
+    "rarity": "Basic",
+    "stats": {
+     "block": 5
+    },
+    "target_type": "None",
+    "type": "Skill",
+    "upgraded": false
+   }
+  ],
+  "max_energy": 3,
+  "options": [],
+  "player": {
+   "block": 0,
+   "deck": [
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": 0,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": 1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": 2,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": 3,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": 4,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": 5,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": 6,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": 7,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 2,
+     "description": "Deal 8 damage.\nApply 2 Vulnerable.",
+     "description_rich": "Deal 8 damage.\nApply 2 Vulnerable.",
+     "id": "BASH",
+     "image": "https://assets.test/card_atlas/ironclad/bash.png",
+     "index": 8,
+     "name": "Bash",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+     "description_rich": "Deal 10 damage.\nDouble the enemy's Vulnerable.\n[gold]Exhaust[/gold].",
+     "id": "MOLTEN_FIST",
+     "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+     "index": 9,
+     "name": "Molten Fist",
+     "rarity": "Common",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 2,
+     "description": "Whenever a card is Exhausted,\ndraw 1 card.",
+     "description_rich": "Whenever a card is [gold]Exhausted[/gold],\ndraw 1 card.",
+     "id": "DARK_EMBRACE",
+     "image": "https://assets.test/card_atlas/ironclad/dark_embrace.png",
+     "index": 10,
+     "name": "Dark Embrace",
+     "rarity": "Rare",
+     "type": "Power",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+     "description_rich": "Deal 10 damage.\nDouble the enemy's Vulnerable.\n[gold]Exhaust[/gold].",
+     "id": "MOLTEN_FIST",
+     "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+     "index": 11,
+     "name": "Molten Fist",
+     "rarity": "Common",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "red",
+     "cost": 1,
+     "description": "Apply 3 Vulnerable.\nExhaust.",
+     "description_rich": "Apply 3 Vulnerable.\n[gold]Exhaust[/gold].",
+     "id": "TREMBLE",
+     "image": "https://assets.test/card_atlas/ironclad/tremble.png",
+     "index": 12,
+     "name": "Tremble",
+     "rarity": "Common",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "quest",
+     "cost": "X",
+     "description": "Unplayable.\nMarks a site of 600 extra Gold in the next Act.",
+     "description_rich": "[gold]Unplayable[/gold].\nMarks a site of 600 extra Gold in the next Act.",
+     "id": "SPOILS_MAP",
+     "image": "https://assets.test/card_atlas/quest/spoils_map.png",
+     "index": 13,
+     "name": "Spoils Map",
+     "rarity": "Quest",
+     "type": "Quest",
+     "upgraded": false
+    }
+   ],
+   "gold": 141,
+   "hp": 30,
+   "image": "https://assets.test/character_sprites/ironclad.png",
+   "max_hp": 80,
+   "name": "Ironclad",
+   "potion_slots": 3,
+   "potions": [],
+   "relics": [
+    {
+     "description": "At the end of combat, heal 6 HP.",
+     "id": "BURNING_BLOOD",
+     "image": "https://assets.test/relic_atlas/burning_blood.png",
+     "name": "Burning Blood"
+    },
+    {
+     "description": "Upon pickup, Upgrade a card.",
+     "id": "POMANDER",
+     "image": "https://assets.test/relic_atlas/pomander.png",
+     "name": "Pomander"
+    }
+   ],
+   "rig": "https://assets.test/character_rigs/ironclad/ironclad",
+   "rig_bounds_h": 278.0,
+   "rig_bounds_w": 242.0,
+   "rig_scale": 0.28
+  },
+  "player_powers": [],
+  "round": 5
+ }
+}

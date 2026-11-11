@@ -1,2046 +1,553 @@
 {
- "active_leaf": 42,
- "active_path": [
-  0,
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  10,
-  11,
-  12,
-  13,
-  14,
-  15,
-  16,
-  17,
-  18,
-  19,
-  20,
-  21,
-  22,
-  23,
-  24,
-  25,
-  26,
-  27,
-  28,
-  29,
-  30,
-  31,
-  32,
-  33,
-  34,
-  35,
-  36,
-  37,
-  38,
-  39,
-  40,
-  41,
-  42
- ],
- "nodes": [
-  {
+ "step": {
+  "action_label": "",
+  "assets_base": "https://assets.test",
+  "chosen_action": null,
+  "decision": "combat_play",
+  "idx": 0,
+  "meta": {
    "act": 1,
-   "child_ids": [
-    1
-   ],
-   "combat_log": [],
-   "decision": "event_choice",
-   "details": [],
-   "error": false,
-   "floor": 1,
-   "id": 0,
-   "idx": 0,
-   "label": "Started Defect (seed G0LDEN0001, A0, act1 overgrowth)",
-   "parent_id": null,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    2
-   ],
-   "combat_log": [],
-   "decision": "card_select",
-   "details": [
-    "+Relic Lead Paperweight"
-   ],
-   "error": false,
-   "floor": 1,
-   "id": 1,
-   "idx": 1,
-   "label": "Choose: Lead Paperweight",
-   "parent_id": 0,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    3
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 1,
-   "id": 2,
-   "idx": 2,
-   "label": "Select Ultimate Strike",
-   "parent_id": 1,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    4
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Fuzzy Wurm Crawler"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 3,
-   "idx": 3,
-   "label": "Map → (2,1)",
-   "parent_id": 2,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    5
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 4,
-   "idx": 4,
-   "label": "Play Defend",
-   "parent_id": 3,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    6
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_channeled",
-     "noun": "Lightning Orb",
-     "round": 1,
-     "side": "player",
-     "source": "Zap",
-     "source_card": "ZAP",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect channeled Lightning Orb.",
-     "verb": "channeled"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Zap"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 5,
-   "idx": 5,
-   "label": "Play Zap",
-   "parent_id": 4,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    7
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 49,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Fuzzy Wurm Crawler using Dualcast.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 41,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Fuzzy Wurm Crawler using Dualcast.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Dualcast",
-    "Fuzzy Wurm Crawler HP 57→41 (−16)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 6,
-   "idx": 6,
-   "label": "Play Dualcast",
-   "parent_id": 5,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    8
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 38,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Fuzzy Wurm Crawler.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "First Acid Goop",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used First Acid Goop.",
-     "verb": "used"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 4,
-     "hp_after": 75,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "First Acid Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "FIRST_ACID_GOOP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler dealt 0 damage to The Defect using First Acid Goop.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 5→0",
-    "Fuzzy Wurm Crawler HP 41→38 (−3)",
-    "Lightning orb passive: 3 damage to a random enemy"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 7,
-   "idx": 7,
-   "label": "End turn",
-   "parent_id": 6,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    9
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 32,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 38→32 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 8,
-   "idx": 8,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 7,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    10
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 14,
-     "blocked": 0,
-     "hp_after": 18,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Ultimate Strike",
-     "source_card": "ULTIMATE_STRIKE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 14 damage to Fuzzy Wurm Crawler using Ultimate Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Ultimate Strike",
-    "Fuzzy Wurm Crawler HP 32→18 (−14)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 9,
-   "idx": 9,
-   "label": "Play Ultimate Strike → Fuzzy Wurm Crawler",
-   "parent_id": 8,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    11
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 12,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 18→12 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 10,
-   "idx": 10,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 9,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    12
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 9,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "First Acid Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "FIRST_ACID_GOOP",
-     "source_upgraded": null,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Fuzzy Wurm Crawler using First Acid Goop.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Inhale",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used Inhale.",
-     "verb": "used"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "kind": "power",
-     "noun": "Strength",
-     "round": 2,
-     "side": "enemy",
-     "source": "Inhale",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "INHALE",
-     "source_upgraded": null,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 7 Strength.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Fuzzy Wurm Crawler HP 12→9 (−3)",
-    "Lightning orb passive: 3 damage to a random enemy",
-    "Fuzzy Wurm Crawler +7 Strength"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 11,
-   "idx": 11,
-   "label": "End turn",
-   "parent_id": 10,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    13
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 12,
-   "idx": 12,
-   "label": "Play Defend",
-   "parent_id": 11,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    14
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 3,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 9→3 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 13,
-   "idx": 13,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 12,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    15
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "You Block 5→0",
-    "Fuzzy Wurm Crawler HP 3→0  ☠ defeated",
-    "Gold 99→110"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 14,
-   "idx": 14,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 13,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    16
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 2,
-   "id": 15,
-   "idx": 15,
-   "label": "Take Boost Away",
-   "parent_id": 14,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    17
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Shrinker Beetle"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 16,
-   "idx": 16,
-   "label": "Map → (2,2)",
-   "parent_id": 15,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    18
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 17,
-   "idx": 17,
-   "label": "Play Defend",
-   "parent_id": 16,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    19
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 34,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 40→34 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 18,
-   "idx": 18,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 17,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    20
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 5→10"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 19,
-   "idx": 19,
-   "label": "Play Defend",
-   "parent_id": 18,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    21
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 31,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Shrinker Beetle.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Shrink",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Shrinker Beetle used Shrink.",
-     "verb": "used"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 10→0",
-    "Shrinker Beetle HP 34→31 (−3)",
-    "Lightning orb passive: 3 damage to a random enemy",
-    "You −1 Shrink"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 20,
-   "idx": 20,
-   "label": "End turn",
-   "parent_id": 19,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    22
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 21,
-   "idx": 21,
-   "label": "Play Defend",
-   "parent_id": 20,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    23
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 23,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Shrinker Beetle using Dualcast.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_evoked",
-     "noun": "Lightning Orb",
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect evoked Lightning Orb.",
-     "verb": "evoked"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 15,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Dualcast",
-     "source_card": "DUALCAST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 8 damage to Shrinker Beetle using Dualcast.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Dualcast",
-    "Shrinker Beetle HP 31→15 (−16)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 22,
-   "idx": 22,
-   "label": "Play Dualcast",
-   "parent_id": 21,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    24
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Boost Away",
-     "source_card": "BOOST_AWAY",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 6 Block.",
-     "verb": "gained"
-    },
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "card_generated",
-     "noun": "Dazed",
-     "round": 2,
-     "side": "player",
-     "source": "Boost Away",
-     "source_card": "BOOST_AWAY",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect generated Dazed.",
-     "verb": "generated"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Boost Away",
-    "You Block 5→11"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 23,
-   "idx": 23,
-   "label": "Play Boost Away",
-   "parent_id": 22,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    25
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 11→16"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 24,
-   "idx": 24,
-   "label": "Play Defend",
-   "parent_id": 23,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    26
-   ],
-   "combat_log": [
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Chomp",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Shrinker Beetle used Chomp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 7,
-     "hp_after": 75,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Chomp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "ShrinkerBeetle",
-     "source_move_id": "CHOMP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Shrinker Beetle dealt 0 damage to The Defect using Chomp.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 16→0"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 25,
-   "idx": 25,
-   "label": "End turn",
-   "parent_id": 24,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    27
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 11,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 4 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 15→11 (−4)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 26,
-   "idx": 26,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 25,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    28
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 2,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Ultimate Strike",
-     "source_card": "ULTIMATE_STRIKE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 9 damage to Shrinker Beetle using Ultimate Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Ultimate Strike",
-    "Shrinker Beetle HP 11→2 (−9)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 27,
-   "idx": 27,
-   "label": "Play Ultimate Strike → Shrinker Beetle",
-   "parent_id": 26,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    29
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 28,
-   "idx": 28,
-   "label": "Play Defend",
-   "parent_id": 27,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    30
-   ],
-   "combat_log": [
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Stomp",
-     "round": 3,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Shrinker Beetle used Stomp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 8,
-     "blocked": 5,
-     "hp_after": 67,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "enemy",
-     "source": "Stomp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "ShrinkerBeetle",
-     "source_move_id": "STOMP",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Shrinker Beetle dealt 8 damage to The Defect using Stomp.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 75→67 (−8)",
-    "You Block 5→0"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 29,
-   "idx": 29,
-   "label": "End turn",
-   "parent_id": 28,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    31
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 4 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 2→0  ☠ defeated",
-    "You −Shrink",
-    "Gold 110→125"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 30,
-   "idx": 30,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 29,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    32
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 3,
-   "id": 31,
-   "idx": 31,
-   "label": "Take TURBO",
-   "parent_id": 30,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    33
-   ],
-   "combat_log": [],
-   "decision": "event_choice",
-   "details": [],
-   "error": false,
-   "floor": 4,
-   "id": 32,
-   "idx": 32,
-   "label": "Map → (2,3)",
-   "parent_id": 31,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    34
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [
-    "You HP 67→59 (−8)",
-    "Gold 125→193"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 33,
-   "idx": 33,
-   "label": "Choose: Trudge On",
-   "parent_id": 32,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    35
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Nibbit"
-   ],
-   "error": false,
+   "act_name": "Overgrowth",
+   "bg_col": 3,
+   "bg_row": 4,
+   "bg_seed": 1772253313,
    "floor": 5,
-   "id": 34,
-   "idx": 34,
-   "label": "Map → (3,4)",
-   "parent_id": 33,
-   "turn": 1,
-   "value": null
+   "step_no": 0,
+   "turn": 1
   },
-  {
+  "pv": null,
+  "scores": [],
+  "source": "live",
+  "state": {
    "act": 1,
-   "child_ids": [
-    36
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "orb_channeled",
-     "noun": "Lightning Orb",
-     "round": 1,
-     "side": "player",
-     "source": "Zap",
-     "source_card": "ZAP",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect channeled Lightning Orb.",
-     "verb": "channeled"
-    }
-   ],
+   "act1": "overgrowth",
+   "act_name": "Overgrowth",
+   "ascension": 0,
+   "bg_col": 3,
+   "bg_row": 4,
+   "bg_seed": 1772253313,
    "decision": "combat_play",
-   "details": [
-    "Play Zap"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 35,
-   "idx": 35,
-   "label": "Play Zap",
-   "parent_id": 34,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    37
-   ],
-   "combat_log": [
+   "discard_pile": [
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 36,
-   "idx": 36,
-   "label": "Play Defend",
-   "parent_id": 35,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    38
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Boost Away",
-     "source_card": "BOOST_AWAY",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 6 Block.",
-     "verb": "gained"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Channel 1 Lightning.",
+     "description_rich": "[gold]Channel[/gold] 1 [gold]Lightning[/gold].",
+     "id": "ZAP",
+     "image": "https://assets.test/card_atlas/defect/zap.png",
+     "index": -1,
+     "name": "Zap",
+     "rarity": "Basic",
+     "stats": {},
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "card_generated",
-     "noun": "Dazed",
-     "round": 1,
-     "side": "player",
-     "source": "Boost Away",
-     "source_card": "BOOST_AWAY",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect generated Dazed.",
-     "verb": "generated"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Boost Away",
-    "You Block 5→11"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 37,
-   "idx": 37,
-   "label": "Play Boost Away",
-   "parent_id": 36,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    39
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 11→16"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 38,
-   "idx": 38,
-   "label": "Play Defend",
-   "parent_id": 37,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    40
-   ],
-   "combat_log": [
-    {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 40,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Nibbit.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 37,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 3 damage to Nibbit.",
-     "verb": "dealt"
+     "base_cost": -1,
+     "can_play": false,
+     "color": "colorless",
+     "cost": 0,
+     "description": "Unplayable.\nEthereal.",
+     "description_rich": "[gold]Unplayable[/gold].\n[gold]Ethereal[/gold].",
+     "id": "DAZED",
+     "image": "https://assets.test/card_atlas/status/dazed.png",
+     "index": -1,
+     "name": "Dazed",
+     "rarity": "Status",
+     "stats": {},
+     "target_type": "None",
+     "type": "Status",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Butt",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit used Butt.",
-     "verb": "used"
+     "base_cost": 0,
+     "can_play": false,
+     "color": "blue",
+     "cost": 0,
+     "description": "Gain 6 Block.\nAdd a Dazed into your Discard Pile.",
+     "description_rich": "Gain 6 [gold]Block[/gold].\nAdd a [gold]Dazed[/gold] into your [gold]Discard Pile[/gold].",
+     "id": "BOOST_AWAY",
+     "image": "https://assets.test/card_atlas/defect/boost_away.png",
+     "index": -1,
+     "name": "Boost Away",
+     "rarity": "Common",
+     "stats": {
+      "block": 6
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
+    }
+   ],
+   "discard_pile_count": 4,
+   "draw_pile": [
+    {
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 12,
-     "hp_after": 59,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Butt",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "BUTT",
-     "source_upgraded": null,
-     "target": "The Defect",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Nibbit dealt 0 damage to The Defect using Butt.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 16→0",
-    "Nibbit HP 43→37 (−6)",
-    "Lightning orb passive: 3 damage to a random enemy (×2)"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 39,
-   "idx": 39,
-   "label": "End turn",
-   "parent_id": 38,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    41
-   ],
-   "combat_log": [
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
+    },
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 31,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Nibbit using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Nibbit HP 37→31 (−6)"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 40,
-   "idx": 40,
-   "label": "Play Strike → Nibbit",
-   "parent_id": 39,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    42
-   ],
-   "combat_log": [
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Evoke your rightmost Orb twice.",
+     "description_rich": "[gold]Evoke[/gold] your rightmost Orb twice.",
+     "id": "DUALCAST",
+     "image": "https://assets.test/card_atlas/defect/dualcast.png",
+     "index": -1,
+     "name": "Dualcast",
+     "rarity": "Basic",
+     "stats": {},
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
+    },
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 25,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_DEFECT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Defect dealt 6 damage to Nibbit using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Nibbit HP 31→25 (−6)"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 41,
-   "idx": 41,
-   "label": "Play Strike → Nibbit",
-   "parent_id": 40,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [],
-   "combat_log": [
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    },
     {
-     "actor": "The Defect",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "card_generated",
-     "noun": "Void",
-     "round": 2,
-     "side": "player",
-     "source": "TURBO",
-     "source_card": "TURBO",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Defect generated Void.",
-     "verb": "generated"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 1,
+     "can_play": false,
+     "color": "blue",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 0,
+     "can_play": false,
+     "color": "blue",
+     "cost": 0,
+     "description": "Gain Energy.\nAdd a Void into your Discard Pile.",
+     "description_rich": "Gain Energy.\nAdd a [gold]Void[/gold] into your [gold]Discard Pile[/gold].",
+     "id": "TURBO",
+     "image": "https://assets.test/card_atlas/defect/turbo.png",
+     "index": -1,
+     "name": "TURBO",
+     "rarity": "Common",
+     "stats": {},
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "Play TURBO"
+   "draw_pile_count": 8,
+   "enemies": [
+    {
+     "block": 0,
+     "hp": 43,
+     "image": "https://assets.test/monsters/nibbit.png",
+     "index": 0,
+     "intents": [
+      {
+       "damage": 12,
+       "intent_image": "https://assets.test/intent_atlas/attack/intent_attack_3.png",
+       "type": "Attack"
+      }
+     ],
+     "kind": "Nibbit",
+     "max_hp": 43,
+     "move_state": "BUTT",
+     "name": "Nibbit",
+     "powers": [],
+     "rig": "https://assets.test/monster_rigs/nibbit/nibbit",
+     "rig_bounds_h": 146.0,
+     "rig_bounds_w": 270.0,
+     "rig_scale": 0.28,
+     "uid": 2
+    }
    ],
-   "error": false,
+   "energy": 1,
+   "energy_image": "https://assets.test/sprite_fonts/defect_energy_icon.png",
+   "exhaust_pile": [],
+   "exhaust_pile_count": 0,
    "floor": 5,
-   "id": 42,
-   "idx": 42,
-   "label": "Play TURBO",
-   "parent_id": 41,
-   "turn": 2,
-   "value": null
+   "hand": [
+    {
+     "base_cost": 1,
+     "can_play": true,
+     "color": "blue",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_DEFECT",
+     "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+     "index": 0,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "base_cost": 1,
+     "can_play": true,
+     "color": "colorless",
+     "cost": 1,
+     "damage_preview": {
+      "0": 14
+     },
+     "description": "Deal 14 damage.",
+     "description_rich": "Deal 14 damage.",
+     "id": "ULTIMATE_STRIKE",
+     "image": "https://assets.test/card_atlas/colorless/ultimate_strike.png",
+     "index": 1,
+     "name": "Ultimate Strike",
+     "rarity": "Uncommon",
+     "stats": {
+      "damage": 14
+     },
+     "target_type": "AnyEnemy",
+     "type": "Attack",
+     "upgraded": false
+    }
+   ],
+   "max_energy": 3,
+   "options": [],
+   "orb_slots": 3,
+   "orbs": [
+    {
+     "evoke": 8,
+     "image": "https://assets.test/orb_atlas/lightning.png",
+     "index": 0,
+     "name": "LIGHTNING_ORB.title",
+     "passive": 3,
+     "type": "Lightning"
+    },
+    {
+     "evoke": 8,
+     "image": "https://assets.test/orb_atlas/lightning.png",
+     "index": 1,
+     "name": "LIGHTNING_ORB.title",
+     "passive": 3,
+     "type": "Lightning"
+    }
+   ],
+   "player": {
+    "block": 11,
+    "deck": [
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 0,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 1,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 2,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/strike_defect.png",
+      "index": 3,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 4,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 5,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 6,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_DEFECT",
+      "image": "https://assets.test/card_atlas/defect/defend_defect.png",
+      "index": 7,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Channel 1 Lightning.",
+      "description_rich": "[gold]Channel[/gold] 1 [gold]Lightning[/gold].",
+      "id": "ZAP",
+      "image": "https://assets.test/card_atlas/defect/zap.png",
+      "index": 8,
+      "name": "Zap",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 1,
+      "description": "Evoke your rightmost Orb twice.",
+      "description_rich": "[gold]Evoke[/gold] your rightmost Orb twice.",
+      "id": "DUALCAST",
+      "image": "https://assets.test/card_atlas/defect/dualcast.png",
+      "index": 9,
+      "name": "Dualcast",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "colorless",
+      "cost": 1,
+      "description": "Deal 14 damage.",
+      "description_rich": "Deal 14 damage.",
+      "id": "ULTIMATE_STRIKE",
+      "image": "https://assets.test/card_atlas/colorless/ultimate_strike.png",
+      "index": 10,
+      "name": "Ultimate Strike",
+      "rarity": "Uncommon",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 0,
+      "description": "Gain 6 Block.\nAdd a Dazed into your Discard Pile.",
+      "description_rich": "Gain 6 Block.\nAdd a Dazed into your Discard Pile.",
+      "id": "BOOST_AWAY",
+      "image": "https://assets.test/card_atlas/defect/boost_away.png",
+      "index": 11,
+      "name": "Boost Away",
+      "rarity": "Common",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "blue",
+      "cost": 0,
+      "description": "Gain Energy.\nAdd a Void into your Discard Pile.",
+      "description_rich": "Gain Energy.\nAdd a [gold]Void[/gold] into your [gold]Discard Pile[/gold].",
+      "id": "TURBO",
+      "image": "https://assets.test/card_atlas/defect/turbo.png",
+      "index": 12,
+      "name": "TURBO",
+      "rarity": "Common",
+      "type": "Skill",
+      "upgraded": false
+     }
+    ],
+    "gold": 193,
+    "hp": 59,
+    "image": "https://assets.test/character_sprites/defect.png",
+    "max_hp": 75,
+    "name": "Defect",
+    "potion_slots": 3,
+    "potions": [],
+    "relics": [
+     {
+      "description": "At the start of each combat, Channel 1 Lightning.",
+      "id": "CRACKED_CORE",
+      "image": "https://assets.test/relic_atlas/cracked_core.png",
+      "name": "Cracked Core"
+     },
+     {
+      "description": "Upon pickup, choose 1 of 2 Colorless cards to add to your Deck.",
+      "id": "LEAD_PAPERWEIGHT",
+      "image": "https://assets.test/relic_atlas/lead_paperweight.png",
+      "name": "Lead Paperweight"
+     }
+    ],
+    "rig": "https://assets.test/character_rigs/defect/defect",
+    "rig_bounds_h": 260.0,
+    "rig_bounds_w": 250.0,
+    "rig_scale": 0.125
+   },
+   "player_powers": [],
+   "round": 1
   }
- ]
+ }
 }

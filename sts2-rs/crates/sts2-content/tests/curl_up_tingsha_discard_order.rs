@@ -38,7 +38,7 @@ fn push_card(
     state.cards.push(Card {
         uid,
         card_id: id,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type,
         target_type,
         upgraded: false,

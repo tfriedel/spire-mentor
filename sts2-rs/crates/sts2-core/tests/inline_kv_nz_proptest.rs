@@ -15,7 +15,7 @@
 //!   different write history) is `==`, hashes alike and prints alike.
 //!
 //! `VarKey` has more variants than the mask has bits, so the aliased keys
-//! (`WireCostStable`/`RampageDamage`, `Generic`/`ClawBuff`) are covered too.
+//! (`Generic`/`GeneticAlgorithmBlock`, `EnchantmentUsed`/`StarCostFreeThisCombat`, ...) are covered too.
 
 use core::hash::{Hash, Hasher};
 
@@ -23,35 +23,36 @@ use proptest::prelude::*;
 use sts2_core::cards::{CardEnchantments, CombatVars, EnchantmentId, VarKey};
 use sts2_core::inline_kv::{InlineKv, InlineKvKey};
 
-const VAR_KEYS: [VarKey; 28] = [
+const VAR_KEYS: [VarKey; 29] = [
     VarKey::RampageDamage,
     VarKey::ClawBuff,
     VarKey::GeneticAlgorithmBlock,
     VarKey::RitualDaggerDamage,
-    VarKey::FreeThisTurn,
     VarKey::EtherealThisCombat,
     VarKey::StarCostFreeThisCombat,
     VarKey::MakeItSoInterval,
-    VarKey::StompCostReductionThisTurn,
-    VarKey::PinpointCostReductionThisTurn,
-    VarKey::SneckoCostDeltaThisTurn,
     VarKey::ReturnIfPlayedRound,
     VarKey::DampenDowngradedMarker,
     VarKey::IsDupe,
     VarKey::GeneratedInCombat,
-    VarKey::CostAbsolutelySet,
     VarKey::ThrashFoldRemNum,
     VarKey::ThrashFoldRemDen,
-    VarKey::FreeUntilPlayed,
     VarKey::WitherFakeUpgradeLevel,
     VarKey::PendingBatchAutoPlay,
     VarKey::AutoPlayStarX,
     VarKey::AutoPlayEnergyValue,
-    VarKey::WireTransientCostThisTurn,
-    VarKey::WireCostExpiringOnPlay,
-    VarKey::WireCostStable,
     VarKey::Generic,
     VarKey::EnchantmentUsed,
+    VarKey::MidnightExhaustsCounted,
+    VarKey::StarCostFreeThisTurn,
+    VarKey::MomentumDamage,
+    VarKey::BansheesCryEtherealCounted,
+    VarKey::ExhaustOnNextPlay,
+    VarKey::RegretCardsInHand,
+    VarKey::SlyOwedAfterDraw,
+    VarKey::CloneTurnFlags,
+    VarKey::ExhaustOwedAfterDraw,
+    VarKey::AfterCardDrawnDeferred,
 ];
 
 const ENCHANTMENT_IDS: [EnchantmentId; 23] = [
@@ -168,11 +169,11 @@ fn run<K: InlineKvKey + Hash, const N: usize>(keys: &[K], ops: &[Op]) -> Result<
                 model.clear();
             }
             Op::Recollect => {
-                map = map.iter().copied().collect();
+                map = map.iter().collect();
             }
         }
 
-        prop_assert_eq!(map.as_slice(), model.as_slice(), "after {:?}", op);
+        prop_assert_eq!(map.to_vec(), model.clone(), "after {:?}", op);
         for &key in keys {
             let want = model
                 .iter()
@@ -224,14 +225,7 @@ proptest! {
 /// `lib.rs` / `combat_loop.rs` claim there is none).
 #[test]
 fn gate_keys_do_not_alias() {
-    for gate in [
-        VarKey::FreeThisTurn,
-        VarKey::FreeUntilPlayed,
-        VarKey::SneckoCostDeltaThisTurn,
-        VarKey::WireTransientCostThisTurn,
-        VarKey::StompCostReductionThisTurn,
-        VarKey::PinpointCostReductionThisTurn,
-    ] {
+    for gate in [VarKey::StarCostFreeThisTurn, VarKey::ExhaustOnNextPlay] {
         let sharing: Vec<VarKey> = VAR_KEYS
             .iter()
             .copied()

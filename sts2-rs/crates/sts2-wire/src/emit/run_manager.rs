@@ -581,7 +581,7 @@ pub fn card_grant_options(rm: &RunManager) -> Vec<(String, bool)> {
 #[must_use]
 pub fn card_enchantment(e: &sts2_core::cards::CardEnchantments) -> Option<(String, i64)> {
     e.first()
-        .map(|(id, amount)| (id.python_name().to_string(), i64::from(*amount)))
+        .map(|(id, amount)| (id.python_name().to_string(), i64::from(amount)))
 }
 
 /// `RunManager.master_deck_enchantments()` — each deck card's enchantment,

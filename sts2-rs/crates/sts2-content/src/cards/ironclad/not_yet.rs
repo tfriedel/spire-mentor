@@ -62,7 +62,7 @@ mod tests {
         state.cards.push(sts2_core::cards::Card {
             uid,
             card_id: CardId::NotYet,
-            cost: 2,
+            cost: sts2_core::CardEnergyCost::new(2),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded,

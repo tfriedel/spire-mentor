@@ -16,7 +16,10 @@ pub(crate) fn on_before_side_turn_start_power_cell(
         .draw
         .iter()
         .copied()
-        .filter(|uid| crate::card_by_uid(&state.cards, *uid).is_some_and(|c| c.cost == 0))
+        .filter(|uid| {
+            crate::card_by_uid(&state.cards, *uid)
+                .is_some_and(|c| c.base_cost() >= 0 && c.local_cost() <= 0)
+        })
         .collect();
     if candidates.is_empty() {
         return EffectResult::NotImplemented;
@@ -26,8 +29,8 @@ pub(crate) fn on_before_side_turn_start_power_cell(
     //                         && c.EnergyCost.GetWithModifiers(Local) == 0)
     //       .ToList().StableShuffle(RunState.Rng.CombatCardSelection)
     //       .Take(DynamicVars.Cards = 2).
-    // X-cost cards (`is_x_cost` = `cost == -1`) are already excluded by the
-    // `c.cost == 0` filter above. `StableShuffle` (`ListExtensions.cs:10`) =
+    // `GetWithModifiers(Local)` clamps at 0 except for a negative base, so
+    // X-cost (base -1) and unplayable cards are excluded by `base_cost() >= 0`. `StableShuffle` (`ListExtensions.cs:10`) =
     // `Sort()` by `CardModel.CompareTo` (Entry ordinal, then upgrade level)
     // THEN `UnstableShuffle` on the `combat_card_selection` stream — reading
     // `candidates.len() - 1` times. The prior port used the legacy generic

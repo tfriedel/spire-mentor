@@ -124,7 +124,7 @@ pub struct PreStep {
     /// `cost` is the **modifier-resolved** cost
     /// ([`crate::hooks::effective_card_cost`]) — the same number
     /// `combat_loop::play_card` subtracts — not the raw `card.cost`, which
-    /// ignores Corruption / `Free*` / `CostAbsolutelySet` and would make the
+    /// ignores Corruption and the local cost modifiers and would make the
     /// energy-delta check fire on correct engine behaviour.
     /// `weighted_drain` is the EXTRA energy the `Weighted` affliction drains
     /// on play (C# `Afflictions/Weighted.cs:8-11`, bead `sts2-rs-l65km`),

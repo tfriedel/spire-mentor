@@ -202,17 +202,16 @@ fn upgrade_keeps_a_keyword_gained_in_combat() {
     }
 }
 
-/// A Confused roll held in `cost` (`CostAbsolutelySet`) that lands on Rend's
-/// v0.107.1 base (2) must survive an in-combat upgrade (Bone Tea); the
-/// upgrade's build normalization must not read it as an unmoved base.
-fn confused_rend_upgraded_cost(version: GameVersion) -> i8 {
+/// A Confused roll (`SetThisCombat(2)`) that lands on Rend's v0.107.1 base
+/// (2) must survive an in-combat upgrade (Bone Tea); the upgrade's build
+/// normalization must not read it as an unmoved base.
+fn confused_rend_upgraded_cost(version: GameVersion) -> i32 {
     content_dispatch::ensure_installed();
     sts2_content::relics::dispatch::ensure_installed();
     let mut card = card_pod_from_id_for(CardId::Rend, false, version).expect("pod");
-    card.cost = 2;
-    card.set_combat_var(sts2_core::cards::VarKey::CostAbsolutelySet, 1);
+    card.cost.set_this_combat(2, false);
     assert!(card.upgrade_for(version));
-    card.cost
+    card.local_cost()
 }
 
 #[test]
@@ -538,11 +537,13 @@ fn momentum_strike_keeps_zero_after_a_snecko_roll_expires() {
     let i = push_hand(&mut state, CardId::MomentumStrike, false);
     let uid = state.player.hand[usize::from(i)];
     // The same banked modifier Snecko Oil's 0 roll leaves on a 1-cost card.
-    state.cards[uid.0.get() as usize - 1].set_this_turn_or_until_played_reduce_only(0);
-    assert_eq!(state.cards[uid.0.get() as usize - 1].cost, 0);
+    state.cards[uid.0.get() as usize - 1]
+        .cost
+        .set_this_turn_or_until_played(0, true);
+    assert_eq!(state.cards[uid.0.get() as usize - 1].local_cost(), 0);
     let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
     assert_eq!(
-        state.cards[uid.0.get() as usize - 1].cost,
+        state.cards[uid.0.get() as usize - 1].local_cost(),
         0,
         "SetThisCombat(0) outlives the expired roll"
     );
@@ -608,9 +609,13 @@ fn rocket_punch_free_until_played_v0107() {
     );
     let card = state.cards[uid.0.get() as usize - 1];
     assert_eq!(
-        card.combat_var(sts2_core::cards::VarKey::CostReductionUntilPlayed),
-        0,
-        "the v0.111.0 var is never set at v0.107.1"
+        card.cost.mods(),
+        &[sts2_core::LocalCostMod::absolute(
+            0,
+            sts2_core::CostExpiry::Played,
+            false
+        )],
+        "v0.107.1 sets, it does not AddUntilPlayed(-1)"
     );
 }
 
@@ -624,7 +629,7 @@ fn midnight_costs_one_less_per_exhaust_v0111() {
     let fodder = new_card(&mut state, CardId::StrikeIronclad, false);
     state.player.hand.push(fodder);
     let _ = sts2_core::card_effects::exhaust_card_uid(&mut state, fodder);
-    assert_eq!(state.cards[uid.0.get() as usize - 1].cost, 11);
+    assert_eq!(state.cards[uid.0.get() as usize - 1].local_cost(), 11);
 }
 
 #[test]
@@ -1144,7 +1149,7 @@ fn razor_tooth_upgrades_with_build_delta_v0111() {
     // (ExpectAFight.cs:39-43).
     let eaf = razor_tooth_upgraded(V111, CardId::ExpectAFight);
     assert!(eaf.upgraded);
-    assert_eq!(eaf.cost, 3);
+    assert_eq!(eaf.local_cost(), 3);
 }
 
 #[test]
@@ -1152,7 +1157,7 @@ fn razor_tooth_upgrades_with_build_delta_v0107() {
     let hb = razor_tooth_upgraded(V107, CardId::Hyperbeam);
     assert_eq!(hb.base_damage, 36);
     let eaf = razor_tooth_upgraded(V107, CardId::ExpectAFight);
-    assert_eq!(eaf.cost, 1);
+    assert_eq!(eaf.local_cost(), 1);
 }
 
 /// C# `CardCmd.Upgrade` returns at once while `CombatManager.IsEnding`
@@ -1192,7 +1197,9 @@ fn adaptive_strike_copy_stays_free_after_a_copied_turn_cap_expires() {
         let mut state = fresh(version, CharacterId::Defect);
         let i = push_hand(&mut state, CardId::AdaptiveStrike, false);
         let original = state.player.hand[usize::from(i)];
-        state.cards[original.0.get() as usize - 1].set_this_turn_or_until_played_reduce_only(1);
+        state.cards[original.0.get() as usize - 1]
+            .cost
+            .set_this_turn_or_until_played(1, true);
         let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
         let copy = *state
             .player
@@ -1204,11 +1211,12 @@ fn adaptive_strike_copy_stays_free_after_a_copied_turn_cap_expires() {
             })
             .expect("the copy lands in the discard pile");
         let card = &mut state.cards[copy.0.get() as usize - 1];
-        assert_eq!(card.cost, 0, "{version:?}");
+        assert_eq!(card.local_cost(), 0, "{version:?}");
         // The turn-end cleanup expires the copied cap.
-        card.expire_snecko_roll();
+        card.cost.end_of_turn_cleanup();
         assert_eq!(
-            card.cost, 0,
+            card.local_cost(),
+            0,
             "{version:?}: SetThisCombat(0) still owns the cost"
         );
     }
@@ -1231,9 +1239,10 @@ fn up_my_sleeve_cost_reduction_stays_unclamped() {
             let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
         }
         let card = &mut state.cards[ums.0.get() as usize - 1];
-        assert_eq!(card.cost, 0, "{version:?}: shown as 0");
-        card.add_cost_this_combat(1);
-        assert_eq!(card.cost, 0, "{version:?}: -1 + 1 = 0, not 0 + 1");
+        assert_eq!(card.local_cost(), -1, "{version:?}: unclamped local");
+        assert_eq!(card.local_cost().max(0), 0, "{version:?}: shown as 0");
+        card.cost.add_this_combat(1);
+        assert_eq!(card.local_cost(), 0, "{version:?}: -1 + 1 = 0, not 0 + 1");
     }
 }
 
@@ -1267,14 +1276,14 @@ fn entangled_pinpoint_keeps_its_reduction_below_zero() {
             0,
             "{version:?}: 3 - 4 skills, then Tangled +1, clamped at the end"
         );
-        state.restore_pinpoint_costs_for_turn_start();
-        let card = &state.cards[pinpoint.0.get() as usize - 1];
-        assert_eq!(card.cost, 3, "{version:?}: next turn the base is back");
+        let card = &mut state.cards[pinpoint.0.get() as usize - 1];
+        card.cost.end_of_turn_cleanup();
         assert_eq!(
-            card.combat_var(sts2_core::cards::VarKey::CostDebtThisTurn),
-            0,
-            "{version:?}"
+            card.local_cost(),
+            3,
+            "{version:?}: next turn the base is back"
         );
+        assert!(!card.cost.has_local_modifiers(), "{version:?}");
     }
 }
 
@@ -1340,16 +1349,19 @@ fn razor_tooth_upgrade_keeps_an_auto_played_exhaust_card_exhausting() {
 fn normalize_keeps_a_confused_cost_v0111() {
     content_dispatch::ensure_installed();
     let mut rolled = card_pod_from_id_for(CardId::BeaconOfHope, false, V111).expect("pod");
-    assert_eq!(rolled.cost, 2, "BeaconOfHope.cs:18");
-    rolled.cost = 1;
-    rolled.set_combat_var(sts2_core::cards::VarKey::CostAbsolutelySet, 1);
+    assert_eq!(rolled.local_cost(), 2, "BeaconOfHope.cs:18");
+    rolled.cost.set_this_combat(1, false);
     assert!(rolled.upgrade_for(V111));
-    assert_eq!(rolled.cost, 1, "the absolute roll is kept");
+    assert_eq!(rolled.local_cost(), 1, "the absolute roll is kept");
 
     let mut minted = card_pod_from_id_for(CardId::BeaconOfHope, false, V107).expect("pod");
-    assert_eq!(minted.cost, 1);
+    assert_eq!(minted.local_cost(), 1);
     minted.normalize_for_version(V111);
-    assert_eq!(minted.cost, 2, "a v0.107.1-minted base cost is re-based");
+    assert_eq!(
+        minted.local_cost(),
+        2,
+        "a v0.107.1-minted base cost is re-based"
+    );
 }
 
 // ── BeatDown ───────────────────────────────────────────────────────────────
@@ -1685,6 +1697,36 @@ fn sweeping_gaze_with_no_target_still_zeroes_flatten() {
     let i = push_hand(&mut state, CardId::SweepingGaze, false);
     let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
     assert_eq!(sts2_core::hooks::effective_card_cost(&state, flatten), 0);
+}
+
+/// `Flatten.AfterAttack` is a card hook, and C# `CombatState.IterateHookListeners`
+/// walks every card in `PlayerCombatState.AllPiles`, so an Osty attack zeroes
+/// a Flatten in the draw and discard piles too (`EnergyCost.SetThisTurn(0)`),
+/// not only one in hand; the zero wears off at turn end. Rust evaluated the
+/// "Osty attacked this turn" rule on read, which showed the draw-pile Flatten
+/// at 2 (workbench golden `necrobinder_g0lden0002_*`).
+#[test]
+fn an_osty_attack_zeroes_flatten_in_every_pile_for_the_turn() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Necrobinder);
+        let _ = state.summon_osty(5);
+        let in_draw = new_card(&mut state, CardId::Flatten, false);
+        state.player.draw.push(in_draw);
+        let in_discard = new_card(&mut state, CardId::Flatten, false);
+        state.player.discard.push(in_discard);
+        let i = push_hand(&mut state, CardId::SweepingGaze, false);
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
+        for flatten in [in_draw, in_discard] {
+            let card = &state.cards[flatten.0.get() as usize - 1];
+            assert_eq!(card.local_cost(), 0, "{version:?}: zeroed this turn");
+            assert_eq!(card.base_cost(), 2, "{version:?}: printed cost kept");
+        }
+        let _ = sts2_core::apply(&mut state, sts2_core::Action::EndTurn);
+        for flatten in [in_draw, in_discard] {
+            let card = &state.cards[flatten.0.get() as usize - 1];
+            assert_eq!(card.local_cost(), 2, "{version:?}: the zero expired");
+        }
+    }
 }
 
 /// C# grants Escape Plan's block only for a drawn `CardType.Skill`; the Quest
@@ -2088,7 +2130,7 @@ fn void_form_frees_only_cards_in_hand_or_play() {
         add_player_power(&mut state, 60, PowerKind::VoidForm, 2);
         let uid = new_card(&mut state, CardId::Equilibrium, false);
         state.player.discard.push(uid);
-        let base = i32::from(state.cards[uid.0.get() as usize - 1].cost);
+        let base = state.cards[uid.0.get() as usize - 1].local_cost();
         assert!(base > 0, "{version:?}");
         assert_eq!(
             sts2_core::hooks::effective_card_cost(&state, uid),
@@ -2431,7 +2473,7 @@ fn danse_macabre_reads_a_replays_live_cost() {
         let i = push_hand(&mut state, CardId::Modded, false);
         let uid = state.player.hand[usize::from(i)];
         let card = &mut state.cards[uid.0.get() as usize - 1];
-        card.cost = 1;
+        card.cost = sts2_core::CardEnergyCost::new(1);
         card.base_replay_count = 1;
         let before = state.player.block;
         let _ = sts2_core::combat_loop::play_card(&mut state, i, None);
@@ -2543,11 +2585,14 @@ fn midnight_reduction_follows_joss_papers_confused_draw_v0111() {
     let midnight = state.player.draw[0];
     let fodder = new_card(&mut state, CardId::StrikeIronclad, false);
     state.player.hand.push(fodder);
-    let roll = i8::try_from(state.run_rng.combat_energy_costs.clone().next_int(0, 3)).expect("i8");
+    let roll = state.run_rng.combat_energy_costs.clone().next_int(0, 3);
     assert!(roll > 0, "a 0 roll cannot tell the orders apart");
     let _ = sts2_core::card_effects::exhaust_card_uid(&mut state, fodder);
     assert!(state.player.hand.contains(&midnight), "Joss Paper drew it");
-    assert_eq!(state.cards[midnight.0.get() as usize - 1].cost, roll - 1);
+    assert_eq!(
+        state.cards[midnight.0.get() as usize - 1].local_cost(),
+        roll - 1
+    );
 }
 
 /// C# `CreateClone` is a `MemberwiseClone` + `DeepCloneFields`
@@ -2830,7 +2875,7 @@ fn veilpiercer_frees_ethereal_cards_only_in_hand_or_play() {
         let uid = new_card(&mut state, CardId::StrikeNecrobinder, false);
         state.cards[uid.0.get() as usize - 1]
             .set_combat_var(sts2_core::cards::VarKey::EtherealThisCombat, 1);
-        let full = i32::from(state.cards[uid.0.get() as usize - 1].cost);
+        let full = state.cards[uid.0.get() as usize - 1].local_cost();
         assert!(full > 0);
         state.player.exhaust.push(uid);
         assert_eq!(
@@ -3080,11 +3125,11 @@ fn an_upgrade_under_enlightenments_cap_keeps_the_cap() {
         let mut state = fresh(version, CharacterId::Necrobinder);
         let uid = new_card(&mut state, CardId::Eidolon, false);
         let card = &mut state.cards[uid.0.get() as usize - 1];
-        assert_eq!(card.cost, 2, "{version:?}");
-        card.set_this_combat_reduce_only(1);
-        assert_eq!(card.cost, 1, "{version:?}: capped");
+        assert_eq!(card.local_cost(), 2, "{version:?}");
+        card.cost.set_this_combat(1, true);
+        assert_eq!(card.local_cost(), 1, "{version:?}: capped");
         assert!(card.upgrade_for(version), "{version:?}");
-        assert_eq!(card.cost, 1, "{version:?}: min(2 - 1, 1)");
+        assert_eq!(card.local_cost(), 1, "{version:?}: min(2 - 1, 1)");
     }
 }
 

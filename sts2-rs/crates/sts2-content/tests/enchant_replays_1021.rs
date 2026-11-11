@@ -57,7 +57,7 @@ fn push_defend(state: &mut CombatState, ench: EnchantmentId, amount: i32, replay
     let mut card = Card {
         uid,
         card_id: CardId::DefendIronclad,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         base_block: 5,
@@ -76,7 +76,7 @@ fn push_strike(state: &mut CombatState, ench: EnchantmentId, amount: i32, replay
     let mut card = Card {
         uid,
         card_id: CardId::StrikeIronclad,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         base_damage: 6,
@@ -179,7 +179,7 @@ fn momentum_on_rampage_counts_each_growth_once() {
     let mut card =
         sts2_content::cards::spec_index::card_pod_from_id(CardId::Rampage, false).expect("Rampage");
     card.uid = uid;
-    card.cost = 0;
+    card.cost = sts2_core::CardEnergyCost::new(0);
     card.set_enchantment(EnchantmentId::Momentum, 3);
     state.cards.push(card);
     state.player.hand.push(uid);

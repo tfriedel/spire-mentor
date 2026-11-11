@@ -23,14 +23,14 @@
      "best_col": 3,
      "columns": [
       {
-       "baseline_score": 1.0209,
+       "baseline_score": 1.0709,
        "can_skip_elite": true,
        "col": 3,
        "is_pick": true,
        "max_elites": 2,
        "min_elites": 0,
        "n_paths": 22,
-       "score": 1.0209
+       "score": 1.0709
       }
      ],
      "diverged": false,

@@ -1470,7 +1470,7 @@ fn x_cost_card_ignores_live_display_cost() {
                     sts2_core::cards::CardId::Cascade | sts2_core::cards::CardId::StrikeIronclad
                 )
             })
-            .map(|c| (c.card_id, c.cost))
+            .map(|c| (c.card_id, c.base_cost()))
             .collect();
         let cascades: Vec<i8> = costs
             .iter()

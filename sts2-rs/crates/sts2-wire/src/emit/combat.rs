@@ -106,15 +106,35 @@ pub fn card_to_value(state: &CombatState, card: &Card) -> Value {
         "cost_override",
         sts2_core::hooks::effective_card_cost(state, card.uid),
     );
-    // The instance's own cost, separate from the effective one above, plus
-    // the per-instance scratch that explains the difference. Emitting only
-    // the effective cost made every transient discount permanent on rebuild;
-    // see `ParsedCard::base_cost`.
-    set(&mut d, "base_cost", i32::from(card.cost));
+    // The instance's own cost (C# `GetWithModifiers(Local)`, the same number
+    // the C# producers send as `base_cost`), separate from the effective one
+    // above. `cost_mods` carries the model behind it — the base and the
+    // ordered local modifiers with their lifetimes — so a rebuild expires
+    // each modifier on schedule instead of keeping a this-turn discount for
+    // good. Omitted for the common unmodified card, where `base_cost` says
+    // everything.
+    let own_cost = if card.base_cost() < 0 {
+        i32::from(card.base_cost())
+    } else {
+        card.local_cost().max(0)
+    };
+    set(&mut d, "base_cost", own_cost);
+    if card.cost.has_local_modifiers() {
+        let mut cm = obj();
+        set(&mut cm, "base", i32::from(card.base_cost()));
+        let mods: Vec<Value> = card
+            .cost
+            .mods()
+            .iter()
+            .map(|m| Value::from(vec![i32::from(m.amount()), i32::from(m.flags())]))
+            .collect();
+        cm.insert("mods".to_owned(), Value::Array(mods));
+        d.insert("cost_mods".to_owned(), Value::Object(cm));
+    }
     if !card.combat_vars.is_empty() {
         let mut cv = obj();
         for (key, value) in &card.combat_vars {
-            set(&mut cv, var_key_wire_name(*key), *value);
+            set(&mut cv, var_key_wire_name(key), value);
         }
         d.insert("combat_vars".to_owned(), Value::Object(cv));
     }
@@ -141,7 +161,7 @@ pub fn card_to_value(state: &CombatState, card: &Card) -> Value {
     // with neither side emitting flags, the diff was structurally BLIND to
     // every keyword divergence. ONLY the override/registry-derived subset is
     // emitted: the C# producer names flags only on HAND cards and never
-    // names the free riders at all, so a var-derived emission (FreeThisTurn,
+    // names the free riders at all, so a model-derived emission (FREE_THIS_TURN,
     // GhostSeed's EtherealThisCombat) is knowledge only the mirror's own
     // model holds — emitting it manufactured a per-decision tuple desync on
     // every generated-free card (the v29wr hand/discard explosion: mirror
@@ -227,7 +247,7 @@ pub fn card_to_value(state: &CombatState, card: &Card) -> Value {
     // than invent a shape no consumer parses.
     if let Some((id, amount)) = card.enchantments.first() {
         set(&mut d, "enchantment", id.wire_name());
-        set(&mut d, "enchantment_amount", *amount);
+        set(&mut d, "enchantment_amount", amount);
     }
     // Per-card affliction (Bound/Devoured/…): additive optional fields
     // so afflicted cards survive the round-trip — without them a

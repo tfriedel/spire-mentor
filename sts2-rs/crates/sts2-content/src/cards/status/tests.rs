@@ -115,7 +115,7 @@ fn play_rip_and_tear_hits_target_twice() {
     state.cards.push(Card {
         uid: CardUid(card_uid),
         card_id: CardId::RipAndTear,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -177,7 +177,7 @@ fn play_shiv_inky_adds_damage_and_weak() {
         let mut card = Card {
             uid: CardUid(card_uid),
             card_id: CardId::Shiv,
-            cost: 0,
+            cost: sts2_core::CardEnergyCost::new(0),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -244,7 +244,7 @@ fn play_shiv_inky_adds_only_weak_v0111() {
     let mut card = Card {
         uid: CardUid(card_uid),
         card_id: CardId::Shiv,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -307,7 +307,7 @@ fn play_shiv_untargeted_without_fan_of_knives_resolves_aoe() {
     state.cards.push(Card {
         uid: CardUid(card_uid),
         card_id: CardId::Shiv,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -474,7 +474,7 @@ fn void_drawn_energy_loss_then_end_of_turn_ethereal_expel() {
     let void_uid = state.add_card_to_draw_pile(Card {
         uid: CardUid(NonZeroU32::new(u32::MAX).expect("nz placeholder")),
         card_id: CardId::Void,
-        cost: -1,
+        cost: sts2_core::CardEnergyCost::new(-1),
         card_type: CardType::Status,
         target_type: TargetType::None,
         upgraded: false,
@@ -537,7 +537,7 @@ fn play_luminesce_grants_two_energy_three_when_upgraded() {
         state.cards.push(Card {
             uid: CardUid(card_uid),
             card_id: CardId::Luminesce,
-            cost: 0,
+            cost: sts2_core::CardEnergyCost::new(0),
             card_type: CardType::Skill,
             target_type: TargetType::Self_,
             upgraded,
@@ -612,7 +612,7 @@ fn fan_of_knives_inky_shiv_weakens_wrigglers_spawned_by_its_kill() {
     let mut card = Card {
         uid: card_uid,
         card_id: CardId::Shiv,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,

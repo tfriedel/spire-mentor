@@ -62,7 +62,7 @@ fn push(cards: &mut sts2_core::CardStore, card: Card) -> CardUid {
 fn strike() -> Card {
     Card {
         card_id: CardId::StrikeIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         base_damage: 6,
@@ -73,7 +73,7 @@ fn strike() -> Card {
 fn defend() -> Card {
     Card {
         card_id: CardId::DefendIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         base_block: 5,
@@ -173,7 +173,7 @@ fn auto_played_unrelenting_under_one_two_punch_ends_with_one_free_attack() {
     let mut state = setup(Vec::new());
     let mut card = sts2_content::cards::spec_index::card_pod_from_id(CardId::Unrelenting, false)
         .expect("Unrelenting");
-    card.cost = 2;
+    card.cost = sts2_core::CardEnergyCost::new(2);
     let u = push(&mut state.cards, card);
     state.player.draw.insert(0, u);
     add_power(&mut state, PowerKind::OneTwoPunch, 1);

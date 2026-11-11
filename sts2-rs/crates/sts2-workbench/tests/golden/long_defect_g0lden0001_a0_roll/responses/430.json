@@ -348,7 +348,7 @@
     "upgraded": false
    },
    {
-    "base_cost": 2,
+    "base_cost": 0,
     "can_play": false,
     "color": "blue",
     "cost": 0,
@@ -367,7 +367,7 @@
     "upgraded": false
    },
    {
-    "base_cost": 2,
+    "base_cost": 0,
     "can_play": false,
     "color": "blue",
     "cost": 0,

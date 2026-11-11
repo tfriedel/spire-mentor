@@ -147,7 +147,8 @@ pub fn apply_static_enchantment(
             // one that has to land; NON_REMOVABLE is the older local alias, kept
             // so existing readers of that flag still see it.
             added = CardKeywords::ETERNAL.with(CardKeywords::NON_REMOVABLE);
-            card.cost = 0;
+            // `UpgradeBy(-GetWithModifiers(None))`: the base goes to 0.
+            card.cost.upgrade_by(-i32::from(card.base_cost()));
         }
         EnchantmentId::SoulsPower => {
             removed = CardKeywords::EXHAUST;
@@ -355,7 +356,7 @@ mod tests {
         Card {
             uid: uid(1),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -417,7 +418,7 @@ mod tests {
         let mut c = strike_card();
         let (add, _) = apply_static_enchantment(&mut c, EnchantmentId::TezcatarasEmber, 1);
         assert!(add.contains(CardKeywords::NON_REMOVABLE));
-        assert_eq!(c.cost, 0);
+        assert_eq!(c.local_cost(), 0);
     }
 
     #[test]
@@ -433,9 +434,13 @@ mod tests {
         // `EnchantDamageMultiplicative` → 2× on a powered attack. It has NO
         // `OnEnchant` / cost behavior — enchanting must leave the cost alone.
         let mut c = strike_card();
-        assert_eq!(c.cost, 1);
+        assert_eq!(c.local_cost(), 1);
         apply_static_enchantment(&mut c, EnchantmentId::Instinct, 1);
-        assert_eq!(c.cost, 1, "Instinct must NOT change the card's cost");
+        assert_eq!(
+            c.local_cost(),
+            1,
+            "Instinct must NOT change the card's cost"
+        );
         // It registers as a 2× powered-attack damage multiplier.
         assert_eq!(enchant_damage_multiplicative_x100(&c, true), 200);
         assert_eq!(
@@ -675,7 +680,7 @@ mod tests {
     fn slither_rejects_x_cost_cards() {
         let spec = basic_strike_spec();
         let mut x_cost = strike_card();
-        x_cost.cost = -1; // X-cost sentinel
+        x_cost.cost = sts2_core::CardEnergyCost::new(-1); // X-cost sentinel
         assert!(
             !can_enchant_card(&spec, &x_cost, EnchantmentId::Slither),
             "Slither rejects X-cost (negative) cards"
@@ -683,7 +688,7 @@ mod tests {
         // A zero-cost card sits on the `>= 0` boundary and IS eligible
         // (kills `>=` → `<`, which would reject cost == 0).
         let mut zero_cost = strike_card();
-        zero_cost.cost = 0;
+        zero_cost.cost = sts2_core::CardEnergyCost::new(0);
         assert!(can_enchant_card(&spec, &zero_cost, EnchantmentId::Slither));
     }
 

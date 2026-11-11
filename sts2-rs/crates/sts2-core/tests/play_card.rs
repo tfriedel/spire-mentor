@@ -47,7 +47,7 @@ fn build_handful(cards: &[(CardId, i32, i32, i8, TargetType)]) -> CombatState {
         cards_arena.push(Card {
             uid,
             card_id,
-            cost,
+            cost: sts2_core::CardEnergyCost::new(cost),
             card_type,
             target_type,
             upgraded: false,
@@ -217,12 +217,9 @@ fn snecko_rolled_cost_reverts_to_base_when_card_is_played() {
     // banked) and confirm that playing it reverts the cost to base and clears
     // the banked delta — so a replay this turn (e.g. BottledPotential redraw,
     // coverage seed 5880) pays the BASE cost, not the stale roll.
-    use sts2_core::cards::VarKey;
-    let mut state = build_handful(&[(CardId::StrikeIronclad, 6, 0, 0, TargetType::Enemy)]);
-    // Strike's base cost is 1; the fixture set the (rolled) cost to 0. Bank the
-    // Snecko delta the way `drink_snecko_oil` does (roll 0 - base 1 = -1).
-    state.cards[0].cost = 0;
-    state.cards[0].set_combat_var(VarKey::SneckoCostDeltaThisTurn, -1);
+    let mut state = build_handful(&[(CardId::StrikeIronclad, 6, 0, 1, TargetType::Enemy)]);
+    // Strike's base cost is 1; the roll is `SetThisTurnOrUntilPlayed(0)`.
+    state.cards[0].cost.set_this_turn_or_until_played(0, false);
 
     let result = apply(
         &mut state,
@@ -236,13 +233,13 @@ fn snecko_rolled_cost_reverts_to_base_when_card_is_played() {
     assert_eq!(state.player.energy, 3, "rolled cost 0 spent no energy");
     // The played card reverted to its base cost (1) and the delta slot cleared.
     assert_eq!(
-        state.cards[0].cost, 1,
+        state.cards[0].local_cost(),
+        1,
         "Snecko cost reverts to base when the card is played (until-played semantics)"
     );
-    assert_eq!(
-        state.cards[0].combat_var(VarKey::SneckoCostDeltaThisTurn),
-        0,
-        "banked Snecko delta cleared on play"
+    assert!(
+        !state.cards[0].cost.has_local_modifiers(),
+        "the roll's modifier is dropped on play"
     );
 }
 
@@ -250,21 +247,26 @@ fn snecko_rolled_cost_reverts_to_base_when_card_is_played() {
 fn zero_delta_snecko_roll_releases_cost_flag_when_card_is_played() {
     // GH #759: C# `AfterCardPlayedCleanup` drops the `WhenPlayed` Snecko
     // modifier whatever it rolled (`CardEnergyCost.cs:341-345`). A roll equal
-    // to the prior cost banks a zero delta; the on-play expiry must still
-    // release the `CostAbsolutelySet` flag the roll raised.
-    use sts2_core::cards::VarKey;
+    // to the prior cost is still a modifier; the on-play expiry must drop it.
     let probe_state = build_handful(&[(CardId::StrikeIronclad, 6, 0, 1, TargetType::Enemy)]);
     let mut probe = probe_state.clone();
     probe.snecko_randomize_hand_costs();
-    let roll = probe.cards[0].cost;
+    let roll = probe.cards[0].local_cost();
 
-    let mut state = build_handful(&[(CardId::StrikeIronclad, 6, 0, roll, TargetType::Enemy)]);
+    let mut state = build_handful(&[(
+        CardId::StrikeIronclad,
+        6,
+        0,
+        i8::try_from(roll).expect("roll fits"),
+        TargetType::Enemy,
+    )]);
     state.snecko_randomize_hand_costs();
     assert_eq!(
-        state.cards[0].cost, roll,
+        state.cards[0].local_cost(),
+        roll,
         "fixture: roll equals the prior cost"
     );
-    assert_eq!(state.cards[0].combat_var(VarKey::CostAbsolutelySet), 1);
+    assert!(state.cards[0].cost.has_local_modifiers());
 
     let result = apply(
         &mut state,
@@ -274,10 +276,9 @@ fn zero_delta_snecko_roll_releases_cost_flag_when_card_is_played() {
         },
     );
     assert_eq!(result, StepResult::Advanced);
-    assert_eq!(
-        state.cards[0].combat_var(VarKey::CostAbsolutelySet),
-        0,
-        "the played zero-delta roll must release the CostAbsolutelySet flag"
+    assert!(
+        !state.cards[0].cost.has_local_modifiers(),
+        "the played zero-delta roll's modifier is dropped"
     );
 }
 
@@ -776,7 +777,7 @@ fn stomp_costs_one_less_after_one_attack() {
         .iter()
         .position(|c| c.card_id == CardId::Stomp)
         .expect("Stomp in arena");
-    assert_eq!(state.cards[stomp].cost, 3, "Stomp base cost is 3");
+    assert_eq!(state.cards[stomp].local_cost(), 3, "Stomp base cost is 3");
 
     apply(
         &mut state,
@@ -787,7 +788,8 @@ fn stomp_costs_one_less_after_one_attack() {
     );
 
     assert_eq!(
-        state.cards[stomp].cost, 2,
+        state.cards[stomp].local_cost(),
+        2,
         "Stomp costs 1 less after playing one Attack"
     );
 }
@@ -857,9 +859,9 @@ fn y2znm_whirlwind_xcost_energy_spent_stamped_and_damage_fires() {
     assert_eq!(state.player.energy, 0, "X-cost drains all energy");
 }
 
-/// The discount clamps at 0 (no negative cost) and is fully undone at the
-/// owner's next turn start (C# `AddThisTurn` reset). Exercises the
-/// `discount` / `restore` helpers directly across the 0-floor.
+/// The discount is not floored (C# folds the `AddThisTurn` shaves without an
+/// intermediate clamp; only the final read clamps) and is fully undone by
+/// `EndOfTurnCleanup`.
 #[test]
 fn stomp_discount_clamps_at_zero_then_restores_at_turn_start() {
     let mut state = build_handful(&[(CardId::Stomp, 12, 0, 3, TargetType::AllEnemies)]);
@@ -873,13 +875,21 @@ fn stomp_discount_clamps_at_zero_then_restores_at_turn_start() {
         state.discount_stomp_on_attack_played();
     }
     assert_eq!(
-        state.cards[stomp].cost, 0,
-        "cost floors at 0 after more attacks than the base cost"
+        state.cards[stomp].local_cost(),
+        -2,
+        "C# folds without an intermediate clamp: 3 - 5"
+    );
+    let uid = state.cards[stomp].uid;
+    assert_eq!(
+        sts2_core::hooks::effective_card_cost(&state, uid),
+        0,
+        "the read clamps"
     );
 
-    state.restore_stomp_costs_for_turn_start();
+    state.cards[stomp].cost.end_of_turn_cleanup();
     assert_eq!(
-        state.cards[stomp].cost, 3,
+        state.cards[stomp].local_cost(),
+        3,
         "cost restored to base 3 at the owner's next turn start"
     );
 }
@@ -902,20 +912,21 @@ fn stomp_set_free_this_combat_drops_banked_shave() {
 
     state.discount_stomp_on_attack_played();
     state.discount_stomp_on_attack_played();
-    assert_eq!(state.cards[stomp].cost, 1);
-    state.cards[stomp].set_free_this_combat();
-    assert_eq!(state.cards[stomp].cost, 0);
+    assert_eq!(state.cards[stomp].local_cost(), 1);
+    state.cards[stomp].set_to_free_this_combat();
+    assert_eq!(state.cards[stomp].local_cost(), 0);
 
-    state.restore_stomp_costs_for_turn_start();
+    state.cards[stomp].cost.end_of_turn_cleanup();
     assert_eq!(
-        state.cards[stomp].cost, 0,
+        state.cards[stomp].local_cost(),
+        0,
         "SetThisCombat(0) supersedes the expired Stomp shaves"
     );
 
     // Same for an explicit `SetThisCombat(n)`.
-    state.cards[stomp].cost = 3;
+    state.cards[stomp].cost = sts2_core::CardEnergyCost::new(3);
     state.discount_stomp_on_attack_played();
-    state.cards[stomp].set_cost_this_combat(1);
-    state.restore_stomp_costs_for_turn_start();
-    assert_eq!(state.cards[stomp].cost, 1);
+    state.cards[stomp].cost.set_this_combat(1, false);
+    state.cards[stomp].cost.end_of_turn_cleanup();
+    assert_eq!(state.cards[stomp].local_cost(), 1);
 }

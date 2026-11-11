@@ -2579,7 +2579,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -2655,7 +2655,7 @@ mod tests {
             let c = &mut state.cards[bane.0.get() as usize - 1];
             c.card_id = sts2_core::cards::CardId::AscendersBane;
             c.card_type = sts2_core::cards::CardType::Curse;
-            c.cost = -1;
+            c.cost = sts2_core::CardEnergyCost::new(-1);
             c.base_damage = 0;
         }
         let _ = dispatch_after_player_turn_start(&mut state);
@@ -2732,7 +2732,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type,
             target_type: TargetType::Enemy,
             upgraded,
@@ -3370,7 +3370,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Skill,
             target_type: TargetType::None,
             upgraded: false,

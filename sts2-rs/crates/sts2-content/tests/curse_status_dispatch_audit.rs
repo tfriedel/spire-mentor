@@ -78,7 +78,7 @@ fn push_card(state: &mut CombatState, card_id: CardId, cost: i8, pile: PileKind)
     let card = Card {
         uid: placeholder,
         card_id,
-        cost,
+        cost: sts2_core::CardEnergyCost::new(cost),
         card_type: CardType::Status,
         target_type: TargetType::None,
         upgraded: false,
@@ -366,7 +366,7 @@ fn slimed_handler_is_a_resolved_no_op() {
     state.cards.push(Card {
         uid,
         card_id: CardId::Slimed,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Status,
         target_type: TargetType::None,
         upgraded: false,
@@ -469,7 +469,7 @@ fn play_card_state_with_one(card_id: CardId, cost: i8, ctype: CardType) -> Comba
     state.cards.push(Card {
         uid,
         card_id,
-        cost,
+        cost: sts2_core::CardEnergyCost::new(cost),
         card_type: ctype,
         target_type: TargetType::None,
         upgraded: false,
@@ -525,7 +525,7 @@ fn exhaust_routing_feed_lands_in_exhaust_pile_after_play() {
     state.cards.push(Card {
         uid,
         card_id: CardId::Feed,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,
@@ -587,7 +587,7 @@ fn exhaust_routing_strike_still_lands_in_discard() {
     state.cards.push(Card {
         uid,
         card_id: CardId::StrikeIronclad,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,

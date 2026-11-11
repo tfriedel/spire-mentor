@@ -51,7 +51,7 @@ fn push_goopy_defend(state: &mut CombatState, amount: i32, replays: i32) -> usiz
     let mut card = Card {
         uid,
         card_id: CardId::DefendIronclad,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         upgraded: false,

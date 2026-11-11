@@ -1,8 +1,79 @@
 {
- "action": "choose_option",
- "args": {
-  "option_index": 0
+ "assumptions": {
+  "energy": 3,
+  "hand": 5,
+  "samples": 200
  },
- "fallback": true,
- "policy": "ppo"
+ "block": {
+  "per_turn": 9.9,
+  "scaling_cards": []
+ },
+ "composition": {
+  "by_rarity": {
+   "Basic": 10,
+   "Common": 3,
+   "Uncommon": 1
+  },
+  "by_type": {
+   "Attack": 6,
+   "Skill": 8
+  },
+  "dead_cards": 0,
+  "energy_curve": {
+   "0": 2,
+   "1": 12
+  },
+  "unupgraded_basics": 10
+ },
+ "damage": {
+  "aoe_attacks": [
+   "Sweeping Beam"
+  ],
+  "attack_count": 6,
+  "per_turn": 18.3,
+  "scaling_cards": [
+   "Zap"
+  ],
+  "single_target": 16.2,
+  "vs_group": 20.4
+ },
+ "deck_size": 14,
+ "lenses": {
+  "boss": 37.3,
+  "hallway": 37.0,
+  "scaling": 37.5
+ },
+ "scores": {
+  "block": 38.9,
+  "damage": 36.6,
+  "velocity": 36.5,
+  "volume": 37.3
+ },
+ "velocity": {
+  "bottleneck": "energy",
+  "cards_per_turn": 4.2,
+  "dilution": 1.0,
+  "draw_limited_turns": 2.0,
+  "energy_limited_turns": 4.3,
+  "engine_cards": 2,
+  "extra_per_turn": 0.5,
+  "tags": {
+   "draw": 1,
+   "energy": 1
+  }
+ },
+ "warnings": [
+  {
+   "severity": "warn",
+   "text": "Thin on block and no block engine — big hits will land in Act 2+."
+  },
+  {
+   "severity": "info",
+   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+  },
+  {
+   "severity": "warn",
+   "text": "Deck clogged with basics/curses — prioritise removals."
+  }
+ ]
 }

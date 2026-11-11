@@ -5371,7 +5371,7 @@ mod plan_tests {
                 card.uid = uid;
                 card.card_id = crate::cards::CardId::StrikeIronclad;
                 card.card_type = crate::cards::CardType::Attack;
-                card.cost = 1;
+                card.cost = crate::CardEnergyCost::new(1);
                 planned.cards.push(card);
                 if i < 2 {
                     planned.player.hand.push(uid);

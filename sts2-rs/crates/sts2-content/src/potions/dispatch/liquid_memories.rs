@@ -14,7 +14,7 @@ use super::prelude::*;
 /// copied that (`card.cost = 0`), so a card made free, then played and
 /// redrawn, stayed free across turns (coverage sweep: `potion:LIQUID_MEMORIES`
 /// player.energy C#=1 rust=2 @t6 — a Strike freed in turn4 was still free
-/// when redrawn in turn6). `VarKey::FreeThisTurn` is the canonical Rust
+/// when redrawn in turn6). `LocalCostMod::FREE_THIS_TURN` is the canonical Rust
 /// analog of `SetToFreeThisTurn`, cleared on play / end-of-turn for every
 /// pile (`combat_loop::clear_per_turn_card_vars`) and honored by
 /// `hooks::effective_card_cost`. Bead `sts2-rs-gpsvo`.
@@ -33,7 +33,7 @@ use super::prelude::*;
 /// prompt; 2+ cards → open the choice in pile order (C# passes `…Cards`
 /// with NO OrderBy). The resolver
 /// [`sts2_core::resolve_add_from_discard_free`] stamps
-/// `VarKey::FreeThisTurn=1` (the canonical analog of `SetToFreeThisTurn`,
+/// `LocalCostMod::FREE_THIS_TURN` (the canonical analog of `SetToFreeThisTurn`,
 /// cleared on play / end-of-turn by `combat_loop::clear_per_turn_card_vars`
 /// and honored by `hooks::effective_card_cost`) and moves the card to
 /// hand under `HAND_LIMIT`. Bead `sts2-rs-gpsvo`.
@@ -45,7 +45,7 @@ pub(crate) fn drink_liquid_memories(state: &mut CombatState, _target: Option<u8>
         &[uid] => {
             state.player.discard.clear();
             if let Some(card) = state.cards.iter_mut().find(|c| c.uid == uid) {
-                card.set_combat_var(sts2_core::cards::VarKey::FreeThisTurn, 1);
+                card.set_to_free_this_turn();
             }
             if state.player.hand.len() < sts2_core::cards::HAND_LIMIT {
                 state.player.hand.push(uid);

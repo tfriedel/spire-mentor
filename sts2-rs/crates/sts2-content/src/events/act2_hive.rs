@@ -1113,7 +1113,7 @@ fn field_of_man_can_enchant(c: &sts2_core::cards::Card) -> bool {
     !matches!(c.card_type, CardType::Status | CardType::Curse)
         && !c.is_quest()
         && c.enchantments.is_empty()
-        && c.cost >= 0
+        && c.base_cost() >= 0
 }
 
 fn field_of_man_sized_holes_enter(state: &mut RunState) -> EventOutcome {
@@ -2399,7 +2399,7 @@ mod tests {
         assert!(rs.master_deck.iter().any(|c| c
             .enchantments
             .iter()
-            .any(|(e, _)| *e == EnchantmentId::PerfectFit)));
+            .any(|(e, _)| e == EnchantmentId::PerfectFit)));
     }
 
     // ── JungleMazeAdventure ────────────────────────────────────────

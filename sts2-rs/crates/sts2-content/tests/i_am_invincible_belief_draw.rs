@@ -24,7 +24,7 @@ fn push_card(state: &mut CombatState, id: CardId, block: i32) -> CardUid {
     state.cards.push(Card {
         uid,
         card_id: id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         upgraded: false,

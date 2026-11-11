@@ -1,0 +1,305 @@
+{
+ "action_label": "",
+ "assets_base": "https://assets.test",
+ "chosen_action": null,
+ "decision": "card_reward",
+ "idx": 0,
+ "meta": {
+  "act": 1,
+  "act_name": "Underdocks",
+  "bg_col": 1,
+  "bg_row": 3,
+  "bg_seed": 206169372,
+  "floor": 4,
+  "step_no": 0,
+  "turn": null
+ },
+ "pv": null,
+ "scores": [],
+ "source": "live",
+ "state": {
+  "act": 1,
+  "act1": "underdocks",
+  "act_name": "Underdocks",
+  "ascension": 10,
+  "bg_col": 1,
+  "bg_row": 3,
+  "bg_seed": 206169372,
+  "can_skip": true,
+  "cards": [
+   {
+    "color": "orange",
+    "cost": 1,
+    "description": "Deal 8 damage.\nDeals 2 additional damage for ALL your cards that have a ★ cost.",
+    "description_rich": "Deal 8 damage.\nDeals 2 additional damage for ALL your cards that have a ★ cost.",
+    "id": "CRESCENT_SPEAR",
+    "image": "https://assets.test/card_atlas/regent/crescent_spear.png",
+    "index": 0,
+    "name": "Crescent Spear",
+    "rarity": "Common",
+    "star_cost": 1,
+    "type": "Attack"
+   },
+   {
+    "color": "orange",
+    "cost": 2,
+    "description": "Deal 6 damage 3 times.",
+    "description_rich": "Deal 6 damage 3 times.",
+    "id": "CELESTIAL_MIGHT",
+    "image": "https://assets.test/card_atlas/regent/celestial_might.png",
+    "index": 1,
+    "name": "Celestial Might",
+    "rarity": "Common",
+    "type": "Attack"
+   },
+   {
+    "color": "orange",
+    "cost": 1,
+    "description": "Add 3 random Colorless cards into your Hand.\nExhaust.",
+    "description_rich": "Add 3 random Colorless cards into your Hand.\n[gold]Exhaust[/gold].",
+    "id": "BUNDLE_OF_JOY",
+    "image": "https://assets.test/card_atlas/regent/bundle_of_joy.png",
+    "index": 2,
+    "name": "Bundle of Joy",
+    "rarity": "Rare",
+    "type": "Skill"
+   }
+  ],
+  "decision": "card_reward",
+  "floor": 4,
+  "options": [
+   {
+    "action": "select_card_reward",
+    "args": {
+     "card_index": 0
+    },
+    "enabled": true,
+    "label": "CRESCENT_SPEAR.title"
+   },
+   {
+    "action": "select_card_reward",
+    "args": {
+     "card_index": 1
+    },
+    "enabled": true,
+    "label": "CELESTIAL_MIGHT.title"
+   },
+   {
+    "action": "select_card_reward",
+    "args": {
+     "card_index": 2
+    },
+    "enabled": true,
+    "label": "BUNDLE_OF_JOY.title"
+   },
+   {
+    "action": "skip_card_reward",
+    "args": {},
+    "enabled": true,
+    "label": "Skip"
+   }
+  ],
+  "player": {
+   "block": 0,
+   "deck": [
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_REGENT",
+     "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+     "index": 0,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_REGENT",
+     "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+     "index": 1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_REGENT",
+     "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+     "index": 2,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_REGENT",
+     "image": "https://assets.test/card_atlas/regent/strike_regent.png",
+     "index": 3,
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Gain 8 Block.",
+     "description_rich": "Gain 8 Block.",
+     "id": "DEFEND_REGENT",
+     "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+     "index": 4,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": true
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_REGENT",
+     "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+     "index": 5,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_REGENT",
+     "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+     "index": 6,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_REGENT",
+     "image": "https://assets.test/card_atlas/regent/defend_regent.png",
+     "index": 7,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 0,
+     "description": "Deal 8 damage.\nApply 1 Weak.\nApply 1 Vulnerable.",
+     "description_rich": "Deal 8 damage.\nApply 1 Weak.\nApply 1 Vulnerable.",
+     "id": "FALLING_STAR",
+     "image": "https://assets.test/card_atlas/regent/falling_star.png",
+     "index": 8,
+     "name": "Falling Star",
+     "rarity": "Basic",
+     "star_cost": 2,
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Gain Stars.",
+     "description_rich": "Gain Stars.",
+     "id": "VENERATE",
+     "image": "https://assets.test/card_atlas/regent/venerate.png",
+     "index": 9,
+     "name": "Venerate",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "curse",
+     "cost": "X",
+     "description": "Unplayable.\nEthereal.\nEternal.",
+     "description_rich": "[gold]Unplayable[/gold].\n[gold]Ethereal[/gold].\n[gold]Eternal[/gold].",
+     "id": "ASCENDERS_BANE",
+     "image": "https://assets.test/card_atlas/curse/ascenders_bane.png",
+     "index": 10,
+     "name": "Ascender's Bane",
+     "rarity": "Curse",
+     "type": "Curse",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Gain 1 Stars.\nDraw 1 card.\nNext turn, draw 1 card.",
+     "description_rich": "Gain 1 Stars.\nDraw 1 card.\nNext turn, draw 1 card.",
+     "id": "GLOW",
+     "image": "https://assets.test/card_atlas/regent/glow.png",
+     "index": 11,
+     "name": "Glow",
+     "rarity": "Common",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "orange",
+     "cost": 1,
+     "description": "Deal 10 damage.\nDraw 1 card.\nPut 1 card from your Hand on top of your Draw Pile.",
+     "description_rich": "Deal 10 damage.\nDraw 1 card.\nPut 1 card from your Hand on top of your Draw Pile.",
+     "id": "PHOTON_CUT",
+     "image": "https://assets.test/card_atlas/regent/photon_cut.png",
+     "index": 12,
+     "name": "Photon Cut",
+     "rarity": "Common",
+     "type": "Attack",
+     "upgraded": false
+    }
+   ],
+   "gold": 125,
+   "hp": 5,
+   "max_hp": 75,
+   "name": "Regent",
+   "potion_slots": 2,
+   "potions": [
+    {
+     "description": "Gain 12 Block.",
+     "id": "BLOCK_POTION",
+     "image": "https://assets.test/potion_atlas/block_potion.png",
+     "name": "Block Potion"
+    }
+   ],
+   "relics": [
+    {
+     "description": "At the start of each combat, gain 3 Stars.",
+     "id": "DIVINE_RIGHT",
+     "image": "https://assets.test/relic_atlas/divine_right.png",
+     "name": "Divine Right"
+    },
+    {
+     "description": "Every 3 normal combats, Upgrade a random card in your Deck.",
+     "id": "FISHING_ROD",
+     "image": "https://assets.test/relic_atlas/fishing_rod.png",
+     "name": "Fishing Rod"
+    }
+   ]
+  }
+ }
+}

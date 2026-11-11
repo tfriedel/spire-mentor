@@ -124,7 +124,7 @@ fn overrides(card_id: CardId, upgraded: bool) -> Overrides {
 /// spec-level `upgrade_delta` table (`apply_spec_upgrade`).
 fn build_stats(spec: &CardSpec, upgraded: bool) -> CardStats {
     let (cost, damage, block) = match card_pod_from_id(spec.id, upgraded) {
-        Some(pod) => (pod.cost, pod.base_damage, pod.base_block),
+        Some(pod) => (pod.base_cost(), pod.base_damage, pod.base_block),
         None => (spec.cost, spec.base_damage, spec.base_block),
     };
 

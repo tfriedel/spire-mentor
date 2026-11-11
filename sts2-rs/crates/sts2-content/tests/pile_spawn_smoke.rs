@@ -45,7 +45,7 @@ fn push_play(state: &mut CombatState, card_id: CardId, damage: i32, block: i32) 
     state.cards.push(Card {
         uid,
         card_id,
-        cost: 1,
+        cost: sts2_core::CardEnergyCost::new(1),
         card_type: CardType::Skill,
         target_type: TargetType::None,
         upgraded: false,
@@ -108,7 +108,7 @@ fn synthesis_deals_damage_and_applies_free_power() {
         state.cards.push(Card {
             uid,
             card_id: CardId::Wound,
-            cost: -1,
+            cost: sts2_core::CardEnergyCost::new(-1),
             card_type: CardType::Status,
             target_type: TargetType::None,
             upgraded: false,
@@ -145,7 +145,7 @@ fn storm_of_steel_replaces_hand_with_shivs() {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeSilent,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,

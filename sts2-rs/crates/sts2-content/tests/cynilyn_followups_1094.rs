@@ -129,7 +129,7 @@ fn imbued_in_hand_does_not_play_after_turn_one() {
 
 /// A Stomp auto-played as the turn's 3rd Attack under Juggling(1); returns
 /// the cost of the Juggling copy in hand.
-fn auto_played_juggled_stomp_copy_cost(v: GameVersion) -> i8 {
+fn auto_played_juggled_stomp_copy_cost(v: GameVersion) -> i32 {
     let mut state = fresh(v);
     let p = state.player.creature_uid.expect("player");
     sts2_core::card_effects::apply_power_to_creature(&mut state, p, PowerKind::Juggling, 1);
@@ -143,15 +143,15 @@ fn auto_played_juggled_stomp_copy_cost(v: GameVersion) -> i8 {
     state.player.cards_played_this_turn[CardType::Attack.index()] = 2;
     let stomp = new_card(&mut state, CardId::Stomp);
     // Two Attacks already shaved it 3 -> 1.
-    let c = &mut state.cards[stomp.0.get() as usize - 1];
-    c.cost = 1;
-    c.set_combat_var(VarKey::StompCostReductionThisTurn, 2);
+    state.cards[stomp.0.get() as usize - 1]
+        .cost
+        .add_this_turn(-2);
     state.player.draw.push(stomp);
     assert!(sts2_core::combat_loop::auto_play_card_from_draw_top(
         &mut state, false
     ));
     assert_eq!(state.player.hand.len(), 1, "{v:?}: the Juggling copy");
-    card(&state, state.player.hand[0]).cost
+    card(&state, state.player.hand[0]).local_cost()
 }
 
 /// `Stomp.BeforeCardPlayed` shaves; the hook's listener list is snapshotted
@@ -172,16 +172,19 @@ fn auto_played_attack_shaves_stomp_once() {
         let mut state = fresh(v);
         let stomp = new_card(&mut state, CardId::Stomp);
         state.player.hand.push(stomp);
-        let base = card(&state, stomp).cost;
+        let base = card(&state, stomp).local_cost();
         let strike = new_card(&mut state, CardId::StrikeIronclad);
         state.player.draw.push(strike);
         assert!(sts2_core::combat_loop::auto_play_card_from_draw_top(
             &mut state, false
         ));
-        assert_eq!(card(&state, stomp).cost, base - 1, "{v:?}");
+        assert_eq!(card(&state, stomp).local_cost(), base - 1, "{v:?}");
         assert_eq!(
-            card(&state, stomp).combat_var(VarKey::StompCostReductionThisTurn),
-            1,
+            card(&state, stomp).cost.mods(),
+            &[sts2_core::LocalCostMod::relative(
+                -1,
+                sts2_core::CostExpiry::Turn
+            )],
             "{v:?}"
         );
     }
@@ -196,24 +199,16 @@ fn auto_played_attack_shaves_stomp_once() {
 #[test]
 fn a_clone_skips_the_entered_combat_catch_up_and_a_fresh_card_does_not() {
     for v in BOTH {
-        for (id, ty, var) in [
-            (
-                CardId::Stomp,
-                CardType::Attack,
-                VarKey::StompCostReductionThisTurn,
-            ),
-            (
-                CardId::Pinpoint,
-                CardType::Skill,
-                VarKey::PinpointCostReductionThisTurn,
-            ),
+        for (id, ty) in [
+            (CardId::Stomp, CardType::Attack),
+            (CardId::Pinpoint, CardType::Skill),
         ] {
             let mut state = fresh(v);
             state.player.cards_played_this_turn[ty.index()] = 2;
-            let base = card_pod_for(id, false, v).expect("spec").cost;
+            let base = card_pod_for(id, false, v).expect("spec").local_cost();
 
             let source = card_pod_for(id, false, v).expect("spec");
-            assert_eq!(source.combat_var(var), 0);
+            assert!(!source.cost.has_local_modifiers());
             let clone = source.create_clone();
             assert!(clone.is_clone());
             let uid = sts2_core::card_effects::spawn_card_into_hand(&mut state, clone);
@@ -221,7 +216,7 @@ fn a_clone_skips_the_entered_combat_catch_up_and_a_fresh_card_does_not() {
                 card(&state, uid).is_clone(),
                 "{v:?} {id:?}: spawn keeps the mark"
             );
-            assert_eq!(card(&state, uid).cost, base, "{v:?} {id:?} clone");
+            assert_eq!(card(&state, uid).local_cost(), base, "{v:?} {id:?} clone");
 
             let fresh_card = card_pod_for(id, false, v).expect("spec");
             let uid = sts2_core::card_effects::spawn_card_into_hand(&mut state, fresh_card);
@@ -231,7 +226,11 @@ fn a_clone_skips_the_entered_combat_catch_up_and_a_fresh_card_does_not() {
                 0,
                 "{v:?} {id:?}: still marked generated"
             );
-            assert_eq!(card(&state, uid).cost, base - 2, "{v:?} {id:?} fresh");
+            assert_eq!(
+                card(&state, uid).local_cost(),
+                base - 2,
+                "{v:?} {id:?} fresh"
+            );
         }
     }
 }

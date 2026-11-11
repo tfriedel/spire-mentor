@@ -55,7 +55,8 @@
         "upgraded": false,
         "base_damage": 6,
         "flags": ["retain"],
-        "combat_vars": { "rampage_damage": 0, "free_this_turn": 1 }
+        "combat_vars": { "rampage_damage": 0 },
+        "cost_mods": { "base": 1, "mods": [[0, 13]] }
       },
       { "id": "curse:Clumsy", "stable_idx": 5, "kind": "curse", "upgraded": false }
     ],

@@ -20,7 +20,7 @@ fn push_hand(state: &mut CombatState, id: CardId, card_type: CardType) -> sts2_c
     state.cards.push(Card {
         uid,
         card_id: id,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type,
         target_type: TargetType::Self_,
         upgraded: false,

@@ -1,91 +1,88 @@
 {
- "assumptions": {
-  "energy": 3,
-  "hand": 5,
-  "samples": 200
- },
- "block": {
-  "per_turn": 8.5,
-  "scaling_cards": []
- },
- "composition": {
-  "by_rarity": {
-   "Basic": 9,
-   "Common": 3,
-   "Quest": 1,
-   "Rare": 1
-  },
-  "by_type": {
-   "Attack": 7,
-   "Power": 1,
-   "Quest": 1,
-   "Skill": 5
-  },
-  "dead_cards": 0,
-  "energy_curve": {
-   "1": 11,
-   "2": 2,
-   "X": 1
-  },
-  "unupgraded_basics": 9
- },
- "damage": {
-  "aoe_attacks": [],
-  "attack_count": 7,
-  "per_turn": 13.4,
-  "scaling_cards": [
-   "Bash",
-   "Molten Fist",
-   "Molten Fist"
-  ],
-  "single_target": 13.4,
-  "vs_group": 13.5
- },
- "deck_size": 14,
- "lenses": {
-  "boss": 21.3,
-  "hallway": 24.2,
-  "scaling": 19.8
- },
- "scores": {
-  "block": 34.7,
-  "damage": 28.5,
-  "velocity": 0.6,
-  "volume": 8.4
- },
- "velocity": {
-  "bottleneck": "energy",
-  "cards_per_turn": 2.6,
-  "dilution": 1.0,
-  "draw_limited_turns": 0.0,
-  "energy_limited_turns": 7.0,
-  "engine_cards": 1,
-  "extra_per_turn": 0.0,
-  "tags": {
-   "draw": 1,
-   "exhaust_synergy": 1
-  }
- },
- "warnings": [
+ "points": [
   {
-   "severity": "warn",
-   "text": "Thin on block and no block engine — big hits will land in Act 2+."
+   "act": 1,
+   "deck_size": 10,
+   "floor": 1,
+   "idx": 0,
+   "scores": {
+    "block": 38.9,
+    "damage": 31.4,
+    "velocity": 0.0,
+    "volume": 0.0
+   }
   },
   {
-   "severity": "info",
-   "text": "No AOE — multi-enemy fights (Gremlins, hallways) will be slow."
+   "act": 1,
+   "deck_size": 10,
+   "floor": 1,
+   "idx": 2,
+   "scores": {
+    "block": 38.9,
+    "damage": 33.4,
+    "velocity": 0.0,
+    "volume": 0.0
+   }
   },
   {
-   "severity": "info",
-   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+   "act": 1,
+   "deck_size": 11,
+   "floor": 2,
+   "idx": 16,
+   "scores": {
+    "block": 38.2,
+    "damage": 34.6,
+    "velocity": 0.2,
+    "volume": 6.4
+   }
   },
   {
-   "severity": "info",
-   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+   "act": 1,
+   "deck_size": 11,
+   "floor": 3,
+   "idx": 19,
+   "scores": {
+    "block": 38.2,
+    "damage": 28.6,
+    "velocity": 0.0,
+    "volume": 0.0
+   }
   },
   {
-   "severity": "warn",
-   "text": "Deck clogged with basics/curses — prioritise removals."
+   "act": 1,
+   "deck_size": 12,
+   "floor": 4,
+   "idx": 34,
+   "scores": {
+    "block": 38.2,
+    "damage": 29.7,
+    "velocity": 4.7,
+    "volume": 17.5
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 13,
+   "floor": 5,
+   "idx": 49,
+   "scores": {
+    "block": 36.7,
+    "damage": 29.6,
+    "velocity": 1.4,
+    "volume": 11.5
+   }
+  },
+  {
+   "act": 1,
+   "deck_size": 14,
+   "floor": 6,
+   "idx": 51,
+   "scores": {
+    "block": 35.0,
+    "damage": 28.6,
+    "velocity": 3.5,
+    "volume": 15.2
+   }
   }
  ]
 }

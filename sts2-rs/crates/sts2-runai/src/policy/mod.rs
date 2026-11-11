@@ -4642,7 +4642,7 @@ mod tests {
             cards.push(Card {
                 uid,
                 card_id,
-                cost,
+                cost: sts2_core::CardEnergyCost::new(cost),
                 card_type: if target_type == TargetType::Enemy {
                     CardType::Attack
                 } else {
@@ -4661,7 +4661,7 @@ mod tests {
             cards.push(Card {
                 uid,
                 card_id: CardId::StrikeDefect,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 card_type: CardType::Attack,
                 target_type: TargetType::Enemy,
                 base_damage: 6,
@@ -5355,17 +5355,19 @@ mod tests {
     /// Captured from the deployed `mcts_pick` BEFORE `build_search` was
     /// extracted from it; the extraction must not move a single visit or
     /// value bit. Two decisions, so the per-decision seed derivation is
-    /// pinned too.
+    /// pinned too. Re-captured when the card cost model (`CardEnergyCost`)
+    /// stopped leaving zero-valued cost keys in `combat_vars`, which the
+    /// search hash (and the streams seeded from it) folds in.
     const BUILD_SEARCH_GOLDEN: &str = concat!(
         "chosen=PlayCard { hand_index: 4, target: None }\n",
-        "PlayCard { hand_index: 3, target: Some(0) }|100|100|0|0|42fb2dea|431dbf5e|45e01000|100|3fa0c13a\n",
-        "PlayCard { hand_index: 0, target: Some(0) }|98|98|0|0|42f59bb9|4319e7d6|45d93000|98|3fa065b2\n",
-        "PlayCard { hand_index: 4, target: None }|113|113|0|0|430f2cbb|43356e9e|46041c00|113|3fa22e23\n",
-        "EndTurn|89|89|0|0|42dd7623|4309ca1b|45be5000|89|3f9f40d1\n",
+        "PlayCard { hand_index: 3, target: Some(0) }|101|101|0|0|42fdc031|431f66df|45e29000|101|3fa0cae5\n",
+        "PlayCard { hand_index: 0, target: Some(0) }|97|97|0|0|42f3098f|431840fa|45d6b000|97|3fa05ac3\n",
+        "PlayCard { hand_index: 4, target: None }|114|114|0|0|43107a58|43372017|46057000|114|3fa23887\n",
+        "EndTurn|88|88|0|0|42dab687|4307eb03|45bb0800|88|3f9f1062\n",
         "chosen=PlayCard { hand_index: 3, target: Some(0) }\n",
-        "PlayCard { hand_index: 3, target: Some(0) }|136|136|0|0|432c1e0f|4359daa7|461e2000|136|3fa1fe2c\n",
-        "PlayCard { hand_index: 0, target: Some(0) }|136|136|0|0|432c14f3|4359c210|461df800|136|3fa1f599\n",
-        "EndTurn|128|128|0|0|43215458|434b5e51|4611f000|128|3fa15458\n",
+        "PlayCard { hand_index: 3, target: Some(0) }|137|137|0|0|432d794d|435bb009|461fb000|137|3fa213e7\n",
+        "PlayCard { hand_index: 0, target: Some(0) }|136|136|0|0|432c3029|435a0839|461e7000|136|3fa20f36\n",
+        "EndTurn|127|127|0|0|43200b4f|4349b7e6|4610b000|127|3fa14deb\n",
     );
 
     #[test]

@@ -256,7 +256,7 @@ fn right_hand_hand_played_for_two_stays_in_discard() {
     for v in BOTH {
         let (mut state, _enemy) = fresh(v, true);
         let rhh = add_to(&mut state, CardId::RightHandHand, PileKind::Hand);
-        state.cards[rhh.0.get() as usize - 1].cost = 2;
+        state.cards[rhh.0.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(2);
         play(&mut state, rhh, Some(0));
         assert!(state.player.discard.contains(&rhh), "{v:?}: RHH in discard");
         assert!(!state.player.hand.contains(&rhh), "{v:?}: RHH not returned");
@@ -271,7 +271,7 @@ fn right_hand_hand_in_discard_returns_after_two_energy_play() {
         let (mut state, _enemy) = fresh(v, true);
         let rhh = add_to(&mut state, CardId::RightHandHand, PileKind::Discard);
         let strike = add_to(&mut state, CardId::StrikeNecrobinder, PileKind::Hand);
-        state.cards[strike.0.get() as usize - 1].cost = 2;
+        state.cards[strike.0.get() as usize - 1].cost = sts2_core::CardEnergyCost::new(2);
         play(&mut state, strike, Some(0));
         assert!(state.player.hand.contains(&rhh), "{v:?}: RHH returned");
     }

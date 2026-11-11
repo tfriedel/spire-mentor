@@ -320,7 +320,7 @@ fn sown_can_enchant(c: &sts2_core::cards::Card) -> bool {
     !matches!(c.card_type, CardType::Status | CardType::Curse)
         && !c.is_quest()
         && c.enchantments.is_empty()
-        && (c.cost >= 0 || c.is_x_cost())
+        && (c.base_cost() >= 0 || c.is_x_cost())
 }
 
 fn sapphire_seed_plant(state: &mut RunState) -> EventOutcome {
@@ -407,7 +407,7 @@ fn self_help_card_eligible(
 ) -> bool {
     c.card_type == card_type
         && c.enchantments.is_empty()
-        && (c.cost >= 0 || c.is_x_cost())
+        && (c.base_cost() >= 0 || c.is_x_cost())
         && !c.is_quest()
         // `Nimble.CanEnchant` → `CardModel.GainsBlock` (GH #1021).
         && (enchantment != sts2_core::cards::EnchantmentId::Nimble || c.gains_block_for(version))
@@ -2548,7 +2548,7 @@ fn wood_carvings_snake(state: &mut RunState) -> EventOutcome {
         if let Some(card) = state.master_deck.iter_mut().find(|c| {
             !matches!(c.card_type, CardType::Status | CardType::Curse)
                 && c.enchantments.is_empty()
-                && c.cost >= 0
+                && c.base_cost() >= 0
         }) {
             card.enchantments.push((EnchantmentId::Slither, 1));
         }
@@ -2935,7 +2935,7 @@ mod tests {
         wood_carvings_snake(&mut rs);
         // First eligible card gains 1 Slither stack.
         assert_eq!(
-            rs.master_deck[0].enchantments.as_slice(),
+            rs.master_deck[0].enchantments.to_vec(),
             &[(sts2_core::cards::EnchantmentId::Slither, 1)]
         );
     }
@@ -3048,7 +3048,7 @@ mod tests {
             .find(|c| c.card_id == CardId::DefendIronclad)
             .expect("defend still in deck");
         assert_eq!(
-            defend.enchantments.as_slice(),
+            defend.enchantments.to_vec(),
             &[(
                 sts2_core::cards::EnchantmentId::Nimble,
                 SELF_HELP_BOOK_ENCHANT_AMOUNT
@@ -3066,7 +3066,7 @@ mod tests {
         // First Attack (slot 1) gets Sharp; the Skill at slot 0 untouched.
         assert!(rs.master_deck[0].enchantments.is_empty());
         assert_eq!(
-            rs.master_deck[1].enchantments.as_slice(),
+            rs.master_deck[1].enchantments.to_vec(),
             &[(
                 sts2_core::cards::EnchantmentId::Sharp,
                 SELF_HELP_BOOK_ENCHANT_AMOUNT
@@ -3246,7 +3246,7 @@ mod tests {
         assert!(outcome.finished);
         assert!(rs.pending_deck_enchants.is_empty());
         assert_eq!(
-            rs.master_deck[0].enchantments.as_slice(),
+            rs.master_deck[0].enchantments.to_vec(),
             &[(sts2_core::cards::EnchantmentId::Sown, 1)]
         );
     }
@@ -4064,7 +4064,7 @@ mod tests {
         let outcome = self_help_book_read_entire(&mut rs);
         assert!(outcome.finished);
         assert_eq!(
-            rs.master_deck[power_idx].enchantments.as_slice(),
+            rs.master_deck[power_idx].enchantments.to_vec(),
             &[(
                 sts2_core::cards::EnchantmentId::Swift,
                 SELF_HELP_BOOK_ENCHANT_AMOUNT
@@ -4168,12 +4168,12 @@ mod tests {
         seed_deck(&mut rs, 1); // slot 1: fresh Strike, fully eligible
         wood_carvings_snake(&mut rs);
         assert_eq!(
-            rs.master_deck[0].enchantments.as_slice(),
+            rs.master_deck[0].enchantments.to_vec(),
             &[(EnchantmentId::Sown, 1)],
             "the already-enchanted front card is skipped (all && clauses hold; no || )"
         );
         assert_eq!(
-            rs.master_deck[1].enchantments.as_slice(),
+            rs.master_deck[1].enchantments.to_vec(),
             &[(EnchantmentId::Slither, 1)],
             "the fresh Strike behind it gains Slither"
         );

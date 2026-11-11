@@ -1628,7 +1628,7 @@ mod embed_parity_tests {
         let mk = |uid_raw: u32, id: CardId, cost: i8, ty: CardType, tgt: TargetType| Card {
             uid: CardUid::new(uid_raw).expect("non-zero"),
             card_id: id,
-            cost,
+            cost: sts2_core::CardEnergyCost::new(cost),
             card_type: ty,
             target_type: tgt,
             upgraded: false,

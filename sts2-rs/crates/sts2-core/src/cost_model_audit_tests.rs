@@ -1,21 +1,23 @@
-//! Differential audit of the collapsed card energy-cost model against a
-//! faithful port of C# `CardEnergyCost` (cluster C parity audit).
+//! Differential audit of the engine's card energy-cost model
+//! ([`crate::CardEnergyCost`]) against a deliberately naive port of C#
+//! `CardEnergyCost` (cluster C parity audit).
 //!
 //! C# keeps a base cost plus an ORDERED list of `LocalCostModifier`s
 //! (`CardEnergyCost.cs` / `LocalCostModifier.cs`, identical in v0.107.1 and
 //! v0.111.0): `GetWithModifiers(Local)` folds them in insertion order with no
 //! intermediate clamp, `EndOfTurnCleanup` / `AfterCardPlayedCleanup` drop the
 //! modifiers carrying that expiry bit, and `UpgradeBy` moves the base and
-//! clamps Absolute amounts above a LOWERED base. The engine collapses all of
-//! that into `Card::cost` plus a handful of combat `VarKey`s.
+//! clamps Absolute amounts above a LOWERED base.
 //!
-//! [`CsCost`] is that C# model; every op below drives the REAL engine entry
-//! point a card / relic / potion uses and the matching C# call, then compares
-//! the local cost (`hooks::local_card_cost`, C# `GetWithModifiers(Local)`).
-//! The enumeration walks every op sequence up to a depth and reports the
-//! shortest diverging ones.
+//! [`CsCost`] is that C# model with an unbounded, never-compacted list; every
+//! op below drives the REAL engine entry point a card / relic / potion uses
+//! and the matching C# call, then compares the local cost
+//! ([`crate::cards::Card::local_cost`], C# `GetWithModifiers(Local)`). The
+//! enumeration walks every op sequence up to a depth and reports the
+//! shortest diverging ones, so it also checks that the engine's list
+//! compaction never changes a value.
 
-use crate::cards::{Card, CardId, CardType, VarKey};
+use crate::cards::{Card, CardId, CardType};
 use crate::{CardUid, CombatState};
 
 #[derive(Clone, Copy, Debug)]
@@ -191,11 +193,11 @@ fn factory(subject: Subject) -> impl Fn(CardId, bool) -> Option<Card> {
         Some(Card {
             card_id: id,
             card_type: subject.card_type,
-            cost: if up {
+            cost: crate::CardEnergyCost::new(if up {
                 (subject.canonical + subject.upgrade_delta).max(0)
             } else {
                 subject.canonical
-            },
+            }),
             ..Card::pod_defaults()
         })
     }
@@ -264,7 +266,7 @@ fn new_world(subject: Subject) -> World {
         uid: uid(),
         card_id: subject.id,
         card_type: subject.card_type,
-        cost: subject.canonical,
+        cost: crate::CardEnergyCost::new(subject.canonical),
         ..Card::pod_defaults()
     };
     state.cards.push(card);
@@ -280,24 +282,20 @@ fn apply(world: &mut World, subject: Subject, op: Op) -> bool {
     let World { state, cs } = world;
     match op {
         Op::FreeThisTurn => {
-            state.cards[0].set_locally_free(VarKey::FreeThisTurn);
+            state.cards[0].set_to_free_this_turn();
             cs.set(0, Expiry::TurnOrPlayed, false);
         }
         Op::FreeUntilPlayed => {
-            state.cards[0].set_locally_free(VarKey::FreeUntilPlayed);
+            state.cards[0].cost.set_until_played(0, false);
             cs.set(0, Expiry::Played, false);
         }
         Op::FreeThisCombat => {
-            state.cards[0].set_free_this_combat();
+            state.cards[0].set_to_free_this_combat();
             cs.set(0, Expiry::Combat, false);
         }
         Op::Confused(r) => {
             // The draw path (`lib.rs` Confused `AfterCardDrawn`).
-            let c = &mut state.cards[0];
-            c.set_cost_this_combat(r);
-            c.set_combat_var(VarKey::StompCostReductionThisTurn, 0);
-            c.combat_vars.zero(VarKey::CostDebtThisCombat);
-            c.set_combat_var(VarKey::CostAbsolutelySet, 1);
+            state.cards[0].cost.set_this_combat(i32::from(r), false);
             cs.set(i32::from(r), Expiry::Combat, false);
         }
         Op::Snecko(r) => {
@@ -310,11 +308,11 @@ fn apply(world: &mut World, subject: Subject, op: Op) -> bool {
             cs.add(1, Expiry::Combat);
         }
         Op::EnlightenmentTurn => {
-            state.cards[0].set_this_turn_or_until_played_reduce_only(1);
+            state.cards[0].cost.set_this_turn_or_until_played(1, true);
             cs.set(1, Expiry::TurnOrPlayed, true);
         }
         Op::EnlightenmentCombat => {
-            state.cards[0].set_this_combat_reduce_only(1);
+            state.cards[0].cost.set_this_combat(1, true);
             cs.set(1, Expiry::Combat, true);
         }
         Op::Bookmark => {
@@ -345,10 +343,6 @@ fn apply(world: &mut World, subject: Subject, op: Op) -> bool {
         }
         Op::EndTurn => {
             crate::combat_loop::clear_per_turn_card_vars(state);
-            state.restore_stomp_costs_for_turn_start();
-            state.restore_pinpoint_costs_for_turn_start();
-            state.restore_snecko_costs_for_turn_start();
-            state.restore_wire_transient_costs_for_turn_start();
             cs.end_of_turn();
         }
         Op::AttackPlayed => {
@@ -382,7 +376,7 @@ fn apply(world: &mut World, subject: Subject, op: Op) -> bool {
 }
 
 fn rust_local(state: &CombatState) -> i32 {
-    crate::hooks::local_card_cost(state, &state.cards[0])
+    state.cards[0].local_cost()
 }
 
 /// Walk every op sequence up to `depth`; return the shortest diverging ones
@@ -580,12 +574,17 @@ fn relative_cost_mods_after_a_local_zero_fold_after_it() {
 fn free_midnight_entering_combat_shaves_after_the_zero() {
     let mut world = new_world(subject(CardId::Midnight));
     world.state.combat_log.cards_exhausted_this_combat = 2;
-    world.state.cards[0].set_locally_free(VarKey::FreeThisTurn);
+    world.state.cards[0].set_to_free_this_turn();
     crate::card_effects::stamp_entered_combat_cost_backfill(&mut world.state, uid());
     assert_eq!(rust_local(&world.state), -2);
     push_player_power(&mut world.state, 1, crate::PowerKind::BorrowedTime, 1);
     assert_eq!(crate::hooks::effective_card_cost(&world.state, uid()), 0);
-    assert_eq!(world.state.cards[0].cost, 10, "the base keeps the -2");
+    world.state.cards[0].cost.after_card_played_cleanup();
+    assert_eq!(
+        world.state.cards[0].local_cost(),
+        10,
+        "played: the -2 stays"
+    );
 }
 
 /// A `SetUntilPlayed(0)` (v0.107.1 Rocket Punch) is `WhenPlayed` only, so it
@@ -756,50 +755,118 @@ fn curious_reads_the_running_cost_of_the_early_cost_pass() {
     assert_eq!(crate::hooks::effective_card_cost(&world.state, uid()), 1);
 }
 
-/// Known gaps of the collapsed model, kept visible (see the audit report):
-/// each needs an ordering the engine's `cost` + vars cannot represent.
-fn known_gap(seq: &[Op]) -> bool {
-    let pos = |pred: &dyn Fn(Op) -> bool| seq.iter().position(|&o| pred(o));
-    let after = |start: usize, pred: &dyn Fn(Op) -> bool| {
-        seq[start..]
-            .iter()
-            .position(|&o| pred(o))
-            .map(|p| p + start)
-    };
-    let absolute = |o: Op| matches!(o, Op::Confused(_) | Op::Snecko(_) | Op::FreeThisCombat);
-    let enlightenment = |o: Op| matches!(o, Op::EnlightenmentTurn | Op::EnlightenmentCombat);
-    // A Relative mod appended AFTER an Absolute, then a base-lowering upgrade:
-    // C# clamps only the Absolute's amount and keeps the Relative on top.
-    let relative_after_absolute_upgrade = pos(&absolute)
-        .and_then(|a| after(a, &|o| o == Op::Transfigure))
-        .and_then(|t| after(t, &|o| o == Op::Upgrade))
-        .is_some();
-    // An until-played cut folded BEFORE a Snecko roll, then a base-lowering
-    // upgrade clamps the roll: the engine cannot tell the cut's order.
-    let cut_before_roll_upgrade = pos(&|o| o == Op::Bookmark)
-        .and_then(|b| after(b, &|o| matches!(o, Op::Snecko(_))))
-        .and_then(|r| after(r, &|o| o == Op::Upgrade))
-        .is_some();
-    // An Enlightenment cap that did not lower the card is not recorded, so
-    // `UpgradeBy` clamping its amount and a later downgrade are lost.
-    let unrecorded_cap = pos(&enlightenment)
-        .and_then(|e| after(e, &|o| o == Op::Upgrade))
-        .and_then(|u| after(u, &|o| o == Op::Downgrade))
-        .is_some();
-    relative_after_absolute_upgrade || cut_before_roll_upgrade || unrecorded_cap
+/// The three orderings the old collapsed model (`Card::cost` plus cost
+/// `VarKey`s) could not represent, now pinned against the C# model.
+///
+/// 1. A Relative modifier appended AFTER an Absolute, then a base-lowering
+///    upgrade: C# clamps only the Absolute's amount and keeps the Relative
+///    on top.
+#[test]
+fn relative_after_an_absolute_survives_a_base_lowering_upgrade() {
+    let strike = subject(CardId::StrikeIronclad);
+    // Confused 2, Transfigure +1, upgrade 1 -> 0: [=min(2,0)=0, +1] = 1.
+    let _ = assert_local(strike, &[Op::Confused(2), Op::Transfigure, Op::Upgrade], 1);
+    let _ = assert_local(strike, &[Op::Snecko(3), Op::Transfigure, Op::Upgrade], 1);
+    let _ = assert_local(
+        strike,
+        &[Op::FreeThisCombat, Op::Transfigure, Op::Upgrade],
+        1,
+    );
+    let bludgeon = subject(CardId::Bludgeon);
+    // Confused 2 under a 3 -> 2 upgrade is not clamped: 2 + 1.
+    let _ = assert_local(
+        bludgeon,
+        &[Op::Confused(2), Op::Transfigure, Op::Upgrade],
+        3,
+    );
+    // Snecko 3 clamps to the new base 2, plus 1; the turn end reveals 2 + 1.
+    let _ = assert_local(bludgeon, &[Op::Snecko(3), Op::Transfigure, Op::Upgrade], 3);
+    let _ = assert_local(
+        bludgeon,
+        &[Op::Snecko(3), Op::Transfigure, Op::Upgrade, Op::EndTurn],
+        3,
+    );
 }
 
-/// Every op sequence up to depth 3, on every subject, matches the C# model
-/// except the documented [`known_gap`]s.
+/// 2. An until-played cut folded BEFORE a Snecko roll, then a base-lowering
+///    upgrade that clamps the roll: the cut stays under the roll, and comes
+///    back only if the roll expires without a play.
 #[test]
-fn cost_model_matches_csharp_to_depth_3() {
+fn until_played_cut_before_a_roll_stays_under_it_through_an_upgrade() {
+    let bludgeon = subject(CardId::Bludgeon);
+    // 3, -1 (played), roll 3 -> clamped to 2 by the upgrade: 2.
+    let _ = assert_local(bludgeon, &[Op::Bookmark, Op::Snecko(3), Op::Upgrade], 2);
+    // Turn end drops the roll, not the cut: 2 - 1.
+    let _ = assert_local(
+        bludgeon,
+        &[Op::Bookmark, Op::Snecko(3), Op::Upgrade, Op::EndTurn],
+        1,
+    );
+    // A play drops both.
+    let _ = assert_local(
+        bludgeon,
+        &[Op::Bookmark, Op::Snecko(3), Op::Upgrade, Op::Played],
+        2,
+    );
+    let strike = subject(CardId::StrikeIronclad);
+    let _ = assert_local(
+        strike,
+        &[Op::Bookmark, Op::Snecko(3), Op::Upgrade, Op::EndTurn],
+        -1,
+    );
+}
+
+/// 3. An Enlightenment cap that does not lower the card is still a
+///    modifier: `UpgradeBy` clamps its amount, and a later downgrade
+///    (canonical base back) meets the clamped cap.
+#[test]
+fn an_unlowering_enlightenment_cap_is_clamped_by_upgrade_and_kept_by_downgrade() {
+    let strike = subject(CardId::StrikeIronclad);
+    // Cap 1 on a 1-cost Strike changes nothing; the upgrade to 0 clamps it
+    // to 0; the downgrade restores base 1 under the cap 0: min(1, 0) = 0.
+    let _ = assert_local(strike, &[Op::EnlightenmentCombat], 1);
+    let _ = assert_local(strike, &[Op::EnlightenmentCombat, Op::Upgrade], 0);
+    let _ = assert_local(
+        strike,
+        &[Op::EnlightenmentCombat, Op::Upgrade, Op::Downgrade],
+        0,
+    );
+    let _ = assert_local(
+        strike,
+        &[
+            Op::EnlightenmentTurn,
+            Op::Upgrade,
+            Op::Downgrade,
+            Op::EndTurn,
+        ],
+        1,
+    );
+    let banshee = subject(CardId::BansheesCry);
+    let _ = assert_local(
+        banshee,
+        &[Op::EnlightenmentCombat, Op::Upgrade, Op::Downgrade],
+        1,
+    );
+}
+
+fn assert_no_divergence(depth: usize) {
     let mut unexpected = Vec::new();
     for subject in SUBJECTS {
-        for (seq, cs, rs) in diverging_sequences(subject, 3) {
-            if !known_gap(&seq) {
-                unexpected.push(format!("{:?}: {seq:?} -> C# {cs}, Rust {rs}", subject.id));
-            }
+        for (seq, cs, rs) in diverging_sequences(subject, depth) {
+            unexpected.push(format!("{:?}: {seq:?} -> C# {cs}, Rust {rs}", subject.id));
         }
     }
     assert!(unexpected.is_empty(), "{}", unexpected.join("\n"));
+}
+
+/// Every op sequence up to depth 3, on every subject, matches the C# model.
+#[test]
+fn cost_model_matches_csharp_to_depth_3() {
+    assert_no_divergence(3);
+}
+
+/// Depth 4: the same, one op deeper (about 0.5 s at the test profile).
+#[test]
+fn cost_model_matches_csharp_to_depth_4() {
+    assert_no_divergence(4);
 }

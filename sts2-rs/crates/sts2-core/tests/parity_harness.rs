@@ -3432,7 +3432,7 @@ mod vmko_heavenly_drill {
         state.cards.push(Card {
             uid: card_uid,
             card_id: CardId::HeavenlyDrill,
-            cost: -1,
+            cost: sts2_core::CardEnergyCost::new(-1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,

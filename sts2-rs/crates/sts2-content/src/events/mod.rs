@@ -198,7 +198,7 @@ pub fn any_enchantable_deck_card(state: &RunState) -> bool {
         !matches!(c.card_type, CardType::Status | CardType::Curse)
             && !c.is_quest()
             && c.enchantments.is_empty()
-            && c.cost >= 0
+            && c.base_cost() >= 0
     })
 }
 
@@ -593,7 +593,7 @@ mod tests {
         Card {
             card_id,
             card_type,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             tags,
             ..Card::pod_defaults()
         }
@@ -781,7 +781,7 @@ mod tests {
             CardType::Attack,
             sts2_core::cards::CardTags::NONE,
         );
-        unplayable.cost = -1;
+        unplayable.cost = sts2_core::CardEnergyCost::new(-1);
         rs.master_deck.push(unplayable);
         assert!(!any_enchantable_deck_card(&rs));
 
@@ -792,7 +792,7 @@ mod tests {
             CardType::Attack,
             sts2_core::cards::CardTags::NONE,
         );
-        zero_cost.cost = 0;
+        zero_cost.cost = sts2_core::CardEnergyCost::new(0);
         rs.master_deck.push(zero_cost);
         assert!(any_enchantable_deck_card(&rs));
     }

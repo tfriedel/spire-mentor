@@ -13,14 +13,12 @@ pub(crate) fn play_momentum_strike(
     let _ = deal_damage_player_to_enemy(state, t, base);
     // C# `MomentumStrike.cs:25-29` OnPlay also calls
     // `base.EnergyCost.SetThisCombat(0)` — this card instance's future
-    // plays cost 0 for the rest of combat. Mutate the resolving card
-    // POD's `cost` directly; `state.cards` is per-combat so the reset
-    // happens at next combat init. Bead `sts2-rs-j0wn5`.
+    // plays cost 0 for the rest of combat. Bead `sts2-rs-j0wn5`.
     if let Some(idx) =
         sts2_core::card_effects::resolving_card_uid(state).map(|u| u.0.get() as usize - 1)
     {
         if let Some(card) = state.cards.get_mut(idx) {
-            card.set_cost_this_combat(0);
+            card.cost.set_this_combat(0, false);
         }
     }
     EffectResult::Resolved

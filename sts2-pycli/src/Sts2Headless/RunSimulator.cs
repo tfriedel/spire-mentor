@@ -4119,7 +4119,7 @@ public class RunSimulator
     /// edge fires first and there is nothing left to re-bank; with two, each
     /// edge retires only its own half. The cost once BOTH cleanups have run is
     /// the fixed point that tells the consumer's
-    /// <c>rebank_wire_cost_after_edge</c> which of the two it is holding.
+    /// <c>folded_cost_to_model</c> which of the two it is holding.
     /// </remarks>
     internal static int? StableEnergyCost(CardModel c) =>
         FoldLocalModifiers(

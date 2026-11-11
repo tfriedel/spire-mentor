@@ -22,7 +22,7 @@ fn grown_arena(n: u32) -> Vec<Card> {
             };
             if i % 3 == 0 {
                 card.set_combat_var(VarKey::RampageDamage, i as i32);
-                card.set_combat_var(VarKey::FreeThisTurn, 1);
+                card.set_to_free_this_turn();
             }
             if i % 5 == 0 {
                 card.set_enchantment(EnchantmentId::Steady, 1);

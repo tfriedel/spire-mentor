@@ -388,7 +388,7 @@ const fn target_type_python_name(t: TargetType) -> &'static str {
 /// add a TODO if it diverges).
 #[must_use]
 fn card_is_playable(card: &Card, state: &CombatState) -> bool {
-    state.player.energy >= i32::from(card.cost)
+    state.player.energy >= card.local_cost()
 }
 
 /// Serialize one [`Card`] from the player's hand into the bridge-state
@@ -407,7 +407,7 @@ fn card_to_bridge_value(card: &Card, state: &CombatState) -> Value {
         "type".into(),
         Value::String(card_type_python_name(card.card_type).into()),
     );
-    obj.insert("cost".into(), json!(card.cost));
+    obj.insert("cost".into(), json!(card.local_cost()));
     obj.insert(
         "target".into(),
         Value::String(target_type_python_name(card.target_type).into()),
@@ -912,7 +912,7 @@ mod tests {
             Card {
                 uid: CardUid(NonZeroU32::new(raw_uid).unwrap()),
                 card_id,
-                cost,
+                cost: crate::CardEnergyCost::new(cost),
                 card_type,
                 target_type,
                 upgraded,
@@ -1006,7 +1006,7 @@ mod tests {
         let upgraded_strike = Card {
             uid: CardUid(NonZeroU32::new(1).unwrap()),
             card_id: CardId::StrikeIronclad,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: true,

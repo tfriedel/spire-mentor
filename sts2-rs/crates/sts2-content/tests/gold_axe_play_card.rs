@@ -59,7 +59,7 @@ fn push(state: &mut CombatState, id: CardId, dmg: i32) -> u8 {
     state.cards.push(Card {
         uid,
         card_id: id,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Attack,
         target_type: TargetType::Enemy,
         upgraded: false,

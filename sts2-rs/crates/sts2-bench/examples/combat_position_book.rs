@@ -1034,7 +1034,12 @@ fn move_key(state: &CombatState, a: &Action) -> String {
             .get(usize::from(*hand_index))
             .and_then(|uid| state.cards.iter().find(|c| c.uid == *uid));
         if let Some(c) = card {
-            return format!("card:{:?}:{}:{}:{target:?}", c.card_id, c.upgraded, c.cost);
+            return format!(
+                "card:{:?}:{}:{}:{target:?}",
+                c.card_id,
+                c.upgraded,
+                c.local_cost()
+            );
         }
     }
     format!("{a:?}")

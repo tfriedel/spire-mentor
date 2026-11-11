@@ -63,7 +63,7 @@ fn make_card(raw: u32, card_id: CardId, cost: i8, card_type: CardType) -> Card {
     Card {
         uid: uid(raw),
         card_id,
-        cost,
+        cost: sts2_core::CardEnergyCost::new(cost),
         card_type,
         target_type: TargetType::Enemy,
         ..Card::pod_defaults()
@@ -114,7 +114,7 @@ fn ironclad_vs_nibbit(seed: u64) -> CombatState {
         arena.push(Card {
             uid: uid(raw),
             card_id: spec.id,
-            cost: spec.cost,
+            cost: sts2_core::CardEnergyCost::new(spec.cost),
             card_type: spec.card_type,
             target_type: spec.target_type,
             base_damage: spec.base_damage,

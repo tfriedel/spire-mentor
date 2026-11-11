@@ -537,12 +537,12 @@ mod tests {
         assert!(!card_exhausts_inst(&times_up) && card_retain_inst(&times_up));
         // Mirage keeps Exhaust and its cost; the upgrade drops Exhaust.
         let mirage = pod(CardId::Mirage, true, v);
-        assert_eq!(mirage.cost, 1);
+        assert_eq!(mirage.local_cost(), 1);
         assert!(!card_exhausts_inst(&mirage));
         assert!(card_exhausts_inst(&pod(CardId::Mirage, false, v)));
         // TrashToTreasure upgrades to cost 0, not Innate.
         let ttt = pod(CardId::TrashToTreasure, true, v);
-        assert_eq!(ttt.cost, 0);
+        assert_eq!(ttt.local_cost(), 0);
         assert!(!card_innate_inst(&ttt));
     }
 

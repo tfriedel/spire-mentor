@@ -449,7 +449,7 @@ fn snapshot_hand(state: &CombatState) -> Vec<CardInHand> {
                 hand_index: u8::try_from(i).unwrap_or(u8::MAX),
                 card_id: card.card_id,
                 upgraded: card.upgraded,
-                cost: card.cost,
+                cost: i8::try_from(card.local_cost()).unwrap_or(card.base_cost()),
                 card_type: card.card_type,
             })
         })

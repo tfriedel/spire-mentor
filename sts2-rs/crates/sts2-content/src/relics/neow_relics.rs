@@ -1057,7 +1057,7 @@ mod tests {
         assert_eq!(rs.master_deck.len(), before + 1);
         let c = rs.master_deck.last().unwrap();
         assert_eq!(c.card_id, CardId::Dowsing);
-        assert_eq!(c.cost, -1);
+        assert_eq!(c.local_cost(), -1);
         assert!(!c.is_upgradable(), "MaxUpgradeLevel => 0");
         assert_eq!(rarity_for_card_id(CardId::Dowsing), Some(CardRarity::Quest));
         assert!(rs.pending_rewards.is_empty());

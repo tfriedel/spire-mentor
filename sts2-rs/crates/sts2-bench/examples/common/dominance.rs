@@ -109,7 +109,8 @@ pub fn card_key(s: &CombatState, a: &Action) -> Option<CardKey> {
     };
     let uid = s.player.hand.get(*hand_index as usize)?;
     let card = s.cards.get(uid.0.get() as usize - 1)?;
-    Some((card.card_id, card.upgraded, card.cost, *target))
+    let cost = i8::try_from(card.local_cost()).unwrap_or(i8::MIN);
+    Some((card.card_id, card.upgraded, cost, *target))
 }
 
 /// Resolve a `CardKey` back to a concrete legal `PlayCard` in `s`.

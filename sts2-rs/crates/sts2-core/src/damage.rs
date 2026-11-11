@@ -1105,6 +1105,7 @@ fn apply_damage_with_final_impl(
             if !state.combat_log.osty_attack_command_open {
                 state.combat_log.osty_attacks_this_turn =
                     state.combat_log.osty_attacks_this_turn.saturating_add(1);
+                crate::card_effects::flatten_after_osty_attack(state);
             }
             // GH #806: per-target powered-hit tally for GangUp (GangUp.cs:24-29
             // counts the target's powered `DamageReceivedEntry`s from a
@@ -4399,7 +4400,7 @@ mod tests {
         let mk_card = |raw: u32, card_id: CardId| crate::Card {
             uid: crate::CardUid::new(raw).expect("non-zero"),
             card_id,
-            cost: 1,
+            cost: crate::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,

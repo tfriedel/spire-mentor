@@ -83,7 +83,7 @@ fn build_arena(options_json: &[Value]) -> (CardStore, Vec<ChoiceOption>) {
         arena.push(Card {
             uid,
             card_id,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type,
             target_type: TargetType::None,
             upgraded,

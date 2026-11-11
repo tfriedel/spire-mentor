@@ -900,12 +900,11 @@ mod tests {
     /// C# `VexingPuzzlebox.AfterPlayerTurnStart` calls `SetToFreeThisTurn()`
     /// (`SetThisTurnOrUntilPlayed(0)`): the generated card is free only until
     /// it is played or the turn ends. It must keep its printed cost and carry
-    /// the `FreeThisTurn` rider, not a permanent `cost = 0` that made every
+    /// the `FREE_THIS_TURN` rider, not a permanent `cost = 0` that made every
     /// later redraw in the combat free too.
     #[test]
     fn vexing_puzzlebox_card_is_free_this_turn_only() {
         use std::num::NonZeroU32;
-        use sts2_core::cards::VarKey;
         use sts2_core::potions::CharacterId;
         use sts2_core::relic_effects::dispatch_after_player_turn_start;
         use sts2_core::{CombatState, Relic, RelicKind};
@@ -928,9 +927,9 @@ mod tests {
         let card = *sts2_core::card_by_uid(&s.cards, uid).expect("card exists");
         let printed = sts2_core::build_card_for_version(card.card_id, false, s.game_version)
             .expect("factory installed")
-            .cost;
-        assert_eq!(card.cost, printed, "printed cost must survive");
-        assert_eq!(card.combat_var(VarKey::FreeThisTurn), 1);
+            .base_cost();
+        assert_eq!(card.base_cost(), printed, "printed cost must survive");
+        assert!(card.cost.has(sts2_core::LocalCostMod::FREE_THIS_TURN));
         assert_eq!(sts2_core::hooks::effective_card_cost(&s, uid), 0);
     }
 
@@ -1433,7 +1432,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id: CardId::StrikeIronclad,
-            cost: 3,
+            cost: sts2_core::CardEnergyCost::new(3),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -1571,7 +1570,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id,
-            cost: 0,
+            cost: sts2_core::CardEnergyCost::new(0),
             card_type,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -1728,7 +1727,7 @@ mod tests {
         Card {
             uid: CardUid(std::num::NonZeroU32::new(uid_val).unwrap()),
             card_id: sts2_core::cards::CardId::StrikeIronclad,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: ct,
             target_type: TargetType::Enemy,
             upgraded: false,

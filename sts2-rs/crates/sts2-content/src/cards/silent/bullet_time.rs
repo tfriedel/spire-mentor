@@ -11,26 +11,24 @@ use super::prelude::*;
 /// Mirrors C# `BulletTime.OnPlay`: `card.SetToFreeThisTurn()` for each hand
 /// card whose cost is not X (`!EnergyCost.CostsX`), then apply `NoDrawPower`.
 /// `SetToFreeThisTurn` is a **temporary** override cleared at turn end — the
-/// canonical Rust analog is the `VarKey::FreeThisTurn` combat-var (cleared by
+/// canonical Rust analog is the `LocalCostMod::FREE_THIS_TURN` cost modifier (dropped by
 /// `combat_loop::clear_per_turn_card_vars` over the whole arena), same as
 /// InfernalBlade / Discovery / WhiteNoise. The prior port mutated `card.cost`
 /// **permanently**, so a hand card freed this turn stayed cost-0 after being
 /// discarded, reshuffled, and redrawn on a later turn — Rust then offered it
 /// at 0 energy when C# (temp cost cleared) did not (coverage-sweep
 /// LEGAL_ACTION: potion:SKILL_POTION, which can roll BULLET_TIME). X-cost
-/// cards (`cost == -1`) are skipped, matching C#'s `!CostsX` guard.
+/// cards (base cost -1) are skipped, matching C#'s `!CostsX` guard.
 /// Bead `sts2-rs-bxwz` / `sts2-rs-q6bix`.
 pub(crate) fn play_bullet_time(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    use sts2_core::cards::VarKey;
-
     let hand_uids: smallvec::SmallVec<[sts2_core::CardUid; 16]> =
         state.player.hand.iter().copied().collect();
     for uid in hand_uids {
         let idx = uid.0.get() as usize - 1;
-        let costs_x = state.cards.get(idx).is_some_and(|c| c.cost < 0);
+        let costs_x = state.cards.get(idx).is_some_and(|c| c.base_cost() < 0);
         if !costs_x {
             if let Some(card) = state.cards.get_mut(idx) {
-                card.set_locally_free(VarKey::FreeThisTurn);
+                card.set_to_free_this_turn();
             }
         }
     }

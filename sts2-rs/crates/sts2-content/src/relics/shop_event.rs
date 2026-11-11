@@ -629,7 +629,7 @@ pub fn install_pool() {
     // Bead `sts2-rs-70anj.1` (hook corrected 2026-07-17): `before_hand_draw`
     // listener for `JeweledMask` (C# `JeweledMask.BeforeHandDraw`). Turn-1
     // hand draw only, BEFORE the opening draw: pick a random Power card in
-    // the draw pile (CombatCardSelection stream), set `FreeThisTurn` on it,
+    // the draw pile (CombatCardSelection stream), set `FREE_THIS_TURN` on it,
     // and move it to hand. Registered on `before_hand_draw` — NOT
     // `after_side_turn_start`, which fired after the opening draw (see
     // `listener_jeweled_mask` and the ToastyMittens note above).
@@ -1830,7 +1830,7 @@ fn listener_toasty_mittens_v0111(state: &mut CombatState) -> EffectResult {
 /// `BeforeHandDraw`: `if (TurnNumber <= 1) { list = Draw.Cards.Where(c =>
 /// c.Type == Power); if non-empty: card = Rng.CombatCardSelection
 /// .NextItem(list); card.SetToFreeThisTurn(); CardPileCmd.Add(card, Hand) }`.
-/// Rust port uses `VarKey::FreeThisTurn = 1` as the "free for this
+/// Rust port uses `LocalCostMod::FREE_THIS_TURN` as the "free for this
 /// turn" mechanism (same pattern as `InfernalBlade` in
 /// `cards/ironclad.rs`). Bead `sts2-rs-70anj.1`.
 ///
@@ -1900,7 +1900,7 @@ fn listener_jeweled_mask(state: &mut CombatState) -> EffectResult {
         .combat_card_selection
         .next_int_exclusive(0, pool.len() as i32) as usize;
     let uid = pool[idx];
-    set_card_var(state, uid, VarKey::FreeThisTurn, 1);
+    sts2_core::card_effects::set_card_free_this_turn(state, uid);
     state.move_card_to_hand(uid);
     EffectResult::Resolved
 }
@@ -2445,7 +2445,7 @@ fn listener_music_box_side_turn_start(state: &mut CombatState, side: Side) -> Ef
 /// side, one random Attack from the character pool, free this turn,
 /// generated into hand. The engine side,
 /// `card_effects::generate_free_attack_in_hand`, samples the card, sets
-/// `VarKey::FreeThisTurn = 1`, and adds it the way C#
+/// `LocalCostMod::FREE_THIS_TURN`, and adds it the way C#
 /// `AddGeneratedCardsToCombat` does: to the discard pile when the hand
 /// is full, with the generation listeners fired.
 fn listener_crossbow(state: &mut CombatState, side: Side) -> EffectResult {
@@ -3046,7 +3046,7 @@ fn push_deck_card(rs: &mut RunState, card_id: sts2_core::cards::CardId) {
         // on v0.111.0).
         let spec = crate::cards::v0111::spec_for(spec, rs.game_version);
         card.card_type = spec.card_type;
-        card.cost = spec.cost;
+        card.cost.set_base(spec.cost);
         card.base_damage = spec.base_damage;
         card.base_block = spec.base_block;
         card.target_type = spec.target_type;
@@ -3521,7 +3521,7 @@ fn listener_radiant_pearl(state: &mut CombatState) -> EffectResult {
     let mut card = sts2_core::cards::Card::pod_defaults();
     card.card_id = sts2_core::cards::CardId::Luminesce;
     card.card_type = sts2_core::cards::CardType::Skill;
-    card.cost = 0;
+    card.cost = sts2_core::CardEnergyCost::new(0);
     card.base_damage = 0;
     card.base_block = 0;
     card.target_type = sts2_core::cards::TargetType::Self_;
@@ -4754,7 +4754,7 @@ fn listener_claws(rs: &mut RunState) -> EffectResult {
             // cloned enchantment through `CardCmd.Enchant` only when
             // `enchantmentModel.CanEnchant(maul)` — a Defend's Nimble/Goopy/
             // Imbued or a Strike's Spiral does not survive onto the Maul.
-            for &(ench, amount) in &card.enchantments {
+            for (ench, amount) in &card.enchantments {
                 if maul_spec.as_ref().is_some_and(|spec| {
                     crate::enchantments::can_enchant_card(spec, &maul, ench, version)
                 }) {
@@ -5901,7 +5901,7 @@ mod tests {
             let _ = sts2_core::run_effects::dispatch_after_obtained(&mut rs);
             assert_eq!(rs.master_deck.len(), 1, "{version:?}");
             assert_eq!(rs.master_deck[0].card_id, CardId::Whistle, "{version:?}");
-            assert_eq!(rs.master_deck[0].cost, whistle_cost, "{version:?}");
+            assert_eq!(rs.master_deck[0].local_cost(), whistle_cost, "{version:?}");
             assert_eq!(rs.master_deck[0].base_damage, 33, "{version:?}");
 
             let mut rs = RunState::new();
@@ -9224,7 +9224,7 @@ mod tests {
         assert_eq!(c.uid, src_uid, "uid preserved");
         assert!(c.upgraded, "upgrade state preserved");
         assert_eq!(
-            c.enchantments.as_slice(),
+            c.enchantments.to_vec(),
             &[(EnchantmentId::Glam, 1)],
             "enchantments preserved"
         );
@@ -9268,7 +9268,7 @@ mod tests {
                 assert_eq!(c.card_id, CardId::Maul);
                 let want: &[(EnchantmentId, i32)] = if kept { &[(ench, 2)] } else { &[] };
                 assert_eq!(
-                    c.enchantments.as_slice(),
+                    c.enchantments.to_vec(),
                     want,
                     "{version:?} {id:?}+{ench:?} -> Maul"
                 );
@@ -9401,11 +9401,11 @@ mod tests {
                 CardId::StrikeIronclad | CardId::StrikeSilent => {
                     assert_eq!(val, 1, "{:?} should be enchanted", card.card_id);
                     // TezcatarasEmber.OnEnchant zeroes the energy cost.
-                    assert_eq!(card.cost, 0, "{:?} should cost 0", card.card_id);
+                    assert_eq!(card.local_cost(), 0, "{:?} should cost 0", card.card_id);
                 }
                 CardId::DefendIronclad => {
                     assert_eq!(val, 0, "Defend should NOT be enchanted");
-                    assert_eq!(card.cost, 1, "Defend keeps its cost");
+                    assert_eq!(card.local_cost(), 1, "Defend keeps its cost");
                 }
                 _ => {}
             }
@@ -10252,7 +10252,7 @@ mod tests {
             .expect("soot card in arena");
         assert_eq!(card.card_id, CardId::Soot);
         assert_eq!(card.card_type, CardType::Status);
-        assert_eq!(card.cost, -1);
+        assert_eq!(card.local_cost(), -1);
     }
 
     /// A card-effect draw that reshuffles fires Biiig Hug mid-draw (C#
@@ -10393,7 +10393,7 @@ mod tests {
         for uid in new_uids {
             let card = state.cards.iter().find(|c| c.uid == *uid).unwrap();
             assert_eq!(card.card_id, CardId::Shiv);
-            assert_eq!(card.cost, 0);
+            assert_eq!(card.local_cost(), 0);
             assert_eq!(card.base_damage, 4);
         }
     }
@@ -11300,7 +11300,7 @@ mod tests {
     #[test]
     fn after_card_played_relics_fire_in_equip_order_iron_club_mummified_hand() {
         use std::num::NonZeroU32;
-        use sts2_core::cards::{Card, CardId, CardType, VarKey};
+        use sts2_core::cards::{Card, CardId, CardType};
         use sts2_core::relic_effects::{dispatch_after_card_played, CardEventCtx};
         use sts2_core::Relic;
         crate::relics::dispatch::ensure_installed();
@@ -11328,7 +11328,7 @@ mod tests {
             let power = state.add_card_to_draw_pile(Card {
                 card_id: CardId::Inflame,
                 card_type: CardType::Power,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 ..Card::pod_defaults()
             });
             state.player.draw.retain(|u| *u != power);
@@ -11336,7 +11336,7 @@ mod tests {
             let strike = state.add_card_to_draw_pile(Card {
                 card_id: CardId::StrikeIronclad,
                 card_type: CardType::Attack,
-                cost: 1,
+                cost: sts2_core::CardEnergyCost::new(1),
                 ..Card::pod_defaults()
             });
             let ctx = CardEventCtx {
@@ -11353,10 +11353,10 @@ mod tests {
                 .iter()
                 .find(|c| c.uid == strike)
                 .expect("strike")
-                .combat_var(VarKey::FreeThisTurn);
+                .cost
+                .has(sts2_core::LocalCostMod::FREE_THIS_TURN);
             assert_eq!(
-                free,
-                i32::from(iron_club_first),
+                free, iron_club_first,
                 "Mummified Hand frees the drawn card iff Iron Club fired first \
                  (iron_club_first={iron_club_first})"
             );
@@ -11375,7 +11375,7 @@ mod tests {
     #[test]
     fn brilliant_scarf_counts_in_its_relic_slot_before_mummified_hand() {
         use std::num::NonZeroU32;
-        use sts2_core::cards::{Card, CardId, CardType, VarKey};
+        use sts2_core::cards::{Card, CardId, CardType};
         use sts2_core::relic_effects::CardEventCtx;
         use sts2_core::Relic;
         crate::relics::dispatch::ensure_installed();
@@ -11413,7 +11413,7 @@ mod tests {
                 let power = state.add_card_to_draw_pile(Card {
                     card_id: CardId::Inflame,
                     card_type: CardType::Power,
-                    cost: 1,
+                    cost: sts2_core::CardEnergyCost::new(1),
                     ..Card::pod_defaults()
                 });
                 state.player.draw.retain(|u| *u != power);
@@ -11423,7 +11423,7 @@ mod tests {
                     let uid = state.add_card_to_draw_pile(Card {
                         card_id: id,
                         card_type: CardType::Attack,
-                        cost: 1,
+                        cost: sts2_core::CardEnergyCost::new(1),
                         ..Card::pod_defaults()
                     });
                     state.player.draw.retain(|u| *u != uid);
@@ -11440,7 +11440,7 @@ mod tests {
                 .expect("index");
                 let (free, other) = (hand[k], hand[1 - k]);
                 state.player.hand.extend(hand.iter().copied());
-                state.cards[free.0.get() as usize - 1].set_locally_free(VarKey::FreeThisTurn);
+                state.cards[free.0.get() as usize - 1].set_to_free_this_turn();
                 let ctx = CardEventCtx {
                     card_id: CardId::Inflame,
                     card_uid: Some(power),
@@ -11456,11 +11456,11 @@ mod tests {
                     .find(|r| r.kind == RelicKind::BrilliantScarf)
                     .expect("scarf");
                 assert_eq!(scarf.counter, 4, "{version:?} scarf_first={scarf_first}");
-                let other_freed =
-                    state.cards[other.0.get() as usize - 1].combat_var(VarKey::FreeThisTurn);
+                let other_freed = state.cards[other.0.get() as usize - 1]
+                    .cost
+                    .has(sts2_core::LocalCostMod::FREE_THIS_TURN);
                 assert_eq!(
-                    other_freed,
-                    i32::from(!scarf_first),
+                    other_freed, !scarf_first,
                     "{version:?}: pool 3 (already-free card picked) iff the Scarf counted \
                      first (scarf_first={scarf_first})"
                 );
@@ -11863,7 +11863,7 @@ mod tests {
 
     #[test]
     fn listener_jeweled_mask_moves_random_power_to_hand_free() {
-        use sts2_core::cards::{Card, CardId, CardType, VarKey};
+        use sts2_core::cards::{Card, CardId, CardType};
         use sts2_core::relic_effects::dispatch_before_hand_draw;
         crate::relics::dispatch::ensure_installed();
         let mut state = CombatState::default();
@@ -11894,10 +11894,9 @@ mod tests {
         );
         assert!(state.player.hand.contains(&power_uid));
         let card = &state.cards[power_uid.0.get() as usize - 1];
-        assert_eq!(
-            card.combat_var(VarKey::FreeThisTurn),
-            1,
-            "Selected Power must have FreeThisTurn = 1"
+        assert!(
+            card.cost.has(sts2_core::LocalCostMod::FREE_THIS_TURN),
+            "Selected Power must have FREE_THIS_TURN"
         );
         // C# `Rng.CombatCardSelection.NextItem(list)` = exactly one
         // `NextInt` tick on the CombatCardSelection stream (Rng.cs:264).
@@ -14170,7 +14169,7 @@ mod tests {
         state.cards.push(Card {
             uid,
             card_id,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type: CardType::Attack,
             target_type: TargetType::Enemy,
             upgraded: false,
@@ -14208,7 +14207,7 @@ mod tests {
         state.cards.get(idx).is_some_and(|c| {
             c.combat_vars
                 .iter()
-                .any(|(k, v)| *k == VarKey::EtherealThisCombat && *v == 1)
+                .any(|(k, v)| k == VarKey::EtherealThisCombat && v == 1)
         })
     }
 
@@ -15183,7 +15182,6 @@ mod tests {
     /// the side `delete !`, and the wrong-relic `==` guard.
     #[test]
     fn crossbow_generates_free_attack_on_player_turn() {
-        use sts2_core::cards::VarKey;
         use sts2_core::potions::CharacterId;
         use sts2_core::relic_effects::dispatch_after_side_turn_start;
         crate::cards::dispatch::ensure_installed();
@@ -15200,10 +15198,11 @@ mod tests {
             "Crossbow must add one free Attack to hand on the player turn"
         );
         let uid = *state.player.hand.last().unwrap();
-        assert_eq!(
-            state.cards[uid.0.get() as usize - 1].combat_var(VarKey::FreeThisTurn),
-            1,
-            "generated Attack must be FreeThisTurn"
+        assert!(
+            state.cards[uid.0.get() as usize - 1]
+                .cost
+                .has(sts2_core::LocalCostMod::FREE_THIS_TURN),
+            "generated Attack must be FREE_THIS_TURN"
         );
     }
 
@@ -15214,7 +15213,7 @@ mod tests {
     /// turn. This is fidelity gate F9's "hand size 11 exceeds cap 10".
     #[test]
     fn crossbow_with_full_hand_puts_free_attack_on_discard() {
-        use sts2_core::cards::{VarKey, HAND_LIMIT};
+        use sts2_core::cards::HAND_LIMIT;
         use sts2_core::event_log::EventLogEntry;
         use sts2_core::potions::CharacterId;
         use sts2_core::relic_effects::dispatch_after_side_turn_start;
@@ -15240,7 +15239,7 @@ mod tests {
         let uid = *state.player.discard.last().unwrap();
         let card = &state.cards[uid.0.get() as usize - 1];
         assert_eq!(card.card_type, CardType::Attack);
-        assert_eq!(card.combat_var(VarKey::FreeThisTurn), 1);
+        assert!(card.cost.has(sts2_core::LocalCostMod::FREE_THIS_TURN));
         assert_eq!(
             state.player.generated_cards_this_combat, 1,
             "the generation counts for Supermassive"

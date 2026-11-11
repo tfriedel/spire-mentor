@@ -1,1899 +1,495 @@
 {
- "active_leaf": 42,
- "active_path": [
-  0,
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  10,
-  11,
-  12,
-  13,
-  14,
-  15,
-  16,
-  17,
-  18,
-  19,
-  20,
-  21,
-  22,
-  23,
-  24,
-  25,
-  26,
-  27,
-  28,
-  29,
-  30,
-  31,
-  32,
-  33,
-  34,
-  35,
-  36,
-  37,
-  38,
-  39,
-  40,
-  41,
-  42
- ],
- "nodes": [
-  {
+ "step": {
+  "action_label": "",
+  "assets_base": "https://assets.test",
+  "chosen_action": null,
+  "decision": "combat_play",
+  "idx": 0,
+  "meta": {
    "act": 1,
-   "child_ids": [
-    1
-   ],
-   "combat_log": [],
-   "decision": "event_choice",
-   "details": [],
-   "error": false,
-   "floor": 1,
-   "id": 0,
-   "idx": 0,
-   "label": "Started Ironclad (seed G0LDEN0001, A0, act1 roll)",
-   "parent_id": null,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    2
-   ],
-   "combat_log": [],
-   "decision": "card_select",
-   "details": [
-    "+Relic Pomander"
-   ],
-   "error": false,
-   "floor": 1,
-   "id": 1,
-   "idx": 1,
-   "label": "Choose: POMANDER",
-   "parent_id": 0,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    3
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 1,
-   "id": 2,
-   "idx": 2,
-   "label": "Upgrade Strike",
-   "parent_id": 1,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    4
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Shrinker Beetle"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 3,
-   "idx": 3,
-   "label": "Map → (0,1)",
-   "parent_id": 2,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    5
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 31,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike+",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": true,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 9 damage to Shrinker Beetle using Strike+.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike+",
-    "Shrinker Beetle HP 40→31 (−9)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 4,
-   "idx": 4,
-   "label": "Play Strike+ → Shrinker Beetle",
-   "parent_id": 3,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    6
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 25,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 6 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 31→25 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 5,
-   "idx": 5,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 4,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    7
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 6,
-   "idx": 6,
-   "label": "Play Defend",
-   "parent_id": 5,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    8
-   ],
-   "combat_log": [
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Shrink",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Shrinker Beetle used Shrink.",
-     "verb": "used"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 5→0",
-    "You −1 Shrink"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 7,
-   "idx": 7,
-   "label": "End turn",
-   "parent_id": 6,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    9
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 21,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 4 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 25→21 (−4)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 8,
-   "idx": 8,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 7,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    10
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "blocked": 0,
-     "hp_after": 16,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 5 damage to Shrinker Beetle using Bash.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Vulnerable",
-     "round": 2,
-     "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Shrinker Beetle gained 2 Vulnerable.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Bash",
-    "Shrinker Beetle HP 21→16 (−5)",
-    "Shrinker Beetle +2 Vulnerable"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 9,
-   "idx": 9,
-   "label": "Play Bash → Shrinker Beetle",
-   "parent_id": 8,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    11
-   ],
-   "combat_log": [
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Chomp",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Shrinker Beetle used Chomp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "blocked": 0,
-     "hp_after": 73,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Chomp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "ShrinkerBeetle",
-     "source_move_id": "CHOMP",
-     "source_upgraded": null,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Shrinker Beetle dealt 7 damage to The Ironclad using Chomp.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 80→73 (−7)",
-    "Shrinker Beetle Vulnerable 2→1"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 10,
-   "idx": 10,
-   "label": "End turn",
-   "parent_id": 9,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    12
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 10,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 6 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 16→10 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 11,
-   "idx": 11,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 10,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    13
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 4,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 6 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Shrinker Beetle HP 10→4 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 12,
-   "idx": 12,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 11,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    14
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 13,
-   "idx": 13,
-   "label": "Play Defend",
-   "parent_id": 12,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    15
-   ],
-   "combat_log": [
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Stomp",
-     "round": 3,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Shrinker Beetle used Stomp.",
-     "verb": "used"
-    },
-    {
-     "actor": "Shrinker Beetle",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 8,
-     "blocked": 5,
-     "hp_after": 65,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "enemy",
-     "source": "Stomp",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "ShrinkerBeetle",
-     "source_move_id": "STOMP",
-     "source_upgraded": null,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Shrinker Beetle dealt 8 damage to The Ironclad using Stomp.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 73→65 (−8)",
-    "You Block 5→0",
-    "Shrinker Beetle −Vulnerable"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 14,
-   "idx": 14,
-   "label": "End turn",
-   "parent_id": 13,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    16
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Shrinker Beetle",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 4 damage to Shrinker Beetle using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "You HP 65→71 (+6)",
-    "Shrinker Beetle HP 4→0  ☠ defeated",
-    "You −Shrink",
-    "Gold 99→117",
-    "+Potion Radiant Tincture"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 15,
-   "idx": 15,
-   "label": "Play Strike → Shrinker Beetle",
-   "parent_id": 14,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    17
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 2,
-   "id": 16,
-   "idx": 16,
-   "label": "Take Molten Fist",
-   "parent_id": 15,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    18
-   ],
-   "combat_log": [],
-   "decision": "event_choice",
-   "details": [],
-   "error": false,
-   "floor": 3,
-   "id": 17,
-   "idx": 17,
-   "label": "Map → (0,2)",
-   "parent_id": 16,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    19
-   ],
-   "combat_log": [],
-   "decision": "card_select",
-   "details": [],
-   "error": false,
-   "floor": 3,
-   "id": 18,
-   "idx": 18,
-   "label": "Choose: Let Go",
-   "parent_id": 17,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    20
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 3,
-   "id": 19,
-   "idx": 19,
-   "label": "Select Strike+",
-   "parent_id": 18,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    21
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Fuzzy Wurm Crawler"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 20,
-   "idx": 20,
-   "label": "Map → (0,3)",
-   "parent_id": 19,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    22
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "potion",
-     "noun": "Radiant Tincture",
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad drank Radiant Tincture.",
-     "verb": "drank"
-    },
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "kind": "power",
-     "noun": "Radiance",
-     "round": 1,
-     "side": "player",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "The Ironclad gained 3 Radiance.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You +3 Radiance",
-    "Used Radiant Tincture"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 21,
-   "idx": 21,
-   "label": "Drink Radiant Tincture → Fuzzy Wurm Crawler",
-   "parent_id": 20,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    23
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 49,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 8 damage to Fuzzy Wurm Crawler using Bash.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Vulnerable",
-     "round": 1,
-     "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 2 Vulnerable.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Bash",
-    "Fuzzy Wurm Crawler HP 57→49 (−8)",
-    "Fuzzy Wurm Crawler +2 Vulnerable"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 22,
-   "idx": 22,
-   "label": "Play Bash → Fuzzy Wurm Crawler",
-   "parent_id": 21,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    24
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 15,
-     "blocked": 0,
-     "hp_after": 34,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Molten Fist",
-     "source_card": "MOLTEN_FIST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 15 damage to Fuzzy Wurm Crawler using Molten Fist.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Vulnerable",
-     "round": 1,
-     "side": "player",
-     "source": "Molten Fist",
-     "source_card": "MOLTEN_FIST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 2 Vulnerable.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Molten Fist",
-    "Fuzzy Wurm Crawler HP 49→34 (−15)",
-    "Fuzzy Wurm Crawler Vulnerable 2→4"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 23,
-   "idx": 23,
-   "label": "Play Molten Fist → Fuzzy Wurm Crawler",
-   "parent_id": 22,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    25
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 25,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 9 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 34→25 (−9)"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 24,
-   "idx": 24,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 23,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    26
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "First Acid Goop",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used First Acid Goop.",
-     "verb": "used"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 67,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "First Acid Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "FIRST_ACID_GOOP",
-     "source_upgraded": null,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler dealt 4 damage to The Ironclad using First Acid Goop.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 71→67 (−4)",
-    "You Radiance 3→2",
-    "Fuzzy Wurm Crawler Vulnerable 4→3"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 25,
-   "idx": 25,
-   "label": "End turn",
-   "parent_id": 24,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    27
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 26,
-   "idx": 26,
-   "label": "Play Defend",
-   "parent_id": 25,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    28
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 5→10"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 27,
-   "idx": 27,
-   "label": "Play Defend",
-   "parent_id": 26,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    29
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 10→15"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 28,
-   "idx": 28,
-   "label": "Play Defend",
-   "parent_id": 27,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    30
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 16,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 9 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 25→16 (−9)"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 29,
-   "idx": 29,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 28,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    31
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Inhale",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used Inhale.",
-     "verb": "used"
-    },
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "kind": "power",
-     "noun": "Strength",
-     "round": 2,
-     "side": "enemy",
-     "source": "Inhale",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "INHALE",
-     "source_upgraded": null,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 7 Strength.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 15→0",
-    "You Radiance 2→1",
-    "Fuzzy Wurm Crawler Vulnerable 3→2",
-    "Fuzzy Wurm Crawler +7 Strength"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 30,
-   "idx": 30,
-   "label": "End turn",
-   "parent_id": 29,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    32
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 7,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 9 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 16→7 (−9)"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 31,
-   "idx": 31,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 30,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    33
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 1,
-     "kind": "power",
-     "noun": "Dark Embrace",
-     "round": 3,
-     "side": "player",
-     "source": "Dark Embrace Card",
-     "source_card": "DARK_EMBRACE_CARD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "The Ironclad gained 1 Dark Embrace.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Dark Embrace Card",
-    "You +1 Dark Embrace"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 32,
-   "idx": 32,
-   "label": "Play Dark Embrace",
-   "parent_id": 31,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    34
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 9,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 9 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "You HP 67→73 (+6)",
-    "Fuzzy Wurm Crawler HP 7→0  ☠ defeated",
-    "You −Radiance",
-    "You −Dark Embrace",
-    "Gold 117→130"
-   ],
-   "error": false,
-   "floor": 4,
-   "id": 33,
-   "idx": 33,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 32,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    35
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 4,
-   "id": 34,
-   "idx": 34,
-   "label": "Take Molten Fist",
-   "parent_id": 33,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    36
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Nibbit"
-   ],
-   "error": false,
+   "act_name": "Overgrowth",
+   "bg_col": 1,
+   "bg_row": 4,
+   "bg_seed": "11180935036767329045",
    "floor": 5,
-   "id": 35,
-   "idx": 35,
-   "label": "Map → (1,4)",
-   "parent_id": 34,
-   "turn": 1,
-   "value": null
+   "step_no": 0,
+   "turn": 1
   },
-  {
+  "pv": null,
+  "scores": [],
+  "source": "live",
+  "state": {
    "act": 1,
-   "child_ids": [
-    37
-   ],
-   "combat_log": [
+   "act1": "overgrowth",
+   "act_name": "Overgrowth",
+   "ascension": 0,
+   "bg_col": 1,
+   "bg_row": 4,
+   "bg_seed": "11180935036767329045",
+   "decision": "combat_play",
+   "discard_pile": [
     {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 10,
-     "blocked": 0,
-     "hp_after": 32,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Molten Fist",
-     "source_card": "MOLTEN_FIST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 10 damage to Nibbit using Molten Fist.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "Play Molten Fist",
-    "Nibbit HP 42→32 (−10)"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 36,
-   "idx": 36,
-   "label": "Play Molten Fist → Nibbit",
-   "parent_id": 35,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    38
-   ],
-   "combat_log": [
+   "discard_pile_count": 1,
+   "draw_pile": [
     {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 37,
-   "idx": 37,
-   "label": "Play Defend",
-   "parent_id": 36,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    39
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 10,
-     "blocked": 0,
-     "hp_after": 22,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Molten Fist",
-     "source_card": "MOLTEN_FIST",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 10 damage to Nibbit using Molten Fist.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Molten Fist",
-    "Nibbit HP 32→22 (−10)"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 38,
-   "idx": 38,
-   "label": "Play Molten Fist → Nibbit",
-   "parent_id": 37,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    40
-   ],
-   "combat_log": [
-    {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Butt",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit used Butt.",
-     "verb": "used"
+     "base_cost": 2,
+     "can_play": false,
+     "color": "red",
+     "cost": 2,
+     "description": "Deal 8 damage.\nApply 2 Vulnerable.",
+     "description_rich": "Deal 8 damage.\nApply 2 [gold]Vulnerable[/gold].",
+     "id": "BASH",
+     "image": "https://assets.test/card_atlas/ironclad/bash.png",
+     "index": -1,
+     "name": "Bash",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 8
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "blocked": 5,
-     "hp_after": 66,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Butt",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "BUTT",
-     "source_upgraded": null,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Nibbit dealt 7 damage to The Ironclad using Butt.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 73→66 (−7)",
-    "You Block 5→0"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 39,
-   "idx": 39,
-   "label": "End turn",
-   "parent_id": 38,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    41
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_IRONCLAD",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Ironclad gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 40,
-   "idx": 40,
-   "label": "Play Defend",
-   "parent_id": 39,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    42
-   ],
-   "combat_log": [
-    {
-     "actor": "The Ironclad",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "blocked": 0,
-     "hp_after": 14,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Ironclad dealt 8 damage to Nibbit using Bash.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 2,
-     "kind": "power",
-     "noun": "Vulnerable",
-     "round": 2,
-     "side": "player",
-     "source": "Bash",
-     "source_card": "BASH",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Nibbit gained 2 Vulnerable.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Bash",
-    "Nibbit HP 22→14 (−8)",
-    "Nibbit +2 Vulnerable"
-   ],
-   "error": false,
-   "floor": 5,
-   "id": 41,
-   "idx": 41,
-   "label": "Play Bash → Nibbit",
-   "parent_id": 40,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [],
-   "combat_log": [
-    {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Slice",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit used Slice.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 1,
-     "blocked": 5,
-     "hp_after": 65,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Slice",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "SLICE",
-     "source_upgraded": null,
-     "target": "The Ironclad",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Nibbit dealt 1 damage to The Ironclad using Slice.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "enemy",
-     "source": "Slice",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "SLICE",
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit gained 5 Block.",
-     "verb": "gained"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 66→65 (−1)",
-    "You Block 5→0",
-    "Nibbit Block 0→5",
-    "Nibbit Vulnerable 2→1"
+   "draw_pile_count": 7,
+   "enemies": [
+    {
+     "block": 0,
+     "hp": 32,
+     "image": "https://assets.test/monsters/nibbit.png",
+     "index": 0,
+     "intents": [
+      {
+       "damage": 12,
+       "intent_image": "https://assets.test/intent_atlas/attack/intent_attack_3.png",
+       "type": "Attack"
+      }
+     ],
+     "kind": "Nibbit",
+     "max_hp": 42,
+     "move_state": "BUTT",
+     "name": "Nibbit",
+     "powers": [],
+     "rig": "https://assets.test/monster_rigs/nibbit/nibbit",
+     "rig_bounds_h": 146.0,
+     "rig_bounds_w": 270.0,
+     "rig_scale": 0.28,
+     "uid": 2
+    }
    ],
-   "error": false,
+   "energy": 1,
+   "energy_image": "https://assets.test/sprite_fonts/ironclad_energy_icon.png",
+   "exhaust_pile": [
+    {
+     "base_cost": 1,
+     "can_play": false,
+     "color": "red",
+     "cost": 1,
+     "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+     "description_rich": "Deal 10 damage.\nDouble the enemy's [gold]Vulnerable[/gold].\n[gold]Exhaust[/gold].",
+     "id": "MOLTEN_FIST",
+     "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+     "index": -1,
+     "name": "Molten Fist",
+     "rarity": "Common",
+     "stats": {
+      "damage": 10
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
+    }
+   ],
+   "exhaust_pile_count": 1,
    "floor": 5,
-   "id": 42,
-   "idx": 42,
-   "label": "End turn",
-   "parent_id": 41,
-   "turn": 3,
-   "value": null
+   "game_version": "v0.111.0",
+   "hand": [
+    {
+     "base_cost": 1,
+     "can_play": true,
+     "color": "red",
+     "cost": 1,
+     "damage_preview": {
+      "0": 10
+     },
+     "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+     "description_rich": "Deal 10 damage.\nDouble the enemy's [gold]Vulnerable[/gold].\n[gold]Exhaust[/gold].",
+     "id": "MOLTEN_FIST",
+     "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+     "index": 0,
+     "name": "Molten Fist",
+     "rarity": "Common",
+     "stats": {
+      "damage": 10
+     },
+     "target_type": "AnyEnemy",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 1,
+     "can_play": true,
+     "color": "red",
+     "cost": 1,
+     "damage_preview": {
+      "0": 6
+     },
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_IRONCLAD",
+     "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+     "index": 1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "AnyEnemy",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "base_cost": 2,
+     "can_play": false,
+     "color": "red",
+     "cost": 2,
+     "description": "Whenever a card is Exhausted,\ndraw 1 card.",
+     "description_rich": "Whenever a card is [gold]Exhausted[/gold],\ndraw 1 card.",
+     "id": "DARK_EMBRACE",
+     "image": "https://assets.test/card_atlas/ironclad/dark_embrace.png",
+     "index": 2,
+     "name": "Dark Embrace",
+     "rarity": "Rare",
+     "stats": {},
+     "target_type": "None",
+     "type": "Power",
+     "unplayable_reason": "cost",
+     "upgraded": false
+    }
+   ],
+   "max_energy": 3,
+   "options": [],
+   "player": {
+    "block": 5,
+    "deck": [
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+      "index": 0,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+      "index": 1,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+      "index": 2,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/strike_ironclad.png",
+      "index": 3,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+      "index": 4,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+      "index": 5,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+      "index": 6,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_IRONCLAD",
+      "image": "https://assets.test/card_atlas/ironclad/defend_ironclad.png",
+      "index": 7,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 2,
+      "description": "Deal 8 damage.\nApply 2 Vulnerable.",
+      "description_rich": "Deal 8 damage.\nApply 2 Vulnerable.",
+      "id": "BASH",
+      "image": "https://assets.test/card_atlas/ironclad/bash.png",
+      "index": 8,
+      "name": "Bash",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+      "description_rich": "Deal 10 damage.\nDouble the enemy's Vulnerable.\n[gold]Exhaust[/gold].",
+      "id": "MOLTEN_FIST",
+      "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+      "index": 9,
+      "name": "Molten Fist",
+      "rarity": "Common",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 2,
+      "description": "Whenever a card is Exhausted,\ndraw 1 card.",
+      "description_rich": "Whenever a card is [gold]Exhausted[/gold],\ndraw 1 card.",
+      "id": "DARK_EMBRACE",
+      "image": "https://assets.test/card_atlas/ironclad/dark_embrace.png",
+      "index": 10,
+      "name": "Dark Embrace",
+      "rarity": "Rare",
+      "type": "Power",
+      "upgraded": false
+     },
+     {
+      "color": "red",
+      "cost": 1,
+      "description": "Deal 10 damage.\nDouble the enemy's Vulnerable.\nExhaust.",
+      "description_rich": "Deal 10 damage.\nDouble the enemy's Vulnerable.\n[gold]Exhaust[/gold].",
+      "id": "MOLTEN_FIST",
+      "image": "https://assets.test/card_atlas/ironclad/molten_fist.png",
+      "index": 11,
+      "name": "Molten Fist",
+      "rarity": "Common",
+      "type": "Attack",
+      "upgraded": false
+     }
+    ],
+    "gold": 130,
+    "hp": 73,
+    "image": "https://assets.test/character_sprites/ironclad.png",
+    "max_hp": 80,
+    "name": "Ironclad",
+    "potion_slots": 3,
+    "potions": [],
+    "relics": [
+     {
+      "description": "At the end of combat, heal 6 HP.",
+      "id": "BURNING_BLOOD",
+      "image": "https://assets.test/relic_atlas/burning_blood.png",
+      "name": "Burning Blood"
+     },
+     {
+      "description": "Upon pickup, Upgrade a card.",
+      "id": "POMANDER",
+      "image": "https://assets.test/relic_atlas/pomander.png",
+      "name": "Pomander"
+     }
+    ],
+    "rig": "https://assets.test/character_rigs/ironclad/ironclad",
+    "rig_bounds_h": 278.0,
+    "rig_bounds_w": 242.0,
+    "rig_scale": 0.28
+   },
+   "player_powers": [],
+   "round": 1
   }
- ]
+ }
 }

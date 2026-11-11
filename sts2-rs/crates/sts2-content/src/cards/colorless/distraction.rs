@@ -9,7 +9,7 @@ use super::prelude::*;
 /// `create_character_cards(character_id, rng, 1, card_type=SKILL,
 /// generation_context="modifier")` then `set_temporary_cost_for_turn(0)`
 /// + `move_card_to_hand`. C# `Distraction.cs:30` `SetToFreeThisTurn()`
-/// maps onto `VarKey::FreeThisTurn`. Bead `sts2-rs-dtrv`
+/// maps onto `LocalCostMod::FREE_THIS_TURN`. Bead `sts2-rs-dtrv`
 /// (re-bodied under `sts2-rs-6ynt.8-distraction`).
 pub(crate) fn play_distraction(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let Some(character) = state.player.character else {
@@ -26,9 +26,8 @@ pub(crate) fn play_distraction(state: &mut CombatState, _t: Option<CreatureUid>)
         // Distraction.cs:30-31 `SetToFreeThisTurn()` then
         // `AddGeneratedCardToCombat(card, Hand, Owner)`: the hand-cap
         // redirect to discard, then the generation listeners (Regalite,
-        // Pillar of Creation, the Supermassive tally). `FreeThisTurn` is the
-        // same shim White Noise uses.
-        sts2_core::card_effects::set_card_var(state, uid, VarKey::FreeThisTurn, 1);
+        // Pillar of Creation, the Supermassive tally).
+        sts2_core::card_effects::set_card_free_this_turn(state, uid);
         let pile = if sts2_core::cards::try_add_to_hand(&mut state.player, uid) {
             sts2_core::card_effects::PileKind::Hand
         } else {

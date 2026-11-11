@@ -379,7 +379,7 @@
   "floor": 20,
   "hand": [
    {
-    "base_cost": 2,
+    "base_cost": 0,
     "can_play": true,
     "color": "blue",
     "cost": 0,

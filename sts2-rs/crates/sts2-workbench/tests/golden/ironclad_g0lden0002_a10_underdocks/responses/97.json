@@ -1,6 +1,7 @@
 {
- "runs": [
-  "<work>/logs/20260101_000000_Ironclad_G0LDEN0002.jsonl",
-  "<work>/logs/20260101_000000_Ironclad_G0LDEN0002_2.jsonl"
- ]
+ "count": 68,
+ "resume": {
+  "kind": "run",
+  "reason": null
+ }
 }

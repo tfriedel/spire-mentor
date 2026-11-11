@@ -46,7 +46,7 @@ fn stampede_state() -> CombatState {
         cards.push(Card {
             uid,
             card_id,
-            cost: 1,
+            cost: sts2_core::CardEnergyCost::new(1),
             card_type,
             target_type,
             upgraded: false,

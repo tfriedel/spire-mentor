@@ -17,7 +17,7 @@ fn defend() -> Card {
     Card {
         uid: sts2_core::CardUid::new(1).expect("nz"),
         card_id: CardId::DefendIronclad,
-        cost: 0,
+        cost: sts2_core::CardEnergyCost::new(0),
         card_type: CardType::Skill,
         target_type: TargetType::Self_,
         base_block: 5,

@@ -342,9 +342,9 @@
     8,
     15,
     14,
-    25,
-    27,
-    35
+    24,
+    26,
+    34
    ],
    "edges": [
     {
@@ -372,7 +372,7 @@
      "visits": 1
     },
     {
-     "child": 25,
+     "child": 24,
      "kind": "play",
      "label": "StrikeDefect",
      "outcome_ordinal": null,
@@ -380,7 +380,7 @@
      "visits": 1
     },
     {
-     "child": 27,
+     "child": 26,
      "kind": "play",
      "label": "DefendDefect",
      "outcome_ordinal": null,
@@ -388,7 +388,7 @@
      "visits": 1
     },
     {
-     "child": 35,
+     "child": 34,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -441,8 +441,8 @@
     11,
     13,
     19,
-    27,
-    31
+    26,
+    30
    ],
    "edges": [
     {
@@ -470,7 +470,7 @@
      "visits": 2
     },
     {
-     "child": 27,
+     "child": 26,
      "kind": "play",
      "label": "StrikeDefect",
      "outcome_ordinal": null,
@@ -478,7 +478,7 @@
      "visits": 1
     },
     {
-     "child": 31,
+     "child": 30,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -532,10 +532,10 @@
     12,
     16,
     22,
-    28,
-    33,
-    39,
-    44
+    27,
+    32,
+    38,
+    43
    ],
    "edges": [
     {
@@ -571,7 +571,7 @@
      "visits": 1
     },
     {
-     "child": 28,
+     "child": 27,
      "kind": "outcome",
      "label": "outcome #4",
      "outcome_ordinal": 4,
@@ -579,7 +579,7 @@
      "visits": 1
     },
     {
-     "child": 33,
+     "child": 32,
      "kind": "outcome",
      "label": "outcome #5",
      "outcome_ordinal": 5,
@@ -587,7 +587,7 @@
      "visits": 1
     },
     {
-     "child": 39,
+     "child": 38,
      "kind": "outcome",
      "label": "outcome #6",
      "outcome_ordinal": 6,
@@ -595,7 +595,7 @@
      "visits": 1
     },
     {
-     "child": 44,
+     "child": 43,
      "kind": "outcome",
      "label": "outcome #7",
      "outcome_ordinal": 7,
@@ -688,11 +688,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    30
+    29
    ],
    "edges": [
     {
-     "child": 30,
+     "child": 29,
      "kind": "play",
      "label": "StrikeDefect",
      "outcome_ordinal": null,
@@ -828,11 +828,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    37
+    36
    ],
    "edges": [
     {
-     "child": 37,
+     "child": 36,
      "kind": "play",
      "label": "StrikeDefect",
      "outcome_ordinal": null,
@@ -925,11 +925,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    40
+    39
    ],
    "edges": [
     {
-     "child": 40,
+     "child": 39,
      "kind": "play",
      "label": "StrikeDefect",
      "outcome_ordinal": null,
@@ -1022,11 +1022,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    42
+    41
    ],
    "edges": [
     {
-     "child": 42,
+     "child": 41,
      "kind": "play",
      "label": "StrikeDefect",
      "outcome_ordinal": null,
@@ -1120,7 +1120,7 @@
    "chance_draws": 2,
    "children": [
     18,
-    29
+    28
    ],
    "edges": [
     {
@@ -1132,7 +1132,7 @@
      "visits": 1
     },
     {
-     "child": 29,
+     "child": 28,
      "kind": "outcome",
      "label": "outcome #1",
      "outcome_ordinal": 1,
@@ -1225,11 +1225,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    43
+    42
    ],
    "edges": [
     {
-     "child": 43,
+     "child": 42,
      "kind": "play",
      "label": "UltimateStrike",
      "outcome_ordinal": null,
@@ -1280,8 +1280,8 @@
    "chance_draws": 3,
    "children": [
     21,
-    26,
-    41
+    25,
+    40
    ],
    "edges": [
     {
@@ -1290,10 +1290,10 @@
      "label": "outcome #0",
      "outcome_ordinal": 0,
      "target_index": null,
-     "visits": 1
+     "visits": 2
     },
     {
-     "child": 26,
+     "child": 25,
      "kind": "outcome",
      "label": "outcome #1",
      "outcome_ordinal": 1,
@@ -1301,7 +1301,7 @@
      "visits": 1
     },
     {
-     "child": 41,
+     "child": 40,
      "kind": "outcome",
      "label": "outcome #2",
      "outcome_ordinal": 2,
@@ -1385,9 +1385,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 1.0498,
-   "visits": 1,
-   "wins": 1
+   "value_sum": 2.0996,
+   "visits": 2,
+   "wins": 2
   },
   {
    "chance_action": null,
@@ -1410,17 +1410,17 @@
    "summary": {
     "enemies": [
      {
-      "hp": 3,
+      "hp": 6,
       "max_hp": 27,
       "uid": 2
      },
      {
-      "hp": 10,
+      "hp": 7,
       "max_hp": 29,
       "uid": 3
      }
     ],
-    "energy": 2,
+    "energy": 3,
     "player_block": 0,
     "player_hp": 8,
     "player_max_hp": 75,
@@ -1437,20 +1437,20 @@
    "chance_closed": false,
    "chance_draws": 2,
    "children": [
-    24,
-    34
+    21,
+    33
    ],
    "edges": [
     {
-     "child": 24,
+     "child": 21,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
      "target_index": null,
-     "visits": 1
+     "visits": 2
     },
     {
-     "child": 34,
+     "child": 33,
      "kind": "outcome",
      "label": "outcome #1",
      "outcome_ordinal": 1,
@@ -1503,49 +1503,6 @@
    "edges": [],
    "id": 24,
    "is_terminal": false,
-   "kind": "outcome",
-   "label": "outcome #0",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": 0,
-   "parent": 23,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.0498,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 0,
-      "max_hp": 27,
-      "uid": 2
-     },
-     {
-      "hp": 7,
-      "max_hp": 29,
-      "uid": 3
-     }
-    ],
-    "energy": 2,
-    "player_block": 0,
-    "player_hp": 14,
-    "player_max_hp": 75,
-    "round": 6
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 1.0498,
-   "visits": 1,
-   "wins": 1
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 25,
-   "is_terminal": false,
    "kind": "play",
    "label": "StrikeDefect",
    "losses": 0,
@@ -1587,7 +1544,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 26,
+   "id": 25,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #1",
@@ -1630,7 +1587,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 27,
+   "id": 26,
    "is_terminal": false,
    "kind": "play",
    "label": "StrikeDefect",
@@ -1673,7 +1630,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 28,
+   "id": 27,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #4",
@@ -1688,17 +1645,17 @@
    "summary": {
     "enemies": [
      {
-      "hp": 6,
+      "hp": 3,
       "max_hp": 27,
       "uid": 2
      },
      {
-      "hp": 7,
+      "hp": 10,
       "max_hp": 29,
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 8,
     "player_max_hp": 75,
@@ -1716,7 +1673,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 29,
+   "id": 28,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #1",
@@ -1759,7 +1716,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 30,
+   "id": 29,
    "is_terminal": true,
    "kind": "play",
    "label": "StrikeDefect",
@@ -1801,12 +1758,12 @@
    "chance_closed": false,
    "chance_draws": 2,
    "children": [
-    32,
-    38
+    31,
+    37
    ],
    "edges": [
     {
-     "child": 32,
+     "child": 31,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -1814,7 +1771,7 @@
      "visits": 1
     },
     {
-     "child": 38,
+     "child": 37,
      "kind": "outcome",
      "label": "outcome #1",
      "outcome_ordinal": 1,
@@ -1822,7 +1779,7 @@
      "visits": 1
     }
    ],
-   "id": 31,
+   "id": 30,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -1865,7 +1822,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 32,
+   "id": 31,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -1873,7 +1830,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 31,
+   "parent": 30,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.0391,
@@ -1908,7 +1865,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 33,
+   "id": 32,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #5",
@@ -1923,17 +1880,17 @@
    "summary": {
     "enemies": [
      {
-      "hp": 6,
+      "hp": 3,
       "max_hp": 27,
       "uid": 2
      },
      {
-      "hp": 7,
+      "hp": 10,
       "max_hp": 29,
       "uid": 3
      }
     ],
-    "energy": 2,
+    "energy": 3,
     "player_block": 0,
     "player_hp": 8,
     "player_max_hp": 75,
@@ -1951,7 +1908,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 34,
+   "id": 33,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #1",
@@ -1976,7 +1933,7 @@
       "uid": 3
      }
     ],
-    "energy": 3,
+    "energy": 2,
     "player_block": 0,
     "player_hp": 14,
     "player_max_hp": 75,
@@ -1993,11 +1950,11 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    36
+    35
    ],
    "edges": [
     {
-     "child": 36,
+     "child": 35,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -2005,7 +1962,7 @@
      "visits": 1
     }
    ],
-   "id": 35,
+   "id": 34,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -2048,7 +2005,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 36,
+   "id": 35,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -2056,7 +2013,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 35,
+   "parent": 34,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.0284,
@@ -2091,7 +2048,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 37,
+   "id": 36,
    "is_terminal": false,
    "kind": "play",
    "label": "StrikeDefect",
@@ -2134,7 +2091,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 38,
+   "id": 37,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #1",
@@ -2142,19 +2099,19 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 1,
-   "parent": 31,
+   "parent": 30,
    "proven_loss": false,
    "proven_win": false,
    "q": 1.039,
    "summary": {
     "enemies": [
      {
-      "hp": 6,
+      "hp": 3,
       "max_hp": 27,
       "uid": 2
      },
      {
-      "hp": 7,
+      "hp": 10,
       "max_hp": 29,
       "uid": 3
      }
@@ -2177,7 +2134,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 39,
+   "id": 38,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #6",
@@ -2192,12 +2149,12 @@
    "summary": {
     "enemies": [
      {
-      "hp": 6,
+      "hp": 3,
       "max_hp": 27,
       "uid": 2
      },
      {
-      "hp": 7,
+      "hp": 10,
       "max_hp": 29,
       "uid": 3
      }
@@ -2220,7 +2177,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 40,
+   "id": 39,
    "is_terminal": true,
    "kind": "play",
    "label": "StrikeDefect",
@@ -2263,7 +2220,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 41,
+   "id": 40,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #2",
@@ -2306,7 +2263,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 42,
+   "id": 41,
    "is_terminal": true,
    "kind": "play",
    "label": "StrikeDefect",
@@ -2349,7 +2306,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 43,
+   "id": 42,
    "is_terminal": true,
    "kind": "play",
    "label": "UltimateStrike",
@@ -2392,7 +2349,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 44,
+   "id": 43,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #7",

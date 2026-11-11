@@ -1,0 +1,34 @@
+{
+ "config": {
+  "c_puct": 2.5,
+  "depth": 200,
+  "draw_widening_c": 2.0,
+  "hidden_info": "beliefdraw",
+  "seed": 1,
+  "sims": 48,
+  "threads": 1
+ },
+ "pv": null,
+ "scores": [
+  {
+   "action": "end turn",
+   "hp_n": 48,
+   "hp_sd": 0.0,
+   "in_band": true,
+   "is_best": true,
+   "losses": 0,
+   "low_confidence": false,
+   "mean_final_hp": 27.0,
+   "pick_rank": 0,
+   "pick_reason": "the highest value",
+   "q": 1.0963,
+   "q_saturated": false,
+   "stable_idx": -1,
+   "target_index": null,
+   "ties": 0,
+   "visits": 48,
+   "win_prob": 1.0,
+   "wins": 48
+  }
+ ]
+}
