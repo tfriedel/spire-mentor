@@ -81,6 +81,18 @@ pub struct TokRow {
     pub dtype: u8,
     /// Combat row.
     pub is_combat: bool,
+    /// `[P, 32]` PRIV tokens' int16 categoricals (empty without PRIV).
+    pub pcat: Vec<i16>,
+    /// `[P, 210]` PRIV tokens' float16 bit patterns.
+    pub pcont: Vec<u16>,
+    /// `[P]` PRIV section ids.
+    pub psec: Vec<u8>,
+    /// PRIV pool: the pooled PRIV token of each entry.
+    pub ppool_tok: Vec<u16>,
+    /// PRIV pool: vocabulary ids.
+    pub ppool_vid: Vec<u16>,
+    /// PRIV pool: weights, float16 bits.
+    pub ppool_w: Vec<u16>,
 }
 
 impl TokRow {
@@ -114,6 +126,8 @@ struct Static {
     key: (u8, i32),
     fm: Value,
     bosses: Vec<String>,
+    /// PRIV_RUN of this `(act, floor)`, made at its first PRIV read.
+    priv_run: std::sync::OnceLock<PrivRun>,
 }
 
 /// The tokenizer's per-run state: the run-static reads (map, bosses) of the
@@ -366,7 +380,12 @@ fn static_of<'c>(cache: &'c mut TokCache, run: &Run<'_>) -> &'c std::sync::Arc<S
                 }
             }
         }
-        cache.stat = Some(std::sync::Arc::new(Static { key, fm, bosses }));
+        cache.stat = Some(std::sync::Arc::new(Static {
+            key,
+            fm,
+            bosses,
+            priv_run: std::sync::OnceLock::new(),
+        }));
     }
     cache.stat.as_ref().expect("static entry")
 }
@@ -438,17 +457,21 @@ fn runctx(
     room: Option<&str>,
     encounter: Option<&str>,
 ) {
-    let t = buf.new_tok(schema::sec("RUNCTX"), 0);
-    buf.c(t, xc("X_DTYPE"), i16::from(d.dtype));
+    let t = buf.new_tok(const { schema::sec("RUNCTX") }, 0);
+    buf.c(t, const { xc("X_DTYPE") }, i16::from(d.dtype));
     if d.dtype == dt::EVENT || d.dtype == dt::NEOW {
         let ev = event_name(d, run);
-        buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Event, ev.as_deref()));
+        buf.c(
+            t,
+            const { xc("X_ID_MAIN") },
+            vid_s(Reg::Event, ev.as_deref()),
+        );
     }
     if d.is_combat() {
         let id = encounter
             .filter(|e| !e.is_empty())
             .map_or(0, |e| vid_s(Reg::Encounter, Some(e)));
-        buf.c(t, xc("X_ID_AUX"), id);
+        buf.c(t, const { xc("X_ID_AUX") }, id);
     }
     let room_s: Option<String> = room.map_or_else(
         || {
@@ -463,7 +486,7 @@ fn runctx(
     };
     buf.c(
         t,
-        xc("X_ROOM"),
+        const { xc("X_ROOM") },
         rid.unwrap_or_else(|| schema::room_id("unknown").unwrap_or(2)),
     );
     let act = i64::from(run.act());
@@ -471,46 +494,74 @@ fn runctx(
     let hp = f64::from(rs.current_hp);
     let mhp = f64::from(rs.max_hp).max(1.0);
     let asc = run.ascension();
-    buf.f(t, xf("R_ACT"), act as f64 / 3.0);
-    buf.f(t, xf("R_FLOOR"), f64::from(run.floor()) / 50.0);
-    buf.f(t, xf("R_ACT_FLOOR"), run.act_floor() as f64 / 17.0);
+    buf.f(t, const { xf("R_ACT") }, act as f64 / 3.0);
+    buf.f(t, const { xf("R_FLOOR") }, f64::from(run.floor()) / 50.0);
     buf.f(
         t,
-        xf("R_ROWS_TO_BOSS"),
+        const { xf("R_ACT_FLOOR") },
+        run.act_floor() as f64 / 17.0,
+    );
+    buf.f(
+        t,
+        const { xf("R_ROWS_TO_BOSS") },
         (boss_row(fm) - cur_row(fm)).max(0) as f64 / 17.0,
     );
     let nb = i64::try_from(n_bosses).unwrap_or(0);
     let left = nb - bosses_beaten(fm, d.is_combat());
     buf.f(
         t,
-        xf("R_BOSSES_LEFT"),
+        const { xf("R_BOSSES_LEFT") },
         bosses_left(act, left, asc) as f64 / 4.0,
     );
-    buf.f(t, xf("R_HP"), hp / 100.0);
-    buf.f(t, xf("R_MAXHP"), mhp / 100.0);
-    buf.f(t, xf("R_HP_FRAC"), hp / mhp);
-    buf.f(t, xf("R_GOLD"), f64::from(emit_rm::gold(run.rm)) / 300.0);
-    buf.f(t, xf("R_DECK"), run.deck.len() as f64 / 40.0);
+    buf.f(t, const { xf("R_HP") }, hp / 100.0);
+    buf.f(t, const { xf("R_MAXHP") }, mhp / 100.0);
+    buf.f(t, const { xf("R_HP_FRAC") }, hp / mhp);
     buf.f(
         t,
-        xf("R_DECK_UPG"),
+        const { xf("R_GOLD") },
+        f64::from(emit_rm::gold(run.rm)) / 300.0,
+    );
+    buf.f(t, const { xf("R_DECK") }, run.deck.len() as f64 / 40.0);
+    buf.f(
+        t,
+        const { xf("R_DECK_UPG") },
         run.deck.iter().filter(|(_, u)| *u).count() as f64 / 20.0,
     );
-    buf.f(t, xf("R_RELICS"), run.relics.len() as f64 / 20.0);
+    buf.f(t, const { xf("R_RELICS") }, run.relics.len() as f64 / 20.0);
     buf.f(
         t,
-        xf("R_POTIONS"),
+        const { xf("R_POTIONS") },
         run.potions.iter().filter(|p| !p.is_empty()).count() as f64 / 5.0,
     );
-    buf.f(t, xf("R_POT_SLOTS"), f64::from(rs.max_potion_slots) / 5.0);
-    buf.f(t, xf("R_ASC"), asc as f64 / 10.0);
-    buf.f(t, xf("R_IN_COMBAT"), f64::from(u8::from(d.is_combat())));
-    buf.f(t, xf("R_SEL_MIN"), sel.min as f64 / 5.0);
-    buf.f(t, xf("R_SEL_MAX"), sel.max as f64 / 5.0);
-    buf.f(t, xf("R_SEL_PICKED"), sel.picked as f64 / 5.0);
-    buf.f(t, xf("R_SEL_CAN_SKIP"), f64::from(u8::from(sel.can_skip)));
-    buf.f(t, xf("R_N_CLASSES"), d.members.len() as f64 / 64.0);
-    buf.f(t, xf("R_DOUBLE_BOSS"), f64::from(u8::from(n_bosses > 1)));
+    buf.f(
+        t,
+        const { xf("R_POT_SLOTS") },
+        f64::from(rs.max_potion_slots) / 5.0,
+    );
+    buf.f(t, const { xf("R_ASC") }, asc as f64 / 10.0);
+    buf.f(
+        t,
+        const { xf("R_IN_COMBAT") },
+        f64::from(u8::from(d.is_combat())),
+    );
+    buf.f(t, const { xf("R_SEL_MIN") }, sel.min as f64 / 5.0);
+    buf.f(t, const { xf("R_SEL_MAX") }, sel.max as f64 / 5.0);
+    buf.f(t, const { xf("R_SEL_PICKED") }, sel.picked as f64 / 5.0);
+    buf.f(
+        t,
+        const { xf("R_SEL_CAN_SKIP") },
+        f64::from(u8::from(sel.can_skip)),
+    );
+    buf.f(
+        t,
+        const { xf("R_N_CLASSES") },
+        d.members.len() as f64 / 64.0,
+    );
+    buf.f(
+        t,
+        const { xf("R_DOUBLE_BOSS") },
+        f64::from(u8::from(n_bosses > 1)),
+    );
 }
 
 /// A summary's members: `(vid, count)` in first-seen order.
@@ -534,10 +585,10 @@ fn summary(buf: &mut Buf, section: &str, m: &Members, n_upg: i64, n_ench: i64) {
     let p = buf.len();
     let t = buf.new_tok(schema::sec(section), TF_POOLED);
     let n = pysum(m.v.iter().map(|e| e.1));
-    buf.f(t, xf("U_N"), n / 40.0);
-    buf.f(t, xf("U_UPG"), n_upg as f64 / 20.0);
-    buf.f(t, xf("U_ENCH"), n_ench as f64 / 10.0);
-    buf.f(t, xf("U_DISTINCT"), m.v.len() as f64 / 40.0);
+    buf.f(t, const { xf("U_N") }, n / 40.0);
+    buf.f(t, const { xf("U_UPG") }, n_upg as f64 / 20.0);
+    buf.f(t, const { xf("U_ENCH") }, n_ench as f64 / 10.0);
+    buf.f(t, const { xf("U_DISTINCT") }, m.v.len() as f64 / 40.0);
     let p16 = u16::try_from(p).unwrap_or(u16::MAX);
     for &(id, w) in &m.v {
         if id != 0 {
@@ -594,7 +645,7 @@ fn head(
     snap: Option<&Value>,
     room: Option<&str>,
     encounter: Option<&str>,
-) -> (Buf, Value) {
+) -> (Buf, std::sync::Arc<Static>) {
     let mut buf = Buf::new(if d.is_combat() { 8 } else { 64 });
     let st = static_of(cache, run).clone();
     runctx(
@@ -654,13 +705,13 @@ fn head(
     summary(&mut buf, "SUM_RELICS", &rel, 0, 0);
     let act = f64::from(run.act());
     for (k, b) in st.bosses.iter().take(MAX_BOSS_TOKENS).enumerate() {
-        let t = buf.new_tok(schema::sec("BOSS"), 0);
-        buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Encounter, Some(b)));
+        let t = buf.new_tok(const { schema::sec("BOSS") }, 0);
+        buf.c(t, const { xc("X_ID_MAIN") }, vid_s(Reg::Encounter, Some(b)));
         #[allow(clippy::cast_precision_loss)]
-        buf.f(t, xf("B_ORDER"), k as f64);
-        buf.f(t, xf("B_ACT"), act / 3.0);
+        buf.f(t, const { xf("B_ORDER") }, k as f64);
+        buf.f(t, const { xf("B_ACT") }, act / 3.0);
     }
-    (buf, st.fm.clone())
+    (buf, st)
 }
 
 // ── combat ───────────────────────────────────────────────────────────────
@@ -701,13 +752,27 @@ fn intent_cols(j: usize, tele: &Value, fc: &Value) -> (Vec<(usize, i16)>, Vec<(u
     let mut conts = Vec::new();
     if let Some(row) = tele.as_array().and_then(|a| a.get(j)) {
         let ints = row.as_array().map_or(&[][..], Vec::as_slice);
-        conts.push((xf("E_N_INTENTS"), (ints.len() as f64 / 3.0) as f32));
+        conts.push((
+            const { xf("E_N_INTENTS") },
+            (ints.len() as f64 / 3.0) as f32,
+        ));
         for (k, (c_kind, c_eff, c_times)) in [
             (
                 1usize,
-                (xc("X_INTENT_T2"), xf("E_T2_EFF"), xf("E_T2_TIMES")),
+                (
+                    const { xc("X_INTENT_T2") },
+                    const { xf("E_T2_EFF") },
+                    const { xf("E_T2_TIMES") },
+                ),
             ),
-            (2, (xc("X_INTENT_T3"), xf("E_T3_EFF"), xf("E_T3_TIMES"))),
+            (
+                2,
+                (
+                    const { xc("X_INTENT_T3") },
+                    const { xf("E_T3_EFF") },
+                    const { xf("E_T3_TIMES") },
+                ),
+            ),
         ] {
             if let Some(i) = ints.get(k) {
                 cats.push((c_kind, schema::intent_id(&intent_kind(i))));
@@ -724,25 +789,25 @@ fn intent_cols(j: usize, tele: &Value, fc: &Value) -> (Vec<(usize, i16)>, Vec<(u
         let steps = row.as_array().map_or(&[][..], Vec::as_slice);
         let fcs = [
             (
-                xc("X_FC1"),
-                xf("E_F1_CERT"),
-                xf("E_F1_AMT"),
-                xf("E_F1_TIMES"),
-                xf("E_F1_TOT"),
+                const { xc("X_FC1") },
+                const { xf("E_F1_CERT") },
+                const { xf("E_F1_AMT") },
+                const { xf("E_F1_TIMES") },
+                const { xf("E_F1_TOT") },
             ),
             (
-                xc("X_FC2"),
-                xf("E_F2_CERT"),
-                xf("E_F2_AMT"),
-                xf("E_F2_TIMES"),
-                xf("E_F2_TOT"),
+                const { xc("X_FC2") },
+                const { xf("E_F2_CERT") },
+                const { xf("E_F2_AMT") },
+                const { xf("E_F2_TIMES") },
+                const { xf("E_F2_TOT") },
             ),
             (
-                xc("X_FC3"),
-                xf("E_F3_CERT"),
-                xf("E_F3_AMT"),
-                xf("E_F3_TIMES"),
-                xf("E_F3_TOT"),
+                const { xc("X_FC3") },
+                const { xf("E_F3_CERT") },
+                const { xf("E_F3_AMT") },
+                const { xf("E_F3_TIMES") },
+                const { xf("E_F3_TOT") },
             ),
         ];
         for (st, (c_fc, c_cert, c_amt, c_times, c_tot)) in steps.iter().take(3).zip(fcs) {
@@ -792,28 +857,36 @@ fn choice_ench(pc_cards: &[Value], s: usize, piles: &Value) -> i16 {
 /// The id gather (`_id_tables`): `(MAIN, MOD, REL, MAIN fallback)` content
 /// ids of an S_ctx token of section `s`.
 fn sctx_ids(s: u8, row: &[i16]) -> [u16; 4] {
+    use schema::sec;
+    const CARD: usize = slot("card");
+    const ENCH: usize = slot("enchantment");
+    const MON: usize = slot("monster");
+    const REL: usize = slot("relic");
+    const POT: usize = slot("potion");
+    const POW: usize = slot("power");
     let l = sctx::luts();
     let g = |sl: usize| -> u16 {
         let i = usize::try_from(row[sl]).unwrap_or(0);
         l[sl].get(i).copied().unwrap_or(0)
     };
-    let name = schema::section_name(s);
-    match name {
-        "HAND" | "DRAW_UNK" | "DRAW_TOP" | "DRAW_BOT" | "DISCARD" | "EXHAUST" | "PLAY" => {
-            [g(slot("card")), g(slot("enchantment")), 0, 0]
+    match s {
+        x if x == const { sec("HAND") }
+            || x == const { sec("DRAW_UNK") }
+            || x == const { sec("DRAW_TOP") }
+            || x == const { sec("DRAW_BOT") }
+            || x == const { sec("DISCARD") }
+            || x == const { sec("EXHAUST") }
+            || x == const { sec("PLAY") } =>
+        {
+            [g(CARD), g(ENCH), 0, 0]
         }
-        "ACT_PLAY" => [
-            g(slot("card")),
-            g(slot("enchantment")),
-            g(slot("monster")),
-            0,
-        ],
-        "RELIC" => [g(slot("relic")), 0, 0, 0],
-        "POTION" | "ACT_POTION" => [g(slot("potion")), 0, 0, 0],
-        "PPOWER" => [g(slot("power")), 0, 0, 0],
-        "EPOWER" => [g(slot("power")), 0, g(slot("monster")), g(slot("card"))],
-        "ENEMY" => [g(slot("monster")), 0, 0, 0],
-        "EHIST" => [0, 0, g(slot("monster")), 0],
+        x if x == const { sec("ACT_PLAY") } => [g(CARD), g(ENCH), g(MON), 0],
+        x if x == const { sec("RELIC") } => [g(REL), 0, 0, 0],
+        x if x == const { sec("POTION") } || x == const { sec("ACT_POTION") } => [g(POT), 0, 0, 0],
+        x if x == const { sec("PPOWER") } => [g(POW), 0, 0, 0],
+        x if x == const { sec("EPOWER") } => [g(POW), 0, g(MON), g(CARD)],
+        x if x == const { sec("ENEMY") } => [g(MON), 0, 0, 0],
+        x if x == const { sec("EHIST") } => [0, 0, g(MON), 0],
         _ => [0, 0, 0, 0],
     }
 }
@@ -827,7 +900,12 @@ fn i16_of(x: u16) -> i16 {
     clippy::cast_possible_truncation,
     clippy::many_single_char_names
 )]
-fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<TokRow, String> {
+fn encode_combat(
+    d: &Decision,
+    rm: &RunManager,
+    cache: &mut TokCache,
+    rare: Option<&RareMap>,
+) -> Result<TokRow, String> {
     let cv = d
         .combat
         .as_ref()
@@ -867,13 +945,13 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
     for ti in 0..t {
         let ids = sctx_ids(tk.sec[ti], tk.cat_row(ti));
         let main = if ids[0] > 0 { ids[0] } else { ids[3] };
-        setc(&mut xcat, ti, xc("X_ID_MAIN"), i16_of(main));
-        setc(&mut xcat, ti, xc("X_ID_MOD"), i16_of(ids[1]));
-        setc(&mut xcat, ti, xc("X_ID_REL"), i16_of(ids[2]));
+        setc(&mut xcat, ti, const { xc("X_ID_MAIN") }, i16_of(main));
+        setc(&mut xcat, ti, const { xc("X_ID_MOD") }, i16_of(ids[1]));
+        setc(&mut xcat, ti, const { xc("X_ID_REL") }, i16_of(ids[2]));
     }
     // Action tokens: kind, potion slot and target, choose content.
     for (k, &kind) in d.kinds.iter().enumerate() {
-        setc(&mut xcat, a0 + k, xc("X_KIND"), i16::from(kind));
+        setc(&mut xcat, a0 + k, const { xc("X_KIND") }, i16::from(kind));
     }
     let ch = get(snap, "choice").filter(|c| !c.is_null());
     let piles = get(&cv.d_bv, "deck")
@@ -889,11 +967,11 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
             let s = get(rep, "slot")
                 .and_then(py_int)
                 .ok_or("potion action without slot")?;
-            setc(&mut xcat, a0 + k, xc("X_POS"), pos(s));
+            setc(&mut xcat, a0 + k, const { xc("X_POS") }, pos(s));
             if let Some(ti) = get(a, "target_index").filter(|v| !v.is_null()) {
                 let e = at(get(snap, "enemies"), Some(ti)).filter(|e| truthy(e));
                 let id = e.map_or(0, |e| vid(Reg::Monster, get(e, "kind")));
-                setc(&mut xcat, a0 + k, xc("X_ID_REL"), id);
+                setc(&mut xcat, a0 + k, const { xc("X_ID_REL") }, id);
             }
         } else if kind == ak::CHOOSE {
             let Some(ch) = ch else { continue };
@@ -913,21 +991,21 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
             setc(
                 &mut xcat,
                 a0 + k,
-                xc("X_ID_MAIN"),
+                const { xc("X_ID_MAIN") },
                 vid(Reg::Card, get(opt, "id")),
             );
             let su = usize::try_from(s0).unwrap_or(usize::MAX);
             setc(
                 &mut xcat,
                 a0 + k,
-                xc("X_ID_MOD"),
+                const { xc("X_ID_MOD") },
                 choice_ench(pcc, su, &piles),
             );
         }
     }
     // Potion tokens: the belt slot (the snapshot drops empty slots).
     let pm: Vec<usize> = (0..a0)
-        .filter(|&i| tk.sec[i] == schema::sec("POTION"))
+        .filter(|&i| tk.sec[i] == const { schema::sec("POTION") })
         .collect();
     if !pm.is_empty() {
         let belt = get(&cv.d_bv, "player")
@@ -947,7 +1025,7 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
             setc(
                 &mut xcat,
                 ti,
-                xc("X_POS"),
+                const { xc("X_POS") },
                 pos(i64::try_from(s).unwrap_or(62)),
             );
         }
@@ -955,7 +1033,7 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
     // Picks: the hand cards an open multi-pick choice has selected.
     if let (false, Some(ch)) = (picked.is_empty(), ch) {
         let hand_tok: Vec<usize> = (0..a0)
-            .filter(|&i| tk.sec[i] == schema::sec("HAND"))
+            .filter(|&i| tk.sec[i] == const { schema::sec("HAND") })
             .collect();
         let opts = list_or_empty(ch, "options");
         for i in &picked {
@@ -967,7 +1045,7 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
                 .and_then(py_int);
             if let Some(hi) = hi.and_then(|h| usize::try_from(h).ok()) {
                 if hi < hand_tok.len() {
-                    xcont[hand_tok[hi] * fw + xf("K_PICKED") - fo] = 1.0;
+                    xcont[hand_tok[hi] * fw + const { xf("K_PICKED") } - fo] = 1.0;
                 }
             }
         }
@@ -975,11 +1053,12 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
     // Tactical and intent columns per enemy.
     let (md, kill, loss) = tactical::tactical(snap, acts);
     let em: Vec<usize> = (0..a0)
-        .filter(|&i| tk.sec[i] == schema::sec("ENEMY"))
+        .filter(|&i| tk.sec[i] == const { schema::sec("ENEMY") })
         .collect();
     for (j, &ti) in em.iter().enumerate() {
-        xcont[ti * fw + xf("E_MAXDMG") - fo] = md.get(j).map_or(0.0, |m| (m / 50.0) as f32);
-        xcont[ti * fw + xf("E_KILLABLE") - fo] = kill.get(j).map_or(0.0, |k| *k as f32);
+        xcont[ti * fw + const { xf("E_MAXDMG") } - fo] =
+            md.get(j).map_or(0.0, |m| (m / 50.0) as f32);
+        xcont[ti * fw + const { xf("E_KILLABLE") } - fo] = kill.get(j).map_or(0.0, |k| *k as f32);
         let dead = enemies
             .get(j)
             .is_some_and(|e| get(e, "is_dead").is_some_and(truthy));
@@ -993,10 +1072,14 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
             }
         }
     }
-    xcont[xf("S_HP_LOSS_END") - fo] = (loss / 50.0) as f32;
+    xcont[const { xf("S_HP_LOSS_END") } - fo] = (loss / 50.0) as f32;
 
     for ti in 0..t {
+        let at = cat.len();
         cat.extend_from_slice(tk.cat_row(ti));
+        if let Some(rare) = rare {
+            rare.apply(&mut cat[at..at + SCTX_N_CAT]);
+        }
         cat.extend_from_slice(&xcat[ti * xw..(ti + 1) * xw]);
     }
     let mut cont = Vec::with_capacity(n * N_CONT);
@@ -1021,7 +1104,7 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
     let u16_of = |x: usize| u16::try_from(x).unwrap_or(u16::MAX);
     let mem_tok: Vec<u16> = (0..n_mem).map(|i| u16_of(a0n + i)).collect();
     let cls_tok: Vec<u16> = reps.iter().map(|&r| mem_tok[r]).collect();
-    Ok(TokRow {
+    let row = TokRow {
         cat,
         cont,
         sec,
@@ -1041,7 +1124,38 @@ fn encode_combat(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<
         n_sctx: t,
         dtype: d.dtype,
         is_combat: true,
-    })
+        ..TokRow::default()
+    };
+    Ok(row)
+}
+
+/// `check_members_identical`: the members of one combat class tokenize
+/// identically except in `hand_slot`. Only the training row runs it
+/// ([`encode_with`]'s `check`): inference ([`encode`], the driver, the
+/// workbench) never did, and must not start failing positions it served.
+fn check_members_identical(r: &TokRow, members: &[Vec<usize>]) -> Result<(), String> {
+    if members.len() == r.mem_tok.len() {
+        return Ok(());
+    }
+    const HS: usize = const { slot("hand_slot") };
+    for (i, &mt) in r.mem_tok.iter().enumerate() {
+        let rf = r.cls_tok[usize::from(r.mem_class[i])];
+        if mt == rf {
+            continue;
+        }
+        let (a, b) = (usize::from(mt), usize::from(rf));
+        let ca = &r.cat[a * N_CAT..(a + 1) * N_CAT];
+        let cb = &r.cat[b * N_CAT..(b + 1) * N_CAT];
+        let cat_diff = (0..N_CAT).any(|c| c != HS && ca[c] != cb[c]);
+        if cat_diff || r.cont[a * N_CONT..(a + 1) * N_CONT] != r.cont[b * N_CONT..(b + 1) * N_CONT]
+        {
+            let bad: Vec<&Vec<usize>> = members.iter().filter(|m| m.len() > 1).collect();
+            return Err(format!(
+                "SchemaError: members of one class tokenize differently: {bad:?}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 // ── out of combat ────────────────────────────────────────────────────────
@@ -1050,18 +1164,27 @@ fn card_cats(buf: &mut Buf, t: usize, cid: &Value, up: bool, ench: Option<&Value
     let tv = sctx::vocab();
     buf.c(
         t,
-        slot("upgraded"),
-        tv.table(slot("upgraded")).index(if up { "1" } else { "0" }),
+        const { slot("upgraded") },
+        tv.table(const { slot("upgraded") })
+            .index(if up { "1" } else { "0" }),
     );
     let ct = if truthy(cid) {
         tv.card_type_any(&py_str(cid))
     } else {
         ""
     };
-    buf.c(t, slot("card_type"), tv.table(slot("card_type")).index(ct));
-    buf.c(t, xc("X_ID_MAIN"), vid(Reg::Card, Some(cid)));
+    buf.c(
+        t,
+        const { slot("card_type") },
+        tv.table(const { slot("card_type") }).index(ct),
+    );
+    buf.c(t, const { xc("X_ID_MAIN") }, vid(Reg::Card, Some(cid)));
     let en = ench_name(ench);
-    buf.c(t, xc("X_ID_MOD"), vid_s(Reg::Enchantment, en.as_deref()));
+    buf.c(
+        t,
+        const { xc("X_ID_MOD") },
+        vid_s(Reg::Enchantment, en.as_deref()),
+    );
 }
 
 fn deck_tokens(buf: &mut Buf, run: &Run<'_>) {
@@ -1079,12 +1202,12 @@ fn deck_tokens(buf: &mut Buf, run: &Run<'_>) {
         }
     }
     for (cid, up, e, n) in groups {
-        let t = buf.new_tok(schema::sec("DECK"), 0);
+        let t = buf.new_tok(const { schema::sec("DECK") }, 0);
         let e = (!e.is_null()).then_some(e);
         card_cats(buf, t, &Value::String(cid), up, e.as_ref());
-        buf.f(t, sc("ENCH_AMT"), ench_amount(e.as_ref()) / 5.0);
+        buf.f(t, const { sc("ENCH_AMT") }, ench_amount(e.as_ref()) / 5.0);
         #[allow(clippy::cast_precision_loss)]
-        buf.f(t, sc("COUNT"), n as f64 / 5.0);
+        buf.f(t, const { sc("COUNT") }, n as f64 / 5.0);
     }
 }
 
@@ -1224,17 +1347,17 @@ fn map_body(buf: &mut Buf, fm: &Value, moves: &[Value]) -> BTreeMap<i64, [f64; 8
     cone.truncate(MAX_MAPNODES);
     for k in cone {
         let n = mn.nodes[&k];
-        let t = buf.new_tok(schema::sec("MAPNODE"), 0);
-        buf.c(t, xc("X_ROOM"), room_of_node(&node_type(n)));
-        buf.c(t, xc("X_POS"), pos(k.0));
-        buf.f(t, xf("N_ROW_OFF"), (k.1 - cr) as f64 / 17.0);
-        buf.f(t, xf("N_COL"), k.0 as f64 / 6.0);
+        let t = buf.new_tok(const { schema::sec("MAPNODE") }, 0);
+        buf.c(t, const { xc("X_ROOM") }, room_of_node(&node_type(n)));
+        buf.c(t, const { xc("X_POS") }, pos(k.0));
+        buf.f(t, const { xf("N_ROW_OFF") }, (k.1 - cr) as f64 / 17.0);
+        buf.f(t, const { xf("N_COL") }, k.0 as f64 / 6.0);
         buf.f(
             t,
-            xf("N_NEXT"),
+            const { xf("N_NEXT") },
             f64::from(u8::from(k.1 == cr + 1 && nxt.contains(&k.0))),
         );
-        buf.f(t, xf("N_PATHS"), (cnt[&k] as f64).ln_1p() / 5.0);
+        buf.f(t, const { xf("N_PATHS") }, (cnt[&k] as f64).ln_1p() / 5.0);
     }
     let mut out = BTreeMap::new();
     for col in nxt {
@@ -1303,15 +1426,15 @@ fn event_delta_columns(info: &Value) -> [(usize, f64); 9] {
     #[allow(clippy::cast_precision_loss)]
     let g = |k: &str| d.get(k).copied().unwrap_or(0) as f64;
     [
-        (xf("O_EV_GOLD"), g("gold_delta") / 100.0),
-        (xf("O_EV_HP"), g("hp_delta") / 20.0),
-        (xf("O_EV_MAXHP"), g("max_hp_delta") / 10.0),
-        (xf("O_EV_RELICS_GAIN"), g("relics_gained") / 1.0),
-        (xf("O_EV_POTIONS_GAIN"), g("potions_gained") / 3.0),
-        (xf("O_EV_CARDS_GAIN"), g("cards_gained") / 3.0),
-        (xf("O_EV_CARDS_LOSE"), g("cards_lost") / 3.0),
-        (xf("O_EV_RELICS_LOSE"), g("relics_lost") / 3.0),
-        (xf("O_EV_POTIONS_LOSE"), g("potions_lost") / 3.0),
+        (const { xf("O_EV_GOLD") }, g("gold_delta") / 100.0),
+        (const { xf("O_EV_HP") }, g("hp_delta") / 20.0),
+        (const { xf("O_EV_MAXHP") }, g("max_hp_delta") / 10.0),
+        (const { xf("O_EV_RELICS_GAIN") }, g("relics_gained") / 1.0),
+        (const { xf("O_EV_POTIONS_GAIN") }, g("potions_gained") / 3.0),
+        (const { xf("O_EV_CARDS_GAIN") }, g("cards_gained") / 3.0),
+        (const { xf("O_EV_CARDS_LOSE") }, g("cards_lost") / 3.0),
+        (const { xf("O_EV_RELICS_LOSE") }, g("relics_lost") / 3.0),
+        (const { xf("O_EV_POTIONS_LOSE") }, g("potions_lost") / 3.0),
     ]
 }
 
@@ -1345,11 +1468,11 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
     let name = kind_name(kind);
     let flags = TF_OPTION | TF_REP;
     let card_opt = |buf: &mut Buf, cid: &Value, up: bool, ench: Option<&Value>| -> usize {
-        let t = buf.new_tok(schema::sec("OPT_CARD"), flags);
+        let t = buf.new_tok(const { schema::sec("OPT_CARD") }, flags);
         card_cats(buf, t, cid, up, ench);
-        buf.f(t, sc("ENCH_AMT"), ench_amount(ench) / 5.0);
+        buf.f(t, const { sc("ENCH_AMT") }, ench_amount(ench) / 5.0);
         let copies = cx.copies.get(&py_str(cid)).copied().unwrap_or(0);
-        buf.f(t, xf("K_DECK_COPIES"), copies as f64 / 5.0);
+        buf.f(t, const { xf("K_DECK_COPIES") }, copies as f64 / 5.0);
         t
     };
     let deck_opt = |buf: &mut Buf, deck_i: Option<&Value>| -> usize {
@@ -1389,7 +1512,7 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
                 .map_or(&[][..], Vec::as_slice);
             let first = pack.first().cloned().unwrap_or(Value::Null);
             let t = card_opt(buf, &first, false, None);
-            buf.f(t, sc("COUNT"), pack.len() as f64 / 5.0);
+            buf.f(t, const { sc("COUNT") }, pack.len() as f64 / 5.0);
             t
         }
         "SMITH_CARD" => {
@@ -1421,7 +1544,7 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
         "SHOP_REMOVE_CARD" => {
             let t = deck_opt(buf, get(a, "deck_idx"));
             let cost = og("shop").and_then(|s| get(s, "removal_cost"));
-            buf.f(t, xf("O_PRICE"), ff(cost) / 300.0);
+            buf.f(t, const { xf("O_PRICE") }, ff(cost) / 300.0);
             t
         }
         "SHOP_BUY_CARD" | "SHOP_BUY_RELIC" | "SHOP_BUY_POTION" => {
@@ -1453,10 +1576,10 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
                     ("OPT_POTION", Reg::Potion)
                 };
                 let t = buf.new_tok(schema::sec(sec), flags);
-                buf.c(t, xc("X_ID_MAIN"), vid(reg, get(e, "id")));
+                buf.c(t, const { xc("X_ID_MAIN") }, vid(reg, get(e, "id")));
                 t
             };
-            buf.f(t, xf("O_PRICE"), ff(get(e, "price")) / 300.0);
+            buf.f(t, const { xf("O_PRICE") }, ff(get(e, "price")) / 300.0);
             t
         }
         "PICK_RELIC_REWARD" | "PICK_BOSS_RELIC" => {
@@ -1465,27 +1588,31 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
             } else {
                 "boss_relic_options"
             });
-            let t = buf.new_tok(schema::sec("OPT_RELIC"), flags);
+            let t = buf.new_tok(const { schema::sec("OPT_RELIC") }, flags);
             let zero = Value::from(0);
             let ii = get(a, "idx").unwrap_or(&zero);
-            buf.c(t, xc("X_ID_MAIN"), vid(Reg::Relic, at(lst, Some(ii))));
+            buf.c(
+                t,
+                const { xc("X_ID_MAIN") },
+                vid(Reg::Relic, at(lst, Some(ii))),
+            );
             t
         }
         "POTION_SWAP_DISCARD" => {
-            let t = buf.new_tok(schema::sec("OPT_POTION"), flags);
+            let t = buf.new_tok(const { schema::sec("OPT_POTION") }, flags);
             let p = get(a, "discard_slot")
                 .and_then(py_int)
                 .and_then(|s| usize::try_from(s).ok())
                 .and_then(|s| run.potions.get(s));
             buf.c(
                 t,
-                xc("X_ID_MAIN"),
+                const { xc("X_ID_MAIN") },
                 vid_s(Reg::Potion, p.map(String::as_str)),
             );
             t
         }
         "MOVE" => {
-            let t = buf.new_tok(schema::sec("OPT_MOVE"), flags);
+            let t = buf.new_tok(const { schema::sec("OPT_MOVE") }, flags);
             let col = get(a, "col").and_then(py_int).unwrap_or(0);
             let mn = map_nodes(cx.fm);
             let cr = cur_row(cx.fm);
@@ -1493,7 +1620,7 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
                 .nodes
                 .get(&(col, cr + 1))
                 .map_or_else(|| "None".to_owned(), |n| node_type(n));
-            buf.c(t, xc("X_ROOM"), room_of_node(&typ));
+            buf.c(t, const { xc("X_ROOM") }, room_of_node(&typ));
             if let Some(st) = cx.route.get(&col) {
                 for (k, c) in [
                     "M_ELITE_MIN",
@@ -1509,10 +1636,10 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
                 {
                     buf.f(t, xf(c), st[k] / 5.0);
                 }
-                buf.f(t, xf("M_ROWS_LEFT"), st[7] / 17.0);
+                buf.f(t, const { xf("M_ROWS_LEFT") }, st[7] / 17.0);
             }
-            buf.c(t, xc("X_KIND"), i16::from(kind));
-            buf.c(t, xc("X_POS"), pos(col));
+            buf.c(t, const { xc("X_KIND") }, i16::from(kind));
+            buf.c(t, const { xc("X_POS") }, pos(col));
             return;
         }
         "EVENT_CHOICE" => {
@@ -1525,17 +1652,21 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
             };
             let empty = Value::Object(serde_json::Map::new());
             let opt = at(Some(infos), idx).filter(|o| truthy(o)).unwrap_or(&empty);
-            let t = buf.new_tok(schema::sec("OPT_EVENT"), flags);
+            let t = buf.new_tok(const { schema::sec("OPT_EVENT") }, flags);
             let ev = event_name(cx.d, run);
-            buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Event, ev.as_deref()));
-            buf.c(t, xc("X_ID_MOD"), neow_relic(opt));
+            buf.c(
+                t,
+                const { xc("X_ID_MAIN") },
+                vid_s(Reg::Event, ev.as_deref()),
+            );
+            buf.c(t, const { xc("X_ID_MOD") }, neow_relic(opt));
             for (col, v) in event_delta_columns(opt) {
                 buf.f(t, col, v);
             }
             t
         }
         "REST_OPTION" => {
-            let t = buf.new_tok(schema::sec("OPT_REST"), flags);
+            let t = buf.new_tok(const { schema::sec("OPT_REST") }, flags);
             let opts: Value = og("rest_site_options")
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!(emit_rm::rest_site_options(run.rm)));
@@ -1549,13 +1680,17 @@ fn option(buf: &mut Buf, cx: &OptCtx<'_, '_>, i: usize, a: &Value, kind: u8) {
             let id = rid
                 .filter(|r| truthy(r))
                 .map_or(0, |r| vid(Reg::Rest, Some(r)));
-            buf.c(t, xc("X_ID_MAIN"), id);
+            buf.c(t, const { xc("X_ID_MAIN") }, id);
             t
         }
-        _ => buf.new_tok(schema::sec("OPT_FIXED"), flags),
+        _ => buf.new_tok(const { schema::sec("OPT_FIXED") }, flags),
     };
-    buf.c(t, xc("X_KIND"), i16::from(kind));
-    buf.c(t, xc("X_POS"), pos(i64::try_from(i).unwrap_or(62)));
+    buf.c(t, const { xc("X_KIND") }, i16::from(kind));
+    buf.c(
+        t,
+        const { xc("X_POS") },
+        pos(i64::try_from(i).unwrap_or(62)),
+    );
 }
 
 /// `_offer`: the potion a swap would add, the enchantment an enchant pick
@@ -1572,9 +1707,13 @@ fn offer(buf: &mut Buf, d: &Decision, run: &Run<'_>) {
                 .map(|k| format!("{k:?}")),
         };
         if let Some(p) = pot.filter(|p| !p.is_empty()) {
-            let t = buf.new_tok(schema::sec("OFFER"), 0);
-            buf.c(t, xc("X_KIND"), i16::from(ak::POTION_SWAP_DISCARD));
-            buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Potion, Some(&p)));
+            let t = buf.new_tok(const { schema::sec("OFFER") }, 0);
+            buf.c(
+                t,
+                const { xc("X_KIND") },
+                i16::from(ak::POTION_SWAP_DISCARD),
+            );
+            buf.c(t, const { xc("X_ID_MAIN") }, vid_s(Reg::Potion, Some(&p)));
         }
     } else if d.dtype == dt::CARD_ENCHANT {
         let e: Option<Value> = match run.og("pending_enchantment").filter(|v| !v.is_null()) {
@@ -1587,10 +1726,14 @@ fn offer(buf: &mut Buf, d: &Decision, run: &Run<'_>) {
                 .map(|p| Value::String(p.enchantment.python_name().to_owned())),
         };
         if let Some(e) = e.filter(truthy) {
-            let t = buf.new_tok(schema::sec("OFFER"), 0);
-            buf.c(t, xc("X_KIND"), i16::from(ak::ENCHANT_DECK_CARD));
+            let t = buf.new_tok(const { schema::sec("OFFER") }, 0);
+            buf.c(t, const { xc("X_KIND") }, i16::from(ak::ENCHANT_DECK_CARD));
             let en = ench_name(Some(&e));
-            buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Enchantment, en.as_deref()));
+            buf.c(
+                t,
+                const { xc("X_ID_MAIN") },
+                vid_s(Reg::Enchantment, en.as_deref()),
+            );
         }
     }
 }
@@ -1604,19 +1747,23 @@ fn encode_ooc(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<Tok
     let (mut buf, fm) = head(d, &run, cache, None, None, None);
     deck_tokens(&mut buf, &run);
     for r in &run.relics {
-        let t = buf.new_tok(schema::sec("RELIC"), 0);
-        buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Relic, Some(r)));
+        let t = buf.new_tok(const { schema::sec("RELIC") }, 0);
+        buf.c(t, const { xc("X_ID_MAIN") }, vid_s(Reg::Relic, Some(r)));
     }
     for (j, p) in run.potions.iter().enumerate() {
         if !p.is_empty() {
-            let t = buf.new_tok(schema::sec("POTION"), 0);
-            buf.c(t, xc("X_ID_MAIN"), vid_s(Reg::Potion, Some(p)));
-            buf.c(t, xc("X_POS"), pos(i64::try_from(j).unwrap_or(62)));
+            let t = buf.new_tok(const { schema::sec("POTION") }, 0);
+            buf.c(t, const { xc("X_ID_MAIN") }, vid_s(Reg::Potion, Some(p)));
+            buf.c(
+                t,
+                const { xc("X_POS") },
+                pos(i64::try_from(j).unwrap_or(62)),
+            );
         }
     }
     offer(&mut buf, d, &run);
     let route = if d.dtype == dt::MAP {
-        map_body(&mut buf, &fm, &d.obs_actions)
+        map_body(&mut buf, &fm.fm, &d.obs_actions)
     } else {
         BTreeMap::new()
     };
@@ -1629,7 +1776,7 @@ fn encode_ooc(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<Tok
         run: &run,
         copies,
         route,
-        fm: &fm,
+        fm: &fm.fm,
     };
     let reps: Vec<usize> = d.members.iter().map(|m| m[0]).collect();
     let mut cls_tok = Vec::with_capacity(reps.len());
@@ -1658,6 +1805,7 @@ fn encode_ooc(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<Tok
         n_sctx: 0,
         dtype: d.dtype,
         is_combat: false,
+        ..TokRow::default()
     })
 }
 
@@ -1679,9 +1827,304 @@ pub fn prime(d: &Decision, rm: &RunManager, cache: &mut TokCache) {
 /// A decision without its view, an S_ctx block not aligned with the
 /// members, or a telegraph the wire cannot emit.
 pub fn encode(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<TokRow, String> {
-    if d.is_combat() {
-        encode_combat(d, rm, cache)
+    encode_with(d, rm, cache, None, false, false)
+}
+
+/// `tokens.encode(d, rare=rare, priv=priv_, check=check)`: the training
+/// worker's row. `rare` maps the combat S_ctx content slots (and
+/// PRIV_DRAW's); `priv_` adds the PRIV tokens (PRIV_DRAW, PRIV_ENEMY,
+/// PRIV_RUN), read from `rm`; `check` runs `check_members_identical` on a
+/// combat row.
+///
+/// # Errors
+///
+/// As [`encode`]; more than `MAX_PRIV` PRIV tokens; with `check`, members
+/// of one class that tokenize differently.
+pub fn encode_with(
+    d: &Decision,
+    rm: &RunManager,
+    cache: &mut TokCache,
+    rare: Option<&RareMap>,
+    priv_: bool,
+    check: bool,
+) -> Result<TokRow, String> {
+    let mut r = if d.is_combat() {
+        let r = encode_combat(d, rm, cache, rare)?;
+        if check {
+            check_members_identical(&r, &d.members)?;
+        }
+        r
     } else {
-        encode_ooc(d, rm, cache)
+        encode_ooc(d, rm, cache)?
+    };
+    if priv_ {
+        privs(
+            &mut r,
+            d,
+            rm,
+            cache,
+            if d.is_combat() { rare } else { None },
+        )?;
+    }
+    Ok(r)
+}
+
+// ── PRIV (the value path's tokens) ───────────────────────────────────────
+
+/// `contracts.MAX_PRIV`.
+pub const MAX_PRIV: usize = 16;
+/// `contracts.PRIV_DRAW_K`.
+pub const PRIV_DRAW_K: usize = 10;
+/// `contracts.PRIV_ENEMY_K`.
+pub const PRIV_ENEMY_K: usize = 5;
+
+/// The combat teacher's `RareMap` (`combat_ctx.data.RareMap`): per S_ctx
+/// content slot, a universe row → mapped row table.
+#[derive(Clone, Debug, Default)]
+pub struct RareMap {
+    maps: Vec<(usize, Vec<i64>)>,
+}
+
+impl RareMap {
+    /// `RareMap.from_json(d)`: `{slot name: [row, ...]}`.
+    ///
+    /// # Errors
+    ///
+    /// Not an object of integer lists, or an unknown slot.
+    pub fn from_value(v: &Value) -> Result<Self, String> {
+        let o = v.as_object().ok_or("RareMap: not an object")?;
+        let mut maps = Vec::with_capacity(o.len());
+        for (k, m) in o {
+            let s = schema::SCTX_SLOTS
+                .iter()
+                .position(|x| *x == k.as_str())
+                .ok_or_else(|| format!("RareMap: unknown slot {k:?}"))?;
+            let m = m
+                .as_array()
+                .ok_or("RareMap: a slot's map is not a list")?
+                .iter()
+                .map(|x| x.as_i64().ok_or("RareMap: a non-integer row"))
+                .collect::<Result<Vec<i64>, _>>()?;
+            maps.push((s, m));
+        }
+        Ok(Self { maps })
+    }
+
+    /// `RareMap.apply` on one S_ctx row (its first `SCTX_N_CAT` columns),
+    /// cast to int16 as `astype(np.int16)` does.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn apply(&self, row: &mut [i16]) {
+        for (s, m) in &self.maps {
+            let v = i64::from(row[*s]);
+            let n = m.len() as i64;
+            let i = if v < 0 { v + n } else { v };
+            row[*s] = m[i as usize] as i16;
+        }
+    }
+}
+
+/// PRIV_RUN of one `(act, floor)`: its row, its continuous row and its
+/// encounter pool.
+#[derive(Clone, Debug)]
+struct PrivRun {
+    cat: [i16; N_CAT],
+    cont: Vec<u16>,
+    vids: Vec<u16>,
+    ws: Vec<u16>,
+}
+
+/// `_priv_arrays(d, rare)` into `r`'s PRIV fields.
+fn privs(
+    r: &mut TokRow,
+    d: &Decision,
+    rm: &RunManager,
+    cache: &mut TokCache,
+    rare: Option<&RareMap>,
+) -> Result<(), String> {
+    let mut n = 0usize;
+    if d.is_combat() {
+        if let Some(cs) = rm.combat.as_ref() {
+            n += priv_draw(r, cs, rare)?;
+            let snap = d.combat.as_ref().map(|c| &c.snap);
+            n += priv_enemy(r, cs, snap)?;
+        }
+    }
+    // PRIV_RUN: cached with the run-static reads of this (act, floor).
+    let run = Run::new(rm, None);
+    let st = static_of(cache, &run).clone();
+    let pr = st
+        .priv_run
+        .get_or_init(|| priv_run_static(rm, run.act(), &st.fm));
+    let pos = u16::try_from(n).unwrap_or(u16::MAX);
+    r.pcat.extend_from_slice(&pr.cat);
+    r.pcont.extend_from_slice(&pr.cont);
+    r.psec.push(const { schema::sec("PRIV_RUN") });
+    n += 1;
+    for (&v, &w) in pr.vids.iter().zip(&pr.ws) {
+        r.ppool_tok.push(pos);
+        r.ppool_vid.push(v);
+        r.ppool_w.push(w);
+    }
+    if n > MAX_PRIV {
+        return Err(format!("SchemaError: {n} PRIV tokens > {MAX_PRIV}"));
+    }
+    Ok(())
+}
+
+/// `_priv_draw`: the true top-10 draw (`COUNT` = rank).
+fn priv_draw(r: &mut TokRow, cs: &CombatState, rare: Option<&RareMap>) -> Result<usize, String> {
+    let draw =
+        sts2_wire::emit::combat::true_draw_top(cs, PRIV_DRAW_K).map_err(|e| e.to_string())?;
+    let draw = draw.as_array().map_or(&[][..], Vec::as_slice);
+    if draw.is_empty() {
+        return Ok(0);
+    }
+    let cards: Vec<Value> = draw.iter().map(crate::snapshot::card).collect();
+    let tk = sctx::draw_top_tokens(&cards);
+    let luts = sctx::luts();
+    const CARD: usize = const { slot("card") };
+    const ENCH: usize = const { slot("enchantment") };
+    for ti in 0..tk.len() {
+        let raw = tk.cat_row(ti);
+        let mut row = [0i16; N_CAT];
+        row[..SCTX_N_CAT].copy_from_slice(raw);
+        if let Some(rare) = rare {
+            rare.apply(&mut row[..SCTX_N_CAT]);
+        }
+        let lut = |s: usize| {
+            let i = usize::try_from(raw[s]).unwrap_or(0);
+            i16_of(luts[s][i])
+        };
+        row[const { xc("X_ID_MAIN") }] = lut(CARD);
+        row[const { xc("X_ID_MOD") }] = lut(ENCH);
+        r.pcat.extend_from_slice(&row);
+        let c = &tk.cont[ti * SCTX_N_CONT..(ti + 1) * SCTX_N_CONT];
+        r.pcont
+            .extend(c.iter().map(|&x| to_f16(x.clamp(-F16_MAX, F16_MAX))));
+        r.pcont
+            .extend(std::iter::repeat_n(0u16, N_CONT - SCTX_N_CONT));
+        r.psec.push(const { schema::sec("PRIV_DRAW") });
+    }
+    Ok(tk.len())
+}
+
+/// `_priv_enemy`: per live enemy, the true next three moves.
+fn priv_enemy(r: &mut TokRow, cs: &CombatState, snap: Option<&Value>) -> Result<usize, String> {
+    let fc = sts2_wire::emit::combat::enemy_intent_forecast(cs, 3).map_err(|e| e.to_string())?;
+    let enemies = snap.map_or(&[][..], |s| list_or_empty(s, "enemies"));
+    let fc = fc.as_array().map_or(&[][..], Vec::as_slice);
+    let mut n = 0;
+    for (j, steps) in fc.iter().take(PRIV_ENEMY_K).enumerate() {
+        let steps = steps.as_array().map_or(&[][..], Vec::as_slice);
+        let dead = enemies
+            .get(j)
+            .is_some_and(|e| get(e, "is_dead").is_some_and(truthy));
+        if steps.is_empty() || dead {
+            continue;
+        }
+        let mut row = absent_cat();
+        const ES: usize = const { slot("enemy_slot") };
+        row[ES] = sctx::vocab().tables[ES].index(&j.to_string());
+        let kind = enemies
+            .get(j)
+            .and_then(|e| get(e, "kind"))
+            .filter(|k| truthy(k))
+            .map(py_str);
+        for (col, st) in [
+            const { xc("X_ID_MAIN") },
+            const { xc("X_ID_MOD") },
+            const { xc("X_ID_REL") },
+        ]
+        .into_iter()
+        .zip(steps)
+        {
+            let mid = get(st, "move_id").filter(|m| truthy(m)).map(py_str);
+            row[col] = match (&mid, &kind) {
+                (Some(m), Some(k)) => vid_s(Reg::Move, Some(&format!("{k}.{m}"))),
+                _ => 0,
+            };
+        }
+        row[const { xc("X_ID_AUX") }] = kind.as_deref().map_or(0, |k| vid_s(Reg::Monster, Some(k)));
+        r.pcat.extend_from_slice(&row);
+        r.pcont.extend(std::iter::repeat_n(0u16, N_CONT));
+        r.psec.push(const { schema::sec("PRIV_ENEMY") });
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// `_priv_run_static`: this act's room queues and the later acts' bosses.
+#[allow(clippy::many_single_char_names)]
+fn priv_run_static(rm: &RunManager, act: u8, fm: &Value) -> PrivRun {
+    let rooms = emit_rm::generated_rooms(rm);
+    let rooms = rooms.as_array().map_or(&[][..], Vec::as_slice);
+    let a = usize::from(rm.run_state.act_index);
+    let empty = Value::Object(serde_json::Map::new());
+    let g = if a >= 1 && a - 1 < rooms.len() {
+        &rooms[a - 1]
+    } else {
+        &empty
+    };
+    let later: &[Value] = rooms.get(a..).unwrap_or(&[]);
+    let mut row = absent_cat();
+    let mut f = vec![0f32; N_CONT];
+    let len10 = |k: &str| {
+        #[allow(clippy::cast_precision_loss)]
+        let n = list_or_empty(g, k).len() as f64;
+        (n / 10.0) as f32
+    };
+    f[const { xf("P_ROOMS_MONSTER") }] = len10("normal");
+    f[const { xf("P_ROOMS_ELITE") }] = len10("elite");
+    f[const { xf("P_ROOMS_EVENT") }] = len10("events_shuffled");
+    let cur = cur_row(fm);
+    let mut ahead: BTreeMap<String, i64> = BTreeMap::new();
+    for rr in list_or_empty(fm, "rows") {
+        for x in rr.as_array().map_or(&[][..], Vec::as_slice) {
+            if get(x, "row").and_then(py_int).unwrap_or(0) > cur {
+                let t = get(x, "type").map_or_else(|| "None".to_owned(), py_str);
+                *ahead.entry(t).or_insert(0) += 1;
+            }
+        }
+    }
+    for (col, typ) in [
+        (const { xf("P_ROOMS_SHOP") }, "Shop"),
+        (const { xf("P_ROOMS_REST") }, "RestSite"),
+        (const { xf("P_ROOMS_TREASURE") }, "Treasure"),
+    ] {
+        #[allow(clippy::cast_precision_loss)]
+        let n = ahead.get(typ).copied().unwrap_or(0) as f64;
+        f[col] = (n / 10.0) as f32;
+    }
+    let boss = |v: &Value, k: &str| vid(Reg::Encounter, get(v, k));
+    if let Some(first) = later.first() {
+        row[const { xc("X_ID_MAIN") }] = boss(first, "boss");
+        if act < 3 && later.len() == usize::from(3 - act) {
+            let last = later.last().expect("non-empty");
+            row[const { xc("X_ID_REL") }] = boss(last, "boss");
+            row[const { xc("X_ID_MOD") }] = boss(last, "second_boss");
+        }
+    }
+    // Counter(vid of normal + elite), first-occurrence order, nonzero vids.
+    let mut ent: Vec<(i16, u32)> = Vec::new();
+    for e in list_or_empty(g, "normal")
+        .iter()
+        .chain(list_or_empty(g, "elite"))
+    {
+        let v = vid(Reg::Encounter, Some(e));
+        match ent.iter_mut().find(|(x, _)| *x == v) {
+            Some((_, c)) => *c += 1,
+            None => ent.push((v, 1)),
+        }
+    }
+    ent.retain(|(v, _)| *v != 0);
+    #[allow(clippy::cast_sign_loss)]
+    PrivRun {
+        cat: row,
+        cont: f.iter().map(|&x| to_f16(x)).collect(),
+        vids: ent.iter().map(|(v, _)| *v as u16).collect(),
+        ws: ent
+            .iter()
+            .map(|(_, w)| f16::from_f64(f64::from(*w)).to_bits())
+            .collect(),
     }
 }

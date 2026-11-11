@@ -259,6 +259,7 @@ def test_an_actor_side_error_keeps_the_envs_counts_and_seed(
     def make(n: int) -> FakeEnv:
         env = FakeEnv(4242 + n, length=3)
         env.counts.update({"f9/violations": 1, "f9/hp_le_max": 1, "unknown": 2})
+        env.f9_violations = ["hp_le_max: 81 > 80"]
         return env
 
     h = Harness(monkeypatch, make)
@@ -274,6 +275,7 @@ def test_an_actor_side_error_keeps_the_envs_counts_and_seed(
     assert e["outcome"] == "error" and e["seed"] == 4242
     assert (e["f9_checks"], e["f9_violations"], e["unknown"], e["fights"]) == (2, 1, 2, 1)
     assert e["counts"]["error/SchemaError"] == 1 and e["counts"]["f9/hp_le_max"] == 1
+    assert e["f9_samples"] == ["hp_le_max: 81 > 80"]
 
 
 def test_a_segment_start_drops_only_its_slots_last_run_from_the_cache(

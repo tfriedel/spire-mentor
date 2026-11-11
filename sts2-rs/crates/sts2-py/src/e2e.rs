@@ -26,6 +26,7 @@ use std::time::Instant;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict};
 use serde_json::{json, Value};
 
 use sts2_e2e::contracts as ct;
@@ -393,6 +394,28 @@ impl PyE2eDriver {
     fn begin_run(&mut self) {
         self.cache.begin_run();
     }
+
+    /// Tokenize `peek`'s decision at `rm` with this driver's per-run cache:
+    /// the policy row (`ppo.e2e.tokens.encode(d, rare=None, priv=False)`) as
+    /// `{field: bytes}` (little-endian, row-major; `cont` and `pool_w` are
+    /// float16 bit patterns) plus `n_tok`, `sctx_lo`, `n_sctx`, `dtype`,
+    /// `is_combat`. A training worker wraps the bytes with `np.frombuffer`.
+    ///
+    /// Raises:
+    ///     ValueError: `peek` is not a decision.
+    ///     RuntimeError: the tokenizer refused the decision.
+    fn encode<'py>(
+        &mut self,
+        py: Python<'py>,
+        peek: &PyE2ePeek,
+        rm: &PyRunManager,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let Next::Decision(d) = &peek.next else {
+            return Err(PyValueError::new_err("encode: the peek is not a decision"));
+        };
+        let r = tokens::encode(d, &rm.inner, &mut self.cache).map_err(PyRuntimeError::new_err)?;
+        tokrow_dict(py, &r)
+    }
 }
 
 /// The campaign run the student trained on for `seed` (Ironclad, v0.111.0,
@@ -464,4 +487,67 @@ pub fn e2e_selfplay<'py>(
         }
     });
     value_to_py(py, &out)
+}
+
+/// A tokenized row as `{field: bytes}` (little-endian, row-major; `cont` and
+/// `pool_w` are float16 bit patterns) plus `n_tok`, `sctx_lo`, `n_sctx`,
+/// `dtype`, `is_combat`.
+pub(crate) fn tokrow_dict<'py>(
+    py: Python<'py>,
+    r: &tokens::TokRow,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    fn le16<T: Copy>(v: &[T], f: impl Fn(T) -> [u8; 2]) -> Vec<u8> {
+        v.iter().flat_map(|&x| f(x)).collect()
+    }
+    out.set_item("cat", PyBytes::new(py, &le16(&r.cat, i16::to_le_bytes)))?;
+    out.set_item("cont", PyBytes::new(py, &le16(&r.cont, u16::to_le_bytes)))?;
+    out.set_item("sec", PyBytes::new(py, &r.sec))?;
+    out.set_item("tok_flags", PyBytes::new(py, &r.tok_flags))?;
+    out.set_item(
+        "mem_tok",
+        PyBytes::new(py, &le16(&r.mem_tok, u16::to_le_bytes)),
+    )?;
+    out.set_item(
+        "mem_class",
+        PyBytes::new(py, &le16(&r.mem_class, u16::to_le_bytes)),
+    )?;
+    out.set_item(
+        "cls_tok",
+        PyBytes::new(py, &le16(&r.cls_tok, u16::to_le_bytes)),
+    )?;
+    out.set_item("cls_kind", PyBytes::new(py, &r.cls_kind))?;
+    out.set_item(
+        "pool_tok",
+        PyBytes::new(py, &le16(&r.pool_tok, u16::to_le_bytes)),
+    )?;
+    out.set_item(
+        "pool_vid",
+        PyBytes::new(py, &le16(&r.pool_vid, u16::to_le_bytes)),
+    )?;
+    out.set_item(
+        "pool_w",
+        PyBytes::new(py, &le16(&r.pool_w, u16::to_le_bytes)),
+    )?;
+    out.set_item("pcat", PyBytes::new(py, &le16(&r.pcat, i16::to_le_bytes)))?;
+    out.set_item("pcont", PyBytes::new(py, &le16(&r.pcont, u16::to_le_bytes)))?;
+    out.set_item("psec", PyBytes::new(py, &r.psec))?;
+    out.set_item(
+        "ppool_tok",
+        PyBytes::new(py, &le16(&r.ppool_tok, u16::to_le_bytes)),
+    )?;
+    out.set_item(
+        "ppool_vid",
+        PyBytes::new(py, &le16(&r.ppool_vid, u16::to_le_bytes)),
+    )?;
+    out.set_item(
+        "ppool_w",
+        PyBytes::new(py, &le16(&r.ppool_w, u16::to_le_bytes)),
+    )?;
+    out.set_item("n_tok", r.n_tok())?;
+    out.set_item("sctx_lo", r.sctx_lo)?;
+    out.set_item("n_sctx", r.n_sctx)?;
+    out.set_item("dtype", r.dtype)?;
+    out.set_item("is_combat", r.is_combat)?;
+    Ok(out)
 }

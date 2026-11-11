@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import Any
 
 import numpy as np
@@ -238,11 +238,18 @@ class Table:
         self.unk = len(self.names)
         self.pad = len(self.names) + 1
         self.size = len(self.names) + 2
+        # `index` memo keyed by the raw string: `norm` (`canonical`) is a pure function and
+        # the encoders ask for the same few hundred names at every decision.
+        self._memo: dict[str, tuple[int, bool]] = {}
 
     def index(self, name: Any) -> tuple[int, bool]:
         """`(row, oov)`; an unknown name is UNK with `oov` True."""
-        i = self.idx.get(self.norm(str(name)))
-        return (self.unk, True) if i is None else (i, False)
+        key = str(name)
+        r = self._memo.get(key)
+        if r is None:
+            i = self.idx.get(self.norm(key))
+            r = self._memo[key] = (self.unk, True) if i is None else (i, False)
+        return r
 
 
 @dataclass(frozen=True)
@@ -253,13 +260,18 @@ class Vocab:
     def sizes(self) -> tuple[int, ...]:
         return tuple(t.size for t in self.tables)
 
-    @property
+    # Cached and read-only: `_Builder.new` reads `pads` once per token. Callers copy.
+    @cached_property
     def pads(self) -> np.ndarray:
-        return np.asarray([t.pad for t in self.tables], np.int16)
+        a = np.asarray([t.pad for t in self.tables], np.int16)
+        a.flags.writeable = False
+        return a
 
-    @property
+    @cached_property
     def unks(self) -> np.ndarray:
-        return np.asarray([t.unk for t in self.tables], np.int16)
+        a = np.asarray([t.unk for t in self.tables], np.int16)
+        a.flags.writeable = False
+        return a
 
     def table(self, slot: str) -> Table:
         return self.tables[S[slot]]
@@ -323,25 +335,53 @@ def vocab() -> Vocab:
 
 
 class _Builder:
+    """Token rows written in place into preallocated blocks.
+
+    `new` hands out row views of a `[_BLOCK, ...]` block (filled with PAD ids and
+    zeros) instead of allocating two arrays per token and stacking them at the end.
+    A full block is never resized, so every view handed out stays valid.
+    """
+
+    _BLOCK = 64
+
     def __init__(self, v: Vocab) -> None:
         self.v = v
-        self.cat: list[np.ndarray] = []
-        self.cont: list[np.ndarray] = []
+        self._cats: list[np.ndarray] = []
+        self._conts: list[np.ndarray] = []
+        self._used = self._BLOCK  # forces a block on the first `new`
         self.sec: list[int] = []
         self.n_oov = 0
         self.n_ids = 0
 
     def new(self, section: str) -> tuple[np.ndarray, np.ndarray]:
-        cat = self.v.pads.copy()
-        cont = np.zeros(N_CONT, np.float32)
-        self.cat.append(cat)
-        self.cont.append(cont)
+        if self._used == self._BLOCK:
+            self._cats.append(np.tile(self.v.pads, (self._BLOCK, 1)))
+            self._conts.append(np.zeros((self._BLOCK, N_CONT), np.float32))
+            self._used = 0
+        i = self._used
+        self._used = i + 1
         self.sec.append(SEC[section])
-        return cat, cont
+        return self._cats[-1][i], self._conts[-1][i]
+
+    def _rows(self, blocks: list[np.ndarray]) -> np.ndarray:
+        if not self.sec:
+            raise ValueError("need at least one array to stack")  # as `np.stack([])`
+        if len(blocks) == 1:
+            return blocks[0][: self._used].copy()
+        return np.concatenate([*blocks[:-1], blocks[-1][: self._used]])
+
+    def cat_rows(self) -> np.ndarray:
+        """`[n, len(SLOTS)]` int16: the cat rows so far (a copy)."""
+        return self._rows(self._cats)
+
+    def cont_rows(self) -> np.ndarray:
+        """`[n, N_CONT]` float32: the cont rows so far (a copy)."""
+        return self._rows(self._conts)
 
     def put(self, cat: np.ndarray, slot: str, name: Any) -> None:
-        row, oov = self.v.tables[S[slot]].index(name)
-        cat[S[slot]] = row
+        k = S[slot]
+        row, oov = self.v.tables[k].index(name)
+        cat[k] = row
         if slot in CONTENT_SLOTS:
             self.n_ids += 1
             self.n_oov += int(oov)
@@ -656,8 +696,8 @@ def tokens(
         _obs_tokens(b, obs, actions)
     _action_tokens(b, obs, actions, rl2, arm)
     return {
-        "cat": np.stack(b.cat).astype(np.int16),
-        "cont": np.stack(b.cont).astype(np.float32),
+        "cat": b.cat_rows(),
+        "cont": b.cont_rows(),
         "sec": np.asarray(b.sec, np.int8),
         "n_act": len(actions),
         "n_oov": b.n_oov,

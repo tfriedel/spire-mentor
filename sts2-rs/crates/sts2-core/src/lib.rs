@@ -304,6 +304,9 @@ pub use dotnet_rng::{canonicalize_seed, deterministic_hash_code, DotNetRandom, R
 // [`runstate::RunState::rng`]; downstream beads migrate the existing
 // `rewards_rng_seed` Xoshiro call sites to per-stream determinism.
 pub mod run_rng_set;
+
+/// CPython's `random.Random`, for hosts that replay a Python sampler.
+pub mod py_random;
 pub use run_rng_set::RunRngSet;
 
 /// C#-faithful run-setup room generation off the shared `up_front` stream

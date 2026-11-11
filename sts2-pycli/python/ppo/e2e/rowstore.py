@@ -131,9 +131,16 @@ def _ranges(starts: np.ndarray, lens: np.ndarray) -> np.ndarray:
     return np.repeat(np.asarray(starts, np.int64) - cum, lens) + np.arange(total)
 
 
-#: The most bytes one scattered copy step (`gather_to_shm`) holds in a temporary:
-#: under numpy's 4 MiB huge-page threshold, with room.
-COPY_BLOCK_BYTES = 1 << 20
+#: The most bytes one scattered copy step (`gather_to_shm`) holds in a temporary.
+#: 16 MiB, not the first 1 MiB: at 1 MiB a lane table (~170k rows, ~280 serving
+#: rounds) takes ~170k small numpy calls, each re-taking the GIL from the serving
+#: loop, and the lane's pack went 2.6 -> 4.7 s per iteration (a4000, 2.07B, -12%
+#: decisions/s). Bench, 4 threads, a 5.3 GB lane-shaped table: 1 MiB 3.2 s quiet /
+#: 109 s against a busy Python thread; 16 MiB 2.2 s / 11-20 s; the pre-block code
+#: 2.6 s / 13-31 s. A 16 MiB block is past numpy's 4 MiB huge-page threshold, so
+#: on a host with THP defrag=madvise and fragmented memory it can stall in direct
+#: compaction again (the a4000 runs defrag=defer).
+COPY_BLOCK_BYTES = 16 << 20
 
 
 def _blocks(
@@ -324,9 +331,10 @@ def gather_to_shm(
     # Per chunk, its rows' places. A chunk whose rows land in order on one span (the
     # held rows' block, which leads the table) copies slices. Any other chunk copies
     # in row blocks (`_blocks`): their index arrays and copies stay under
-    # `COPY_BLOCK_BYTES`, so no copy allocates a large array. numpy asks for huge
-    # pages on large arrays, and on a fragmented host each such allocation can
-    # stall in direct compaction.
+    # `COPY_BLOCK_BYTES`, which bounds each copy's allocation but, at 16 MiB, NOT
+    # below numpy's 4 MiB huge-page threshold: on a host with THP defrag=madvise
+    # and fragmented memory a block copy can still stall in direct compaction
+    # (see `COPY_BLOCK_BYTES`).
     plans = []
     for ch, idx, pos in parts:
         if bool((np.diff(pos) == 1).all() and (np.diff(idx) == 1).all()):

@@ -155,6 +155,52 @@ pub fn surface_index(s: &str) -> usize {
     SURFACES.iter().position(|&x| x == s).unwrap_or(unknown)
 }
 
+/// `encoder.py::_KIND_SURFACE` verbatim: an action kind's surface-defining
+/// label, or `None` for kinds that never define a surface (`unknown`
+/// included: it carries no entry in the Python dict either). Every label is
+/// a [`SURFACES`] row.
+#[must_use]
+pub fn kind_surface(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "move" => "path",
+        "pick_card_reward" | "sacrifice_card_reward" => "card-reward",
+        "pick_relic_reward" | "skip_relic" => "relic-reward",
+        "pick_boss_relic" => "boss-relic",
+        "smith_card" => "card-smith",
+        "remove_deck_card" => "card-remove",
+        "upgrade_deck_card" => "card-upgrade",
+        "transform_deck_card" => "card-transform",
+        "enchant_deck_card" => "card-enchant",
+        "grant_deck_card" => "card-grant",
+        "shop_buy_card" | "shop_buy_relic" | "shop_buy_potion" | "shop_remove_card"
+        | "leave_shop" => "shop",
+        "rest_option" => "rest",
+        "event_choice" => "event",
+        "collect_treasure" => "treasure",
+        "potion_swap" => "potion-swap",
+        _ => return None,
+    })
+}
+
+/// `encoder.py::fine_surface` over the decision's action kinds, in order:
+/// the first surface-defining kind, skipping the deferring `skip_relic` /
+/// `leave_shop` on a first pass; any on a second; else `"unknown"`.
+#[must_use]
+pub fn fine_surface<'a, I>(kinds: I) -> &'static str
+where
+    I: IntoIterator<Item = &'a str>,
+    I::IntoIter: Clone,
+{
+    const DEFERRING: [&str; 2] = ["skip_relic", "leave_shop"];
+    let kinds = kinds.into_iter();
+    kinds
+        .clone()
+        .filter(|k| !DEFERRING.contains(k))
+        .find_map(kind_surface)
+        .or_else(|| kinds.clone().find_map(kind_surface))
+        .unwrap_or("unknown")
+}
+
 /// Which deck operation a CARD-section action token belongs to (GH #545) —
 /// mirrors `vocab.py::DECK_OPS` verbatim (order is embedding-index-significant).
 ///

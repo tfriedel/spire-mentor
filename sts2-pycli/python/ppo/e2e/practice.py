@@ -50,7 +50,7 @@ from typing import Any
 import numpy as np
 
 from . import contracts as C
-from .env import Capture, E2EEnv, EnvConfig, Segment
+from .env import Capture, E2EEnv, EnvConfig, Segment, new_env
 
 CELLS = C.CELLS  # ELITE_ACT1..3, BOSS_ACT1, BOSS_ACT2, BOSS_ACT3_DOUBLE
 DOUBLE_BOSS = "BOSS_ACT3_DOUBLE"
@@ -314,7 +314,7 @@ class SegmentSource:
             self.stats["practice/run_fallback"] += 1
         cfg = dataclasses.replace(self.cfg, on_capture=self.queues.sink(self.clock))
         self.stats["run"] += 1
-        return E2EEnv(int(next(self.seeds)), cfg=cfg)
+        return new_env(int(next(self.seeds)), cfg=cfg)
 
 
 def segment_for(cap: Capture, reseed: int, uid: int | None = None) -> Segment:
@@ -345,7 +345,7 @@ def start_env(
     # Every setting carries over (caps, F9, the tokenizer) except capture: practice
     # segments feed no queue.
     pcfg = dataclasses.replace(cfg or EnvConfig(), on_capture=None)
-    return E2EEnv(cap.seed, rm=rm, cfg=pcfg, segment=segment_for(cap, reseed, uid))
+    return new_env(cap.seed, rm=rm, cfg=pcfg, segment=segment_for(cap, reseed, uid))
 
 
 def opening_key(env: E2EEnv) -> tuple[Any, ...]:

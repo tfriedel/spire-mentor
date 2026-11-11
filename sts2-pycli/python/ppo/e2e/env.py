@@ -75,7 +75,9 @@ combat step, forced ones included, before the action; the actor calls `encode`.
 **F9** (plan §3.5): every step, forced ones included, goes through
 `InvariantChecker.maybe_check` (`ppo.e2e.invariants`), which checks 1% of them from its own
 RNG. Violations are counted (`f9/violations`, `f9/<code>`) and the first few kept in
-`E2EEnv.f9_violations`; one is a lane stop (plan §8), so the caller reads the counts.
+`E2EEnv.f9_violations`, which the actor sends with the segment's end record; one is a
+lane stop (plan §8) unless the segment ended at the step cap (a hang: PREREG Amendment 9,
+`learner._f9_hung`), so the caller reads the counts.
 """
 
 from __future__ import annotations
@@ -972,6 +974,10 @@ class EnvConfig:
     tokenizer: Any = None
     # Exposed for tests only: skip the factory's version guard.
     allow_any_run: bool = False
+    # `new_env` builds an `rsenv.RsE2EEnv` (the Rust training env) instead of an
+    # `E2EEnv`, its rows tokenized with this `sts2_rs.E2eRareMap` (None: no RareMap).
+    rust: bool = False
+    rust_rare: Any = None
 
 
 @dataclass
@@ -1530,6 +1536,18 @@ class E2EEnv:
             self.counts[f"f9/{v.code}"] += 1
             if len(self.f9_violations) < 8:
                 self.f9_violations.append(f"{v.code}: {v.detail}")
+
+
+def new_env(
+    seed: int, *, rm: Any = None, cfg: EnvConfig | None = None, segment: Segment = RUN
+) -> Any:
+    """`E2EEnv(seed, rm=rm, cfg=cfg, segment=segment)`, or with `cfg.rust` its Rust twin
+    (`rsenv.RsE2EEnv`)."""
+    if cfg is not None and cfg.rust:
+        from .rsenv import RsE2EEnv
+
+        return RsE2EEnv(seed, rm=rm, cfg=cfg, segment=segment, rare=cfg.rust_rare)
+    return E2EEnv(seed, rm=rm, cfg=cfg, segment=segment)
 
 
 # ── the env's part of the row batch (contracts.ROW_FIELDS) ───────────────────

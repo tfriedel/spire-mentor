@@ -90,10 +90,10 @@ class Encoder:
         for r, c in enumerate(draw):
             cat, cont = b.new("DRAW_TOP")  # section id replaced below
             T.card_feats(b, cat, cont, _card(c), float(r + 1))
-        if not b.cat:
+        if not b.sec:
             return np.zeros((0, T.N_CAT), np.int16), np.zeros((0, T.N_CONT), np.float16)
-        cat = self.rare.apply(np.stack(b.cat).astype(np.int16)).astype(np.int16)
-        return cat, T.f16(np.stack(b.cont))
+        cat = self.rare.apply(b.cat_rows()).astype(np.int16)
+        return cat, T.f16(b.cont_rows())
 
 
 @dataclass

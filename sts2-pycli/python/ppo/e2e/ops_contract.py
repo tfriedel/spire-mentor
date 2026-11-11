@@ -129,6 +129,9 @@ WATCHDOG_LOCK = "ops/watchdog.lock"
 STARTS = "ops/starts.tsv"
 EVENTS = "ops/events.jsonl"
 NAN_EVENTS = "ops/nan_events.jsonl"
+# Every ended segment with an F9 hit, one line each: seed, cell, the first violation
+# texts and `dropped` (true for a hung segment, which does not stop the lane).
+F9_HITS = "ops/f9_hits.jsonl"
 SEED_OFFSET = "ops/seed_offset"
 RESUME_NEXT = "ops/resume_next.json"
 RESUME_USED_DIR = "ops/resume_used"
@@ -336,7 +339,10 @@ E1_WINDOW_ITERS = 20
 # released, never dropped) for good: `HELD_ROW_LEAK` needs HOLD_ITERS + 3 in a
 # row (a test ties it to `algo.HOLD_ITERS`).
 HELD_LEAK_ITERS = 7
-F9_MAX_HITS = 0  # any hit stops the lane (plan §3.5 F9: 0 per 1e6)
+F9_MAX_HITS = 0  # any hit stops the lane (plan §3.5 F9: 0 per 1e6), a hung segment's aside
+# The env cap that marks a hung segment (PREREG Amendment 9): F9 hits in a segment that
+# ended `capped` at this cap are logged (`F9_HITS`), its rows dropped, the lane goes on.
+F9_HANG_CAP = "steps"
 HEARTBEAT_STALE_S = 15 * 60
 PIN_MISSING_AFTER = 10_000_000  # decisions past a milestone or K-gate without its pin
 
@@ -439,7 +445,11 @@ STATS_FIELDS: dict[str, tuple[str, str]] = {
     "lr": ("map", "optimizer lr per param group"),
     "lr_closed_form": ("map", "the same lrs from the schedule's closed form"),
     "caps": ("map", "this iteration: fights, fights_capped, runs, runs_capped"),
-    "f9": ("map", "this iteration: checked, hits"),
+    "f9": (
+        "map",
+        "this iteration: checked, hits (they stop the lane), tolerated, and the hits and "
+        "segments of hung fights (step cap), which are logged and dropped: hung_hits, hung_segments",
+    ),
     "losses": ("map", "policy, value, ks, total"),
     "grad_norm": ("num", "gradient norm before clipping"),
     "nonfinite": ("int", "1 if any loss, gradient or value was non-finite"),
@@ -722,7 +732,8 @@ ALARMS: tuple[Alarm, ...] = (
         "F9_INVARIANT",
         HUMAN,
         "driver, learner",
-        "any F9 invariant hit (HP <= max, energy >= 0, pile conservation)",
+        "any F9 invariant hit (HP <= max, energy >= 0, pile conservation) in a segment "
+        "that did not end at the step cap; ops/f9_hits.jsonl has seed and violation text",
         "stopped the lane (DONE)",
         "user",
         True,

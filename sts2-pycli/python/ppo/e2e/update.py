@@ -82,6 +82,17 @@ NO_BUCKETS = {
 }
 LEARNER_FORMATS = ("ppo.e2e.learner/3",)
 
+
+def upload(x: np.ndarray, dev: torch.device) -> torch.Tensor:
+    """`x` on `dev` without a host sync: a CUDA copy goes through pinned memory
+    and does not block, so the host builds the next batch while the device runs
+    (a pageable copy waits for every queued kernel). Same values either way."""
+    t = torch.from_numpy(np.ascontiguousarray(x))
+    if dev.type != "cuda":
+        return t.to(dev)
+    return t.pin_memory().to(dev, non_blocking=True)
+
+
 #: `ppo_losses` statistics (scalars, then per-type vectors), summed over chunks and ranks.
 STAT_SCALARS = (
     "n_v",
@@ -207,7 +218,7 @@ class Rank:
     # ── one update ──────────────────────────────────────────────────────
 
     def _fwd(self, rows: Chunk, idx: np.ndarray) -> Any:
-        return self.net(to_batch(take(rows, idx), self.dev, **NO_BUCKETS))
+        return self.net(to_batch(take(rows, idx), self.dev, pin=True, **NO_BUCKETS))
 
     def update(self, job: dict[str, Any]) -> dict[str, Any]:
         a = self.algo
@@ -302,15 +313,15 @@ class Rank:
                 if j % world != rank or not len(idx):
                     continue
                 out = self._fwd(rows, idx)
-                ti = torch.from_numpy(idx).to(dev)
-                nc = torch.from_numpy(nc_all[idx]).to(dev)
+                ti = upload(idx, dev)
+                nc = upload(nc_all[idx], dev)
                 values[ti] = out.value.float()
-                lp_prox[ti] = A.logp_of(out.logits, nc, torch.from_numpy(act_all[idx]).to(dev))
+                lp_prox[ti] = A.logp_of(out.logits, nc, upload(act_all[idx], dev))
                 es, ec = A.entropy_by_type(
                     out.logits,
                     nc,
-                    torch.from_numpy(dt_all[idx]).to(dev),
-                    torch.from_numpy(masks.pi[idx]).to(dev),
+                    upload(dt_all[idx], dev),
+                    upload(masks.pi[idx], dev),
                     n_types,
                 )
                 ent_s += es
@@ -322,7 +333,7 @@ class Rank:
                     probe_prox[j] = (idx, out.logits.float())
             for c, idx in enumerate(chunks):
                 if c % world == rank:
-                    values[torch.from_numpy(idx).to(dev)] = self._fwd(rows, idx).value.float()
+                    values[upload(idx, dev)] = self._fwd(rows, idx).value.float()
         self.net.train()
         flat = self._sum(torch.cat([values, lp_prox, ent_s, ent_c, ent_n]))
         values_np = flat[:n].double().cpu().numpy()
@@ -519,8 +530,8 @@ class Rank:
                 ks, kc = A.probe_kl(
                     self._fwd(rows, idx).logits,
                     lg_prox,
-                    torch.from_numpy(nc_all[idx]).to(self.dev),
-                    torch.from_numpy(pi[idx]).to(self.dev),
+                    upload(nc_all[idx], self.dev),
+                    upload(pi[idx], self.dev),
                 )
                 s[0] += ks
                 s[1] += kc
@@ -602,14 +613,14 @@ def normalized_entropy_by_type(
 ) -> torch.Tensor:
     """Entropy / log(n_classes) summed per decision type over ``mask`` rows (stats only)."""
     dev = logits.device
-    m = torch.from_numpy(np.asarray(mask, bool)).to(dev)
+    m = upload(np.asarray(mask, bool), dev)
     nc = torch.where(m, n_classes.long(), torch.full_like(n_classes.long(), 2))
     cm = A.class_mask(nc, logits.shape[-1])
     lg = torch.where(m[:, None], logits.float(), torch.zeros_like(logits, dtype=torch.float32))
     lp = torch.log_softmax(lg.masked_fill(~cm, A.NEG), dim=-1)
     h = -(torch.where(cm, lp.exp() * lp, torch.zeros_like(lp))).sum(-1)
     hn = h / torch.log(nc.float().clamp(min=2.0))
-    dt = torch.from_numpy(np.asarray(dtype, np.int64)).to(dev)
+    dt = upload(np.asarray(dtype, np.int64), dev)
     dt = torch.where(m, dt, torch.zeros_like(dt))
     return torch.zeros(n_types, device=dev).index_add(0, dt, hn * m.float())
 

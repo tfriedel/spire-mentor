@@ -167,7 +167,8 @@ def counts_from_stats(rows: Iterable[Mapping[str, Any]]) -> collections.Counter:
         tot["unknown"] += int(r["unknown"])
         f9 = r["f9"]
         tot["f9/checks"] += int(f9.get("checked", 0))
-        tot["f9/violations"] += int(f9.get("hits", 0))
+        # The pre-flight is stricter than a live lane: a hung segment's hits count too.
+        tot["f9/violations"] += int(f9.get("hits", 0)) + int(f9.get("hung_hits", 0))
         tot["f9/tolerated"] += int(f9.get("tolerated", 0))
         for k, v in (r.get("error_types") or {}).items():
             tot[f"error/{k}"] += int(v)

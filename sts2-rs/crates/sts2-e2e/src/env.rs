@@ -106,7 +106,7 @@ const COMBAT_RUN_KINDS: [&str; 5] = [
 
 /// The run-action kinds the run encoder has a surface for
 /// (`encoder._KIND_SURFACE`, `assert_encodable`).
-const ENCODABLE: [&str; 21] = [
+pub(crate) const ENCODABLE: [&str; 21] = [
     "move",
     "pick_card_reward",
     "sacrifice_card_reward",
@@ -141,13 +141,13 @@ const DECK_MUTATION: [&str; 5] = [
 /// Base rest-site option labels (`REST_OPTION_LABELS`).
 const REST_OPTION_LABELS: [&str; 2] = ["rest", "smith"];
 
-type R<T> = Result<T, String>;
+pub(crate) type R<T> = Result<T, String>;
 
-fn schema(e: SchemaError) -> String {
+pub(crate) fn schema(e: SchemaError) -> String {
     e.to_string()
 }
 
-fn action_name(a: &Value) -> &str {
+pub(crate) fn action_name(a: &Value) -> &str {
     get(a, "action").and_then(Value::as_str).unwrap_or("")
 }
 
@@ -1677,21 +1677,21 @@ fn check_caps(n_members: usize, n_classes: usize, dtype: u8) -> R<()> {
     Ok(())
 }
 
-fn available(rm: &RunManager) -> Vec<Value> {
+pub(crate) fn available(rm: &RunManager) -> Vec<Value> {
     match emit_rm::available_actions(rm) {
         Value::Array(a) => a,
         _ => Vec::new(),
     }
 }
 
-fn round_of(d_bv: &Value) -> i64 {
+pub(crate) fn round_of(d_bv: &Value) -> i64 {
     get(d_bv, "round")
         .filter(|v| truthy(v))
         .and_then(as_int)
         .unwrap_or(0)
 }
 
-fn snapshot_of(bv: &CombatState, d_bv: &Value, room: &str) -> Value {
+pub(crate) fn snapshot_of(bv: &CombatState, d_bv: &Value, room: &str) -> Value {
     let pc = sts2_wire::emit::pending_choice(bv);
     snapshot::snapshot_from_parts(
         d_bv,

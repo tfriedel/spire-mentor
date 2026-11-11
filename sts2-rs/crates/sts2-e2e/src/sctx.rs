@@ -343,12 +343,12 @@ pub fn vocab() -> &'static SctxVocab {
 
 /// The content slots `luts` covers, with their e2e registries.
 pub const ID_SLOTS: [(usize, Reg); 6] = [
-    (slot("card"), Reg::Card),
-    (slot("relic"), Reg::Relic),
-    (slot("potion"), Reg::Potion),
-    (slot("power"), Reg::Power),
-    (slot("monster"), Reg::Monster),
-    (slot("enchantment"), Reg::Enchantment),
+    (const { slot("card") }, Reg::Card),
+    (const { slot("relic") }, Reg::Relic),
+    (const { slot("potion") }, Reg::Potion),
+    (const { slot("power") }, Reg::Power),
+    (const { slot("monster") }, Reg::Monster),
+    (const { slot("enchantment") }, Reg::Enchantment),
 ];
 
 /// `tokens.luts()`: per content slot, S_ctx table row -> e2e vocab id (PAD
@@ -449,25 +449,25 @@ struct B<'a> {
 }
 
 // Continuous column indices (`combat_ctx.tokens.C_*`).
-const C_COST: usize = schema::sc("COST");
-const C_BASE_COST: usize = schema::sc("BASE_COST");
-const C_DMG: usize = schema::sc("DMG");
-const C_BLK: usize = schema::sc("BLK");
-const C_CALC: usize = schema::sc("CALC");
-const C_HAS_CALC: usize = schema::sc("HAS_CALC");
-const C_ETHEREAL: usize = schema::sc("ETHEREAL");
-const C_UNPLAYABLE: usize = schema::sc("UNPLAYABLE");
-const C_INNATE: usize = schema::sc("INNATE");
-const C_SLY: usize = schema::sc("SLY");
-const C_SLY_TURN: usize = schema::sc("SLY_TURN");
-const C_RETAIN_TURN: usize = schema::sc("RETAIN_TURN");
-const C_ENCH_AMT: usize = schema::sc("ENCH_AMT");
-const C_AFF_STACKS: usize = schema::sc("AFF_STACKS");
+const C_COST: usize = const { schema::sc("COST") };
+const C_BASE_COST: usize = const { schema::sc("BASE_COST") };
+const C_DMG: usize = const { schema::sc("DMG") };
+const C_BLK: usize = const { schema::sc("BLK") };
+const C_CALC: usize = const { schema::sc("CALC") };
+const C_HAS_CALC: usize = const { schema::sc("HAS_CALC") };
+const C_ETHEREAL: usize = const { schema::sc("ETHEREAL") };
+const C_UNPLAYABLE: usize = const { schema::sc("UNPLAYABLE") };
+const C_INNATE: usize = const { schema::sc("INNATE") };
+const C_SLY: usize = const { schema::sc("SLY") };
+const C_SLY_TURN: usize = const { schema::sc("SLY_TURN") };
+const C_RETAIN_TURN: usize = const { schema::sc("RETAIN_TURN") };
+const C_ENCH_AMT: usize = const { schema::sc("ENCH_AMT") };
+const C_AFF_STACKS: usize = const { schema::sc("AFF_STACKS") };
 /// The pile-multiplicity / pin-rank column.
-pub const C_COUNT: usize = schema::sc("COUNT");
-const C_PLAYABLE: usize = schema::sc("PLAYABLE");
-const C_DMG_PREV: usize = schema::sc("DMG_PREV");
-const C_BLK_PREV: usize = schema::sc("BLK_PREV");
+pub const C_COUNT: usize = const { schema::sc("COUNT") };
+const C_PLAYABLE: usize = const { schema::sc("PLAYABLE") };
+const C_DMG_PREV: usize = const { schema::sc("DMG_PREV") };
+const C_BLK_PREV: usize = const { schema::sc("BLK_PREV") };
 
 impl B<'_> {
     fn new_tok(&mut self, section: &str) -> usize {
@@ -494,19 +494,19 @@ impl B<'_> {
 
     fn card_feats(&mut self, t: usize, c: &Value, count: f64) {
         let id = get(c, "id").map_or_else(|| "None".to_owned(), py_str);
-        self.put(t, slot("card"), &id);
+        self.put(t, const { slot("card") }, &id);
         let up = get(c, "upgraded").is_some_and(truthy);
-        self.put(t, slot("upgraded"), if up { "1" } else { "0" });
+        self.put(t, const { slot("upgraded") }, if up { "1" } else { "0" });
         let ct = match get(c, "id") {
             Some(Value::String(s)) => self.v.card_type_raw(s),
             _ => "?",
         };
-        self.put(t, slot("card_type"), ct);
+        self.put(t, const { slot("card_type") }, ct);
         if let Some(e) = get(c, "enchantment").filter(|e| truthy(e)) {
-            self.put(t, slot("enchantment"), &py_str(e));
+            self.put(t, const { slot("enchantment") }, &py_str(e));
         }
         if let Some(a) = get(c, "affliction").filter(|a| truthy(a)) {
-            self.put(t, slot("affliction"), &py_str(a));
+            self.put(t, const { slot("affliction") }, &py_str(a));
         }
         let flags: Vec<&str> = list_or_empty(c, "flags")
             .iter()
@@ -534,16 +534,28 @@ impl B<'_> {
 
     fn power_feats(&mut self, t: usize, p: &Value) {
         let name = get(p, "name").map_or_else(|| "None".to_owned(), py_str);
-        self.put(t, slot("power"), &name);
-        self.set(t, schema::sc("P_AMT"), fz(get(p, "amount")) / 10.0);
-        self.set(t, schema::sc("P_DISP"), fz(get(p, "display_amount")) / 10.0);
-        self.set(t, schema::sc("P_CTR"), fz(get(p, "counter")) / 10.0);
+        self.put(t, const { slot("power") }, &name);
+        self.set(
+            t,
+            const { schema::sc("P_AMT") },
+            fz(get(p, "amount")) / 10.0,
+        );
+        self.set(
+            t,
+            const { schema::sc("P_DISP") },
+            fz(get(p, "display_amount")) / 10.0,
+        );
+        self.set(
+            t,
+            const { schema::sc("P_CTR") },
+            fz(get(p, "counter")) / 10.0,
+        );
     }
 
     fn hand_card(&mut self, t: usize, hand: &[Value], i: usize, extras: &[(f64, f64, f64)]) {
         let Some(c) = hand.get(i) else { return };
         self.card_feats(t, c, 0.0);
-        self.put(t, slot("hand_slot"), &i.to_string());
+        self.put(t, const { slot("hand_slot") }, &i.to_string());
         let (playable, dmg, blk) = extras[i];
         self.set(t, C_PLAYABLE, playable);
         self.set(t, C_DMG_PREV, dmg);
@@ -634,7 +646,7 @@ fn state_token(b: &mut B<'_>, obs: &Value, rl2s: &[f32]) {
     b.set(t, sc("IS_HALL"), f64::from(u8::from(room == "monster")));
     if let Some(ch) = get(obs, "choice").filter(|c| !c.is_null()) {
         let k = get(ch, "kind").map_or_else(|| "None".to_owned(), py_str);
-        b.put(t, slot("choice_kind"), &k);
+        b.put(t, const { slot("choice_kind") }, &k);
         b.set(t, sc("CH_MIN"), fz(get(ch, "min_select")) / 5.0);
         b.set(t, sc("CH_MAX"), fz(get(ch, "max_select")) / 5.0);
         b.set(
@@ -692,25 +704,25 @@ fn obs_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value]) {
     for r in list_or_empty(obs, "relics") {
         let t = b.new_tok("RELIC");
         let id = get(r, "id").map_or_else(|| "None".to_owned(), py_str);
-        b.put(t, slot("relic"), &id);
+        b.put(t, const { slot("relic") }, &id);
         if let Some(ctr) = get(r, "counter") {
-            b.set(t, schema::sc("R_CTR"), fz(Some(ctr)) / 10.0);
-            b.set(t, schema::sc("R_HAS"), 1.0);
+            b.set(t, const { schema::sc("R_CTR") }, fz(Some(ctr)) / 10.0);
+            b.set(t, const { schema::sc("R_HAS") }, 1.0);
         }
         b.set(
             t,
-            schema::sc("R_WAX"),
+            const { schema::sc("R_WAX") },
             f64::from(u8::from(get(r, "is_wax").is_some_and(truthy))),
         );
         b.set(
             t,
-            schema::sc("R_MELT"),
+            const { schema::sc("R_MELT") },
             f64::from(u8::from(get(r, "is_melted").is_some_and(truthy))),
         );
     }
     for pid in list_or_empty(obs, "potions") {
         let t = b.new_tok("POTION");
-        b.put(t, slot("potion"), &py_str(pid));
+        b.put(t, const { slot("potion") }, &py_str(pid));
     }
     for p in list_or_empty(obs, "powers") {
         let t = b.new_tok("PPOWER");
@@ -723,11 +735,11 @@ fn obs_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value]) {
         let kind = get(m, "kind").map_or_else(|| "None".to_owned(), py_str);
         let js = j.to_string();
         let t = b.new_tok("ENEMY");
-        b.put(t, slot("monster"), &kind);
-        b.put(t, slot("enemy_slot"), &js);
+        b.put(t, const { slot("monster") }, &kind);
+        b.put(t, const { slot("enemy_slot") }, &js);
         let hi = intent_log::head_intent(m);
         let hk = get(&hi, "kind").map_or_else(|| "None".to_owned(), py_str);
-        b.put(t, slot("intent"), &hk);
+        b.put(t, const { slot("intent") }, &hk);
         let mhp = fz(get(m, "max_hp")).max(1.0);
         let sc = schema::sc;
         b.set(t, sc("E_HPF"), fz(get(m, "hp")) / mhp);
@@ -747,8 +759,8 @@ fn obs_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value]) {
         for p in list_or_empty(m, "powers") {
             let t = b.new_tok("EPOWER");
             b.power_feats(t, p);
-            b.put(t, slot("monster"), &kind);
-            b.put(t, slot("enemy_slot"), &js);
+            b.put(t, const { slot("monster") }, &kind);
+            b.put(t, const { slot("enemy_slot") }, &js);
         }
         for s in list_or_empty(m, "stolen") {
             let t = b.new_tok("EPOWER");
@@ -757,16 +769,16 @@ fn obs_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value]) {
                 "upgraded": get(s, "upgraded").cloned().unwrap_or(Value::Null),
             });
             b.card_feats(t, &c, 0.0);
-            b.put(t, slot("monster"), &kind);
-            b.put(t, slot("enemy_slot"), &js);
+            b.put(t, const { slot("monster") }, &kind);
+            b.put(t, const { slot("enemy_slot") }, &js);
         }
         if let Some(Value::Array(hs)) = ehist.get(j) {
             for h in hs {
                 let t = b.new_tok("EHIST");
                 let k = get(h, "kind").map_or_else(|| "None".to_owned(), py_str);
-                b.put(t, slot("intent"), &k);
-                b.put(t, slot("monster"), &kind);
-                b.put(t, slot("enemy_slot"), &js);
+                b.put(t, const { slot("intent") }, &k);
+                b.put(t, const { slot("monster") }, &kind);
+                b.put(t, const { slot("enemy_slot") }, &js);
                 b.set(t, sc("H_LAG"), fz(get(h, "lag")) / 3.0);
                 b.set(t, sc("H_AMT"), fz(get(h, "amount")) / 30.0);
                 b.set(t, sc("H_EFF"), fz(get(h, "effective_amount")) / 30.0);
@@ -781,17 +793,17 @@ fn obs_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value]) {
 /// when it exists.
 fn target<'v>(b: &mut B<'_>, t: usize, obs: &'v Value, ti: Option<&Value>) -> Option<&'v Value> {
     let ti = ti.filter(|v| !v.is_null()).and_then(py_int)?;
-    b.put(t, slot("enemy_slot"), &ti.to_string());
+    b.put(t, const { slot("enemy_slot") }, &ti.to_string());
     let m = usize::try_from(ti)
         .ok()
         .and_then(|i| list_or_empty(obs, "enemies").get(i))?;
     let kind = get(m, "kind").map_or_else(|| "None".to_owned(), py_str);
-    b.put(t, slot("monster"), &kind);
+    b.put(t, const { slot("monster") }, &kind);
     let mhp = fz(get(m, "max_hp")).max(1.0);
-    b.set(t, schema::sc("T_HPF"), fz(get(m, "hp")) / mhp);
+    b.set(t, const { schema::sc("T_HPF") }, fz(get(m, "hp")) / mhp);
     b.set(
         t,
-        schema::sc("T_EHP"),
+        const { schema::sc("T_EHP") },
         (fz(get(m, "hp")) + fz(get(m, "block"))) / 100.0,
     );
     Some(m)
@@ -820,7 +832,7 @@ fn action_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value], rl2: &Rl2) {
                     .get(iu)
                     .and_then(|c| get(c, "dmg"))
                     .and_then(|d| get(d, &key));
-                b.set(t, schema::sc("T_DMG"), fz(dmg) / 30.0);
+                b.set(t, const { schema::sc("T_DMG") }, fz(dmg) / 30.0);
             }
         } else if kind == "end_turn" {
             t = b.new_tok("ACT_END");
@@ -829,10 +841,14 @@ fn action_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value], rl2: &Rl2) {
             let s = get(a, "slot").and_then(py_int).unwrap_or(0);
             let pots = list_or_empty(obs, "potions");
             if let Some(p) = usize::try_from(s).ok().and_then(|s| pots.get(s)) {
-                b.put(t, slot("potion"), &py_str(p));
+                b.put(t, const { slot("potion") }, &py_str(p));
             }
             if let Some(ti) = get(a, "target_index").filter(|v| !v.is_null()) {
-                b.put(t, slot("enemy_slot"), &py_int(ti).unwrap_or(0).to_string());
+                b.put(
+                    t,
+                    const { slot("enemy_slot") },
+                    &py_int(ti).unwrap_or(0).to_string(),
+                );
             }
         } else if kind == "choose" && !sel.is_empty() {
             t = b.new_tok("ACT_CHOOSE");
@@ -840,33 +856,33 @@ fn action_tokens(b: &mut B<'_>, obs: &Value, actions: &[Value], rl2: &Rl2) {
             let s0 = sel.first().and_then(py_int).unwrap_or(0);
             if let Some(o) = usize::try_from(s0).ok().and_then(|s| opts.get(s)) {
                 let id = get(o, "id").map_or_else(|| "None".to_owned(), py_str);
-                b.put(t, slot("card"), &id);
+                b.put(t, const { slot("card") }, &id);
                 let up = get(o, "upgraded").is_some_and(truthy);
-                b.put(t, slot("upgraded"), if up { "1" } else { "0" });
+                b.put(t, const { slot("upgraded") }, if up { "1" } else { "0" });
                 let ct = match get(o, "id") {
                     Some(Value::String(s)) => b.v.card_type_raw(s),
                     _ => "?",
                 };
-                b.put(t, slot("card_type"), ct);
+                b.put(t, const { slot("card_type") }, ct);
                 let pile = get(o, "pile").map_or_else(|| "generated".to_owned(), py_str);
-                b.put(t, slot("choice_pile"), &pile);
+                b.put(t, const { slot("choice_pile") }, &pile);
                 if get(o, "pile").and_then(Value::as_str) == Some("hand") {
                     if let Some(hi) = get(o, "hand_index") {
-                        b.put(t, slot("hand_slot"), &py_str(hi));
+                        b.put(t, const { slot("hand_slot") }, &py_str(hi));
                     }
                 }
             }
             if let Some(c) = ch {
                 let k = get(c, "kind").map_or_else(|| "None".to_owned(), py_str);
-                b.put(t, slot("choice_kind"), &k);
+                b.put(t, const { slot("choice_kind") }, &k);
             }
-            b.set(t, schema::sc("N_SEL"), sel.len() as f64 / 3.0);
+            b.set(t, const { schema::sc("N_SEL") }, sel.len() as f64 / 3.0);
         } else if kind == "choose" {
             t = b.new_tok("ACT_SKIP");
         } else {
             t = b.new_tok("ACT_OTHER");
         }
-        b.put(t, slot("rl2key"), &rl2.keys[k]);
+        b.put(t, const { slot("rl2key") }, &rl2.keys[k]);
         let base = t * SCTX_N_CONT + C_RL2X;
         b.out.cont[base..base + RL2_ACTION_DIM].copy_from_slice(&rl2.x[k][..RL2_ACTION_DIM]);
     }
@@ -894,6 +910,22 @@ pub fn tokens(obs: &Value, actions: &[Value], rl2: &Rl2) -> Result<SctxTokens, S
     action_tokens(&mut b, obs, actions, rl2);
     b.out.n_act = actions.len();
     Ok(b.out)
+}
+
+/// PRIV_DRAW's S_ctx rows: one `DRAW_TOP` token per card of `cards` (the
+/// snapshot's `_card` dicts), `COUNT` = its rank (1 = the next draw).
+#[must_use]
+pub fn draw_top_tokens(cards: &[Value]) -> SctxTokens {
+    let mut b = B {
+        v: vocab(),
+        out: SctxTokens::default(),
+    };
+    for (r, c) in cards.iter().enumerate() {
+        let t = b.new_tok("DRAW_TOP");
+        #[allow(clippy::cast_precision_loss)]
+        b.card_feats(t, c, (r + 1) as f64);
+    }
+    b.out
 }
 
 #[cfg(test)]

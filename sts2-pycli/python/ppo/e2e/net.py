@@ -1216,6 +1216,23 @@ class Block(nn.Module):
         h = self.n2(x)
         return x + self.w2(F.silu(self.w1(h)) * self.v(h))
 
+    def forward_first(self, x: torch.Tensor, keep: torch.Tensor) -> torch.Tensor:
+        """`forward`'s output at token 0 only, `[B, D]`: every token is a key, token
+        0 alone is a query, and the MLP runs on it alone. Same values as
+        `forward(x, keep)[:, 0]` up to float rounding."""
+        b, t, d = x.shape
+        hd = d // self.heads
+        h = self.n1(x)
+        w = self.qkv.weight
+        kv = F.linear(h, w[d:]).view(b, t, 2, self.heads, hd).unbind(2)
+        q = F.linear(h[:, :1], w[:d]).view(b, 1, self.heads, hd)
+        a = F.scaled_dot_product_attention(
+            q.transpose(1, 2), kv[0].transpose(1, 2), kv[1].transpose(1, 2), attn_mask=keep
+        )
+        y = x[:, 0] + self.out(a.reshape(b, d))
+        h0 = self.n2(y)
+        return y + self.w2(F.silu(self.w1(h0)) * self.v(h0))
+
     def forward_query(self, x: torch.Tensor, at: torch.Tensor, attn: Varlen) -> torch.Tensor:
         """`forward_packed`'s outputs at the tokens `at` only, `[len(at), D]`:
         every token is a key, only those are queries (`attn` has one query per
@@ -1283,10 +1300,12 @@ class ValueModule(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         z = torch.cat([x, e_priv.to(x.dtype)], 1)
         keep = ~torch.cat([pad, ppad], 1)[:, None, None, :]
-        for blk in self.blocks:
+        for blk in self.blocks[:-1]:
             z = blk(z, keep)
-        with torch.autocast(z.device.type, enabled=False):
-            hs = self.norm(z[:, 0].float())
+        # Only RUNCTX is read, so the last block runs its query and MLP there alone.
+        z0 = self.blocks[-1].forward_first(z, keep) if len(self.blocks) else z[:, 0]
+        with torch.autocast(z0.device.type, enabled=False):
+            hs = self.norm(z0.float())
             vc = F.linear(hs, self.v_combat.weight, self.v_combat.bias).squeeze(-1)
             vr = F.linear(hs, self.v_run.weight, self.v_run.bias).squeeze(-1)
         return vc, vr

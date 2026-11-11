@@ -367,53 +367,11 @@ fn action_kind(a: &ActionDesc) -> &'static str {
     }
 }
 
-/// `_KIND_SURFACE` verbatim — maps an action kind to its surface-defining
-/// label, or `None` for kinds that never define a surface (`unknown`
-/// included: it carries no entry in the Python dict either).
-fn kind_surface(kind: &str) -> Option<&'static str> {
-    Some(match kind {
-        "move" => "path",
-        "pick_card_reward" | "sacrifice_card_reward" => "card-reward",
-        "pick_relic_reward" | "skip_relic" => "relic-reward",
-        "pick_boss_relic" => "boss-relic",
-        "smith_card" => "card-smith",
-        "remove_deck_card" => "card-remove",
-        "upgrade_deck_card" => "card-upgrade",
-        "transform_deck_card" => "card-transform",
-        "enchant_deck_card" => "card-enchant",
-        "grant_deck_card" => "card-grant",
-        "shop_buy_card" | "shop_buy_relic" | "shop_buy_potion" | "shop_remove_card"
-        | "leave_shop" => "shop",
-        "rest_option" => "rest",
-        "event_choice" => "event",
-        "collect_treasure" => "treasure",
-        "potion_swap" => "potion-swap",
-        _ => return None,
-    })
-}
-
-/// Finer-grained surface for the state token, from the first
-/// surface-defining action kind (skip/leave variants defer to a
-/// sibling). Mirrors `encoder.py::fine_surface`: first pass skips
-/// `skip_relic`/`leave_shop`; second pass accepts any; else
-/// `"unknown"`.
+/// Finer-grained surface for the state token: `encoder.py::fine_surface`
+/// ([`vocab::fine_surface`], which also holds `_KIND_SURFACE`).
 #[must_use]
 pub fn fine_surface(actions: &[ActionDesc]) -> &'static str {
-    const DEFERRING: [&str; 2] = ["skip_relic", "leave_shop"];
-    for a in actions {
-        let k = action_kind(a);
-        if !DEFERRING.contains(&k) {
-            if let Some(s) = kind_surface(k) {
-                return s;
-            }
-        }
-    }
-    for a in actions {
-        if let Some(s) = kind_surface(action_kind(a)) {
-            return s;
-        }
-    }
-    "unknown"
+    vocab::fine_surface(actions.iter().map(action_kind))
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

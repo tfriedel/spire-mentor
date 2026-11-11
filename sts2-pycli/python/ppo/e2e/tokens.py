@@ -1599,7 +1599,7 @@ def _priv_draw_rows(
     for r, c in enumerate(draw):
         cat, cont = b.new("DRAW_TOP")
         T.card_feats(b, cat, cont, _card(c), float(start + r + 1))
-    raw = np.stack(b.cat).astype(np.int16)
+    raw = b.cat_rows()
     k = len(raw)
     L = luts()
     cat = np.zeros((k, N_CAT), np.int16)
@@ -1607,7 +1607,7 @@ def _priv_draw_rows(
     cat[:, XC["X_ID_MAIN"]] = L["card"][raw[:, T.S["card"]]]
     cat[:, XC["X_ID_MOD"]] = L["enchantment"][raw[:, T.S["enchantment"]]]
     cont = np.zeros((k, N_CONT), np.float16)
-    cont[:, :NS_CONT] = T.f16(np.stack(b.cont))
+    cont[:, :NS_CONT] = T.f16(b.cont_rows())
     return cat, cont
 
 

@@ -167,6 +167,18 @@ FIGHT_CAPS = frozenset({"turns", "fight_decisions"})
 RUN_CAPS = frozenset({"run_decisions", "steps"})
 
 
+def _f9_hung(e: Mapping[str, Any]) -> bool:
+    """An ended segment whose F9 hits do not stop the lane (PREREG Amendment 9): it spun
+    to the env's step cap (`OC.F9_HANG_CAP`), so it ended `capped` and scored no win.
+    A hang is an engine bug to replay from `ops/f9_hits.jsonl`, not an exploit the policy
+    can be paid for; a hit in a segment that ends any other way still stops the lane."""
+    return (
+        int(e.get("f9_violations", 0)) > 0
+        and e.get("outcome") == "capped"
+        and e.get("cap") == OC.F9_HANG_CAP
+    )
+
+
 def lc_combat_ev(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """The learning check's combat value EV over the stats rows (GH #1153).
 
@@ -228,6 +240,10 @@ class Cfg:
     # Action logs (plan §3.2): the workers keep boss-2, capped and error segments and 2%
     # of runs under <save_dir>/actions (`actionlog.LogSink`, 10 GB in total).
     action_logs: bool = True
+    # The workers run the Rust training env (`rsenv.RsE2EEnv`: env loop, bookkeeping and
+    # tokenizer in Rust, lockstep-equal to `env.E2EEnv`). Needs the run teacher off: its
+    # features read the Python env's `run_obs`.
+    rust_env: bool = False
     # Check each start's first table against `filled` (`fillcheck.check`, repeated
     # while inconclusive); a mismatch is FILL_MISMATCH, exit 87, before it trains.
     # Off only for scripted rollout sources (tests), whose rows are not real.
@@ -817,6 +833,13 @@ class Learner:
 
         if unknown := sorted(set(cfg.f9_tolerate) - set(KNOWN_ISSUES)):
             raise UsageError(f"--f9-tolerate {unknown}: not in invariants.KNOWN_ISSUES")
+        if cfg.rust_env and self._teacher_flags()[1]:
+            # The run teacher reads `run_obs`, which rsenv rows do not carry: the
+            # workers would raise at the first round the teacher is on, days in.
+            raise UsageError(
+                "--rust-env cannot serve a run teacher (--run-teacher / --teacher-pair): "
+                "its rows carry no run_obs; run with --rust-env false"
+            )
         OC.atomic_write_text(self.sd.p(OC.LEARNER_PID), json.dumps(OC.pid_record(argv=argv)) + "\n")
         import sts2_client
 
@@ -1108,6 +1131,7 @@ class Learner:
             "teacher_rare": rare,
             "run_teacher_honest": bool(cfg.run_teacher_honest),
             "action_log_dir": str(self.sd.p(OC.ACTIONS_DIR)) if cfg.action_logs else None,
+            "rust_env": bool(cfg.rust_env),
         }
 
     def start(self) -> None:
@@ -1347,7 +1371,11 @@ class Learner:
             "reward_mismatch": 0,
             "reward_mismatch_sample": [],
             "f9_checks": 0,
+            # F9 hits that stop the lane: every one but a hung segment's (`_f9_hung`).
             "f9_violations": 0,
+            "f9_hung_hits": 0,
+            "f9_hung_segments": 0,
+            "f9_stop_samples": [],
             "f9_tolerated": 0,
             "unknown": 0,
             "rows": 0,
@@ -1473,7 +1501,17 @@ class Learner:
         out = e["outcome"]
         st["outcomes"][out] += 1
         st["f9_checks"] += int(e.get("f9_checks", 0))
-        st["f9_violations"] += int(e.get("f9_violations", 0))
+        hits = int(e.get("f9_violations", 0))
+        hung = _f9_hung(e)
+        if hung:
+            st["f9_hung_hits"] += hits
+            st["f9_hung_segments"] += 1
+        else:
+            st["f9_violations"] += hits
+        if hits:
+            rec = self._f9_note(e, hung)
+            if not hung and len(st["f9_stop_samples"]) < 3:
+                st["f9_stop_samples"].append(rec)
         st["f9_tolerated"] += int((e.get("counts") or {}).get("f9/tolerated", 0))
         st["unknown"] += int(e.get("unknown", 0))
         st["fights"] += int(e.get("fights", 0))
@@ -1481,6 +1519,12 @@ class Learner:
         if cap in FIGHT_CAPS:
             st["fights_capped"] += 1
         seg = self.segs.get(e["uid"])
+        if hung:
+            # A fight that spun to the step cap with broken invariants: none of its rows
+            # train (the cut drops them like an error segment's) and it counts as no run.
+            if seg is not None:
+                seg.error = True
+            return
         if out == "error":
             st["errors"] += 1
             if len(st["errors_sample"]) < 3:
@@ -1723,6 +1767,7 @@ class Learner:
         for k in pk["move"]:
             r = joined[k]
             r.chunk, r.i = blk, k
+        ast["submit_t"] = time.time()
         self.updater.submit(job)
         return True
 
@@ -1752,11 +1797,16 @@ class Learner:
         return {"ok": fc.ok, "inconclusive": fc.inconclusive, "summary": summary}
 
     def _poll(self, block: bool) -> bool:
+        tw = time.time()
         res = self.updater.poll(block)
         if res is None:
             return False
         inf, self.inflight = self.inflight, None
         assert inf is not None
+        # The serving loop's wait for this update (0 when it was already done), and
+        # its wall time from submission to here (ranks plus the hand-offs).
+        inf["ast"]["poll_wait_s"] = time.time() - tw if block else 0.0
+        inf["ast"]["update_wall_s"] = time.time() - inf["ast"].pop("submit_t", tw)
         inf["block"].unlink()  # the ranks are done with it; the rows in it keep it mapped
         t0 = time.time()
         held = _map_held(res.get("held"))  # rank 0's copy of the held rows; its name goes
@@ -1868,6 +1918,29 @@ class Learner:
         OC.atomic_write_text(self.sd.p(OC.NAN_RECORD), json.dumps(rec) + "\n")
         raise NanStop(json.dumps(rec))
 
+    def _f9_note(self, e: dict[str, Any], hung: bool) -> dict[str, Any]:
+        """Append a segment with F9 hits to `ops/f9_hits.jsonl`: seed, cell and the first
+        violation texts replay it. `dropped` says it was a hung segment (`_f9_hung`)."""
+        rec = {
+            "time": time.time(),
+            "it": int(self.n_dispatched),
+            "dropped": bool(hung),
+            "hits": int(e.get("f9_violations", 0)),
+            "checks": int(e.get("f9_checks", 0)),
+            **{k: e.get(k) for k in ("uid", "seed", "kind", "cell", "outcome", "cap", "steps")},
+            **{k: e.get(k) for k in ("rows", "floor", "act", "wheel")},
+            "samples": list(e.get("f9_samples") or []),
+            "counts": e.get("counts"),
+        }
+        try:
+            p = Path(self.sd.p(OC.F9_HITS))
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps(_jsonable(rec)) + "\n")
+        except OSError as ex:  # a full disk must not hide the hit: the alarm still carries it
+            print(f"[learner] f9_hits.jsonl not written: {ex}", flush=True)
+        return rec
+
     def _guard(self, name: str, reason: str, **details: Any) -> None:
         OC.write_alarm(self.sd.root, name, writer="learner", reason=reason, **details)
         raise GuardStop(name, reason)
@@ -1925,6 +1998,8 @@ class Learner:
                 "checked": cst["f9_checks"],
                 "hits": cst["f9_violations"],
                 "tolerated": cst["f9_tolerated"],
+                "hung_hits": cst["f9_hung_hits"],
+                "hung_segments": cst["f9_hung_segments"],
             },
             "losses": {
                 "policy": num(ust.get("ploss")),
@@ -2009,7 +2084,7 @@ class Learner:
             self._guard(
                 "F9_INVARIANT",
                 json.dumps({"it": ust["it"], "violations": cst["f9_violations"]}),
-                samples=[e.get("counts") for e in cst["ends"] if e.get("f9_violations")][:3],
+                samples=_jsonable(cst["f9_stop_samples"]),
             )
 
     def _ops_tick(self) -> None:

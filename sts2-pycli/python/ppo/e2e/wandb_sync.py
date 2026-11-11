@@ -55,20 +55,35 @@ def flatten(row: Mapping[str, Any], prefix: str = "") -> dict[str, float]:
     return out
 
 
-def read_new_lines(path: Path, offset: int) -> tuple[list[dict[str, Any]], int, bool]:
-    """Complete JSON lines after ``offset``; returns (rows, new offset, file was rewritten)."""
+# One call reads at most this much, and a file that shrank below the cursor (a resume
+# truncates stats.jsonl to the checkpoint's row) is re-read from this far before its end,
+# not from byte 0: a 2 GB stats.jsonl parsed in one go is the mirror's memory limit
+# (2026-11-11). The rows before the window were logged already (`max_it` skips repeats).
+MAX_READ = 64 << 20
+
+
+def read_new_lines(
+    path: Path, offset: int, *, max_read: int = MAX_READ
+) -> tuple[list[dict[str, Any]], int, bool]:
+    """Complete JSON lines after ``offset``, ``max_read`` bytes at most (the rest comes
+    with the next call); returns (rows, new offset, file was rewritten)."""
     if not path.is_file():
         return [], offset, False
     size = path.stat().st_size
     rewritten = size < offset
-    if rewritten:
-        offset = 0
     rows: list[dict[str, Any]] = []
     with path.open("rb") as f:
+        if rewritten:
+            offset = max(0, size - max_read)
+            if offset:  # start on a line: skip the one the window cuts
+                f.seek(offset)
+                offset += len(f.readline())
         f.seek(offset)
-        data = f.read()
+        data = f.read(max_read)
     end = data.rfind(b"\n")
     if end < 0:
+        if len(data) >= max_read:  # one line longer than the window: step over it
+            return rows, offset + len(data), rewritten
         return rows, offset, rewritten
     for line in data[: end + 1].splitlines():
         try:

@@ -132,6 +132,7 @@ class FakeSource:
         stamps: dict[str, Any] | None = None,
         on_round: Any = None,
         f9_hit_round: int = -1,
+        f9_cap: str | None = None,
         floor_fn: Any = None,
         total_bias: float = 0.0,
     ) -> None:
@@ -149,6 +150,7 @@ class FakeSource:
         self.rounds = 0
         self.on_round = on_round
         self.f9_hit_round = f9_hit_round
+        self.f9_cap = f9_cap  # a segment with an F9 hit ends capped at this cap
         self.floor_fn = floor_fn  # run end count -> the run's floor (None: from its length)
         self.total_bias = total_bias  # added to a finished run's env total (a T4 break)
         self.run_ends = 0
@@ -266,9 +268,15 @@ class FakeSource:
 
     def _end(self, s: _Slot, k: int, outcome: str, last: float) -> dict[str, Any]:
         counts = Counter({"fights/monster": 1 + s.length // 8, "f9/checks": 3})
+        f9_texts = None
         if self.f9_hit_round >= 0 and self.rounds >= self.f9_hit_round:
             counts["f9/violations"] = 1
+            f9_texts = ["combat.engine: scripted violation"]
+            if self.f9_cap is not None:
+                outcome = "capped"
         cap = "turns" if outcome == "capped" else None
+        if f9_texts and self.f9_cap is not None:
+            cap = self.f9_cap
         floor = 1 + s.length // 3
         if s.kind == "run" and outcome != "bootstrap":
             if self.floor_fn is not None:
@@ -286,7 +294,7 @@ class FakeSource:
             total_reward=s.total,
         )
         cell = C.CELLS[s.cell] if s.kind == "practice" else None
-        return actors.end_record(s.uid, k, s.t, term, s.kind, cell, self.stamps)
+        return actors.end_record(s.uid, k, s.t, term, s.kind, cell, self.stamps, f9_texts=f9_texts)
 
 
 def spy_shipped(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, np.ndarray]]:
@@ -819,13 +827,17 @@ def test_gather_to_shm_is_batch_to_shm_of_gather(
             b.unlink()
 
 
-def test_gather_to_shm_allocates_no_large_array() -> None:
+def test_gather_to_shm_allocates_no_large_array(monkeypatch: pytest.MonkeyPatch) -> None:
     """A large chunk whose rows copy by index (a held block after a drop) copies in
-    row blocks: no temporary reaches numpy's 4 MiB huge-page threshold (on a
-    fragmented host each such allocation can stall in direct compaction)."""
+    row blocks: no temporary grows past a few `COPY_BLOCK_BYTES` (here 1 MiB, so the
+    check runs on a small chunk; the lane uses 16 MiB)."""
     import tracemalloc
 
-    from ppo.e2e.rowstore import COPY_BLOCK_BYTES, Chunk, gather_to_shm
+    from ppo.e2e import rowstore
+    from ppo.e2e.rowstore import Chunk, gather_to_shm
+
+    monkeypatch.setattr(rowstore, "COPY_BLOCK_BYTES", 1 << 20)
+    COPY_BLOCK_BYTES = rowstore.COPY_BLOCK_BYTES
 
     rng = np.random.default_rng(7)
     big = Chunk(concat([synthetic_row(rng, combat=False, t=i, body=(40, 60)) for i in range(400)]))
@@ -1341,7 +1353,14 @@ _VOLATILE = {
     "workers",
 }
 _VOLATILE_UPDATE = {"prepass_s", "update_s", "rank_s", "held_pack_s"}
-_VOLATILE_ASSEMBLY = {"cut_s", "held_land_s", "pack_s", "pack_wait_s"}
+_VOLATILE_ASSEMBLY = {
+    "cut_s",
+    "held_land_s",
+    "pack_s",
+    "pack_wait_s",
+    "poll_wait_s",
+    "update_wall_s",
+}
 
 
 def _stable(row: dict[str, Any]) -> dict[str, Any]:
@@ -1558,6 +1577,10 @@ def test_refusals_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert L.main([*base, "--max-iters", "1", "--f9-tolerate", '["nope"]']) == OC.EXIT_USAGE
     # A fill event the schema does not know (contracts.FILL_EVENTS).
     assert L.main([*base, "--max-iters", "1", "--filled", '["nope"]']) == OC.EXIT_USAGE
+    # The Rust env with a run teacher: its rows carry no run_obs, so the workers would
+    # raise at the first round the teacher is on, not at launch.
+    rt = ["--rust-env", "true", "--run-teacher", "any.onnx"]
+    assert L.main([*base, "--max-iters", "1", *rt]) == OC.EXIT_USAGE
 
 
 def test_a_lane_draws_its_run_seeds_from_its_prereg_block(tmp_path: Path) -> None:
@@ -1896,11 +1919,55 @@ def test_a_worker_stamp_mismatch_stops_before_its_batch_trains(tmp_path: Path, b
     assert lr.stats_rows == [] and not (tmp_path / "state.pt").exists()
 
 
-def test_an_f9_hit_stops_with_its_alarm(tmp_path: Path) -> None:
-    lr = make_learner(make_cfg(tmp_path, max_iters=4), f9_hit_round=3)
+def _f9_hits(save_dir: Path) -> list[dict[str, Any]]:
+    p = save_dir / OC.F9_HITS
+    return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines()] if p.exists() else []
+
+
+@pytest.mark.parametrize("cap", [None, "turns"])
+def test_an_f9_hit_stops_with_its_alarm(tmp_path: Path, cap: str | None) -> None:
+    """A hit in a segment that did not end at the step cap stops the lane, a fight cap
+    (`turns`) included, and the alarm says which seed broke which invariant."""
+    lr = make_learner(make_cfg(tmp_path, max_iters=4), f9_hit_round=3, f9_cap=cap)
     with pytest.raises(L.GuardStop) as e:
         lr.train()
     assert e.value.name == "F9_INVARIANT"
+    alarm = json.loads(OC.alarm_path(tmp_path, "F9_INVARIANT").read_text(encoding="utf-8"))
+    s = alarm["samples"][0]
+    assert s["seed"] is not None and s["samples"] == ["combat.engine: scripted violation"]
+    assert s["dropped"] is False and s["hits"] == 1 and s["counts"]["f9/violations"] == 1
+    hits = _f9_hits(tmp_path)
+    assert hits and not any(h["dropped"] for h in hits)
+    assert lr.stats_rows[-1]["f9"]["hits"] == len(hits) > 0
+
+
+def test_an_f9_hit_in_a_segment_hung_at_the_step_cap_is_logged_and_dropped(tmp_path: Path) -> None:
+    """PREREG Amendment 9: a segment that spun to the step cap with broken invariants
+    (2026-11-11, 1,971 `combat.engine` hits in one practice fight) is an engine hang,
+    not an exploit: it is written to `ops/f9_hits.jsonl` with its seed and violation
+    text, none of its rows train, and the lane goes on with `f9.hits` 0."""
+    lr = make_learner(
+        make_cfg(tmp_path, max_iters=4),
+        f9_hit_round=3,
+        f9_cap="steps",
+        error_p=0.0,
+        start_error_p=0.0,
+    )
+    assert lr.train() == "max_iters"
+    assert not OC.alarm_path(tmp_path, "F9_INVARIANT").exists()
+    rows = lr.stats_rows
+    hits = _f9_hits(tmp_path)
+    assert sum(r["f9"]["hits"] for r in rows) == 0
+    assert sum(r["f9"]["hung_segments"] for r in rows) == len(hits) > 0
+    assert sum(r["f9"]["hung_hits"] for r in rows) == sum(h["hits"] for h in hits)
+    for h in hits:
+        assert h["dropped"] is True and (h["outcome"], h["cap"]) == ("capped", "steps")
+        assert h["seed"] is not None and h["samples"] == ["combat.engine: scripted violation"]
+    # With no error segment in the stream, every dropped row is a hung segment's; a hung
+    # segment is no run and no practice segment of the stats.
+    assert sum(r["assembly"]["dropped_error_rows"] for r in rows) > 0
+    ended = sum(r["runs"] + r["practice_segments"] for r in rows)
+    assert ended + len(hits) == sum(sum(r["outcomes"].values()) for r in rows)
 
 
 def test_a_start_whose_rows_fail_the_fill_check_stops_before_it_trains(tmp_path: Path) -> None:
@@ -2310,7 +2377,13 @@ def test_g_skeleton_real_workers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         clock=lambda: S.ANNEAL_START - 86400.0,
     )
     assert lr2.train() == "max_iters" and [r["it"] for r in lr2.stats_rows] == [4]
-    assert set(lr2.stats_rows[0]["f9"]) == {"checked", "hits", "tolerated"}
+    assert set(lr2.stats_rows[0]["f9"]) == {
+        "checked",
+        "hits",
+        "tolerated",
+        "hung_hits",
+        "hung_segments",
+    }
     assert os.path.exists(tmp_path / OC.DONE)
 
 

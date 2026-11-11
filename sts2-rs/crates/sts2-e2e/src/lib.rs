@@ -24,4 +24,5 @@ pub mod sctx;
 pub mod snapshot;
 pub mod tactical;
 pub mod tokens;
+pub mod train;
 pub mod vocab;

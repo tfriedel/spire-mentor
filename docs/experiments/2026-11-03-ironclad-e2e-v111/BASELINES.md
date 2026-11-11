@@ -82,3 +82,41 @@ Only row counts, error counts and sha256 manifests appear here before the Mon No
 | R3 | 161,000,000-161,003,999 | 4000 | 0 | `2b532d9f…09ec` | 11:18-11:34 |
 
 All three sealed baselines ran on W2 from the frozen worktree at 7c4c6acc0; R3 is the final pair (`at_it04000` + `it04000`), checked against the archive's `SHA256SUMS` before the run.
+
+## DEV on W4
+
+W4 (PREREG amendment 6): PGO wheel, src_hash `d0ef75046cf7cb85`, profdata sha256 `9507beadddac…`, build_git 0297d646a, pinned at `~/runs/e2e-pin/87de4d1a0bbffeeb` (`.so` sha256 `87de4d1a0bbf…3bc5e5`, the same on the a4000 and the laptop, F1). Every arm ran on the laptop from the frozen worktree at 2b9f06510, whose Rust is the build SHA's; `meta/config.txt` records `so_sha256=aadf9a0b…`. F3 (qx, fresh) and the F9 soak exit 0 (`~/runs/e2e/fidelity-w4`).
+
+The W3 ≡ W4 SMOKE identity check finds differences: R2 154 of 200 seeds identical, R1 2 of 50. R1's search lines move almost everywhere because #1164's clone flag changes search hashes. So every baseline re-runs on W4.
+
+| Arm | Agent | Panel | Wins / n | WR (Wilson 95%) | Errors | Decisions/run | Wall |
+|---|---|---|---|---|---|---|---|
+| R2_W4 | cont300_it1150 + combat-PPO it06000, no search | DEV-2000 | 157 / 2000 | 7.85% (6.75-9.11%) | 0 | 56.1 | 22:21-22:26 |
+| R3_W4 | final R3: H2 `run/ckpt/at_it04000.pt` + `ckpt/it04000.pt` | DEV-2000 | 245 / 2000 | 12.25% (10.89-13.76%) | 0 | 58.1 | 22:26-22:32 |
+| R1_W4 | cont300_it1150 + shipped MCTS 1000/4000 | DEV-1000 | 246 / 1000 | 24.60% (22.03-27.36%) | 0 | 61.9 | 22:32-23:11 (46.8 s/run) |
+
+Paired contrasts on the same DEV seeds (exact two-sided McNemar on the discordant seeds; Newcombe paired 95% CI):
+
+| Contrast | Seeds won only by the first | Seeds won only by the second | Difference | 95% CI | p |
+|---|---|---|---|---|---|
+| R3_W4 − R2_W4 | 194 | 106 | +4.40pp | [+2.72, +6.10] | 4e-07 |
+| R1_W4 − R3_W4 (first 1,000 seeds) | 185 | 59 | +12.60pp | [+9.64, +15.57] | 3e-16 |
+| R1_W4 − R2_W4 (first 1,000 seeds) | 201 | 32 | +16.90pp | [+14.11, +19.73] | 4e-31 |
+
+W3 against W4 on the same seeds: R3 plays 1,348 of 2,000 seeds identically and moves +0.05pp (43 / 42, p = 1.0); R2 plays 1,491 identically and moves −0.70pp (26 / 40, p = 0.11); R1 plays 17 of 1,000 identically and moves +0.90pp (115 / 106, p = 0.59).
+
+**C\*_W4 = R3** at 12.25% on DEV-2000. The rule picks the better of R2 and R3 on DEV-2000, and R3 when they're within 2pp. R3 leads R2 by 4.40pp, so it's R3 either way. The teacher is unchanged.
+
+Manifests (sha256 of each arm's `DEV/<ARM>.sha256`, copied to `sha256/DEV/`): R2_W4 `1e0fbabc…1dee`, R3_W4 `0bec7e8c…02da`, R1_W4 `23717b0f…f892`.
+
+## TEST on W4 (sealed)
+
+Only row counts, error counts and sha256 manifests appear here before the read.
+
+| Arm | Seeds | Rows | Errors after retry | Manifest (sha256 of `TEST/<ARM>.sha256`) | Wall |
+|---|---|---|---|---|---|
+| R2_W4 | 161,000,000-161,003,999 | 4000 | 0 | `b89ed830…0733` | 23:11-23:21 |
+| R1_W4 | 161,000,000-161,003,999 | 4000 | 0 | `5ce1fa5b…8205` | 23:21-02:28 |
+| R3_W4 | 161,000,000-161,003,999 | 4000 | 0 | `71913787…f7f5` | 02:28-02:46 |
+
+All three ran on W4 from the frozen worktree at 2b9f06510, on the laptop, Nov 7-8. The manifests are in `sha256/TEST/`.

@@ -816,7 +816,11 @@ class LossRows:
                     raise KeyError(f"missing loss column {k!r}")
                 out[k] = None
                 continue
-            out[k] = torch.as_tensor(np.asarray(x), dtype=dt.get(k, torch.float32), device=device)
+            h = torch.as_tensor(np.asarray(x), dtype=dt.get(k, torch.float32))
+            if torch.device(device).type == "cuda":  # no host sync (see update.upload)
+                out[k] = h.pin_memory().to(device, non_blocking=True)
+            else:
+                out[k] = h.to(device)
         return cls(**out)
 
     def index(self, idx: Any) -> LossRows:

@@ -109,6 +109,33 @@ def test_rewritten_stats_after_a_resume_logs_each_it_once(tmp_path: Path) -> Non
     assert its == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
 
 
+def test_a_shrunk_file_is_reread_from_a_tail_window_not_from_byte_zero(tmp_path: Path) -> None:
+    """A resume truncates stats.jsonl below the mirror's cursor. Re-reading the whole
+    file (2.1 GB on 2026-11-11) ran the mirror out of memory: only the last `max_read`
+    bytes are read, from the next line start, and a call reads `max_read` at most."""
+    p = tmp_path / "stats.jsonl"
+    _append(p, [{"it": i, "pad": "x" * 80} for i in range(100)])
+    size = p.stat().st_size
+    rows, off, rewritten = W.read_new_lines(p, size + 1000, max_read=1000)
+    assert rewritten and off == size
+    its = [r["it"] for r in rows]
+    assert its == list(range(its[0], 100)) and 85 <= its[0] <= 95
+    # A plain read is chunked too, and loses no row across calls.
+    got, off = [], 0
+    for _ in range(100):
+        rows, off, rewritten = W.read_new_lines(p, off, max_read=1000)
+        assert not rewritten and len(rows) <= 10
+        got += [r["it"] for r in rows]
+    assert got == list(range(100)) and off == size
+    # One line longer than the window is stepped over, not a stall.
+    _append(p, [{"it": 100, "pad": "y" * 5000}, {"it": 101}])
+    got = []
+    for _ in range(20):
+        rows, off, _ = W.read_new_lines(p, off, max_read=1000)
+        got += [r["it"] for r in rows]
+    assert got == [101] and off == p.stat().st_size
+
+
 def test_variants_get_their_own_series_and_an_old_cursor_relogs_evals(tmp_path: Path) -> None:
     sd = tmp_path / "lane"
     done = sd / OC.EVAL_DONE

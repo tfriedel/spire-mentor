@@ -75,6 +75,7 @@ pub mod allocator;
 
 pub mod combat_surrogate;
 pub mod e2e;
+pub mod e2e_train;
 pub mod heuristic_agent;
 pub mod mcts_combat_agent;
 pub mod ppo_agent;
@@ -4597,6 +4598,12 @@ pub fn sts2_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::e2e::PyE2eStudent>()?;
     m.add_class::<crate::e2e::PyE2eDriver>()?;
     m.add_class::<crate::e2e::PyE2ePeek>()?;
+    m.add_class::<crate::e2e_train::PyE2eTrainEnv>()?;
+    m.add_class::<crate::e2e_train::PyE2eRareMap>()?;
+    m.add(
+        "E2eEnvRaise",
+        py.get_type::<crate::e2e_train::E2eEnvRaise>(),
+    )?;
     m.add_function(wrap_pyfunction!(crate::e2e::e2e_new_run, m)?)?;
     m.add_function(wrap_pyfunction!(crate::e2e::e2e_selfplay, m)?)?;
     m.add(

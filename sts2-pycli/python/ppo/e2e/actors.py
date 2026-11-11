@@ -114,10 +114,31 @@ def segment_uid(session: int, wid: int, slot: int, count: int) -> int:
     )
 
 
+F9_SAMPLES = 8  # F9 violation texts an end record carries (`E2EEnv.f9_violations` keeps as many)
+F9_SAMPLE_CHARS = 600
+
+
+def f9_samples(env: Any) -> list[str]:
+    """The first F9 violation texts of a segment's env (`E2EEnv.f9_violations`), cut to
+    what an end record carries: with the seed they say which invariant broke and where."""
+    return [str(v)[:F9_SAMPLE_CHARS] for v in (getattr(env, "f9_violations", None) or [])][
+        :F9_SAMPLES
+    ]
+
+
 def end_record(
-    uid: int, slot: int, t_last: int, term: Any, kind: str, cell: str | None, stamps: dict[str, Any]
+    uid: int,
+    slot: int,
+    t_last: int,
+    term: Any,
+    kind: str,
+    cell: str | None,
+    stamps: dict[str, Any],
+    *,
+    f9_texts: list[str] | None = None,
 ) -> dict[str, Any]:
-    """What the learner needs from an `E2ETerminal` (plain types only)."""
+    """What the learner needs from an `E2ETerminal` (plain types only). `f9_texts` are
+    the segment's first F9 violation texts (`f9_samples`)."""
     counts = dict(term.counts) if term.counts is not None else {}
     return {
         "uid": uid,
@@ -141,6 +162,7 @@ def end_record(
         "unassigned_reward": float(term.unassigned_reward),
         "f9_checks": int(counts.get("f9/checks", 0)),
         "f9_violations": int(counts.get("f9/violations", 0)),
+        "f9_samples": list(f9_texts or []),
         "unknown": int(counts.get("unknown", 0)),
         "fights": int(sum(v for k, v in counts.items() if str(k).startswith("fights/"))),
         "counts": {str(k): int(v) for k, v in counts.items()},
@@ -183,6 +205,7 @@ def error_record(
     *,
     env_counts: Mapping[str, int] | None = None,
     seed: int = -1,
+    f9_texts: list[str] | None = None,
 ) -> dict[str, Any]:
     """A segment the worker ended on an exception of its own (outside the env, which
     ends a segment as an `error` terminal itself); `etype` is counted as
@@ -215,6 +238,7 @@ def error_record(
         "unassigned_reward": 0.0,
         "f9_checks": int(counts.get("f9/checks", 0)),
         "f9_violations": int(counts.get("f9/violations", 0)),
+        "f9_samples": list(f9_texts or []),
         "unknown": int(counts.get("unknown", 0)),
         "fights": int(sum(v for k, v in counts.items() if k.startswith("fights/"))),
         "counts": dict(counts),
@@ -261,6 +285,7 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
     from . import tokens as TK
     from .env import E2EDecision, EnvConfig, ends_segment
     from .practice import PracticeQueues, SegmentSource
+    from .rsenv import RsDecision
 
     stamps = {"wheel": wheel_identity(), "py_src": python_source_digest()}
     # Action logs (plan §3.2, review finding ENVR-1): every segment this worker ends is
@@ -293,7 +318,15 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
         return run_teacher_features(d, honest=honest)
 
     n_envs = int(cfg["n_envs"])
-    env_cfg = EnvConfig(f9_tolerate=tuple(cfg.get("f9_tolerate") or ()))
+    rust = bool(cfg.get("rust_env"))
+    rust_rare = None
+    if rust and cfg.get("teacher_rare"):
+        import sts2_rs
+
+        rust_rare = sts2_rs.E2eRareMap(cfg["teacher_rare"])
+    env_cfg = EnvConfig(
+        f9_tolerate=tuple(cfg.get("f9_tolerate") or ()), rust=rust, rust_rare=rust_rare
+    )
 
     def now() -> int:
         return clock["decisions"]
@@ -321,7 +354,7 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
         # holds at most one run per slot.
         old = s.env
         s.env, s.kind, s.cell = None, "run", None
-        if old is not None:
+        if old is not None and not getattr(old, "rust", False):
             TK.clear_cache(id(old.rm))
         s.env = s.source.next(s.k, clock["decisions"])
         seg = s.env.segment
@@ -370,6 +403,7 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
                 etype,
                 env_counts=getattr(env, "counts", None),
                 seed=int(getattr(env, "seed", -1)),
+                f9_texts=f9_samples(env),
             )
         )
         s.d = None
@@ -398,13 +432,24 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
                         fail(s, -1)
                         continue
                 d = s.d
-                if not isinstance(d, E2EDecision):  # an E2ETerminal
-                    ends.append(end_record(s.uid, s.k, s.t - 1, d, s.kind, s.cell, stamps))
+                if not isinstance(d, (E2EDecision, RsDecision)):  # an E2ETerminal
+                    ends.append(
+                        end_record(
+                            s.uid,
+                            s.k,
+                            s.t - 1,
+                            d,
+                            s.kind,
+                            s.cell,
+                            stamps,
+                            f9_texts=f9_samples(s.env),
+                        )
+                    )
                     log_end(s, d)
                     s.d = None
                     continue
                 try:
-                    tk = TK.encode(d, rare=rare, priv=True)
+                    tk = d.tok if rust else TK.encode(d, rare=rare, priv=True)
                     if tk.n_classes != d.n_classes:
                         raise C.SchemaError(f"{tk.n_classes} token classes for {d.n_classes}")
                     f = feats_of(d) if (want["feats"] and not d.is_combat) else None
@@ -439,7 +484,16 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
                 s.t += 1
                 if d.bootstrap:  # a practice segment's value-only end row
                     ends.append(
-                        end_record(s.uid, s.k, s.t - 1, s.env.terminal, s.kind, s.cell, stamps)
+                        end_record(
+                            s.uid,
+                            s.k,
+                            s.t - 1,
+                            s.env.terminal,
+                            s.kind,
+                            s.cell,
+                            stamps,
+                            f9_texts=f9_samples(s.env),
+                        )
                     )
                     log_end(s, s.env.terminal)
                 break
@@ -484,6 +538,11 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
         _, acts, info = msg
         clock["decisions"] = int(info["decisions"])
         want["feats"] = bool(info.get("feats"))
+        if rust and want["feats"]:
+            raise RuntimeError(
+                "rust_env workers cannot make the run teacher's features (rsenv rows carry "
+                "no run_obs): run with --rust-env false while the run teacher is on"
+            )
         for s, a in zip(slots, acts, strict=True):
             d = s.d
             if d.bootstrap:
