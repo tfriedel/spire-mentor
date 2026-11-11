@@ -764,6 +764,46 @@ fn turn_end_orb_kill_select_opens_before_the_hand_flush() {
     }
 }
 
+/// The same turn-end Lightning kill, with an Ethereal Dazed in hand. C#'s
+/// queued hook action runs only after the whole of `EndPlayerTurnPhaseOne`:
+/// `DoTurnEnd` exhausts the Ethereal hand first (CombatManager.cs, after the
+/// orb passives), then `BeforeFlush`, and only then does the pick open. The
+/// picked Dazed and the one the horn draws after it miss the Ethereal sweep and
+/// are discarded with the hand. Rust opened the pick before the sweep and
+/// exhausted them too (random-loadout Ironclad 7756 v0.111.0).
+#[test]
+fn turn_end_orb_kill_select_opens_after_the_ethereal_sweep() {
+    for v in BOTH {
+        let (mut state, _dying, _reshuffled) =
+            horn_stratagem_fixture(v, 1, &[CardId::Dazed, CardId::Dazed, CardId::Dazed]);
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id.get() == 3) {
+            c.current_hp = 1;
+        }
+        state.player.character = Some(sts2_core::potions::CharacterId::Defect);
+        state.player.orbs.ensure_defect_base();
+        sts2_core::orbs::channel_orb(&mut state, sts2_core::orbs::Orb::Lightning);
+        let dazed = new_card(&mut state, CardId::Dazed);
+        state.player.hand.push(dazed);
+
+        let r = sts2_core::apply(&mut state, sts2_core::Action::EndTurn);
+
+        assert_eq!(r, sts2_core::StepResult::PendingChoice, "{v:?}");
+        let pc = state.pending_choice.as_ref().expect("the grid surfaced");
+        assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand, "{v:?}");
+        assert_eq!(
+            state.player.exhaust.as_slice(),
+            &[dazed],
+            "{v:?}: the Ethereal sweep ran before the pick"
+        );
+        resolve(&mut state, 0);
+        assert_eq!(
+            state.player.exhaust.as_slice(),
+            &[dazed],
+            "{v:?}: the picked and drawn Dazed are flushed, not exhausted"
+        );
+    }
+}
+
 // ── A nested damage call kills its own targets ───────────────────────────
 
 /// Flick-Flack (8 with Strength 2) hits four enemies at [21, 8, 19, 17]; the

@@ -3775,6 +3775,59 @@ fn dispose_turn_end_in_hand_card(state: &mut CombatState, uid: crate::CardUid) {
 
 /// [`end_player_turn_phase_two`] after the turn-end-in-hand cards.
 fn end_player_turn_phase_two_after_turn_end_cards(state: &mut CombatState) -> StepResult {
+    // C# `Hook.BeforeFlush` (Hook.cs) walks every listener's `BeforeFlush`
+    // (SlumberingEssence's cost tick) before any `BeforeFlushLate` (Well-Laid
+    // Plans' retain select below). Mirrors Python's
+    // `apply_enchantment_before_flush(self, owner)` (`combat.py:1024`) too.
+    // Empty-bus early-out is internal to the dispatcher.
+    crate::enchantment_hooks::dispatch_before_flush(state);
+
+    // A select a kill's `AfterDeath` parked during the end of turn (a turn-end
+    // Lightning kill whose Gremlin Horn draw reshuffled into a Stratagem pick)
+    // is a hook action queued behind the end-turn action. C# runs the whole
+    // `EndPlayerTurnPhaseOneInternal` first (`DoTurnEnd`'s Ethereal sweep and
+    // turn-end-in-hand cards, then `BeforeFlush`), and flushes the hand
+    // (`EndPlayerTurnPhaseTwoInternal`) only once the queue is empty
+    // (`AfterAllPlayersReadyToBeginEnemyTurn`). So the pick opens here: the
+    // Ethereal cards are already exhausted, and the picked and drawn cards are
+    // discarded with the hand (random-loadout Ironclad 7756 v0.111.0; loadout
+    // Defect 1119 v0.107.1 for the flush).
+    if state.coop.seat_run.is_none()
+        && state.combat_log.parked_hook_choices.is_some()
+        && crate::surface_parked_hook_choice(state)
+    {
+        state.pending_end_turn_resume = Some(crate::EndTurnResume::BeforeFlush);
+        return StepResult::PendingChoice;
+    }
+    end_player_turn_phase_two_before_flush_late(state)
+}
+
+/// Resume the end-turn chain parked before the hand flush (see
+/// [`crate::EndTurnResume::BeforeFlush`]): the rest of phase two, then the
+/// enemy turn and the next player turn.
+pub(crate) fn resume_end_turn_before_flush(state: &mut CombatState) -> StepResult {
+    // Another parked select is the next queued hook action.
+    if crate::surface_parked_hook_choice(state) {
+        state.pending_end_turn_resume = Some(crate::EndTurnResume::BeforeFlush);
+        return StepResult::PendingChoice;
+    }
+    let tail = end_player_turn_phase_two_before_flush_late(state);
+    if !matches!(tail, StepResult::Advanced) || state.coop.seat_run.is_some() {
+        return tail;
+    }
+    end_turn_dispatch_from(state, 2)
+}
+
+/// [`end_player_turn_phase_two`] from `BeforeFlushLate` (Well-Laid Plans'
+/// retain select) on.
+fn end_player_turn_phase_two_before_flush_late(state: &mut CombatState) -> StepResult {
+    if state.is_over {
+        return if state.player_won {
+            StepResult::CombatWon
+        } else {
+            StepResult::CombatLost
+        };
+    }
     // Step 4: compute retained cards. Bead `sts2-rs-sah` (G3 plumbing)
     // wires the per-player retain side-table (`retain_this_turn`)
     // plus the stack-based budget (`pending_retain_count`).
@@ -3993,14 +4046,6 @@ fn end_player_turn_phase_two_flush_tail(state: &mut CombatState) -> StepResult {
             }
         }
     }
-
-    // Bead `sts2-rs-6ynt.11`: enchantment `before_flush` channel.
-    // Mirrors Python's `apply_enchantment_before_flush(self, owner)`
-    // call at `combat.py:1024`, fired immediately before the flush
-    // decision and per-card discard walk so SlumberingEssence cards
-    // can tick down their cost while still in hand. Empty-bus
-    // early-out is internal to the dispatcher.
-    crate::enchantment_hooks::dispatch_before_flush(state);
 
     // Step 5: compute flush. `dispatch_should_flush` is relic-only
     // and defaults true; the first `false` from any relic listener
@@ -7780,21 +7825,6 @@ fn run_end_turn_step(state: &mut CombatState, phase: usize) -> StepResult {
         begin_enemy_side_capture(state);
     }
     let result = END_TURN_CHAIN[phase](state);
-    // C# `EndPlayerTurnPhaseTwoInternal` (the hand flush) runs only once the
-    // action queue is empty (`AfterAllPlayersReadyToBeginEnemyTurn` behind
-    // `WaitUntilQueueIsEmptyOrWaitingOnNonPlayerDrivenAction`), so a select a
-    // `DoTurnEnd` kill's `AfterDeath` queued (Lightning passive -> Gremlin
-    // Horn draw -> Stratagem pick) opens and resolves before the flush: the
-    // pick and the drawn card are discarded with the hand (loadout Defect
-    // 1119 v0.107.1). Rust surfaced it only at the next player turn.
-    if phase == 0
-        && matches!(result, StepResult::Advanced)
-        && state.combat_log.parked_hook_choices.is_some()
-        && crate::surface_parked_hook_choice(state)
-    {
-        state.pending_end_turn_resume = Some(crate::EndTurnResume::AfterPhaseOne);
-        return StepResult::PendingChoice;
-    }
     if (ENEMY_SIDE_FIRST..=ENEMY_SIDE_LAST).contains(&phase)
         && (phase == ENEMY_SIDE_LAST || !matches!(result, StepResult::Advanced))
     {

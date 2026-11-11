@@ -2858,19 +2858,20 @@ public class RunSimulator
             catch (Exception ex) { LogException("Scroll Boxes add to deck", ex); }
         }
 
-        // Now release the parked continuation and drive it to quiescence.
-        tcs.TrySetResult(System.Array.Empty<CardModel>());
+        // Now release the parked continuation and drive it on. The release goes
+        // through ResolveSelection: the continuation runs inline on the thread
+        // that completes the TCS, and it can reach a blocking card reward —
+        // Neow's relic pair Scroll Boxes + Lost Coffer (seed 7709, v0.111.0):
+        // RewardsSet.Offer obtains Lost Coffer after the pack, and its
+        // AfterObtained offers a card reward. Completed on the game thread, that
+        // reward blocked the very thread that has to answer it (OracleHang). The
+        // real game shows the card reward screen. DrainEventOptionTaskIfDue then
+        // re-stashes the option task while that reward is pending, so the next
+        // select_card_reward / skip resumes it.
+        ResolveSelection(() => tcs.TrySetResult(System.Array.Empty<CardModel>()));
         _syncCtx.Pump();
-        WaitForActionExecutor();
-        if (_pendingEventOptionTask != null)
-        {
-            WaitForTask(_pendingEventOptionTask, 5000, "neow bundle continuation");
-            _pendingEventOptionTask = null;
-            SyncEventOptionInFlight();
-            WaitForActionExecutor();
-            _syncCtx.Pump();
-            WaitForActionExecutor();
-        }
+        WaitForActionExecutor(stopOnSelection: true);
+        DrainEventOptionTaskIfDue();
         return DetectDecisionPoint();
     }
 

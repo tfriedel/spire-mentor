@@ -3642,13 +3642,16 @@ pub enum EndTurnResume {
     /// further parked select, the end-of-turn checks and the rest of the chain
     /// are owed.
     AfterTurnEndLate,
-    /// Suspended after phase one (`DoTurnEnd`) on a select a kill's
-    /// `AfterDeath` parked there (a turn-end Lightning kill whose Gremlin Horn
-    /// draw reshuffled into a Stratagem pick). C# queues that hook's action
-    /// behind the end-turn action, and the hand flush (`EndPlayerTurnPhaseTwo`)
-    /// waits for the queue, so the pick and its draw land before the flush.
-    /// Phase two and the rest of the chain are owed.
-    AfterPhaseOne,
+    /// Suspended before the hand flush on a select a kill's `AfterDeath`
+    /// parked during the end of turn (a turn-end Lightning kill whose Gremlin
+    /// Horn draw reshuffled into a Stratagem pick). C# queues that hook's
+    /// action behind the end-turn action: the rest of
+    /// `EndPlayerTurnPhaseOneInternal` (the Ethereal sweep, the
+    /// turn-end-in-hand cards, `BeforeFlush`) runs first, and the hand flush
+    /// (`EndPlayerTurnPhaseTwoInternal`) waits for the queue, so the pick and
+    /// its draw land after the sweep and before the flush. `BeforeFlushLate`,
+    /// the flush and the rest of the chain are owed.
+    BeforeFlush,
     /// Suspended inside phase two's turn-end-in-hand walk (`DoTurnEnd`'s
     /// `OnTurnEndInHandWrapper` loop): an effect opened a select (Toxic's
     /// self-hit -> Centennial Puzzle's draw -> a Stratagem pick). The card is
@@ -11660,7 +11663,7 @@ fn resume_suspended_end_turn(state: &mut CombatState) -> Option<StepResult> {
         EndTurnResume::AfterTurnEndLate => Some(
             crate::combat_loop::resume_end_turn_after_turn_end_late(state),
         ),
-        EndTurnResume::AfterPhaseOne => Some(crate::combat_loop::end_turn_dispatch_from(state, 1)),
+        EndTurnResume::BeforeFlush => Some(crate::combat_loop::resume_end_turn_before_flush(state)),
         EndTurnResume::TurnEndInHand { remaining } => Some(
             crate::combat_loop::resume_end_turn_in_hand(state, remaining),
         ),
