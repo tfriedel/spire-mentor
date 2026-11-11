@@ -6207,8 +6207,9 @@ public class RunSimulator
         // uint) — a method absent from the headless GodotStubs, so it throws
         // MissingMethodException → swallowed → boulder damage never lands AND
         // the enemy turn wedges (nuclear fallback re-runs moves, inflating
-        // damage/SLIMED). The replacement reproduces the TestMode branch:
-        // DoDamage(HittableEnemies) then SetAmount(Amount + DamageVar(5)).
+        // damage/SLIMED). The replacement hits the enemies one at a time, as
+        // the real game's rolling boulder does (see the prefix), then
+        // SetAmount(Amount + DamageVar(5)).
         // Pairs with the Rust impl in combat_loop::start_player_turn
         // (sts2-rs-ioty0, q6bix PILE_COUNT: ROLLING_BOULDER).
         PatchPowerAfterPlayerTurnStart(
@@ -8944,9 +8945,22 @@ public class RunSimulator
         /// TestMode.IsOn; otherwise it constructs NRollingBoulderVfx and calls
         /// GodotObject.Connect(StringName, Callable, uint), which the headless
         /// GodotStubs lack → MissingMethodException (swallowed), so no boulder
-        /// damage lands and the turn wedges. We reproduce the TestMode branch:
-        /// DoDamage(HittableEnemies) then SetAmount(Amount + DamageVar(5)).
-        /// Bead sts2-rs-ioty0 (q6bix PILE_COUNT: ROLLING_BOULDER).
+        /// damage lands and the turn wedges. Bead sts2-rs-ioty0 (q6bix
+        /// PILE_COUNT: ROLLING_BOULDER).
+        ///
+        /// The TestMode branch is not what the real game does. It deals one
+        /// multi-target DoDamage(HittableEnemies), whose Kill(killedCreatures)
+        /// waits until every enemy has been hit. In the real game,
+        /// NRollingBoulderVfx rolls the boulder left to right over a snapshot
+        /// of HittableEnemies and signals HitCreature as it reaches each one,
+        /// and each signal starts its own single-target DoDamage. The enemies
+        /// stand in CombatState.Enemies order (SortEnemiesBySlotName, or
+        /// NCombatRoom.PositionEnemies by index), so an enemy the boulder fells
+        /// dies, and its death hooks run, before the next enemy is hit. So this
+        /// awaits one single-target CreatureCmd.Damage per snapshot enemy, in
+        /// order, then SetAmount(Amount + DamageVar(5)). The real calls overlap
+        /// only when a hit's hooks wait on a real-time timer (Cmd.Wait), which
+        /// Instant fast mode skips.
         /// </summary>
         public static bool RollingBoulderAfterPlayerTurnStartPrefix(
             object __instance,
@@ -8970,13 +8984,18 @@ public class RunSimulator
                 {
                     return;
                 }
-                // DoDamage(HittableEnemies): Amount Unpowered, dealt by Owner.
-                await MegaCrit.Sts2.Core.Commands.CreatureCmd.Damage(
-                    choiceContext,
-                    power.CombatState.HittableEnemies,
-                    power.Amount,
-                    MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered,
-                    power.Owner);
+                // One DoDamage per enemy the boulder reaches: Amount Unpowered,
+                // dealt by Owner. CreatureCmd.Damage skips an enemy that died
+                // before its turn and deals nothing once the dealer is dead.
+                foreach (var enemy in power.CombatState.HittableEnemies.ToList())
+                {
+                    await MegaCrit.Sts2.Core.Commands.CreatureCmd.Damage(
+                        choiceContext,
+                        new[] { enemy },
+                        power.Amount,
+                        MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered,
+                        power.Owner);
+                }
                 // Ramp: SetAmount(Amount + DynamicVars.Damage.IntValue).
                 power.SetAmount(power.Amount + power.DynamicVars.Damage.IntValue);
             }

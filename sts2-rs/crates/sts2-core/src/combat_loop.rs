@@ -1559,7 +1559,7 @@ pub(crate) fn finish_player_turn_setup(state: &mut CombatState, side_fired: bool
     // effect inline:
     //
     //   * RollingBoulder (`RollingBoulderPower.cs`, ioty0 / boulder-inst): deal
-    //     its OWN `Amount` Unpowered to all hittable enemies, then ramp
+    //     its OWN `Amount` Unpowered to each hittable enemy in turn, then ramp
     //     `Amount += DamageVar(5)`; IsInstanced, so each instance fires once in
     //     power order.
     //   * Entropy (`EntropyPower.cs`, isooo / 3tder): transform the first
@@ -1823,11 +1823,13 @@ fn run_after_player_turn_start_cluster(
                 // with no amount check.
                 crate::event_log::flash_player_power(state, crate::PowerKind::RollingBoulder);
                 if amount > 0 {
-                    let _ = crate::card_effects::deal_damage_to_all_alive_enemies(
+                    // The real game's boulder hits each enemy with its own
+                    // `DoDamage` as it rolls past (NRollingBoulderVfx), not
+                    // the TestMode branch's one multi-target call.
+                    crate::card_effects::deal_damage_to_each_alive_enemy_in_turn(
                         state,
                         amount,
                         ValueProps::UNPOWERED,
-                        None,
                     );
                     if let Some(pow) = state.powers.get_mut_by_id(uid.0) {
                         pow.amount = pow.amount.saturating_add(5);
@@ -4366,6 +4368,7 @@ fn finish_phase_two_after_turn_end_late(state: &mut CombatState) -> StepResult {
             .combat_log
             .extra_turns_taken_this_combat
             .saturating_add(1);
+        crate::relic_effects::emotion_chip::on_player_turn_number_increment(state);
         // C# `PlayersTakingExtraTurn` stays filled through the extra turn's
         // `AfterSideTurnStart` (CombatManager.cs:703-707, :785).
         state.combat_log.taking_extra_turn = true;
@@ -7271,6 +7274,9 @@ pub fn enemy_turn_end(state: &mut CombatState) -> StepResult {
     // Python int (unbounded) so the saturation is purely defensive at
     // this pin.
     state.round = state.round.saturating_add(1);
+    // C# `PlayerCombatState.IncrementTurnNumber` runs at the same switch
+    // (CombatManager.cs): Emotion Chip's "last turn" moves along.
+    crate::relic_effects::emotion_chip::on_player_turn_number_increment(state);
 
     // Step 8: advance phase to PlayerTurnStart for the next round.
     state.phase = CombatPhase::PlayerTurnStart;
@@ -9592,8 +9598,14 @@ fn shining_strike_on_play_return(
         return;
     }
     let card = &state.cards[uid.0.get() as usize - 1];
+    // A forced exhaust (Havoc's `ExhaustOnNextPlay`) is already gone by the
+    // time `OnPlay` reads it: `OnPlayWrapper` asks `GetResultPileTypeForCardPlay`
+    // for the result pile before `OnPlay`, and that read clears the flag
+    // (CardModel.cs). Only a dupe returns early from that read, keeping it
+    // (loadout Regent 8300 v0.107.1).
+    let is_dupe = card.combat_var(VarKey::IsDupe) != 0;
     if card.card_id != cards::CardId::ShiningStrike
-        || force_exhaust
+        || (force_exhaust && is_dupe)
         || crate::card_effects::card_exhausts_inst(card)
         || state.pending_choice.is_some()
         // `CardPileCmd.Add` refuses a combat pile once the combat is ending
@@ -14083,6 +14095,63 @@ mod tests {
             before,
             "popping the pinned ShiningStrike must consume NO RNG (no chance node)"
         );
+    }
+
+    /// Havoc's `forceExhaust` does not stop a v0.107.1 Shining Strike from
+    /// returning to the draw top. `AutoPlayFromDrawPile` sets
+    /// `ExhaustOnNextPlay` (CardPileCmd.cs), but `OnPlayWrapper` reads the
+    /// result pile through `GetResultPileTypeForCardPlay` before `OnPlay`, and
+    /// that read clears the flag (CardModel.cs). `OnPlay`'s
+    /// `!ExhaustOnNextPlay` check then passes, the card goes back on top of the
+    /// draw pile, and the Exhaust result is skipped because the card has left
+    /// Play (loadout Regent 8300 v0.107.1). v0.111.0 routes it through
+    /// `GetResultLocationForCardPlay`, which keeps the Exhaust.
+    #[test]
+    #[serial_test::serial(global_registry)]
+    fn force_exhausted_shining_strike_returns_to_draw_top_v0107_only() {
+        crate::card_effects::ensure_installed();
+        for version in [crate::GameVersion::V0_107_1, crate::GameVersion::V0_111_0] {
+            let mut state = state_with_cultists(1);
+            let _ = start_combat(&mut state);
+            state.game_version = version;
+            let uid = crate::CardUid::new(1).expect("non-zero");
+            state.cards.clear();
+            state.cards.push(crate::cards::Card {
+                uid,
+                card_id: crate::cards::CardId::ShiningStrike,
+                cost: crate::CardEnergyCost::new(1),
+                card_type: crate::cards::CardType::Attack,
+                target_type: crate::cards::TargetType::Enemy,
+                base_damage: 8,
+                ..crate::cards::Card::pod_defaults()
+            });
+            state.player.play.clear();
+            state.player.play.push(uid);
+            state.player.draw.clear();
+            state.player.discard.clear();
+            state.player.exhaust.clear();
+
+            resolve_auto_played_card(&mut state, uid, /*force_exhaust=*/ true);
+
+            assert!(!state.player.play.contains(&uid), "{version:?}");
+            if version >= crate::GameVersion::V0_111_0 {
+                assert_eq!(
+                    state.player.exhaust.as_slice(),
+                    [uid],
+                    "{version:?}: exhausted"
+                );
+            } else {
+                assert_eq!(
+                    state.player.draw.first().copied(),
+                    Some(uid),
+                    "{version:?}: back on the draw top"
+                );
+                assert!(
+                    state.player.exhaust.is_empty(),
+                    "{version:?}: not exhausted"
+                );
+            }
+        }
     }
 
     /// v0.107.1 `ShiningStrike.OnPlay` has no `IsDupe` check

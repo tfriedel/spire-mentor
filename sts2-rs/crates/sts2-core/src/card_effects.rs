@@ -219,6 +219,66 @@ pub fn deal_damage_to_all_alive_enemies_counting_kills(
     })
 }
 
+/// One single-target `CreatureCmd.Damage` per alive enemy, in enemy order,
+/// each run to completion (its hooks and its kill) before the next starts.
+///
+/// This is how the real game resolves Rolling Boulder
+/// (RollingBoulderPower.cs, `TestMode.IsOff` branch): `NRollingBoulderVfx`
+/// rolls the boulder left to right and signals `HitCreature` as it reaches
+/// each creature of its `HittableEnemies` snapshot, and each signal starts
+/// its own `DoDamage` over that one creature. The enemies stand left to right
+/// in `CombatState.Enemies` order (`SortEnemiesBySlotName`, or
+/// `NCombatRoom.PositionEnemies` by index), so an enemy the boulder fells has
+/// died, and its death hooks have run, before the next enemy is hit.
+///
+/// The calls only overlap if a hit's hooks wait on a real-time timer
+/// (`Cmd.Wait`); with the waits skipped (Instant fast mode, or none in the
+/// hooks) each finishes inside its frame. The snapshot is taken up front: a
+/// creature spawned mid-roll is not hit, and one that died before the boulder
+/// reached it is skipped (`CreatureCmd.Damage` skips the dead). The player is
+/// the dealer, and a dead dealer deals nothing.
+pub fn deal_damage_to_each_alive_enemy_in_turn(
+    state: &mut CombatState,
+    base: i32,
+    props: ValueProps,
+) {
+    let targets: smallvec::SmallVec<[CreatureUid; 8]> = state
+        .enemy_uids
+        .iter()
+        .copied()
+        .filter(|uid| {
+            state
+                .creatures
+                .iter()
+                .any(|c| c.id == uid.0 && c.current_hp > 0)
+        })
+        .collect();
+    for target_uid in targets {
+        if state.player.current_hp <= 0 {
+            break;
+        }
+        let alive = state
+            .creatures
+            .iter()
+            .any(|c| c.id == target_uid.0 && c.current_hp > 0);
+        if !alive {
+            continue;
+        }
+        damage::with_deferred_enemy_deaths(state, |state| {
+            let dmg = damage::compute_modified_damage_flashing(
+                state,
+                CreatureRef::Player,
+                target_uid,
+                base,
+                props,
+                None,
+            );
+            let _ =
+                damage::apply_damage_with_final(state, CreatureRef::Player, target_uid, dmg, props);
+        });
+    }
+}
+
 /// One `CreatureCmd.Damage` whose targets are the player AND every alive
 /// enemy, the player first: Foul Potion's `CombatState.Creatures.Where(c =>
 /// !c.IsPet)` (FoulPotion.cs), where `Creatures` lists the allies before the
@@ -3768,10 +3828,9 @@ pub fn stamp_entered_combat_cost_backfill(state: &mut CombatState, uid: CardUid)
 ///
 /// [decompiled C# omitted — see the cited path]
 ///
-/// The engine has no clone flag, so the shave covers only the plays the card
-/// has not yet counted ([`crate::cards::VarKey::BansheesCryEtherealCounted`]):
-/// a fresh card counts none, and a copy of one already in combat carries the
-/// original's count. Unclamped like every `AddThisCombat`
+/// The shave covers the plays the card has not yet counted
+/// ([`crate::cards::VarKey::BansheesCryEtherealCounted`]): a fresh card counts
+/// none. A clone is not shaved at all. Unclamped like every `AddThisCombat`
 /// ([`crate::cards::Card::add_cost_this_combat`]).
 fn banshees_cry_entered_combat(state: &mut CombatState, uid: CardUid) {
     let total =
@@ -3780,6 +3839,15 @@ fn banshees_cry_entered_combat(state: &mut CombatState, uid: CardUid) {
         return;
     };
     let key = crate::cards::VarKey::BansheesCryEtherealCounted;
+    // `if (base.IsClone) return`: a clone keeps the cost it was cloned with,
+    // even when the original had not yet counted the play under way (Music
+    // Box clones in a relic's `AfterCardPlayed`, before the cards' own walk;
+    // loadout Necrobinder 8428 v0.107.1). Marking it counted keeps that walk,
+    // which it is not a listener of, from shaving it.
+    if c.is_clone() || c.combat_var(crate::cards::VarKey::IsDupe) != 0 {
+        c.set_combat_var(key, total);
+        return;
+    }
     let missed = total - c.combat_var(key);
     if missed > 0 {
         c.set_combat_var(key, total);
@@ -9719,5 +9787,41 @@ mod banshees_cry_entered_combat_tests {
         state.combat_log.ethereal_cards_played_this_combat = 6;
         let floored = spawn_card_into_hand(&mut state, banshee(9));
         assert_eq!(cost_of(&state, floored), 0);
+    }
+
+    /// Music Box clones the played card in its `AfterCardPlayed`, a relic
+    /// listener, before the cards' own `AfterCardPlayed` (CombatState.cs
+    /// `IterateHookListeners`). When the played card is an Ethereal Banshee's
+    /// Cry, the clone is made before the original has counted this play, and
+    /// its `AfterCardEnteredCombat` returns on `IsClone` (BansheesCry.cs): the
+    /// clone keeps the original's cost and is not shaved for the play that
+    /// made it (loadout Necrobinder 8428 v0.107.1: C# 1, Rust 0).
+    #[test]
+    fn a_clone_of_a_banshees_cry_that_has_not_counted_the_play_keeps_its_cost() {
+        let mut state = CombatState {
+            rng: crate::dotnet_rng::Rng::new(0_i32),
+            ..Default::default()
+        };
+        state.player.current_hp = 80;
+        let original = spawn_card_into_pile(
+            &mut state,
+            crate::cards::Card {
+                card_id: crate::cards::CardId::BansheesCry,
+                cost: crate::CardEnergyCost::new(3),
+                ..crate::cards::Card::pod_defaults()
+            },
+            PileKind::Draw,
+        );
+        // The Ethereal play is tallied; the original has not counted it yet.
+        state.combat_log.ethereal_cards_played_this_combat = 1;
+        let clone = state.cards[original.0.get() as usize - 1].create_clone();
+        let copy = spawn_card_into_hand(&mut state, clone);
+        assert_eq!(state.cards[copy.0.get() as usize - 1].local_cost(), 3);
+
+        // The cards' `AfterCardPlayed` walk then shaves the original only:
+        // the clone was not yet a listener when the walk started.
+        state.banshees_cry_after_card_played(true);
+        assert_eq!(state.cards[original.0.get() as usize - 1].local_cost(), 1);
+        assert_eq!(state.cards[copy.0.get() as usize - 1].local_cost(), 3);
     }
 }

@@ -8667,10 +8667,10 @@ fn emotion_chip_triggers_passive_on_prior_hp_loss() {
     // `player.block` (no enemy roster needed).
     crate::orbs::channel_orb(&mut state, crate::orbs::Orb::frost());
     let block_before = state.player.block;
-    // Simulate HP loss "last turn": bump the counter directly.
+    // Simulate HP loss "last turn": arm the last-turn bit directly.
     for r in &mut state.relics {
         if r.kind == RelicKind::EmotionChip {
-            r.counter = 5;
+            r.counter = 1;
         }
     }
     let _ = dispatch_after_player_turn_start(&mut state);
@@ -8759,7 +8759,7 @@ fn emotion_chip_with_cables_fired(
     }
     for r in &mut state.relics {
         if r.kind == RelicKind::EmotionChip {
-            r.counter = 5;
+            r.counter = 1;
         }
     }
     let _ = dispatch_after_player_turn_start(&mut state);
@@ -8806,6 +8806,41 @@ fn emotion_chip_fires_plasma_v0107() {
     let state =
         emotion_chip_with_cables_fired(crate::GameVersion::V0_107_1, &[crate::orbs::Orb::Plasma]);
     assert_eq!(state.player.energy, 1);
+}
+
+/// C# `LostHpInPreviousTurn` keeps the damage entries stamped with the
+/// player's previous `TurnNumber` (EmotionChip.cs, `HappenedLastPlayerTurn`).
+/// The number goes up only when the enemy side hands back to the player
+/// (CombatManager.cs `IncrementTurnNumber`), so a hit during this turn's own
+/// start (Royal Poison's turn-1 damage, an earlier relic in the same
+/// `AfterPlayerTurnStart` walk) is this turn's, and arms the chip for the next
+/// turn only (loadout Defect 8400 v0.111.0: Rust fired the Lightning twice
+/// under Gold-Plated Cables on turn 1).
+#[test]
+#[serial_test::serial(global_registry)]
+fn emotion_chip_ignores_a_hit_taken_this_turn_until_the_next() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 80);
+    give_player_relic(&mut state, RelicKind::EmotionChip);
+    crate::orbs::channel_orb(&mut state, crate::orbs::Orb::frost());
+    let _ = crate::combat_loop::apply_damage_to_player(
+        &mut state,
+        crate::hooks::CreatureRef::Nobody,
+        4,
+        crate::hooks::ValueProps::UNBLOCKABLE.union(crate::hooks::ValueProps::UNPOWERED),
+        None,
+    );
+    let _ = dispatch_after_player_turn_start(&mut state);
+    assert_eq!(state.player.block, 0, "the hit is this turn's");
+
+    crate::relic_effects::emotion_chip::on_player_turn_number_increment(&mut state);
+    let _ = dispatch_after_player_turn_start(&mut state);
+    assert!(state.player.block > 0, "next turn it was last turn's");
+
+    crate::relic_effects::emotion_chip::on_player_turn_number_increment(&mut state);
+    let block = state.player.block;
+    let _ = dispatch_after_player_turn_start(&mut state);
+    assert_eq!(state.player.block, block, "and the turn after, no longer");
 }
 
 #[test]

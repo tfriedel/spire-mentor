@@ -9,8 +9,8 @@ use super::prelude::*;
 /// The reinsert is not done here but by the engine right after this handler
 /// returns, on every play iteration (`combat_loop::shining_strike_on_play_return`,
 /// before `Enchantment.OnPlay`): the engine knows whether the play is a
-/// dupe or force-exhausted (Havoc's `ExhaustOnNextPlay`), which this handler
-/// cannot see. Bead `sts2-rs-a649q`.
+/// dupe and whether Havoc forced an exhaust, which this handler cannot see.
+/// Bead `sts2-rs-a649q`.
 pub(crate) fn play_shining_strike(
     state: &mut CombatState,
     target: Option<CreatureUid>,

@@ -179,3 +179,61 @@ fn foul_potion_that_fells_the_last_enemy_draws_nothing() {
         );
     }
 }
+
+fn add_crab(state: &mut CombatState, kind: MonsterKind, hp: i32) -> CreatureUid {
+    let uid = add_enemy(state, hp);
+    let c = state
+        .creatures
+        .iter_mut()
+        .find(|c| c.id == uid.0)
+        .expect("crab");
+    c.species = Some(kind);
+    c.max_hp = 200;
+    sts2_core::card_effects::apply_power_to_creature(state, uid, sts2_core::PowerKind::CrabRage, 1);
+    uid
+}
+
+fn hp_and_block(state: &CombatState, uid: CreatureUid) -> (i32, i32) {
+    let c = state
+        .creatures
+        .iter()
+        .find(|c| c.id == uid.0)
+        .expect("creature");
+    (c.current_hp, c.block)
+}
+
+/// The real game rolls Rolling Boulder over the enemies one at a time
+/// (RollingBoulderPower.cs, `TestMode.IsOff`): `NRollingBoulderVfx` signals
+/// `HitCreature` as the boulder reaches each enemy, left to right, and each
+/// signal starts its own single-target `CreatureCmd.Damage`. An enemy the
+/// boulder fells is dead, and its death hooks have run, before the boulder
+/// reaches the next one. Here the Crusher dies first and the Rocket's
+/// `CrabRagePower.AfterDeath` (CrabRagePower.cs) raises 99 block that then
+/// takes the whole boulder. One multi-target call (the TestMode branch) hit
+/// the Rocket before the Crusher died.
+#[test]
+fn rolling_boulder_kills_each_enemy_before_it_reaches_the_next() {
+    for v in BOTH {
+        let mut state = fresh(v, 60);
+        state.phase = CombatPhase::PlayerTurnStart;
+        state.round = 2;
+        let crusher = add_crab(&mut state, MonsterKind::Crusher, 5);
+        let rocket = add_crab(&mut state, MonsterKind::Rocket, 100);
+        let player = state.player.creature_uid.expect("player creature");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut state,
+            player,
+            sts2_core::PowerKind::RollingBoulder,
+            10,
+        );
+
+        let _ = sts2_core::combat_loop::start_player_turn(&mut state);
+
+        assert_eq!(hp_and_block(&state, crusher).0, 0, "{v:?}: Crusher felled");
+        assert_eq!(
+            hp_and_block(&state, rocket),
+            (100, 89),
+            "{v:?}: the Rocket's rage block took the boulder"
+        );
+    }
+}
