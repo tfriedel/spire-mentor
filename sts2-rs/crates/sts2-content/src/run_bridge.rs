@@ -734,46 +734,6 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
     // during the fight, rewards added after).
     rs.gold = combat.gold;
 
-    // Royalties combat-victory gold (C# `RoyaltiesPower.AfterCombatEnd` →
-    // `room.AddExtraReward(player, new GoldReward(Amount))`). The Regent's
-    // `RoyaltiesCard` applies N stacks of `Royalties` mid-combat (Gold.BaseValue
-    // = 30); on a WON combat each stack is worth 1 gold, auto-collected with the
-    // rest of the reward set. This is the `Royalties` arm the `AddExtraReward`
-    // TODO above (Heist / Swipe / Royalties / TheHunt) flagged as pending — a
-    // flat grant (no RNG, stream-faithful). Granted here AFTER the RP17
-    // `rs.gold = combat.gold` writeback so it isn't clobbered, and gated on
-    // victory (a lost combat has no rewards screen, so the extra reward is never
-    // collected — mirrors C# and the `royalties_gold_on_victory` helper's
-    // `_on_victory` contract). The base reward gold is added separately by
-    // `apply_combat_gold_and_potion`; final = base + royalties, matching C#.
-    if combat.player_won && room_gives_rewards {
-        let royalties_stacks = combat.player_power_amount(sts2_core::PowerKind::Royalties);
-        if royalties_stacks > 0 {
-            rs.gain_gold(sts2_core::powers::regent::royalties_gold_on_victory(
-                royalties_stacks,
-            ));
-        }
-    }
-
-    // GH #604: `HeistPower.BeforeDeath` gold-back. C# `HeistPower.cs:19-28`
-    // adds a `GoldReward(Amount, wasGoldStolenBack: true)` to the combat room
-    // when the gremlin CARRYING the merc's stolen gold is killed; a gremlin
-    // that flees keeps it. The engine banks the amount on
-    // `CombatState::heist_recovered_gold` at the damage-death chokepoint
-    // (`damage.rs`, next to the `SwipePower` card reclaim), so all that is left
-    // here is settling it into run gold. This is the `Heist` arm of the
-    // `AddExtraReward` TODO the `Royalties` block above started working
-    // through.
-    //
-    // Victory-gated for the same reason as Royalties: an extra reward is
-    // collected off the rewards screen, which a lost combat never shows. Flat
-    // (no RNG), so — like Royalties — it cannot desync the `rewards` stream.
-    // Runs AFTER the RP17 `rs.gold = combat.gold` writeback so it is not
-    // clobbered by it.
-    if combat.player_won && room_gives_rewards && combat.heist_recovered_gold > 0 {
-        rs.gain_gold(combat.heist_recovered_gold);
-    }
-
     // Run-master propagation for scaling cards (C# `DeckVersion.BuffFromPlay`).
     // The Scythe and Genetic Algorithm `OnPlay` buff BOTH the combat copy AND
     // the run-master deck card (`(base.DeckVersion as TheScythe)?.BuffFromPlay`,
@@ -944,6 +904,51 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
             // listener list. `None` once all 4 wax relics are gone.
             let _ = rs.melt_next_wax_relic();
         }
+    }
+
+    // The extra rewards below are collected off the reward screen, after
+    // every `AfterCombatEnd` hook above has run: a Toy Box melt has already
+    // taken a wax Bowler Hat out of `ModifyGoldGained` (Regent loadout
+    // v0.111.0 seed 7135: Royalties paid 30, not 37).
+    //
+    // Royalties combat-victory gold (C# `RoyaltiesPower.AfterCombatEnd` →
+    // `room.AddExtraReward(player, new GoldReward(Amount))`). The Regent's
+    // `RoyaltiesCard` applies N stacks of `Royalties` mid-combat (Gold.BaseValue
+    // = 30); on a WON combat each stack is worth 1 gold, auto-collected with the
+    // rest of the reward set. This is the `Royalties` arm the `AddExtraReward`
+    // TODO above (Heist / Swipe / Royalties / TheHunt) flagged as pending — a
+    // flat grant (no RNG, stream-faithful). Granted here AFTER the RP17
+    // `rs.gold = combat.gold` writeback so it isn't clobbered, and gated on
+    // victory (a lost combat has no rewards screen, so the extra reward is never
+    // collected — mirrors C# and the `royalties_gold_on_victory` helper's
+    // `_on_victory` contract). The base reward gold is added separately by
+    // `apply_combat_gold_and_potion`; final = base + royalties, matching C#.
+    if combat.player_won && room_gives_rewards {
+        let royalties_stacks = combat.player_power_amount(sts2_core::PowerKind::Royalties);
+        if royalties_stacks > 0 {
+            rs.gain_gold(sts2_core::powers::regent::royalties_gold_on_victory(
+                royalties_stacks,
+            ));
+        }
+    }
+
+    // GH #604: `HeistPower.BeforeDeath` gold-back. C# `HeistPower.cs:19-28`
+    // adds a `GoldReward(Amount, wasGoldStolenBack: true)` to the combat room
+    // when the gremlin CARRYING the merc's stolen gold is killed; a gremlin
+    // that flees keeps it. The engine banks the amount on
+    // `CombatState::heist_recovered_gold` at the damage-death chokepoint
+    // (`damage.rs`, next to the `SwipePower` card reclaim), so all that is left
+    // here is settling it into run gold. This is the `Heist` arm of the
+    // `AddExtraReward` TODO the `Royalties` block above started working
+    // through.
+    //
+    // Victory-gated for the same reason as Royalties: an extra reward is
+    // collected off the rewards screen, which a lost combat never shows. Flat
+    // (no RNG), so — like Royalties — it cannot desync the `rewards` stream.
+    // Runs AFTER the RP17 `rs.gold = combat.gold` writeback so it is not
+    // clobbered by it.
+    if combat.player_won && room_gives_rewards && combat.heist_recovered_gold > 0 {
+        rs.gain_gold(combat.heist_recovered_gold);
     }
 }
 
@@ -2533,6 +2538,48 @@ mod tests {
             rs.gold,
             gold_before + 30,
             "Royalties(30) on victory grants 30 gold"
+        );
+    }
+
+    /// C# collects the Royalties extra reward from the reward screen, after
+    /// every `AfterCombatEnd` hook has run, so a Toy Box melt in that walk
+    /// already took a wax Bowler Hat out of `ModifyGoldGained`: the 30 gold
+    /// arrives unscaled. Rust granted it inside `exit_combat` before the melt,
+    /// at x1.25 (Regent loadout v0.111.0 seed 7135: 37 instead of 30).
+    #[test]
+    fn exit_combat_royalties_gold_misses_a_bowler_hat_toy_box_melts() {
+        let mut rs = fresh_run();
+        rs.relics.push(sts2_core::RelicId::ToyBox);
+        rs.relics.push(sts2_core::RelicId::BowlerHat);
+        rs.wax_relics.insert(sts2_core::RelicId::BowlerHat);
+        rs.relic_counters.insert(
+            sts2_core::RelicId::ToyBox,
+            crate::relics::shop_event::TOY_BOX_COMBATS - 1,
+        );
+        let gold_before = rs.gold;
+        let mut combat = enter_combat(&rs, select_first(act1_normal_pool()));
+        combat.player_won = true;
+        let player_uid = combat
+            .player
+            .creature_uid
+            .expect("player-Creature initialized");
+        sts2_core::card_effects::apply_power_to_creature(
+            &mut combat,
+            player_uid,
+            sts2_core::PowerKind::Royalties,
+            30,
+        );
+
+        exit_combat(&mut rs, &combat);
+
+        assert!(
+            !rs.owns_active_relic(sts2_core::RelicId::BowlerHat),
+            "melted"
+        );
+        assert_eq!(
+            rs.gold,
+            gold_before + 30,
+            "the melted hat no longer scales it"
         );
     }
 

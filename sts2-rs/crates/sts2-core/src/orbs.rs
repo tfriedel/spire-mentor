@@ -736,7 +736,7 @@ fn resolve_evoke(state: &mut CombatState, orb: Orb) -> SmallVec<[CreatureUid; 4]
             // C# `PlasmaOrb.cs` `EvokeVal => 2m` → `PlayerCmd.GainEnergy(2)`.
             // (Passive is +1; the Python pin collapsed both to +1 — a drift.)
             // Focus does NOT scale a Plasma evoke. Bead `sts2-rs-plasma-evoke`.
-            state.player.energy = state.player.energy.saturating_add(2);
+            state.gain_energy(2);
         }
         Orb::Glass { current_passive } => {
             // C# `GlassOrb.EvokeVal => PassiveVal * 2` with
@@ -829,7 +829,8 @@ pub fn trigger_orb_passive_at(state: &mut CombatState, idx: usize) {
             state.player.orbs.slots[idx] = Orb::Dark { stored: new };
         }
         Orb::Plasma => {
-            state.player.energy = state.player.energy.saturating_add(1);
+            // C# `PlasmaOrb.Passive`: `PlayerCmd.GainEnergy(1)`.
+            state.gain_energy(1);
         }
         Orb::Glass { current_passive } => {
             // C# `GlassOrb.Passive` (GlassOrb.cs:34-39): when
@@ -941,7 +942,7 @@ pub fn trigger_first_orb_passive_n(state: &mut CombatState, times: u32) {
                 // (Defect sweep `PLAYER_STATE|end_turn` seed 1171: Loop(2) +
                 // front Plasma, C# energy 6 vs Rust 4). Bead `sts2-rs-zlx.4`
                 // follow-up — matches the singular `trigger_first_orb_passive`.
-                state.player.energy = state.player.energy.saturating_add(1);
+                state.gain_energy(1);
             }
             Orb::Empty => {}
         }

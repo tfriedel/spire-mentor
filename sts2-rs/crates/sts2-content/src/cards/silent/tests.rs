@@ -4077,3 +4077,17 @@ fn echoing_slash_rewaves_on_kill() {
         "survivor takes 2 waves (10+10) — the kill of the low-HP enemy rewaves"
     );
 }
+
+/// Tactician's energy goes through `PlayerCmd.GainEnergy` (C# `Tactician.cs`
+/// `OnPlay`), so `NoEnergyGainPower.ModifyEnergyGain` zeroes it. A Sly
+/// Tactician discarded by Storm of Steel under No Energy Gain gained nothing
+/// in C# (Silent loadout v0.107.1 seed 7346).
+#[test]
+fn tactician_gains_no_energy_under_no_energy_gain() {
+    install_pool();
+    let (mut state, _) = fresh_state(CardId::Tactician, 0, 0);
+    state.player.energy = 2;
+    apply_power_to_player(&mut state, PowerKind::NoEnergyGain, 1);
+    let _ = lookup(CardId::Tactician).expect("registered")(&mut state, None);
+    assert_eq!(state.player.energy, 2);
+}

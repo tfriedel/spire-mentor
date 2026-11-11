@@ -20,7 +20,7 @@ pub(crate) fn play_sunder(state: &mut CombatState, target: Option<CreatureUid>) 
     let killed =
         sts2_core::card_effects::deal_damage_player_to_enemy_full(state, t, base).was_target_killed;
     if killed {
-        state.player.energy = state.player.energy.saturating_add(3);
+        state.gain_energy(3);
     }
     EffectResult::Resolved
 }

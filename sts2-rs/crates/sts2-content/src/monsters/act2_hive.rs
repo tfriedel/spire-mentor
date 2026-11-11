@@ -5899,6 +5899,55 @@ mod tests {
             .unwrap()
     }
 
+    /// Slumber ticks at its own listener position in the enemy turn-end walk
+    /// (SlumberPower.cs `AfterSideTurnEnd`). The beetle got Slumber at spawn,
+    /// before the player's Demise, so on its last sleeping turn Slumber
+    /// reaches 0 and `WakeUpMove` sheds the Plating BEFORE Demise's
+    /// unblockable damage lands. Rust ticked Slumber after the walk, so the
+    /// Demise hit woke it through the damage path and kept the Plating
+    /// (Necrobinder loadout v0.107.1 seed 7405).
+    #[test]
+    fn slumber_ticks_before_a_later_demise_and_sheds_the_plating() {
+        use sts2_core::card_effects::apply_power_to_creature;
+        use sts2_core::hooks::{dispatch_after_turn_end, TurnSideCtx};
+        use sts2_core::Side;
+
+        let mut state = CombatState::default();
+        state.player.current_hp = 70;
+        state.player.max_hp = 70;
+        let _ = state.init_player_creature();
+        let uid = spawn_real_slumbering_beetle(&mut state);
+        let slumber = state
+            .powers
+            .iter_mut()
+            .find(|p| p.kind == PowerKind::Slumber)
+            .unwrap();
+        slumber.amount = 1;
+        apply_power_to_creature(&mut state, uid, PowerKind::Demise, 9);
+        let hp0 = state
+            .creatures
+            .iter()
+            .find(|c| c.id == uid.0)
+            .unwrap()
+            .current_hp;
+
+        dispatch_after_turn_end(&mut state, &TurnSideCtx { side: Side::Enemy });
+
+        assert!(!state.powers.iter().any(|p| p.kind == PowerKind::Slumber));
+        assert!(
+            !state.powers.iter().any(|p| p.kind == PowerKind::Plating),
+            "the turn-end wake sheds the Plating before Demise hits",
+        );
+        let hp1 = state
+            .creatures
+            .iter()
+            .find(|c| c.id == uid.0)
+            .unwrap()
+            .current_hp;
+        assert_eq!(hp0 - hp1, 9, "Demise still hits");
+        assert_eq!(beetle_move(&state, uid), "ROLL_OUT_MOVE");
+    }
+
     /// **End-to-end SlumberingBeetle wake (turn-end path)** (`sts2-rs-ybtmu`):
     /// drive the *real* AI + Slumber(3)/Plating(15) through the real
     /// `dispatch_after_turn_end(Enemy)`. Pins the C#-headless-harness

@@ -14821,6 +14821,14 @@ fn run_foregone_conclusion_select(
     if state.player.draw.is_empty() {
         let _ = state.reshuffle_into_draw_with_after_shuffle();
     }
+    // C# awaits a Stratagem `AfterShuffle` pick that reshuffle opened before
+    // the FC select runs, so its card reaches the hand first even when FC's
+    // take covers the rest of the pile (Regent loadout v0.107.1 seed 7107).
+    // Leave the power live: the turn-start resume re-runs it once the pick
+    // lands ([`resume_foregone_conclusion_after_blocking_choice`]).
+    if state.pending_choice.is_some() {
+        return;
+    }
     let take = foregone_total as usize;
     if state.player.draw.len() <= take {
         // C# `CardSelectCmd.FromCombatPile` fast path (v0.111.0
@@ -14852,7 +14860,7 @@ fn run_foregone_conclusion_select(
                 c.powers.retain(|u| u.0 != pid);
             }
         }
-    } else if state.pending_choice.is_none() {
+    } else {
         let rarity_rank = crate::lookup_card_rarity_rank();
         let mut keyed: Vec<(u8, &'static str, crate::CardUid)> = state
             .player
@@ -14875,7 +14883,6 @@ fn run_foregone_conclusion_select(
         // `cards.Count > MinSelect`). Defer the picks AND the
         // `PowerCmd.Remove(this)` into the resolver — removing the power
         // now would let it re-fire next turn before the select resolves.
-        // Guard like the Stratagem path against a pre-existing open choice.
         let options: Vec<crate::ChoiceOption> = sorted
             .into_iter()
             .map(|uid| {
@@ -16454,8 +16461,10 @@ fn dispatch_after_card_played_player_powers(
                     // `energy` × `GainEnergy(1)` calls. Same armed-snapshot
                     // clause as Storm above.
                     crate::event_log::flash_player_power(state, PowerKind::Subroutine);
-                    let gain = amount.max(0);
-                    state.player.energy = state.player.energy.saturating_add(gain);
+                    // `energy` x `PlayerCmd.GainEnergy(1)`.
+                    for _ in 0..amount.max(0) {
+                        state.gain_energy(1);
+                    }
                 }
             // SerpentForm is intentionally absent from this commutative apply
             // loop: it deals random-target enemy damage and fires in the
@@ -18260,9 +18269,15 @@ fn dispatch_after_turn_end_body(state: &mut CombatState, ctx: &TurnSideCtx) {
         ctx.side == Side::Enemy && power_kind_live(state, PowerKind::BattlewornDummyTimeLimit);
     let consuming_shadow_live =
         ctx.side == Side::Player && power_kind_live(state, PowerKind::ConsumingShadow);
+    // The enemies' sleep ticks (Slumber, Asleep): once, never in a co-op seat pass.
+    let sleep_live = ctx.side == Side::Enemy
+        && !state.coop.seat_pass
+        && (power_kind_live(state, PowerKind::Slumber)
+            || power_kind_live(state, PowerKind::Asleep));
     if dark_embrace_live
         || dummy_timer_live
         || consuming_shadow_live
+        || sleep_live
         || state
             .powers
             .present_kinds()
@@ -18391,6 +18406,41 @@ fn dispatch_after_turn_end_body(state: &mut CombatState, ctx: &TurnSideCtx) {
                     }
                 }
             }
+            // ── SlumberPower / AsleepPower.AfterSideTurnEnd (enemy side) ──
+            // SlumberPower.cs / AsleepPower.cs: decrement, and wake the owner
+            // at 0 (SlumberingBeetle.WakeUpMove sheds the Plating). Peers of
+            // the owner's other power listeners, so each ticks at its
+            // application-order position: the earlier listeners' batched
+            // effects land first, and a later Demise on the beetle hits it
+            // already awake, so its damage no longer wakes it through
+            // `AfterDamageReceived`'s Stun path with the Plating kept
+            // (Necrobinder loadout v0.107.1 seed 7405).
+            if sleep_live {
+                if let ListenerRef::Power(u) = listener {
+                    let tick = state
+                        .powers
+                        .get_by_id(u.0)
+                        .filter(|p| matches!(p.kind, PowerKind::Slumber | PowerKind::Asleep))
+                        .map(|p| p.kind);
+                    if let Some(kind) = tick {
+                        let owner = state
+                            .creatures
+                            .iter()
+                            .find(|c| c.current_hp > 0 && c.powers.contains(&u))
+                            .map(|c| CreatureUid(c.id));
+                        if let Some(owner) = owner {
+                            apply_effects(state, &effects);
+                            effects.clear();
+                            if kind == PowerKind::Slumber {
+                                tick_slumber_and_maybe_wake(state, owner, true);
+                            } else {
+                                tick_asleep_and_maybe_wake(state, owner);
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
             if let Some(listener_effects) = after_turn_end(state, listener, ctx) {
                 let is_own = matches!(listener, ListenerRef::Power(u) if player_uids.contains(&u));
                 if is_own || ctx.side != Side::Player {
@@ -18484,59 +18534,8 @@ fn dispatch_after_turn_end_body(state: &mut CombatState, ctx: &TurnSideCtx) {
         let effects = collect_on_turn_end_enemy_side(state, &TurnSelfCtx::default());
         apply_effects(state, &effects);
     }
-    // The enemies' own turn-end lanes: once, never in a co-op seat pass.
-    if ctx.side == Side::Enemy && !state.coop.seat_pass {
-        // SlumberPower tick (SlumberingBeetle): C# `SlumberPower.AfterTurnEnd`
-        // decrements once per enemy turn-end and wakes the beetle at 0. Inline
-        // (not an Effect arm) because the wake removes a SECOND power (Plating)
-        // and forces an AI move — multi-power + AI mutation reads cleaner with
-        // `&mut` than the Effect-emitting walk (same rationale as the Slippery
-        // inline in `dispatch_after_damage_received`). Fires after the synthetic
-        // duration walk so Plating's own amount-decay has already run; the wake
-        // strips whatever Plating remains. Bead `sts2-rs-ybtmu`.
-        // present_kinds lane gate (perf): no live Slumber ⇒ nothing to tick.
-        if power_kind_live(state, PowerKind::Slumber) {
-            let slumbering = creatures_with_live_power(state, PowerKind::Slumber);
-            for uid in slumbering {
-                tick_slumber_and_maybe_wake(state, uid, /* refresh_telegraph */ true);
-            }
-        }
-
-        // AsleepPower tick (LagavulinMatriarch), GH #362. Same shape as the
-        // Slumber lane above and, until now, entirely missing: a whole-workspace
-        // grep for `PowerKind::Asleep` found only the spawn table and the
-        // damage-wake leg, so nothing ever decremented it. The world ticks
-        // ASLEEP 3 → 2 → 1 → gone; the mirror sat +1 at every snapshot and
-        // still held ASLEEP 1 + PLATING 10 + 10 block on the wake turn (6
-        // records in the 2026-08-03 live Necrobinder A1 corpus, 2 more in
-        // Regent) — the search planned against an elite asleep a turn longer
-        // than it really is, with phantom Plating, and mis-timed the wake.
-        if power_kind_live(state, PowerKind::Asleep) {
-            let sleeping = creatures_with_live_power(state, PowerKind::Asleep);
-            for uid in sleeping {
-                tick_asleep_and_maybe_wake(state, uid);
-            }
-        }
-    }
-}
-
-/// Alive enemies carrying a live instance of `kind`, in `enemy_uids` order.
-/// Shared by the turn-end sleep ticks so the two lanes cannot drift.
-fn creatures_with_live_power(state: &CombatState, kind: PowerKind) -> SmallVec<[CreatureUid; 2]> {
-    state
-        .enemy_uids
-        .iter()
-        .copied()
-        .filter(|uid| {
-            state.creatures.iter().any(|c| {
-                c.id == uid.0
-                    && c.current_hp > 0
-                    && c.powers
-                        .iter()
-                        .any(|u| state.powers.iter().any(|p| p.id == u.0 && p.kind == kind))
-            })
-        })
-        .collect()
+    // (Slumber and Asleep tick inside the walk above, at their listener
+    // positions.)
 }
 
 /// Fire `on_turn_end_enemy_side` on every listener and apply any deferred
@@ -22000,6 +21999,54 @@ mod tests {
             &mut state
         ));
         assert_eq!(state.player.hand.len(), 2);
+    }
+
+    /// The Stratagem pick that FC's own `ShuffleIfNecessary` opens is awaited
+    /// before FC's `FromCombatPile(Draw)` (ForegoneConclusionPower.cs), even
+    /// when FC's take covers the whole draw pile: C#'s Stratagem card goes to
+    /// hand first and FC takes what is left. Rust's whole-pile fast path took
+    /// both cards under the open Stratagem choice, so the hand order flipped
+    /// (Regent loadout v0.107.1 seed 7107).
+    #[test]
+    fn foregone_conclusion_fast_path_waits_for_a_stratagem_pick() {
+        use crate::cards::{CardId, CardType, TargetType};
+        let (mut state, fc_uid) = state_with_player_power(PowerKind::ForegoneConclusion, 2);
+        // A living player: a dead one trips the select's IsOverOrEnding guard.
+        state.player.current_hp = 80;
+        state.player.max_hp = 80;
+        let strat = power_uid(2);
+        state.powers.push(Power {
+            id: strat.0,
+            kind: PowerKind::Stratagem,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(strat);
+        for i in 0..2u32 {
+            let uid = crate::CardUid::new(i + 1).expect("nz");
+            state.cards.push(crate::Card {
+                uid,
+                card_id: CardId::StrikeIronclad,
+                card_type: CardType::Attack,
+                target_type: TargetType::Enemy,
+                ..crate::Card::pod_defaults()
+            });
+            state.player.discard.push(uid);
+        }
+
+        dispatch_before_hand_draw_powers(&mut state);
+
+        assert!(state.pending_choice.is_some(), "the Stratagem pick is open");
+        assert!(
+            state.player.hand.is_empty(),
+            "FC waits for the Stratagem pick"
+        );
+        assert!(
+            state.powers.iter().any(|p| p.id == fc_uid.0),
+            "FC has not fired yet",
+        );
     }
 
     /// Final-branch-review finding (bead `sts2-rs-ztl78`): the

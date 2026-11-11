@@ -14,7 +14,8 @@ pub(crate) fn play_tactician(state: &mut CombatState, _t: Option<CreatureUid>) -
     // Bead `sts2-rs-x9uqx`: C# `Tactician.cs` `EnergyVar(1)` with `OnUpgrade
     // UpgradeValueBy(1m)` → +1 energy base / +2 upgraded.
     let amt = if current_card_upgraded(state) { 2 } else { 1 };
-    state.player.energy = state.player.energy.saturating_add(amt);
+    // `PlayerCmd.GainEnergy`, so No Energy Gain zeroes it (seed 7346).
+    state.gain_energy(amt);
     EffectResult::Resolved
 }
 

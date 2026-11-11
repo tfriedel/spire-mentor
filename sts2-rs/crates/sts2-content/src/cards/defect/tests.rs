@@ -2711,3 +2711,28 @@ fn compact_transforms_in_place_one_at_a_time_v0107() {
         "each Fuel replaces its Status in place"
     );
 }
+
+/// Every Defect energy card gains through `PlayerCmd.GainEnergy` (C#
+/// `Turbo.cs`, `EnergySurge.cs`, `Sunder.cs`, `Supercritical.cs`,
+/// `DoubleEnergy.cs` `OnPlay`), so `NoEnergyGainPower` zeroes the gain.
+#[test]
+fn defect_energy_cards_gain_nothing_under_no_energy_gain() {
+    install_pool();
+    for id in [
+        CardId::Turbo,
+        CardId::EnergySurge,
+        CardId::Sunder,
+        CardId::Supercritical,
+        CardId::DoubleEnergy,
+    ] {
+        let (mut state, euid) = fresh_state(id, 99, 0);
+        state.creatures[0].current_hp = 5;
+        state.player.energy = 2;
+        apply_power_to_player(&mut state, PowerKind::NoEnergyGain, 1);
+        let _ = lookup(id).expect("registered")(&mut state, Some(euid));
+        assert_eq!(
+            state.player.energy, 2,
+            "{id:?} gained energy under NoEnergyGain"
+        );
+    }
+}

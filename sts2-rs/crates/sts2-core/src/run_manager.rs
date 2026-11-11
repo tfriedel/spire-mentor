@@ -2912,7 +2912,7 @@ impl RunManager {
                 self.card_reward_options.clear();
                 self.card_reward_upgraded.clear();
                 self.card_reward_enchantments.clear();
-                self.populate_hook_rewards(reward_room_type, hook_relics);
+                self.populate_hook_rewards(reward_room_type, hook_relics, false);
                 self.open_card_reward_phase();
                 return ActionResult::Advanced;
             }
@@ -2960,7 +2960,7 @@ impl RunManager {
             self.populate_fixed_extra_gold_rewards();
             // LavaRock's two act-1 boss relics, Wongo's three (`LavaRock.cs:38`,
             // `WongosMysteryTicket.cs:80`).
-            self.populate_hook_rewards(reward_room_type, hook_relics.clone());
+            self.populate_hook_rewards(reward_room_type, hook_relics.clone(), false);
             self.fire_before_combat_reward_offered(
                 reward_room_type,
                 card_options,
@@ -3071,7 +3071,9 @@ impl RunManager {
             // list — and the rewards-stream cursor — in lockstep with the
             // oracle. Without this the relic surfaced one step late, so the
             // card-reward-screen relic-list diff diverged (RP109/RP72).
-            self.run_state.drain_relic_rewards_directly();
+            // It is obtained only once the whole set is populated, hook
+            // additions included: `populate_hook_rewards` drains the queue at
+            // its end.
         }
         if elite_relic.is_some() {
             reward_set.push((3, RewardSlot::Other));
@@ -3098,8 +3100,19 @@ impl RunManager {
         //    neither was rolled, so the `Rewards` cursor fell 9 reads behind
         //    C# (act23 probe Necrobinder:1012, White Star).
         // All identical in v0.107.1 and v0.111.0.
-        reward_set.extend(self.populate_hook_rewards(reward_room_type, hook_relics.clone()));
-        self.apply_obtained_eggs_to_open_card_reward(relics_before_card_reward);
+        reward_set.extend(self.populate_hook_rewards(
+            reward_room_type,
+            hook_relics.clone(),
+            reward_room_type == crate::runstate::RoomType::Elite,
+        ));
+        let queued: Vec<usize> = reward_set
+            .iter()
+            .filter_map(|&(_, slot)| match slot {
+                RewardSlot::Queued(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        self.apply_obtained_eggs_to_open_card_reward(relics_before_card_reward, &queued);
         self.offer_first_sorted_card_reward(&reward_set);
         self.fire_before_combat_reward_offered(
             reward_room_type,
@@ -3152,10 +3165,7 @@ impl RunManager {
     /// SilverCrucible, WingCharm) read the reward's creation options or carry
     /// state that this id + upgrade + enchantment slate does not model, and
     /// LastingCandy's `TryModifyCardRewardOptions` adds a card.
-    fn apply_obtained_eggs_to_open_card_reward(&mut self, relics_before: usize) {
-        if self.phase != Phase::CardReward || self.card_reward_options.is_empty() {
-            return;
-        }
+    fn apply_obtained_eggs_to_open_card_reward(&mut self, relics_before: usize, queued: &[usize]) {
         let new_eggs: Vec<crate::RelicId> = self
             .run_state
             .relics
@@ -3175,13 +3185,52 @@ impl RunManager {
         if new_eggs.is_empty() {
             return;
         }
+        if self.phase == Phase::CardReward && !self.card_reward_options.is_empty() {
+            if let Some(upgraded) = self.eggs_over_slate(
+                &new_eggs,
+                &self.card_reward_options.clone(),
+                &self.card_reward_upgraded.clone(),
+            ) {
+                self.card_reward_upgraded = upgraded;
+            }
+        }
+        // A hook-added card reward of the same set (White Star / Prayer
+        // Wheel) is populated before the set's relics are obtained too, so it
+        // hears the same `RelicObtained`.
+        for &i in queued {
+            let Some(crate::runstate::Reward::Card(reward)) = self.run_state.pending_rewards.get(i)
+            else {
+                continue;
+            };
+            if reward.options.is_empty() {
+                continue;
+            }
+            let (options, upgraded) = (reward.options.clone(), reward.upgraded.clone());
+            if let Some(upgraded) = self.eggs_over_slate(&new_eggs, &options, &upgraded) {
+                if let Some(crate::runstate::Reward::Card(reward)) =
+                    self.run_state.pending_rewards.get_mut(i)
+                {
+                    reward.upgraded = upgraded;
+                }
+            }
+        }
+    }
+
+    /// Run `eggs`' late hooks over a slate of `options` (with per-option
+    /// `upgraded` flags, empty for none); the new flags when any option ends
+    /// up upgraded.
+    fn eggs_over_slate(
+        &mut self,
+        eggs: &[crate::RelicId],
+        options: &[crate::cards::CardId],
+        upgraded: &[bool],
+    ) -> Option<Vec<bool>> {
         let version = self.run_state.game_version;
-        let mut cards: Vec<crate::cards::Card> = self
-            .card_reward_options
+        let mut cards: Vec<crate::cards::Card> = options
             .iter()
             .enumerate()
             .map(|(i, &id)| {
-                let upgraded = self.card_reward_upgraded.get(i).copied().unwrap_or(false);
+                let upgraded = upgraded.get(i).copied().unwrap_or(false);
                 crate::build_card_for_version(id, upgraded, version).unwrap_or_else(|| {
                     crate::cards::Card {
                         card_id: id,
@@ -3191,14 +3240,15 @@ impl RunManager {
                 })
             })
             .collect();
-        for id in new_eggs {
+        for &id in eggs {
             if let Some(hook) = crate::run_effects::lookup_modify_card_reward_options_late(id) {
                 let _ = hook(&mut self.run_state, &mut cards);
             }
         }
-        if cards.iter().any(|c| c.upgraded) {
-            self.card_reward_upgraded = cards.iter().map(|c| c.upgraded).collect();
-        }
+        cards
+            .iter()
+            .any(|c| c.upgraded)
+            .then(|| cards.iter().map(|c| c.upgraded).collect())
     }
 
     /// Open the card reward C# offers first: the oracle offers a room's
@@ -3278,6 +3328,7 @@ impl RunManager {
         &mut self,
         reward_room_type: crate::runstate::RoomType,
         hook_relics: Vec<crate::RelicId>,
+        mut collect_relics: bool,
     ) -> Vec<(u8, RewardSlot)> {
         use crate::runstate::RoomType;
         let mut added_set = Vec::new();
@@ -3285,7 +3336,7 @@ impl RunManager {
             match (relic, reward_room_type) {
                 (crate::RelicId::BlackStar, RoomType::Elite) => {
                     self.run_state.offer_random_relic_rewards(1, &[None]);
-                    self.run_state.drain_relic_rewards_directly();
+                    collect_relics = true;
                     added_set.push((3, RewardSlot::Other));
                 }
                 (crate::RelicId::AmethystAubergine, _) => {
@@ -3311,7 +3362,7 @@ impl RunManager {
                     for reward in added {
                         if matches!(reward, crate::runstate::Reward::Relic(_)) {
                             self.run_state.offer_random_relic_rewards(1, &[None]);
-                            self.run_state.drain_relic_rewards_directly();
+                            collect_relics = true;
                             added_set.push((3, RewardSlot::Other));
                         }
                     }
@@ -3334,6 +3385,19 @@ impl RunManager {
                 }
                 _ => {}
             }
+        }
+        // The oracle auto-collects the set's relic rewards (the Elite's own
+        // and the ones added above) only after `GenerateWithoutOffering` has
+        // populated every reward (`RunSimulator.cs` collects after the call;
+        // the real game shows the populated set first). So a relic's
+        // `AfterObtained` reads RNG after a White Star / Prayer Wheel slate
+        // has rolled: Whetstone's `StableShuffle(Rng.Niche)` follows the Wing
+        // Charm `Rng.Niche` pick on the White Star reward (loadout Regent
+        // 7371, v0.107.1). `collect_relics` is set when the set holds an
+        // auto-collected relic reward (the Elite's, passed in, or one added
+        // above).
+        if collect_relics {
+            self.run_state.drain_relic_rewards_directly();
         }
         added_set
     }
@@ -3784,7 +3848,7 @@ impl RunManager {
         // An egg taken while its card reward is still open upgrades the
         // shown options (`CardReward.OnRelicObtained`), as when the egg came
         // with the combat rewards. A no-op when no card reward is open.
-        self.apply_obtained_eggs_to_open_card_reward(relics_before);
+        self.apply_obtained_eggs_to_open_card_reward(relics_before, &[]);
         // Bead `sts2-rs-l0wbw` (GH #70): same C# `TestMode.IsOn`
         // auto-resolution as `do_event_choice` — if accepting this relic
         // fired an after-obtained listener that queued more rewards
@@ -8260,6 +8324,63 @@ mod tests {
         assert!(rm.run_state.pending_rewards.is_empty());
     }
 
+    /// The Elite's relic is obtained only once the whole reward set is
+    /// populated: a White Star card reward rolls first (its Wing Charm pick
+    /// reads `Rng.Niche` before Whetstone's `AfterObtained` shuffle does), and
+    /// an egg among the relics still upgrades that queued slate through
+    /// `CardReward.OnRelicObtained` (`CardReward.cs`). Loadout Regent 7371
+    /// (v0.107.1).
+    #[test]
+    fn white_star_card_reward_rolls_before_the_elite_relic_is_obtained() {
+        use crate::runstate::{CardReward, Reward, RoomType};
+        use crate::{RelicId, RelicRarity};
+        static EGG_OWNED_AT_ROLL: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+        fn hook(rs: &mut RunState, _room: RoomType) -> CardReward {
+            *EGG_OWNED_AT_ROLL.lock().expect("lock") =
+                Some(rs.relics.contains(&RelicId::MoltenEgg));
+            CardReward::from_options(vec![crate::cards::CardId::Anger; 3])
+        }
+        crate::run_effects::register_modify_card_reward_options_late(
+            RelicId::MoltenEgg,
+            upgrade_all_if_molten_egg as crate::run_effects::ModifyCardRewardOptionsLateRunFn,
+        );
+        let mut callbacks = drain_test_callbacks();
+        callbacks.roll_hook_card_reward = Some(hook);
+        let mut rm = RunManager::new(7, CharacterId::Ironclad).with_content_callbacks(callbacks);
+        let mut by_rarity = std::collections::BTreeMap::new();
+        for rarity in [
+            RelicRarity::Common,
+            RelicRarity::Uncommon,
+            RelicRarity::Rare,
+        ] {
+            by_rarity.insert(rarity, vec![RelicId::MoltenEgg]);
+        }
+        rm.run_state
+            .populate_relic_grab_bag_by_rarity(by_rarity, Vec::new(), Vec::new());
+        rm.run_state.relics = vec![RelicId::WhiteStar];
+        rm.run_state.current_room = Some(crate::runstate::Room::new(RoomType::Elite));
+        rm.combat = Some(crate::CombatState {
+            is_over: true,
+            player_won: true,
+            ..crate::CombatState::default()
+        });
+        rm.set_phase(Phase::Combat);
+        let _ = rm.exit_combat_and_transition();
+        assert!(rm.run_state.relics.contains(&RelicId::MoltenEgg));
+        assert_eq!(*EGG_OWNED_AT_ROLL.lock().expect("lock"), Some(false));
+        let Some(Reward::Card(white_star)) = rm.run_state.pending_rewards.first() else {
+            panic!(
+                "White Star reward queued: {:?}",
+                rm.run_state.pending_rewards
+            );
+        };
+        assert_eq!(
+            white_star.upgraded,
+            vec![true; 3],
+            "the egg upgrades the queued slate"
+        );
+    }
+
     /// An "up to N" deck-enchant batch (Kifuda / Gnarled Hammer,
     /// `CardSelectorPrefs(prompt, 0, 3)`, `Kifuda.cs:26`) can be confirmed
     /// after one pick: the rest is dropped and the run moves on (act23 probe
@@ -10977,10 +11098,10 @@ mod tests {
         ];
         let before = rm.run_state.relics.len();
         rm.run_state.relics.push(crate::RelicId::Anchor);
-        rm.apply_obtained_eggs_to_open_card_reward(before);
+        rm.apply_obtained_eggs_to_open_card_reward(before, &[]);
         assert!(rm.card_reward_upgraded.iter().all(|u| !u));
         rm.run_state.relics.push(crate::RelicId::MoltenEgg);
-        rm.apply_obtained_eggs_to_open_card_reward(before);
+        rm.apply_obtained_eggs_to_open_card_reward(before, &[]);
         assert_eq!(rm.card_reward_upgraded, vec![true; 3]);
     }
 

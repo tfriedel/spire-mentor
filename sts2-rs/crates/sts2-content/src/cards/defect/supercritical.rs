@@ -9,7 +9,7 @@ use super::prelude::*;
 /// `sts2-rs-vaddk`.
 pub(crate) fn play_supercritical(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let amt = if current_card_upgraded(state) { 6 } else { 4 };
-    state.player.energy = state.player.energy.saturating_add(amt);
+    state.gain_energy(amt);
     EffectResult::Resolved
 }
 

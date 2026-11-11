@@ -7,7 +7,7 @@ use super::prelude::*;
 /// Bead `sts2-rs-2ror2`.
 pub(crate) fn play_alignment(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let amt = if current_card_upgraded(state) { 3 } else { 2 };
-    state.player.energy = state.player.energy.saturating_add(amt);
+    state.gain_energy(amt);
     EffectResult::Resolved
 }
 

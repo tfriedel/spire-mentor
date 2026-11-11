@@ -11,7 +11,7 @@ pub(crate) fn play_energy_surge(state: &mut CombatState, _t: Option<CreatureUid>
     let amt = if current_card_upgraded(state) { 3 } else { 2 };
     // C# `EnergySurge.cs`: every living player on the side gains it.
     sts2_core::coop::every_player(state, |state| {
-        state.player.energy = state.player.energy.saturating_add(amt);
+        state.gain_energy(amt);
     });
     EffectResult::Resolved
 }

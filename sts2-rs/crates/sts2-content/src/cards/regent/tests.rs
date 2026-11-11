@@ -4350,3 +4350,16 @@ fn mummified_hand_sees_void_form_spent_by_the_power_play() {
         );
     }
 }
+
+/// Alignment gains through `PlayerCmd.GainEnergy` (C# `Alignment.cs` `OnPlay`),
+/// so `NoEnergyGainPower` zeroes it.
+#[test]
+fn alignment_gains_nothing_under_no_energy_gain() {
+    install_pool();
+    let (mut state, _e) = fresh_state_with_enemy(200);
+    state.player.energy = 1;
+    apply_power_to_player(&mut state, PowerKind::NoEnergyGain, 1);
+    let _ = push_play_card(&mut state, CardId::Alignment, 0, 0);
+    let _ = dispatch(&mut state, CardId::Alignment, None);
+    assert_eq!(state.player.energy, 1);
+}

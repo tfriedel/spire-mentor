@@ -2218,9 +2218,9 @@ fn plasma_turn_start_passive(state: &mut CombatState) {
         .iter()
         .filter(|o| matches!(o, crate::orbs::Orb::Plasma))
         .count();
-    if plasma_count > 0 {
-        let add = i32::try_from(plasma_count).unwrap_or(i32::MAX);
-        state.player.energy = state.player.energy.saturating_add(add);
+    // One `PlayerCmd.GainEnergy(1)` per orb, each through `ModifyEnergyGain`.
+    for _ in 0..plasma_count {
+        state.gain_energy(1);
     }
 }
 
@@ -10083,6 +10083,12 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
             // v0.111.0: Juggling's `BeforeCardPlayed` runs per play iteration
             // (decomp JugglingPower.cs:36). No-op before v0.111.0.
             crate::hooks::juggling_before_card_played_v0111(state, card_uid, card.card_type);
+            // `SurroundedPower.BeforeCardPlayed` re-faces toward the target on
+            // every play iteration, not only the first (Defect loadout v0.107.1
+            // seed 7475: an echoed Uproar).
+            if let Some(t) = target_uid {
+                hooks::update_surrounded_facing(state, t);
+            }
         }
         // C# records `History.CardPlayStarted` once per play iteration, right
         // after `Hook.BeforeCardPlayed` (CardModel.cs:1926-1929), and
@@ -10186,6 +10192,12 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
                 // v0.111.0: Juggling's `BeforeCardPlayed` runs per play iteration
                 // (decomp JugglingPower.cs:36). No-op before v0.111.0.
                 crate::hooks::juggling_before_card_played_v0111(state, card_uid, card.card_type);
+                // `SurroundedPower.BeforeCardPlayed` re-faces toward the target on
+                // every play iteration, not only the first (Defect loadout v0.107.1
+                // seed 7475: an echoed Uproar).
+                if let Some(t) = target_uid {
+                    hooks::update_surrounded_facing(state, t);
+                }
             }
             // Per-iteration `History.CardPlayStarted` (CardModel.cs:1926-1929),
             // same as the `extra_plays` loop above.
@@ -12926,6 +12938,12 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
                 // v0.111.0: Juggling's `BeforeCardPlayed` runs per play iteration
                 // (decomp JugglingPower.cs:36). No-op before v0.111.0.
                 crate::hooks::juggling_before_card_played_v0111(state, top_uid, top_card_type);
+                // `SurroundedPower.BeforeCardPlayed` re-faces toward the target on
+                // every play iteration, not only the first (Defect loadout v0.107.1
+                // seed 7475: an echoed Uproar).
+                if let Some(t) = target_uid {
+                    hooks::update_surrounded_facing(state, t);
+                }
             }
             // `Stomp.BeforeCardPlayed` per play iteration, as above.
             if top_card_type == crate::cards::CardType::Attack {
@@ -23008,6 +23026,107 @@ mod tests {
     // + one echo replay); the second card fires it once (its first-in-series
     // index 1 is no longer `< amount`). The counter counts UP and resets to 0
     // each turn.
+
+    static SURROUNDED_FACING_AT_BODY: std::sync::Mutex<Vec<i32>> =
+        std::sync::Mutex::new(Vec::new());
+
+    fn surrounded_facing_now(state: &CombatState) -> i32 {
+        state
+            .powers
+            .iter()
+            .find(|p| p.kind == crate::PowerKind::Surrounded)
+            .map(|p| p.counter)
+            .expect("Surrounded")
+    }
+
+    /// Records the facing each play iteration's body sees, then turns toward
+    /// the first enemy (BackAttackLeft), as an auto-played Attack at a random
+    /// arm does in Uproar's body.
+    fn surrounded_turning_body(
+        state: &mut CombatState,
+        _t: Option<CreatureUid>,
+    ) -> crate::card_effects::EffectResult {
+        SURROUNDED_FACING_AT_BODY
+            .lock()
+            .unwrap()
+            .push(surrounded_facing_now(state));
+        let left = state.enemy_uids[0];
+        crate::hooks::update_surrounded_facing(state, left);
+        crate::card_effects::EffectResult::Resolved
+    }
+
+    /// C# `CardModel.OnPlayWrapper` fires `Hook.BeforeCardPlayed` once per
+    /// play iteration, so `SurroundedPower.BeforeCardPlayed` re-faces the
+    /// player toward the card's target before EVERY copy, not only the first.
+    /// An Echo Form'd Uproar at the Rocket whose first copy auto-played an
+    /// Attack at the Crusher turned back to the Rocket for its echo in C#;
+    /// Rust kept facing the Crusher, so the Rocket's back attack took the
+    /// 1.5x instead of the Crusher's (Defect loadout v0.107.1 seed 7475).
+    #[test]
+    #[serial_test::serial(global_registry)]
+    fn surrounded_re_faces_the_target_before_each_echo_copy() {
+        use crate::{Power, PowerKind};
+        crate::card_effects::install_default_registry();
+        crate::card_effects::register(
+            crate::cards::CardId::AscendersBane,
+            surrounded_turning_body as crate::card_effects::PlayCardFn,
+        );
+        SURROUNDED_FACING_AT_BODY.lock().unwrap().clear();
+
+        let mut state = state_with_cultists(2);
+        let _ = start_combat(&mut state);
+        let left = state.enemy_uids[0];
+        let right = state.enemy_uids[1];
+        crate::card_effects::apply_power_to_creature(
+            &mut state,
+            left,
+            PowerKind::BackAttackLeft,
+            1,
+        );
+        crate::card_effects::apply_power_to_creature(
+            &mut state,
+            right,
+            PowerKind::BackAttackRight,
+            1,
+        );
+        for (id, kind, counter) in [
+            (123, PowerKind::EchoForm, 0),
+            (
+                124,
+                PowerKind::Surrounded,
+                crate::hooks::SURROUNDED_FACING_LEFT,
+            ),
+        ] {
+            let pid = std::num::NonZeroU32::new(id).unwrap();
+            state.powers.push(Power {
+                id: pid,
+                kind,
+                amount: 1,
+                counter,
+                applier: None,
+                skip_next_tick: false,
+            });
+            state.player.powers.push(crate::PowerUid(pid));
+        }
+        let _ = start_player_turn(&mut state);
+
+        let mut card = j87_blank_strike((state.cards.len() + 1) as u32);
+        card.target_type = crate::cards::TargetType::Enemy;
+        let uid = card.uid;
+        state.cards.push(card);
+        state.player.hand.push(uid);
+        let hand_idx = (state.player.hand.len() - 1) as u8;
+        let _ = play_card(&mut state, hand_idx, Some(1));
+
+        assert_eq!(
+            *SURROUNDED_FACING_AT_BODY.lock().unwrap(),
+            vec![
+                crate::hooks::SURROUNDED_FACING_RIGHT,
+                crate::hooks::SURROUNDED_FACING_RIGHT
+            ],
+            "each copy faces its target (the right arm) before its body runs",
+        );
+    }
 
     /// EchoForm(amount=1): first card plays twice, second plays once.
     #[test]

@@ -9,7 +9,7 @@ pub(crate) fn play_turbo(state: &mut CombatState, _t: Option<CreatureUid>) -> Ef
     // UpgradeValueBy(1m)` → +2 energy base / +3 upgraded. Void-spawn rider
     // does not upgrade.
     let energy = if current_card_upgraded(state) { 3 } else { 2 };
-    state.player.energy = state.player.energy.saturating_add(energy);
+    state.gain_energy(energy);
     let _ = spawn_void(state, PileKind::Discard);
     EffectResult::Resolved
 }

@@ -42,7 +42,8 @@ pub(crate) fn on_after_side_turn_start_booming_conch(
         return EffectResult::NotImplemented;
     }
     // C# `Energy.BaseValue = 1` (CanonicalVars `EnergyVar(1)`).
-    state.player.energy = state.player.energy.saturating_add(1);
+    // `PlayerCmd.GainEnergy`, so No Energy Gain zeroes it.
+    state.gain_energy(1);
     EffectResult::Resolved
 }
 

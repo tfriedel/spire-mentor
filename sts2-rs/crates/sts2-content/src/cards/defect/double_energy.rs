@@ -5,7 +5,9 @@ use super::prelude::*;
 /// Bead `sts2-rs-2gh` G3 plumbing — handler reads + writes
 /// `state.player.energy`.
 pub(crate) fn play_double_energy(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    state.player.energy = state.player.energy.saturating_mul(2);
+    // C# `DoubleEnergy.cs`: `PlayerCmd.GainEnergy(Energy)`, so No Energy Gain
+    // zeroes it.
+    state.gain_energy(state.player.energy);
     EffectResult::Resolved
 }
 
