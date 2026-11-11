@@ -4108,6 +4108,17 @@ pub struct TurnEvents {
     /// `damage::with_deferred_enemy_deaths`; taken by the play's tail
     /// (`combat_loop::finish_faulted_card_play`). `false` at rest.
     pub card_play_faulted: bool,
+    /// The combat ended while an action was paused on a player choice: C#
+    /// `ActionExecutor` runs `CombatManager.CheckWinCondition` whenever the
+    /// running action pauses for one (`GameActionPlayerChoiceContext.
+    /// SignalPlayerChoiceBegun` -> `PauseActionForPlayerChoice`), so a card
+    /// whose `OnPlay` opens a prompting select (Quasar's
+    /// `FromChooseACardScreen`) once the enemies are dead ends the combat
+    /// there. `CombatManager.IsInProgress` is then false, so the
+    /// `AfterCardPlayed` that `CardModel.OnPlayWrapper` gates on it is skipped
+    /// for that card and every card whose play encloses it. Set by
+    /// `combat_loop::end_combat_at_choice_pause`; `false` at rest.
+    pub ended_at_choice_pause: bool,
     /// `Some` while a multi-target `CreatureCmd.Damage` is applying its hits:
     /// each hit's after-hit hooks (`AfterBlockBroken`, `AfterDamageGiven`,
     /// `AfterDamageReceived`) queue here and run once every target has lost
@@ -8024,6 +8035,19 @@ impl CombatState {
         // discard-pick (shadow census v8 seed 1048, cs=card_reward
         // rs=card_select). Mirror the guard at the single request site.
         if self.is_over || crate::combat_loop::combat_is_ending(self) {
+            // `FromChooseACardScreen` (a screen of generated cards: Quasar,
+            // Discovery, Splash, the class potions) has no such guard: it
+            // signals the player choice, and that pause ends the combat
+            // before the pick lands.
+            let choose_a_card = matches!(
+                kind,
+                ChoiceKind::AddGeneratedToHand
+                    | ChoiceKind::AddGeneratedFreeToHand
+                    | ChoiceKind::AddGeneratedRetainedToHand
+            ) && options.iter().all(|o| o.card_uid.is_none());
+            if choose_a_card {
+                crate::combat_loop::end_combat_at_choice_pause(self);
+            }
             return;
         }
         // Bead `sts2-rs-ve0oq`: PendingChoice indexes options with a

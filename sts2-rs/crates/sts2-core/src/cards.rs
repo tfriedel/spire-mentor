@@ -1486,6 +1486,15 @@ impl Card {
         // added (Ghost Seed's / Music Box's Ethereal, modelled as this combat
         // var) is gone and nothing re-applies it.
         self.combat_vars.zero(VarKey::EtherealThisCombat);
+        // It then re-runs `Enchantment?.ModifyCard()`: Tezcatara's Ember's
+        // `OnEnchant` (`EnergyCost.UpgradeBy(-GetWithModifiers(None))`) zeroes
+        // the canonical base `ResetForDowngrade` just restored, so a Dampened
+        // Ember card still costs 0 (random-loadout Ironclad 7505 v0.107.1). The
+        // other enchantments' `OnEnchant` only add keywords, which Rust reads
+        // off the enchantment itself.
+        if self.has_enchantment(EnchantmentId::TezcatarasEmber) && !self.is_x_cost() {
+            self.cost.upgrade_by(-i32::from(self.cost.base()));
+        }
         true
     }
 

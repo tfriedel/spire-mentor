@@ -911,44 +911,33 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
     // taken a wax Bowler Hat out of `ModifyGoldGained` (Regent loadout
     // v0.111.0 seed 7135: Royalties paid 30, not 37).
     //
-    // Royalties combat-victory gold (C# `RoyaltiesPower.AfterCombatEnd` →
-    // `room.AddExtraReward(player, new GoldReward(Amount))`). The Regent's
-    // `RoyaltiesCard` applies N stacks of `Royalties` mid-combat (Gold.BaseValue
-    // = 30); on a WON combat each stack is worth 1 gold, auto-collected with the
-    // rest of the reward set. This is the `Royalties` arm the `AddExtraReward`
-    // TODO above (Heist / Swipe / Royalties / TheHunt) flagged as pending — a
-    // flat grant (no RNG, stream-faithful). Granted here AFTER the RP17
-    // `rs.gold = combat.gold` writeback so it isn't clobbered, and gated on
-    // victory (a lost combat has no rewards screen, so the extra reward is never
-    // collected — mirrors C# and the `royalties_gold_on_victory` helper's
-    // `_on_victory` contract). The base reward gold is added separately by
-    // `apply_combat_gold_and_potion`; final = base + royalties, matching C#.
+    // They are fixed-amount `GoldReward`s the fight added to its room (C#
+    // `CombatRoom.AddExtraReward`), queued here in insertion order and
+    // collected by `RunState::grant_extra_reward_gold` right after the room's
+    // base gold and before its potion (`RewardsSet` sorts the set by
+    // `RewardsSetIndex`: gold 1, potion 2). Victory-gated: a lost combat
+    // never shows the rewards screen. Queued AFTER the RP17
+    // `rs.gold = combat.gold` writeback, so nothing clobbers them.
+    //
+    // GH #604: `HeistPower.BeforeDeath` gold-back (`HeistPower.cs`) adds a
+    // `GoldReward(Amount, wasGoldStolenBack: true)` when the gremlin CARRYING
+    // the merc's stolen gold is killed; a gremlin that flees keeps it. The
+    // engine banks the amount on `CombatState::heist_recovered_gold` at the
+    // damage-death chokepoint. Added mid-combat, so ahead of Royalties.
+    if combat.player_won && room_gives_rewards && combat.heist_recovered_gold > 0 {
+        rs.pending_extra_reward_gold
+            .push(combat.heist_recovered_gold);
+    }
+    // Royalties (`RoyaltiesPower.AfterCombatEnd` ->
+    // `room.AddExtraReward(player, new GoldReward(Amount))`): each stack the
+    // Regent's `RoyaltiesCard` applied is worth 1 gold on a won combat.
     if combat.player_won && room_gives_rewards {
         let royalties_stacks = combat.player_power_amount(sts2_core::PowerKind::Royalties);
         if royalties_stacks > 0 {
-            rs.gain_gold(sts2_core::powers::regent::royalties_gold_on_victory(
-                royalties_stacks,
-            ));
+            rs.pending_extra_reward_gold.push(
+                sts2_core::powers::regent::royalties_gold_on_victory(royalties_stacks),
+            );
         }
-    }
-
-    // GH #604: `HeistPower.BeforeDeath` gold-back. C# `HeistPower.cs:19-28`
-    // adds a `GoldReward(Amount, wasGoldStolenBack: true)` to the combat room
-    // when the gremlin CARRYING the merc's stolen gold is killed; a gremlin
-    // that flees keeps it. The engine banks the amount on
-    // `CombatState::heist_recovered_gold` at the damage-death chokepoint
-    // (`damage.rs`, next to the `SwipePower` card reclaim), so all that is left
-    // here is settling it into run gold. This is the `Heist` arm of the
-    // `AddExtraReward` TODO the `Royalties` block above started working
-    // through.
-    //
-    // Victory-gated for the same reason as Royalties: an extra reward is
-    // collected off the rewards screen, which a lost combat never shows. Flat
-    // (no RNG), so — like Royalties — it cannot desync the `rewards` stream.
-    // Runs AFTER the RP17 `rs.gold = combat.gold` writeback so it is not
-    // clobbered by it.
-    if combat.player_won && room_gives_rewards && combat.heist_recovered_gold > 0 {
-        rs.gain_gold(combat.heist_recovered_gold);
     }
 }
 
@@ -2534,6 +2523,10 @@ mod tests {
 
         exit_combat(&mut rs, &combat);
 
+        // The reward screen collects the queued extra gold.
+
+        rs.grant_extra_reward_gold();
+
         assert_eq!(
             rs.gold,
             gold_before + 30,
@@ -2571,6 +2564,10 @@ mod tests {
         );
 
         exit_combat(&mut rs, &combat);
+
+        // The reward screen collects the queued extra gold.
+
+        rs.grant_extra_reward_gold();
 
         assert!(
             !rs.owns_active_relic(sts2_core::RelicId::BowlerHat),
@@ -2618,6 +2615,10 @@ mod tests {
             }
 
             exit_combat(&mut rs, &combat);
+
+            // The reward screen collects the queued extra gold.
+
+            rs.grant_extra_reward_gold();
 
             let (gold, removals) = if expect_extras {
                 (
@@ -2786,6 +2787,10 @@ mod tests {
 
         exit_combat(&mut rs, &combat);
 
+        // The reward screen collects the queued extra gold.
+
+        rs.grant_extra_reward_gold();
+
         (rs.gold - gold, rs.pending_rewards.len() - pending)
     }
 
@@ -2823,8 +2828,8 @@ mod tests {
     }
 
     /// GH #604: C# `HeistPower.BeforeDeath` hands the merc's stolen gold back
-    /// as a `GoldReward` when the carrier is killed. `exit_combat` settles the
-    /// engine-side ledger into run gold — on a WON combat only, since an extra
+    /// as a `GoldReward` when the carrier is killed. `exit_combat` queues the
+    /// engine-side ledger as reward gold — on a WON combat only, since an extra
     /// reward is collected off a rewards screen a lost combat never shows.
     #[test]
     fn exit_combat_returns_heist_gold_on_victory_only() {
@@ -2836,6 +2841,8 @@ mod tests {
         let before = rs.gold;
         combat.player_won = false;
         exit_combat(&mut rs, &combat);
+        // The reward screen collects the queued extra gold.
+        rs.grant_extra_reward_gold();
         assert_eq!(
             rs.gold, before,
             "a lost combat never reaches the rewards screen"
@@ -2848,6 +2855,8 @@ mod tests {
         let before = rs.gold;
         combat.player_won = true;
         exit_combat(&mut rs, &combat);
+        // The reward screen collects the queued extra gold.
+        rs.grant_extra_reward_gold();
         assert_eq!(
             rs.gold,
             before + 42,

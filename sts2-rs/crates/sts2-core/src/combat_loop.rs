@@ -8169,6 +8169,11 @@ fn after_card_played_buses_from(
     relic_from: Option<usize>,
     park_on_draw: bool,
 ) -> Option<usize> {
+    // The combat ended at a choice pause inside this play: C# `OnPlayWrapper`
+    // skips `Hook.AfterCardPlayed` once `CombatManager.IsInProgress` is false.
+    if state.combat_log.ended_at_choice_pause {
+        return None;
+    }
     if let Some(from) = relic_from {
         if let Some(next) = after_card_played_relics_from(state, played_ctx, from, park_on_draw) {
             return Some(next);
@@ -12593,6 +12598,26 @@ fn after_played_draw_suspended(state: &CombatState, draw_was_parked: bool) -> bo
     !draw_was_parked
         && state.pending_draw_resume.is_some()
         && auto_play_choice_should_surface(state)
+}
+
+/// End the combat at a select that pauses the running action while the
+/// combat is ending. C# `ActionExecutor` checks the win condition whenever an
+/// action pauses for a player choice, not only when it finishes
+/// (ActionExecutor.cs; `GameActionPlayerChoiceContext.SignalPlayerChoiceBegun`
+/// -> `PauseActionForPlayerChoice`). `CardSelectCmd.FromChooseACardScreen`
+/// signals one without checking `IsOverOrEnding`, so Quasar's screen opened
+/// after the last enemy died ends the combat there. `CombatManager.IsInProgress`
+/// is false from then on, so the `AfterCardPlayed` of the prompting card and
+/// of every play enclosing it never fires (CardModel.cs `OnPlayWrapper`):
+/// Tuning Fork does not count them (Regent 7654 v0.111.0).
+pub fn end_combat_at_choice_pause(state: &mut CombatState) {
+    if state.is_over || !combat_is_ending(state) {
+        return;
+    }
+    let _ = check_combat_end(state);
+    if state.is_over {
+        state.combat_log.ended_at_choice_pause = true;
+    }
 }
 
 /// Does the open choice prompt the player? C# `optList.Count == 0` is an

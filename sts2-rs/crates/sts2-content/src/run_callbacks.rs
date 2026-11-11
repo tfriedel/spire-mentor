@@ -504,38 +504,26 @@ fn roll_out_of_combat_potion_kind(rs: &mut RunState) -> Option<sts2_core::potion
 fn apply_combat_gold_and_potion(rs: &mut RunState, room_type: RoomType) -> bool {
     // (1) potion-odds NextFloat + pity update; `true` ⇒ a potion drops.
     let potion_drops = rs.roll_potion_reward(room_type);
-    // (2) gold NextInt → apply immediately, scaled by the escaped-creature
-    // GoldProportion that `exit_combat` stashed (`sts2-rs-RP15`).
+    // (2) gold NextInt, scaled by the escaped-creature GoldProportion that
+    // `exit_combat` stashed (`sts2-rs-RP15`).
     let gold_proportion = rs.last_combat_gold_proportion;
-    if let Some(amount) = rs.roll_encounter_gold(room_type, gold_proportion) {
-        rs.gain_gold(amount);
-    }
+    let base_gold = rs.roll_encounter_gold(room_type, gold_proportion);
     // (3) potion-contents off the SAME `Rewards` stream (only on a drop).
-    if potion_drops {
+    let potion = if potion_drops {
         let character = rs.character_id;
-        if let Some(kind) = crate::potions::all::create_random_potions_out_of_combat(
-            &mut rs.rng.rewards,
-            character,
-            1,
-        )
-        .into_iter()
-        .next()
-        {
-            // Reward claim: on a full belt this queues an interactive
-            // discard-to-claim swap (or counts the drop) instead of
-            // silently evaporating — C# leaves the TooFull `PotionReward`
-            // claimable on the reward screen (GH #252).
-            let _ = rs.claim_potion_reward(kind);
-        }
-    }
+        crate::potions::all::create_random_potions_out_of_combat(&mut rs.rng.rewards, character, 1)
+            .into_iter()
+            .next()
+    } else {
+        None
+    };
     // (4) `modify_rewards` relic bonuses (C# `RelicModel.TryModifyRewards`,
     // applied to the combat reward set). The hook bus exists + is tested but
     // was never wired into the LIVE combat-reward path, so AmethystAubergine's
     // `GoldReward(15)` per Monster/Elite (`AmethystAubergine.cs:42`) was never
     // granted — the rs-lower half of the gold class (IC:1009 elite @266:
-    // C# +15). The headless auto-collects gold rewards, so credit the appended
-    // `Reward::Gold` here. Listeners are pure pushes (no RNG), so this consumes
-    // no `Rewards` reads and stays stream-faithful. Card/Relic bonuses from the
+    // C# +15). Listeners are pure pushes (no RNG), so this consumes no
+    // `Rewards` reads and stays stream-faithful. Card/Relic bonuses from the
     // same hook (BlackStar / LavaRock / Wongo relics, PrayerWheel / WhiteStar
     // cards) are rolled by `RunManager::offer_combat_room_rewards`'s hook
     // walk, in relic order and after the card reward (`RewardsSet.cs:139-146`).
@@ -555,8 +543,23 @@ fn apply_combat_gold_and_potion(rs: &mut RunState, room_type: RoomType) -> bool 
             _ => None,
         })
         .sum();
+    // The headless auto-collects the set in `RewardsSet`'s sorted order
+    // (`RewardsSetIndex`: gold 1, potion 2; stable among the golds): the
+    // base gold, the fight's extra gold (Heist, Royalties) and the hook gold,
+    // then the potion.
+    if let Some(amount) = base_gold {
+        rs.gain_gold(amount);
+    }
+    rs.grant_extra_reward_gold();
     if bonus_gold > 0 {
         rs.gain_gold(bonus_gold);
+    }
+    if let Some(kind) = potion {
+        // Reward claim: on a full belt this queues an interactive
+        // discard-to-claim swap (or counts the drop) instead of
+        // silently evaporating — C# leaves the TooFull `PotionReward`
+        // claimable on the reward screen (GH #252).
+        let _ = rs.claim_potion_reward(kind);
     }
     potion_drops
 }
@@ -1705,6 +1708,60 @@ mod tests {
             "base+15 bonus in [25,35], got {}",
             rs.gold
         );
+    }
+
+    static GOLD_GAINS: std::sync::Mutex<Vec<(i32, usize)>> = std::sync::Mutex::new(Vec::new());
+
+    fn record_gold_gain(rs: &mut RunState, amount: i32) -> sts2_core::EffectResult {
+        GOLD_GAINS
+            .lock()
+            .expect("gold log")
+            .push((amount, rs.potions.len()));
+        sts2_core::EffectResult::Resolved
+    }
+
+    /// C# `RewardsSet.GenerateWithoutOffering` sorts the set by
+    /// `RewardsSetIndex` (gold 1, potion 2) and the headless takes it in that
+    /// order: the base gold, the fight's extra gold (Heist then Royalties, the
+    /// `AddExtraReward` order) and Amethyst Aubergine's gold all land before
+    /// the potion. Rust credited the extras in `exit_combat`, ahead of the
+    /// base gold.
+    #[test]
+    fn combat_rewards_take_every_gold_before_the_potion() {
+        crate::relics::dispatch::ensure_installed();
+        sts2_core::run_effects::register_on_gold_gained(
+            RelicId::Akabeko,
+            record_gold_gain as sts2_core::run_effects::OnGoldGainedRunFn,
+        );
+        let mut rm = new_run_manager_for_character(42, CharacterId::Ironclad).with_neow_start();
+        initialize_run_setup(&mut rm);
+        let rs = &mut rm.run_state;
+        rs.last_combat_gold_proportion = 1.0;
+        rs.potions.clear();
+        rs.potion_reward_odds.current_value = 1.0;
+        rs.relics.push(RelicId::AmethystAubergine);
+        rs.pending_extra_reward_gold = vec![7, 30];
+        GOLD_GAINS.lock().expect("gold log").clear();
+
+        assert!(apply_combat_gold_and_potion(rs, RoomType::Monster));
+
+        let gains = GOLD_GAINS.lock().expect("gold log").clone();
+        assert_eq!(gains.len(), 4, "{gains:?}");
+        assert!(
+            (10..=20).contains(&gains[0].0),
+            "base gold first: {gains:?}"
+        );
+        assert_eq!(
+            gains[1..].iter().map(|g| g.0).collect::<Vec<_>>(),
+            [7, 30, 15],
+            "Heist, Royalties, then the Aubergine"
+        );
+        assert!(
+            gains.iter().all(|&(_, potions)| potions == 0),
+            "no potion before the gold: {gains:?}"
+        );
+        assert_eq!(rs.potions.len(), 1, "the potion is claimed last");
+        assert!(rs.pending_extra_reward_gold.is_empty());
     }
 
     /// Task #19 end-to-end: `generate_boss_relic_pool` returns the NEXT

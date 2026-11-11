@@ -421,6 +421,27 @@ mod tests {
         assert_eq!(c.local_cost(), 0);
     }
 
+    /// C# `CardModel.DowngradeInternal` resets the base cost to canonical
+    /// and then re-runs `Enchantment.ModifyCard`, whose `OnEnchant` zeroes
+    /// the base again: a Dampen-downgraded Tezcatara's Ember Strike still
+    /// costs 0 (random-loadout Ironclad 7505 v0.107.1).
+    #[test]
+    fn tezcataras_ember_survives_a_downgrade() {
+        for version in [
+            sts2_core::GameVersion::V0_107_1,
+            sts2_core::GameVersion::V0_111_0,
+        ] {
+            crate::relics::dispatch::ensure_installed();
+            let mut c = sts2_core::build_card_for_version(CardId::StrikeIronclad, false, version)
+                .expect("strike");
+            let _ = apply_static_enchantment(&mut c, EnchantmentId::TezcatarasEmber, 1);
+            assert!(c.upgrade_for(version));
+            assert!(c.downgrade_for(version));
+            assert_eq!(c.cost.base(), 0, "{version:?}: the enchant re-runs");
+            assert_eq!(c.local_cost(), 0, "{version:?}");
+        }
+    }
+
     #[test]
     fn souls_power_removes_exhaust() {
         let mut c = strike_card();

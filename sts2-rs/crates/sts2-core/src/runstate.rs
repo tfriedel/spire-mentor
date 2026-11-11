@@ -1253,6 +1253,16 @@ pub struct RunState {
     /// `sts2-rs-RP15`.
     pub last_combat_gold_proportion: f64,
 
+    /// The fixed-amount `GoldReward`s the just-won fight added to its room
+    /// (C# `CombatRoom.AddExtraReward`: a killed carrier's Heist gold, then
+    /// Royalties' at combat end), in insertion order. `exit_combat` queues
+    /// them; [`Self::grant_extra_reward_gold`] collects them right after the
+    /// room's base gold. `RewardsSet.GenerateWithoutOffering` sorts the set
+    /// by `RewardsSetIndex` (gold 1, potion 2, …) and the rewards are taken
+    /// in that order, so every gold reward lands before the potion. Empty
+    /// outside the combat-exit step.
+    pub pending_extra_reward_gold: Vec<i32>,
+
     /// The just-won combat's encounter gold bounds when the encounter
     /// overrides C# `EncounterModel.MinGoldReward`/`MaxGoldReward` (only
     /// `FakeMerchantEventEncounter`, a flat 300 — see
@@ -2138,6 +2148,7 @@ impl Default for RunState {
             relics: Vec::new(),
             last_obtained_relic: None,
             last_combat_gold_proportion: 1.0,
+            pending_extra_reward_gold: Vec::new(),
             combat_gold_bounds_override: None,
             dusty_tome_setup_card: None,
             current_room: None,
@@ -5178,6 +5189,14 @@ impl RunState {
     /// `gain_gold` has the same `if amount <= 0: return` guard at line
     /// 121, so the relic hooks never fire on debits. Bead `sts2-rs-xqvn`
     /// (initial surface), `sts2-rs-wag75` (gain-hook pipeline).
+    /// Collect the queued [`Self::pending_extra_reward_gold`], each as its
+    /// own `PlayerCmd.GainGold`. A no-op once drained.
+    pub fn grant_extra_reward_gold(&mut self) {
+        for amount in std::mem::take(&mut self.pending_extra_reward_gold) {
+            self.gain_gold(amount);
+        }
+    }
+
     pub fn gain_gold(&mut self, delta: i32) {
         // Bead `sts2-rs-w9vpp`: saturating_add at both the negative-delta
         // short-circuit and the post-`should_gain_gold` credit. No

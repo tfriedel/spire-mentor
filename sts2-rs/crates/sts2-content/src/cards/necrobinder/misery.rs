@@ -38,11 +38,15 @@ pub(crate) fn play_misery(state: &mut CombatState, target: Option<CreatureUid>) 
     let t = target.expect("Misery: Enemy-targeted");
 
     // 1. Snapshot the target's debuffs (kind + amount + C# `Applier`) before
-    // the hit.
+    // the hit. A corpse has none: C# `CreatureCmd.Kill` strips it with
+    // `RemoveAllPowersAfterDeath`, keeping only a few non-debuff survivors
+    // (Minion, Adaptable, ...). Rust keeps corpse powers, so a replay of a
+    // Misery that killed its target copied them again (random-loadout
+    // Necrobinder 7600 v0.111.0: the Rock's Imbalanced, 2 instead of 1).
     let original_debuffs: Vec<Debuff> = state
         .creatures
         .iter()
-        .find(|c| c.id == t.0)
+        .find(|c| c.id == t.0 && c.current_hp > 0)
         .map(|c| {
             c.powers
                 .iter()

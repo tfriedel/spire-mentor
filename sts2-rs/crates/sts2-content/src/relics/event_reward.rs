@@ -1916,13 +1916,16 @@ fn listener_paels_tooth_after_obtained(rs: &mut RunState) -> EffectResult {
         return EffectResult::NotImplemented;
     }
     // Candidate set: master-deck (idx, card_id, upgraded) tuples for
-    // non-upgraded AND removable cards.
+    // upgradable AND removable cards. `IsUpgradable`, not `!upgraded`: a
+    // curse is never upgradable, so a Guilty must not count toward the
+    // removals queued below (the select's own filter already skips it).
     let mut candidates: Vec<(usize, sts2_core::cards::CardId, bool)> = rs
         .master_deck
         .iter()
         .enumerate()
         .filter_map(|(idx, c)| {
-            (!c.upgraded && is_paels_tooth_removable(c)).then_some((idx, c.card_id, c.upgraded))
+            (c.is_upgradable() && is_paels_tooth_removable(c))
+                .then_some((idx, c.card_id, c.upgraded))
         })
         .collect();
     // Sort by card_id for parity with Python's `reference_card_entry`
@@ -5113,6 +5116,33 @@ mod tests {
         for stored in &rs.paels_tooth_stored {
             assert!(!stored.upgraded, "stowed cards are not pre-upgraded");
         }
+    }
+
+    /// The tooth's pool is `IsUpgradable`, not "not yet upgraded": a curse
+    /// (`MaxUpgradeLevel => 0`) is never offered. With 4 upgradable cards
+    /// and a Guilty curse, C# auto-takes the 4 (`FromDeckGeneric`, count <=
+    /// MinSelect) and the run moves on. Rust counted the curse as a 5th
+    /// candidate and queued 5 removals, so after the 4 a `card_select` with
+    /// no offer was left open (random-loadout Necrobinder 7602 v0.107.1).
+    #[test]
+    fn listener_paels_tooth_after_obtained_skips_a_curse() {
+        crate::relics::dispatch::ensure_installed();
+        let v = sts2_core::GameVersion::V0_107_1;
+        let mut rs = RunState::new();
+        for _ in 0..4 {
+            rs.master_deck
+                .push(deck_card(sts2_core::cards::CardId::Anger));
+        }
+        rs.master_deck.push(
+            sts2_core::build_card_for_version(sts2_core::cards::CardId::Guilty, false, v)
+                .expect("Guilty spec"),
+        );
+        rs.interactive_card_removal = true;
+        rs.relics.push(RelicId::PaelsTooth);
+        rs.last_obtained_relic = Some(RelicId::PaelsTooth);
+        let _ = sts2_core::run_effects::dispatch_after_obtained(&mut rs);
+        assert_eq!(rs.pending_deck_removals, 4, "the curse is not upgradable");
+        assert!(rs.pending_removal_paels_tooth);
     }
 
     /// PaelsTooth caps stowage at 5 cards even if more candidates exist.

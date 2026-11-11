@@ -2950,6 +2950,9 @@ impl RunManager {
             if let Some(apply) = self.callbacks.apply_combat_gold_and_potion {
                 let _ = apply(&mut self.run_state, reward_room_type);
             }
+            // The callback collects the room's extra gold after its base
+            // gold; without one (raw-core tests) it is collected here.
+            self.run_state.grant_extra_reward_gold();
             // Advance into the next act only AFTER the boss reward chain
             // (card reward, then the boss-relic / Ancient choice) fully
             // drains — `advance_after_card_reward` (empty pool) or
@@ -3015,6 +3018,7 @@ impl RunManager {
             .callbacks
             .apply_combat_gold_and_potion
             .is_some_and(|apply| apply(&mut self.run_state, reward_room_type));
+        self.run_state.grant_extra_reward_gold();
         // The set in C# insertion order, as (`RewardsSetIndex`, slot), for
         // the `List.Sort` emulation below (`RewardsSet.cs:148`).
         let mut reward_set = Vec::new();
@@ -3414,8 +3418,8 @@ impl RunManager {
     ///
     /// [decompiled C# omitted — see the cited path]
     ///
-    /// The amounts themselves are already credited by the content
-    /// `exit_combat` (they equal `_min == _max`), so only the draw is left.
+    /// The amounts themselves (`_min == _max`) are collected from
+    /// `RunState::pending_extra_reward_gold`, so only the draw is left.
     /// Hook gold (Amethyst Aubergine's `GoldReward(15)`) is populated by its
     /// constructor and `GenerateWithoutOffering` skips it (`!IsPopulated`),
     /// so it reads nothing. Same in v0.111.0. Ported from
@@ -5758,13 +5762,17 @@ impl RunManager {
             return result;
         }
         self.grant_event_combat_outcome(&req, clean_victory);
+        // The extra gold `exit_combat` queued for a fight that grants its
+        // room rewards outside the base set (BattlewornDummy's
+        // `RewardsCmd.OfferCustom`).
+        self.run_state.grant_extra_reward_gold();
         // v0.111.0 `BattlewornDummy.Resume` appends the room's `ExtraRewards`
         // after its own setting reward and offers the lot through
         // `RewardsCmd.OfferCustom` (`BattlewornDummy.cs:110-116`), whose
         // populate pass reads `Rewards` once per fixed extra `GoldReward`
         // (Heist, Royalties; `RewardsSet.cs:135-138`). The setting reward was
         // rolled just above in the resume, so these draws land after it.
-        // `exit_combat` already credited the gold; only the draws are left.
+        // The gold itself was collected from the queue above.
         if clean_victory
             && self.run_state.game_version >= crate::GameVersion::V0_111_0
             && matches!(

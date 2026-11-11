@@ -3247,3 +3247,136 @@ fn malaise_x0_onto_existing_weak_spends_unsettling_lamp_v0107() {
     let _ = sts2_core::combat_loop::play_card(&mut state, neutralize, Some(0));
     assert_eq!(enemy_power(&state, enemy, PowerKind::Weak), 3);
 }
+
+/// Random-loadout Necrobinder 7600 v0.111.0 act2: a Misery with Replay 1
+/// kills the Bowlbug Rock on its first play and copies the Rock's Doom and
+/// Imbalanced to the beetle. The replay targets the corpse, and C#
+/// `CreatureCmd.Kill` has already stripped it (`RemoveAllPowersAfterDeath`),
+/// so the replay finds no debuffs to copy. Rust keeps corpse powers, and the
+/// replay copied Imbalanced a second time (beetle Imbalanced 2, C# 1).
+#[test]
+fn misery_replay_on_a_killed_target_copies_nothing() {
+    for version in [V107, V111] {
+        let mut state = fresh(version, CharacterId::Necrobinder);
+        let rock = first_enemy(&state);
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id == rock.0) {
+            c.species = Some(MonsterKind::BowlbugRock);
+            c.monster_id = MonsterId("BowlbugRock");
+            c.current_hp = 4;
+        }
+        add_enemy_power(&mut state, rock, 800, PowerKind::Imbalanced, 1);
+        add_enemy_power(&mut state, rock, 801, PowerKind::Weak, 2);
+        let other = add_enemy(&mut state, 50, 100);
+        let i = push_hand(&mut state, CardId::Misery, false);
+        let uid = state.player.hand[usize::from(i)];
+        state.cards[uid.0.get() as usize - 1].base_replay_count = 1;
+        let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+        assert_eq!(hp_of(&state, rock), 0, "{version:?}: the first play kills");
+        assert_eq!(
+            enemy_power(&state, other, PowerKind::Imbalanced),
+            1,
+            "{version:?}: copied once"
+        );
+        assert_eq!(
+            enemy_power(&state, other, PowerKind::Weak),
+            2,
+            "{version:?}: copied once"
+        );
+    }
+}
+
+fn tuning_fork_regent(version: GameVersion, enemy_hp: i32) -> CombatState {
+    let mut state = fresh(version, CharacterId::Regent);
+    state.creatures[0].current_hp = enemy_hp;
+    state.player.stars = 10;
+    add_player_power(&mut state, 50, PowerKind::TheSealedThrone, 1);
+    add_player_power(&mut state, 51, PowerKind::BlackHole, 3);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::TuningFork,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    });
+    state
+}
+
+/// C# pauses the action when a select prompts (`SignalPlayerChoiceBegun` ->
+/// `ActionQueueSet.PauseActionForPlayerChoice`), and `ActionExecutor` checks
+/// the win condition at every pause (ActionExecutor.cs, both builds). The
+/// Sealed Throne's star feeds Black Hole in `BeforeCardPlayed`, which kills
+/// the last enemy; Quasar's choose-a-card screen then pauses the play, the
+/// combat ends there, and `OnPlayWrapper` skips `Hook.AfterCardPlayed`
+/// (gated on `IsInProgress`). Tuning Fork does not count Quasar.
+#[test]
+fn quasar_prompt_after_a_lethal_before_card_played_ends_the_combat() {
+    for version in [V107, V111] {
+        let mut state = tuning_fork_regent(version, 3);
+        let i = push_hand(&mut state, CardId::Quasar, false);
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        while state.pending_choice.is_some() {
+            let pick = sts2_core::legal_actions(&state)
+                .into_iter()
+                .find_map(|a| match a {
+                    sts2_core::Action::ResolveChoice { selection } => Some(selection),
+                    _ => None,
+                })
+                .expect("a pick");
+            let _ = sts2_core::apply(
+                &mut state,
+                sts2_core::Action::ResolveChoice { selection: pick },
+            );
+        }
+        assert!(state.is_over, "{version:?}: Black Hole killed the enemy");
+        assert_eq!(
+            state.relics[0].counter, 0,
+            "{version:?}: no AfterCardPlayed once the combat ended at the prompt"
+        );
+    }
+}
+
+/// Random-loadout Regent 7654 v0.111.0: Decisions, Decisions auto-plays a
+/// lone Quasar; the Sealed Throne's star feeds Black Hole in Quasar's
+/// `BeforeCardPlayed`, which kills the last enemy, and Quasar's prompt then
+/// ends the combat. Neither Quasar nor Decisions, Decisions fires
+/// `AfterCardPlayed`, so Tuning Fork stays put (Rust counted both: 6 -> 8,
+/// and the next fight's 10th Skill gave 7 Block too early).
+#[test]
+fn decisions_decisions_quasar_prompt_after_a_lethal_ends_the_combat() {
+    for version in [V107, V111] {
+        let mut state = tuning_fork_regent(version, 5);
+        let _ = push_hand(&mut state, CardId::Quasar, false);
+        let i = push_hand(&mut state, CardId::DecisionsDecisions, false);
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::PlayCard {
+                hand_index: i,
+                target: None,
+            },
+        );
+        while state.pending_choice.is_some() {
+            let pick = sts2_core::legal_actions(&state)
+                .into_iter()
+                .find_map(|a| match a {
+                    sts2_core::Action::ResolveChoice { selection } => Some(selection),
+                    _ => None,
+                })
+                .expect("a pick");
+            let _ = sts2_core::apply(
+                &mut state,
+                sts2_core::Action::ResolveChoice { selection: pick },
+            );
+        }
+        assert!(state.is_over, "{version:?}: Black Hole killed the enemy");
+        assert_eq!(
+            state.relics[0].counter, 0,
+            "{version:?}: neither play fires AfterCardPlayed"
+        );
+    }
+}
