@@ -1195,7 +1195,8 @@ pub fn install_pool() {
     //   * AfterSideTurnStart    → decrement the cooldown each owner turn.
     // The cooldown lives in `relic.counter` with the sentinel scheme
     //   0  = armed (ready to double),
-    //   -1 = doubled this card-play, cooldown pending its end,
+    //   <0 = doubled during the play of card uid `-counter` (C#'s
+    //        `AffectedCardPlay`), cooldown pending that play's end,
     //   >0 = turns of cooldown remaining.
     // The pet is cosmetic (animation triggers only); the block-doubling is
     // the mechanic. See the listener doc-comments.
@@ -1267,16 +1268,21 @@ fn listener_paels_legion_modify_block(state: &CombatState, ctx: &BlockCtx) -> ho
 
 /// `PaelsLegion::after_block_gained` — once a doubled card-block lands
 /// (armed, card-sourced, owner-targeted), mark the cooldown pending with
-/// the `-1` sentinel. Subsequent block gains in the SAME card-play stay
+/// the card's negated uid. Subsequent block gains in the SAME card-play stay
 /// `<= 0`, so they are still doubled by
 /// [`listener_paels_legion_modify_block`] — matching C#'s
 /// `AfterModifyingBlockAmount` latching the whole `CardPlay` before
-/// `AfterCardPlayed` starts the cooldown. Bead `sts2-rs-ppabi`.
+/// `AfterCardPlayed` starts the cooldown. A pending latch is kept
+/// (`AffectedCardPlay != null && AffectedCardPlay != cardPlay` returns).
+/// Bead `sts2-rs-ppabi`.
 fn listener_paels_legion_after_block_gained(
     state: &mut CombatState,
     ctx: &BlockGainedCtx,
 ) -> EffectResult {
-    if ctx.card_source.is_none() || !matches!(ctx.target, CreatureRef::Player) {
+    let Some(source) = ctx.card_source else {
+        return EffectResult::NotImplemented;
+    };
+    if !matches!(ctx.target, CreatureRef::Player) {
         return EffectResult::NotImplemented;
     }
     let Some(idx) = state
@@ -1286,22 +1292,29 @@ fn listener_paels_legion_after_block_gained(
     else {
         return EffectResult::NotImplemented;
     };
-    if state.relics[idx].counter <= 0 {
-        state.relics[idx].counter = -1;
+    if state.relics[idx].counter == 0 {
+        state.relics[idx].counter = paels_legion_pending(source);
         EffectResult::Resolved
     } else {
         EffectResult::NotImplemented
     }
 }
 
+/// The pending sentinel for a doubling latched by the play of `card`.
+fn paels_legion_pending(card: sts2_core::CardUid) -> i32 {
+    i32::try_from(card.0.get()).map_or(i32::MIN, |uid| -uid)
+}
+
 /// `PaelsLegion::after_card_played` — when the card-play that triggered
-/// the doubling resolves (`counter == -1` pending), start the
+/// the doubling resolves (`counter` pending on this card's uid), start the
 /// `PAELS_LEGION_TURNS`-turn cooldown. Mirrors C#
-/// `PaelsLegion.cs::AfterCardPlayed` (`Cooldown = DynamicVars["Turns"]`).
-/// Bead `sts2-rs-ppabi`.
+/// `PaelsLegion.cs::AfterCardPlayed` (`AffectedCardPlay == cardPlay` →
+/// `Cooldown = DynamicVars["Turns"]`): a different card played inside the
+/// latched play (a Hellraiser auto-play) finishes first and leaves it
+/// pending. Bead `sts2-rs-ppabi`.
 fn listener_paels_legion_after_card_played(
     state: &mut CombatState,
-    _ctx: &CardEventCtx,
+    ctx: &CardEventCtx,
 ) -> EffectResult {
     let Some(idx) = state
         .relics
@@ -1310,7 +1323,12 @@ fn listener_paels_legion_after_card_played(
     else {
         return EffectResult::NotImplemented;
     };
-    if state.relics[idx].counter == -1 {
+    let counter = state.relics[idx].counter;
+    let latched = counter < 0
+        && ctx
+            .card_uid
+            .is_none_or(|uid| paels_legion_pending(uid) == counter);
+    if latched {
         state.relics[idx].counter = PAELS_LEGION_TURNS;
         EffectResult::Resolved
     } else {
@@ -1321,7 +1339,7 @@ fn listener_paels_legion_after_card_played(
 /// `PaelsLegion::after_side_turn_start` — decrement the cooldown each
 /// owner (player) turn start; at `0` the relic is armed again. Mirrors
 /// C# `PaelsLegion.cs::AfterSideTurnStart` (`if side == Owner.Side:
-/// Cooldown--`). A pending `-1` is left untouched (the cooldown has not
+/// Cooldown--`). A pending (negative) latch is left untouched (the cooldown has not
 /// started yet). Bead `sts2-rs-ppabi`.
 fn listener_paels_legion_after_side_turn_start(
     state: &mut CombatState,
@@ -6519,6 +6537,59 @@ mod tests {
         // 5) Armed again: doubled (15 + 10 = 25).
         gain_block_player(&mut state, 5);
         assert_eq!(state.player.block, 25, "doubled again after re-arm");
+    }
+
+    /// C# `PaelsLegion.AfterCardPlayed` starts the cooldown only for the
+    /// `CardPlay` it latched in `AfterModifyingBlockAmount`. A different card
+    /// played inside that play (Hellraiser auto-playing a Strike that Dark
+    /// Embrace drew mid-Second Wind) finishes first and must not start it,
+    /// so Second Wind's later gains stay doubled (loadout Ironclad 7070
+    /// v0.107.1: cs 5 x 16 = 80, rs 56).
+    #[test]
+    fn paels_legion_nested_play_does_not_end_the_latched_play() {
+        use std::num::NonZeroU32;
+        use sts2_core::card_effects::gain_block_player;
+        use sts2_core::relic_effects::dispatch_after_card_played;
+        crate::relics::dispatch::ensure_installed();
+
+        let mut state = CombatState::default();
+        state.player.current_hp = 80;
+        state.player.max_hp = 80;
+        let _ = state.init_player_creature();
+        state.sync_player_creature();
+        state.relics.push(sts2_core::Relic {
+            id: NonZeroU32::new(1).expect("non-zero"),
+            kind: RelicKind::PaelsLegion,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        });
+        let outer = sts2_core::CardUid(NonZeroU32::new(1).expect("non-zero"));
+        let nested = sts2_core::CardUid(NonZeroU32::new(2).expect("non-zero"));
+        state.player.play.push(outer);
+
+        gain_block_player(&mut state, 8);
+        assert_eq!(state.player.block, 16, "first gain doubled");
+
+        // The nested auto-play resolves and fires its own AfterCardPlayed.
+        let nested_ctx = CardEventCtx {
+            card_uid: Some(nested),
+            ..paels_card_event_ctx()
+        };
+        let _ = dispatch_after_card_played(&mut state, &nested_ctx);
+
+        gain_block_player(&mut state, 8);
+        assert_eq!(
+            state.player.block, 32,
+            "the outer play's next gain is still doubled"
+        );
+
+        let outer_ctx = CardEventCtx {
+            card_uid: Some(outer),
+            ..paels_card_event_ctx()
+        };
+        let _ = dispatch_after_card_played(&mut state, &outer_ctx);
+        assert_eq!(paels_legion_counter(&state), PAELS_LEGION_TURNS);
     }
 
     /// `PaelsLegion` does not double non-card (system) block — `card_source`

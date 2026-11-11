@@ -559,3 +559,87 @@ fn play_luminesce_grants_two_energy_three_when_upgraded() {
         "upgraded Luminesce → 2 + UpgradeValueBy(1)"
     );
 }
+
+/// `Inky.OnPlay` (Inky.cs) runs after `Shiv.OnPlay` and, for an `AllEnemies`
+/// card (a Shiv under Fan of Knives), reads `CombatState.HittableEnemies` at
+/// that point. A Shiv that kills an Infested enemy spawns its four Wrigglers
+/// inside the hit (`InfestedPower.AfterDeath`), so the Weak lands on them.
+/// Rust used the enemy list snapshotted before the damage and gave the
+/// Wrigglers nothing (loadout Silent 7030 v0.107.1).
+#[test]
+fn fan_of_knives_inky_shiv_weakens_wrigglers_spawned_by_its_kill() {
+    use std::num::NonZeroU32;
+    use sts2_core::cards::{Card, CardType, EnchantmentId, TargetType};
+    use sts2_core::{
+        CombatPhase, Creature, IntentHistory, MonsterId, MonsterKind, Power, PowerKind, PowerUid,
+    };
+    install_pool();
+    crate::cards::dispatch::ensure_installed();
+
+    let mut state = CombatState::default();
+    let enemy_id = NonZeroU32::new(1).expect("nz");
+    state.creatures.push(Creature {
+        id: enemy_id,
+        current_hp: 1,
+        max_hp: 61,
+        block: 0,
+        powers: smallvec::SmallVec::new(),
+        species: Some(MonsterKind::PhrogParasite),
+        intent: None,
+        intent_history: IntentHistory::default(),
+        monster_id: MonsterId("PhrogParasite"),
+        ai: None,
+    });
+    state.enemy_uids.push(CreatureUid(enemy_id));
+    state.player.current_hp = 80;
+    state.player.max_hp = 80;
+    state.player.energy = 3;
+    state.player.max_energy = 3;
+    let _ = state.init_player_creature();
+    state.phase = CombatPhase::PlayerPlayPhase;
+    let infested = NonZeroU32::new(7700).expect("nz");
+    state
+        .powers
+        .push(Power::new(infested, PowerKind::Infested, 4));
+    state.creatures[0].powers.push(PowerUid(infested));
+    let fan = NonZeroU32::new(7701).expect("nz");
+    state
+        .powers
+        .push(Power::new(fan, PowerKind::FanOfKnives, 1));
+    state.player.powers.push(PowerUid(fan));
+
+    let card_uid = CardUid(NonZeroU32::new(1).expect("nz"));
+    let mut card = Card {
+        uid: card_uid,
+        card_id: CardId::Shiv,
+        cost: 0,
+        card_type: CardType::Attack,
+        target_type: TargetType::Enemy,
+        upgraded: false,
+        base_damage: 4,
+        base_block: 0,
+        ..Card::pod_defaults()
+    };
+    card.set_enchantment(EnchantmentId::Inky, 1);
+    state.cards.push(card);
+    state.player.hand.push(card_uid);
+
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+
+    let wrigglers: Vec<&Creature> = state
+        .creatures
+        .iter()
+        .filter(|c| c.species == Some(MonsterKind::Wriggler) && c.current_hp > 0)
+        .collect();
+    assert_eq!(wrigglers.len(), 4, "the kill spawned four Wrigglers");
+    for w in wrigglers {
+        let weak = w.powers.iter().find_map(|pu| {
+            state
+                .powers
+                .iter()
+                .find(|p| p.id == pu.0 && p.kind == PowerKind::Weak)
+                .map(|p| p.amount)
+        });
+        assert_eq!(weak, Some(1), "Inky weakens every spawned Wriggler");
+    }
+}

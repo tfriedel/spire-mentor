@@ -41,13 +41,27 @@ pub(crate) fn play_shiv(state: &mut CombatState, target: Option<CreatureUid>) ->
     };
     let Some(t) = single_target else {
         let card = sts2_core::card_effects::originating_card_id(state);
-        let targets: Vec<CreatureUid> = state.enemy_uids.iter().copied().collect();
         let _ = sts2_core::card_effects::deal_damage_to_all_alive_enemies(
             state,
             damage,
             sts2_core::hooks::ValueProps::MOVE,
             card,
         );
+        // `Inky.OnPlay` runs after the attack and reads
+        // `CombatState.HittableEnemies` then (Inky.cs, `AllEnemies` arm), so
+        // enemies the attack killed are skipped and enemies its kills spawned
+        // (Infested's Wrigglers) are included.
+        let targets: Vec<CreatureUid> = state
+            .enemy_uids
+            .iter()
+            .copied()
+            .filter(|uid| {
+                state
+                    .creatures
+                    .iter()
+                    .any(|c| c.id == uid.0 && c.current_hp > 0)
+            })
+            .collect();
         for uid in targets {
             apply_enchantment_on_play(state, active, uid);
         }

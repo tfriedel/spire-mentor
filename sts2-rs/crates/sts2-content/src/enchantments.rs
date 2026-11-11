@@ -275,9 +275,9 @@ pub fn enchant_play_count_bonus(card: &Card) -> i32 {
 /// a card after its base effect resolves. At this pin the only enchantment
 /// with an `OnPlay` body is [`EnchantmentId::Inky`] (`Inky.cs:28-41`): it
 /// applies `1` Weak to the card's target — Blade of Ink's Shivs are its sole
-/// source. `target` is the single resolved enemy target (Shiv is
-/// `TargetType::Enemy`; C#'s `AllEnemies` branch is unreachable for any
-/// current Inky carrier).
+/// source. `target` is one resolved enemy target: the Shiv's own target, or,
+/// for a Shiv under Fan of Knives (C#'s `AllEnemies` arm), each enemy
+/// hittable after the attack resolved.
 ///
 /// Callers invoke this from a card's play handler *after* the damage/effect
 /// resolves, passing the resolved target — the generic per-card dispatch in
