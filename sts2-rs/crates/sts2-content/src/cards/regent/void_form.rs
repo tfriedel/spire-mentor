@@ -11,7 +11,15 @@ use super::prelude::*;
 /// (VoidForm.cs:26) and Python's `_end_turn_after_play` consumer at
 /// `sts2-rl-agent@01c094d:sts2_env/core/combat.py:909-911`.
 pub(crate) fn play_void_form(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    let before = state.player_power_amount(PowerKind::VoidForm);
     apply_power_to_player(state, PowerKind::VoidForm, 2);
+    // The apply spends the rest of this turn's free plays (C#
+    // `HideTemporaryZeroCostVisual`, VoidFormPower.cs:60-75): a Cascade /
+    // Distilled Chaos batch that plays Void Form keeps the full `EnergyValue`
+    // on the cards it plays after it.
+    if state.player_power_amount(PowerKind::VoidForm) != before {
+        sts2_core::combat_loop::void_form_spend_this_turn(state);
+    }
     state.player.request_end_turn_after_play = true;
     EffectResult::Resolved
 }

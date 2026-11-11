@@ -1,1989 +1,565 @@
 {
- "active_leaf": 42,
- "active_path": [
-  0,
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  10,
-  11,
-  12,
-  13,
-  14,
-  15,
-  16,
-  17,
-  18,
-  19,
-  20,
-  21,
-  22,
-  23,
-  24,
-  25,
-  26,
-  27,
-  28,
-  29,
-  30,
-  31,
-  32,
-  33,
-  34,
-  35,
-  36,
-  37,
-  38,
-  39,
-  40,
-  41,
-  42
- ],
- "nodes": [
-  {
+ "step": {
+  "action_label": "",
+  "assets_base": "https://assets.test",
+  "chosen_action": null,
+  "decision": "combat_play",
+  "idx": 0,
+  "meta": {
    "act": 1,
-   "child_ids": [
-    1
-   ],
-   "combat_log": [],
-   "decision": "event_choice",
-   "details": [],
-   "error": false,
-   "floor": 1,
-   "id": 0,
-   "idx": 0,
-   "label": "Started Silent (seed G0LDEN0002, A0, act1 overgrowth)",
-   "parent_id": null,
-   "turn": null,
-   "value": null
+   "act_name": "Overgrowth",
+   "bg_col": 2,
+   "bg_row": 2,
+   "bg_seed": 206169372,
+   "floor": 3,
+   "step_no": 0,
+   "turn": 2
   },
-  {
+  "pv": null,
+  "scores": [],
+  "source": "live",
+  "state": {
    "act": 1,
-   "child_ids": [
-    2
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [
-    "+Relic Fishing Rod"
-   ],
-   "error": false,
-   "floor": 1,
-   "id": 1,
-   "idx": 1,
-   "label": "Choose: Fishing Rod",
-   "parent_id": 0,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    3
-   ],
-   "combat_log": [],
+   "act1": "overgrowth",
+   "act_name": "Overgrowth",
+   "ascension": 0,
+   "bg_col": 2,
+   "bg_row": 2,
+   "bg_seed": 206169372,
    "decision": "combat_play",
-   "details": [
-    "Spawned: Fuzzy Wurm Crawler"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 2,
-   "idx": 2,
-   "label": "Map → (2,1)",
-   "parent_id": 1,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    4
-   ],
-   "combat_log": [
+   "discard_pile": [
     {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 52,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Neutralize",
-     "source_card": "NEUTRALIZE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 3 damage to Fuzzy Wurm Crawler using Neutralize.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 3 damage.\nAdd 2 Shivs into your Hand.",
+     "description_rich": "Deal 3 damage.\nAdd 2 [gold]Shivs[/gold] into your [gold]Hand[/gold].",
+     "id": "LEADING_STRIKE",
+     "image": "https://assets.test/card_atlas/silent/leading_strike.png",
+     "index": -1,
+     "name": "Leading Strike",
+     "rarity": "Common",
+     "stats": {
+      "damage": 3
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 1,
-     "kind": "power",
-     "noun": "Weak",
-     "round": 1,
-     "side": "player",
-     "source": "Neutralize",
-     "source_card": "NEUTRALIZE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 1 Weak.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Neutralize",
-    "Fuzzy Wurm Crawler HP 55→52 (−3)",
-    "Fuzzy Wurm Crawler +1 Weak"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 3,
-   "idx": 3,
-   "label": "Play Neutralize → Fuzzy Wurm Crawler",
-   "parent_id": 2,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    5
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 46,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 52→46 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 4,
-   "idx": 4,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 3,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    6
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 5,
-   "idx": 5,
-   "label": "Play Defend",
-   "parent_id": 4,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    7
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 40,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 46→40 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 6,
-   "idx": 6,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 5,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    8
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "First Acid Goop",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used First Acid Goop.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 3,
-     "hp_after": 70,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "First Acid Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "FIRST_ACID_GOOP",
-     "source_upgraded": null,
-     "target": "The Silent",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler dealt 0 damage to The Silent using First Acid Goop.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 5→0",
-    "Fuzzy Wurm Crawler −Weak"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 7,
-   "idx": 7,
-   "label": "End turn",
-   "parent_id": 6,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    9
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 34,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 40→34 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 8,
-   "idx": 8,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 7,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    10
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 9,
-   "idx": 9,
-   "label": "Play Defend",
-   "parent_id": 8,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    11
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 28,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 34→28 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 10,
-   "idx": 10,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 9,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    12
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Inhale",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used Inhale.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "kind": "power",
-     "noun": "Strength",
-     "round": 2,
-     "side": "enemy",
-     "source": "Inhale",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "INHALE",
-     "source_upgraded": null,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 7 Strength.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 5→0",
-    "Fuzzy Wurm Crawler +7 Strength"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 11,
-   "idx": 11,
-   "label": "End turn",
-   "parent_id": 10,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    13
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 22,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 28→22 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 12,
-   "idx": 12,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 11,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    14
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 16,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 22→16 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 13,
-   "idx": 13,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 12,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    15
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "kind": "block",
-     "noun": "Block",
-     "round": 3,
-     "side": "player",
-     "source": "Survivor",
-     "source_card": "SURVIVOR",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 8 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "card_select",
-   "details": [
-    "Play Survivor",
-    "You Block 0→8"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 14,
-   "idx": 14,
-   "label": "Play Survivor",
-   "parent_id": 13,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    16
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [],
-   "error": false,
-   "floor": 2,
-   "id": 15,
-   "idx": 15,
-   "label": "Select Neutralize",
-   "parent_id": 14,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    17
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Acid Goop",
-     "round": 3,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used Acid Goop.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 3,
-     "blocked": 8,
-     "hp_after": 67,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "enemy",
-     "source": "Acid Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "ACID_GOOP",
-     "source_upgraded": null,
-     "target": "The Silent",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler dealt 3 damage to The Silent using Acid Goop.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 70→67 (−3)",
-    "You Block 8→0"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 16,
-   "idx": 16,
-   "label": "End turn",
-   "parent_id": 15,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    18
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 10,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 16→10 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 17,
-   "idx": 17,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 16,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    19
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 4,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Fuzzy Wurm Crawler HP 10→4 (−6)"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 18,
-   "idx": 18,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 17,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    20
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 4,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 19,
-   "idx": 19,
-   "label": "Play Defend",
-   "parent_id": 18,
-   "turn": 4,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    21
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "First Acid Goop",
-     "round": 4,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used First Acid Goop.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 6,
-     "blocked": 5,
-     "hp_after": 61,
-     "kind": "damage",
-     "noun": null,
-     "round": 4,
-     "side": "enemy",
-     "source": "First Acid Goop",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "FIRST_ACID_GOOP",
-     "source_upgraded": null,
-     "target": "The Silent",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler dealt 6 damage to The Silent using First Acid Goop.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 67→61 (−6)",
-    "You Block 5→0"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 20,
-   "idx": 20,
-   "label": "End turn",
-   "parent_id": 19,
-   "turn": 5,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    22
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 5,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 21,
-   "idx": 21,
-   "label": "Play Defend",
-   "parent_id": 20,
-   "turn": 5,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    23
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 5,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 5→10"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 22,
-   "idx": 22,
-   "label": "Play Defend",
-   "parent_id": 21,
-   "turn": 5,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    24
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 5,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 10→15"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 23,
-   "idx": 23,
-   "label": "Play Defend",
-   "parent_id": 22,
-   "turn": 5,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    25
-   ],
-   "combat_log": [
-    {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Inhale",
-     "round": 5,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Fuzzy Wurm Crawler used Inhale.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Fuzzy Wurm Crawler",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "kind": "power",
-     "noun": "Strength",
-     "round": 5,
-     "side": "enemy",
-     "source": "Inhale",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "FuzzyWurmCrawler",
-     "source_move_id": "INHALE",
-     "source_upgraded": null,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Fuzzy Wurm Crawler gained 7 Strength.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 15→0",
-    "Fuzzy Wurm Crawler Strength 7→14"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 24,
-   "idx": 24,
-   "label": "End turn",
-   "parent_id": 23,
-   "turn": 6,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    26
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 6,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 25,
-   "idx": 25,
-   "label": "Play Defend",
-   "parent_id": 24,
-   "turn": 6,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    27
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 0,
-     "kind": "damage",
-     "noun": null,
-     "round": 6,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Fuzzy Wurm Crawler",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Fuzzy Wurm Crawler using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "card_reward",
-   "details": [
-    "Play Strike",
-    "You Block 5→0",
-    "Fuzzy Wurm Crawler HP 4→0  ☠ defeated",
-    "Gold 99→109"
-   ],
-   "error": false,
-   "floor": 2,
-   "id": 26,
-   "idx": 26,
-   "label": "Play Strike → Fuzzy Wurm Crawler",
-   "parent_id": 25,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    28
-   ],
-   "combat_log": [],
-   "decision": "map_select",
-   "details": [],
-   "error": false,
-   "floor": 2,
-   "id": 27,
-   "idx": 27,
-   "label": "Take Leading Strike",
-   "parent_id": 26,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    29
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [
-    "Spawned: Nibbit"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 28,
-   "idx": 28,
-   "label": "Map → (2,2)",
-   "parent_id": 27,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    30
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 39,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Leading Strike",
-     "source_card": "LEADING_STRIKE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 3 damage to Nibbit using Leading Strike.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "card_generated",
-     "noun": "Shiv",
-     "round": 1,
-     "side": "player",
-     "source": "Leading Strike",
-     "source_card": "LEADING_STRIKE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent generated Shiv.",
-     "verb": "generated"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": null,
-     "kind": "card_generated",
-     "noun": "Shiv",
-     "round": 1,
-     "side": "player",
-     "source": "Leading Strike",
-     "source_card": "LEADING_STRIKE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent generated Shiv.",
-     "verb": "generated"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Leading Strike",
-    "Nibbit HP 42→39 (−3)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 29,
-   "idx": 29,
-   "label": "Play Leading Strike → Nibbit",
-   "parent_id": 28,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    31
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 33,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Nibbit using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Nibbit HP 39→33 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 30,
-   "idx": 30,
-   "label": "Play Strike → Nibbit",
-   "parent_id": 29,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    32
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 1,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 0→5"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 31,
-   "idx": 31,
-   "label": "Play Defend",
-   "parent_id": 30,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    33
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 29,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Shiv",
-     "source_card": "SHIV",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 4 damage to Nibbit using Shiv.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Shiv",
-    "Nibbit HP 33→29 (−4)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 32,
-   "idx": 32,
-   "label": "Play Shiv → Nibbit",
-   "parent_id": 31,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    34
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 4,
-     "blocked": 0,
-     "hp_after": 25,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "player",
-     "source": "Shiv",
-     "source_card": "SHIV",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 4 damage to Nibbit using Shiv.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Shiv",
-    "Nibbit HP 29→25 (−4)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 33,
-   "idx": 33,
-   "label": "Play Shiv → Nibbit",
-   "parent_id": 32,
-   "turn": 1,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    35
-   ],
-   "combat_log": [
-    {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Butt",
-     "round": 1,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit used Butt.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 8 Block.\nDiscard 1 card.",
+     "description_rich": "Gain 8 [gold]Block[/gold].\nDiscard 1 card.",
+     "id": "SURVIVOR",
+     "image": "https://assets.test/card_atlas/silent/survivor.png",
+     "index": -1,
+     "name": "Survivor",
+     "rarity": "Basic",
+     "stats": {
+      "block": 8
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 7,
-     "blocked": 5,
-     "hp_after": 54,
-     "kind": "damage",
-     "noun": null,
-     "round": 1,
-     "side": "enemy",
-     "source": "Butt",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "BUTT",
-     "source_upgraded": null,
-     "target": "The Silent",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Nibbit dealt 7 damage to The Silent using Butt.",
-     "verb": "dealt"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 [gold]Block[/gold].",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": -1,
+     "name": "Defend",
+     "rarity": "Basic",
+     "stats": {
+      "block": 5
+     },
+     "target_type": "None",
+     "type": "Skill",
+     "upgraded": false
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "You HP 61→54 (−7)",
-    "You Block 5→0"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 34,
-   "idx": 34,
-   "label": "End turn",
-   "parent_id": 33,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    36
-   ],
-   "combat_log": [
+   "discard_pile_count": 10,
+   "draw_pile": [
     {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 8,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Survivor",
-     "source_card": "SURVIVOR",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 8 Block.",
-     "verb": "gained"
+     "base_cost": 1,
+     "can_play": false,
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+     "index": -1,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     }
    ],
-   "decision": "card_select",
-   "details": [
-    "Play Survivor",
-    "You Block 0→8"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 35,
-   "idx": 35,
-   "label": "Play Survivor",
-   "parent_id": 34,
-   "turn": null,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    37
-   ],
-   "combat_log": [],
-   "decision": "combat_play",
-   "details": [],
-   "error": false,
-   "floor": 3,
-   "id": 36,
-   "idx": 36,
-   "label": "Select Strike",
-   "parent_id": 35,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    38
-   ],
-   "combat_log": [
+   "draw_pile_count": 1,
+   "enemies": [
     {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "player",
-     "source": "Defend",
-     "source_card": "DEFEND_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "The Silent gained 5 Block.",
-     "verb": "gained"
+     "block": 0,
+     "hp": 25,
+     "image": "https://assets.test/monsters/nibbit.png",
+     "index": 0,
+     "intents": [
+      {
+       "damage": 6,
+       "intent_image": "https://assets.test/intent_atlas/attack/intent_attack_2.png",
+       "type": "Attack"
+      }
+     ],
+     "kind": "Nibbit",
+     "max_hp": 42,
+     "move_state": "SLICE",
+     "name": "Nibbit",
+     "powers": [],
+     "rig": "https://assets.test/monster_rigs/nibbit/nibbit",
+     "rig_bounds_h": 146.0,
+     "rig_bounds_w": 270.0,
+     "rig_scale": 0.28,
+     "uid": 2
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "Play Defend",
-    "You Block 8→13"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 37,
-   "idx": 37,
-   "label": "Play Defend",
-   "parent_id": 36,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    39
-   ],
-   "combat_log": [
+   "energy": 1,
+   "energy_image": "https://assets.test/sprite_fonts/silent_energy_icon.png",
+   "exhaust_pile": [
     {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 19,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Nibbit using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Nibbit HP 25→19 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 38,
-   "idx": 38,
-   "label": "Play Strike → Nibbit",
-   "parent_id": 37,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    40
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 3,
-     "blocked": 0,
-     "hp_after": 16,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "player",
-     "source": "Neutralize",
-     "source_card": "NEUTRALIZE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 3 damage to Nibbit using Neutralize.",
-     "verb": "dealt"
+     "base_cost": 0,
+     "can_play": false,
+     "color": "colorless",
+     "cost": 0,
+     "description": "Deal 4 damage.\nExhaust.",
+     "description_rich": "Deal 4 damage.\n[gold]Exhaust[/gold].",
+     "id": "SHIV",
+     "image": "https://assets.test/card_atlas/token/shiv.png",
+     "index": -1,
+     "name": "Shiv",
+     "rarity": "Token",
+     "stats": {
+      "damage": 4
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 1,
-     "kind": "power",
-     "noun": "Weak",
-     "round": 2,
-     "side": "player",
-     "source": "Neutralize",
-     "source_card": "NEUTRALIZE",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "Nibbit gained 1 Weak.",
-     "verb": "gained"
+     "base_cost": 0,
+     "can_play": false,
+     "color": "colorless",
+     "cost": 0,
+     "description": "Deal 4 damage.\nExhaust.",
+     "description_rich": "Deal 4 damage.\n[gold]Exhaust[/gold].",
+     "id": "SHIV",
+     "image": "https://assets.test/card_atlas/token/shiv.png",
+     "index": -1,
+     "name": "Shiv",
+     "rarity": "Token",
+     "stats": {
+      "damage": 4
+     },
+     "target_type": "None",
+     "type": "Attack",
+     "upgraded": false
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "Play Neutralize",
-    "Nibbit HP 19→16 (−3)",
-    "Nibbit +1 Weak"
-   ],
-   "error": false,
+   "exhaust_pile_count": 2,
    "floor": 3,
-   "id": 39,
-   "idx": 39,
-   "label": "Play Neutralize → Nibbit",
-   "parent_id": 38,
-   "turn": 2,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    41
-   ],
-   "combat_log": [
+   "hand": [
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": null,
-     "kind": "monster_move",
-     "noun": "Slice",
-     "round": 2,
-     "side": "enemy",
-     "source": null,
-     "source_card": null,
-     "source_kind": null,
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit used Slice.",
-     "verb": "used"
+     "base_cost": 1,
+     "can_play": true,
+     "color": "green",
+     "cost": 1,
+     "damage_preview": {
+      "0": 6
+     },
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+     "index": 0,
+     "name": "Strike",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 6
+     },
+     "target_type": "AnyEnemy",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 0,
-     "blocked": 4,
-     "hp_after": 54,
-     "kind": "damage",
-     "noun": null,
-     "round": 2,
-     "side": "enemy",
-     "source": "Slice",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "SLICE",
-     "source_upgraded": null,
-     "target": "The Silent",
-     "target_side": "player",
-     "target_uid": null,
-     "text": "Nibbit dealt 0 damage to The Silent using Slice.",
-     "verb": "dealt"
-    },
-    {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
-     "amount": 5,
-     "kind": "block",
-     "noun": "Block",
-     "round": 2,
-     "side": "enemy",
-     "source": "Slice",
-     "source_card": null,
-     "source_kind": "move",
-     "source_monster": "Nibbit",
-     "source_move_id": "SLICE",
-     "source_upgraded": null,
-     "target": null,
-     "target_side": null,
-     "target_uid": null,
-     "text": "Nibbit gained 5 Block.",
-     "verb": "gained"
+     "base_cost": 0,
+     "can_play": true,
+     "color": "green",
+     "cost": 0,
+     "damage_preview": {
+      "0": 3
+     },
+     "description": "Deal 3 damage.\nApply 1 Weak.",
+     "description_rich": "Deal 3 damage.\nApply 1 [gold]Weak[/gold].",
+     "id": "NEUTRALIZE",
+     "image": "https://assets.test/card_atlas/silent/neutralize.png",
+     "index": 1,
+     "name": "Neutralize",
+     "rarity": "Basic",
+     "stats": {
+      "damage": 3
+     },
+     "target_type": "AnyEnemy",
+     "type": "Attack",
+     "upgraded": false
     }
    ],
-   "decision": "combat_play",
-   "details": [
-    "You Block 13→0",
-    "Nibbit Block 0→5",
-    "Nibbit −Weak"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 40,
-   "idx": 40,
-   "label": "End turn",
-   "parent_id": 39,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [
-    42
-   ],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 1,
-     "blocked": 5,
-     "hp_after": 15,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 1 damage to Nibbit using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Nibbit HP 16→15 (−1)",
-    "Nibbit Block 5→0"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 41,
-   "idx": 41,
-   "label": "Play Strike → Nibbit",
-   "parent_id": 40,
-   "turn": 3,
-   "value": null
-  },
-  {
-   "act": 1,
-   "child_ids": [],
-   "combat_log": [
-    {
-     "actor": "The Silent",
-     "actor_side": "player",
-     "actor_uid": null,
-     "amount": 6,
-     "blocked": 0,
-     "hp_after": 9,
-     "kind": "damage",
-     "noun": null,
-     "round": 3,
-     "side": "player",
-     "source": "Strike",
-     "source_card": "STRIKE_SILENT",
-     "source_kind": "card",
-     "source_monster": null,
-     "source_move_id": null,
-     "source_upgraded": false,
-     "target": "Nibbit",
-     "target_side": "enemy",
-     "target_uid": 2,
-     "text": "The Silent dealt 6 damage to Nibbit using Strike.",
-     "verb": "dealt"
-    }
-   ],
-   "decision": "combat_play",
-   "details": [
-    "Play Strike",
-    "Nibbit HP 15→9 (−6)"
-   ],
-   "error": false,
-   "floor": 3,
-   "id": 42,
-   "idx": 42,
-   "label": "Play Strike → Nibbit",
-   "parent_id": 41,
-   "turn": 3,
-   "value": null
+   "max_energy": 3,
+   "options": [],
+   "player": {
+    "block": 13,
+    "deck": [
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_SILENT",
+      "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+      "index": 0,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_SILENT",
+      "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+      "index": 1,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_SILENT",
+      "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+      "index": 2,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_SILENT",
+      "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+      "index": 3,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Deal 6 damage.",
+      "description_rich": "Deal 6 damage.",
+      "id": "STRIKE_SILENT",
+      "image": "https://assets.test/card_atlas/silent/strike_silent.png",
+      "index": 4,
+      "name": "Strike",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_SILENT",
+      "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+      "index": 5,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_SILENT",
+      "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+      "index": 6,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_SILENT",
+      "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+      "index": 7,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_SILENT",
+      "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+      "index": 8,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Gain 5 Block.",
+      "description_rich": "Gain 5 Block.",
+      "id": "DEFEND_SILENT",
+      "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+      "index": 9,
+      "name": "Defend",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 0,
+      "description": "Deal 3 damage.\nApply 1 Weak.",
+      "description_rich": "Deal 3 damage.\nApply 1 Weak.",
+      "id": "NEUTRALIZE",
+      "image": "https://assets.test/card_atlas/silent/neutralize.png",
+      "index": 10,
+      "name": "Neutralize",
+      "rarity": "Basic",
+      "type": "Attack",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Gain 8 Block.\nDiscard 1 card.",
+      "description_rich": "Gain 8 Block.\nDiscard 1 card.",
+      "id": "SURVIVOR",
+      "image": "https://assets.test/card_atlas/silent/survivor.png",
+      "index": 11,
+      "name": "Survivor",
+      "rarity": "Basic",
+      "type": "Skill",
+      "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 1,
+      "description": "Deal 3 damage.\nAdd 2 Shivs into your Hand.",
+      "description_rich": "Deal 3 damage.\nAdd 2 Shivs into your Hand.",
+      "id": "LEADING_STRIKE",
+      "image": "https://assets.test/card_atlas/silent/leading_strike.png",
+      "index": 12,
+      "name": "Leading Strike",
+      "rarity": "Common",
+      "type": "Attack",
+      "upgraded": false
+     }
+    ],
+    "gold": 109,
+    "hp": 54,
+    "image": "https://assets.test/character_sprites/silent.png",
+    "max_hp": 70,
+    "name": "Silent",
+    "potion_slots": 3,
+    "potions": [],
+    "relics": [
+     {
+      "description": "At the start of each combat, draw 2 additional cards.",
+      "id": "RING_OF_THE_SNAKE",
+      "image": "https://assets.test/relic_atlas/ring_of_the_snake.png",
+      "name": "Ring of the Snake"
+     },
+     {
+      "description": "Every 3 normal combats, Upgrade a random card in your Deck.",
+      "id": "FISHING_ROD",
+      "image": "https://assets.test/relic_atlas/fishing_rod.png",
+      "name": "Fishing Rod"
+     }
+    ],
+    "rig": "https://assets.test/character_rigs/silent/silent",
+    "rig_bounds_h": 244.0,
+    "rig_bounds_w": 244.0,
+    "rig_scale": 0.29
+   },
+   "player_powers": [],
+   "round": 2
   }
- ]
+ }
 }

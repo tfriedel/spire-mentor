@@ -30,13 +30,25 @@ pub fn run(state: &mut CombatState, tail: DrawThen) {
         DrawThen::Neurosurge => {
             super::necrobinder::helpers::apply_power_to_player(state, PowerKind::Neurosurge, 3);
         }
+        DrawThen::Clarity => crate::potions::dispatch::clarity::clarity_power(state),
+        DrawThen::Modded => super::defect::modded::modded_cost_up(state),
         DrawThen::Overclock => {
             let _ = spawn_burn(state, sts2_core::card_effects::PileKind::Discard);
         }
         DrawThen::Stoke(_)
         | DrawThen::StokePlus(_)
         | DrawThen::FiendFire(_)
-        | DrawThen::FlakCannon(_) => {
+        | DrawThen::FlakCannon(_)
+        | DrawThen::SecondWind(_)
+        | DrawThen::Glowwater
+        | DrawThen::ExhaustSelected
+        | DrawThen::ExhaustSelectedThenStrength(_)
+        | DrawThen::ExhaustSelectedThenEnergyNextTurn(_)
+        | DrawThen::Eidolon(_) => {
+            // The exhaust whose draw this tail waited on is done: first the
+            // code the loop runs after each exhaust, then the exhausts still
+            // owed.
+            after_each_exhaust(state, tail);
             if !exhaust_owed(state, tail) {
                 after_exhaust_loop(state, tail);
             }
@@ -44,17 +56,52 @@ pub fn run(state: &mut CombatState, tail: DrawThen) {
     }
 }
 
+/// The code an exhaust loop's card runs after EACH awaited exhaust: Second
+/// Wind's `GainBlock` (SecondWind.cs:31-32, both builds).
+fn after_each_exhaust(state: &mut CombatState, tail: DrawThen) {
+    if let DrawThen::SecondWind(block) = tail {
+        let _ = sts2_core::card_effects::gain_block_player(state, i32::from(block));
+    }
+}
+
 /// The code an exhaust loop's card runs once every exhaust is done.
 fn after_exhaust_loop(state: &mut CombatState, tail: DrawThen) {
     match tail {
-        DrawThen::Stoke(count) => {
-            super::ironclad::stoke::generate_stoke_cards(state, count, false);
-        }
-        DrawThen::StokePlus(count) => {
-            super::ironclad::stoke::generate_stoke_cards(state, count, true);
+        // `base.IsUpgraded` is read after the exhausts (Stoke.cs:28-33): an
+        // exhaust that kills the Dampen caster (Charon's Ashes) re-upgrades
+        // Stoke first, so read the card live rather than the play-start
+        // variant (the Hidden Daggers pattern, Silent 6787 v0.111.0).
+        DrawThen::Stoke(count) | DrawThen::StokePlus(count) => {
+            let upgraded = sts2_core::card_effects::resolving_card_uid(state)
+                .and_then(|u| sts2_core::card_by_uid(&state.cards, u))
+                .map_or(matches!(tail, DrawThen::StokePlus(_)), |c| c.upgraded);
+            super::ironclad::stoke::generate_stoke_cards(state, count, upgraded);
         }
         DrawThen::FiendFire(packed) => super::ironclad::fiend_fire::fiend_fire_hits(state, packed),
         DrawThen::FlakCannon(hits) => super::defect::flak_cannon::flak_cannon_hits(state, hits),
+        DrawThen::ExhaustSelectedThenStrength(n) if n > 0 => {
+            super::ironclad::helpers::apply_power_to_player(
+                state,
+                PowerKind::Strength,
+                i32::from(n),
+            );
+        }
+        DrawThen::ExhaustSelectedThenEnergyNextTurn(n) if n > 0 => {
+            super::ironclad::helpers::apply_power_to_player(
+                state,
+                PowerKind::EnergyNextTurn,
+                i32::from(n),
+            );
+        }
+        DrawThen::Eidolon(count) if count >= 9 => {
+            super::necrobinder::helpers::apply_power_to_player(state, PowerKind::Intangible, 1);
+        }
+        DrawThen::Glowwater => {
+            let _ = sts2_core::cards::draw_via_state(
+                state,
+                crate::potions::dispatch::glowwater_potion::GLOWWATER_DRAW,
+            );
+        }
         _ => {}
     }
 }
@@ -62,7 +109,14 @@ fn after_exhaust_loop(state: &mut CombatState, tail: DrawThen) {
 /// An exhaust loop's `CardCmd.Exhaust` of one snapshotted card, from
 /// whichever pile holds it now (a card already exhausted is skipped).
 fn exhaust_one(state: &mut CombatState, uid: CardUid, tail: DrawThen) {
-    if !matches!(tail, DrawThen::FlakCannon(_)) && state.player.hand.contains(&uid) {
+    let hand_path = matches!(
+        tail,
+        DrawThen::Stoke(_)
+            | DrawThen::StokePlus(_)
+            | DrawThen::FiendFire(_)
+            | DrawThen::SecondWind(_)
+    );
+    if hand_path && state.player.hand.contains(&uid) {
         super::ironclad::helpers::exhaust_hand_card(state, uid);
     } else {
         let _ = sts2_core::card_effects::exhaust_card_uid(state, uid);
@@ -70,7 +124,8 @@ fn exhaust_one(state: &mut CombatState, uid: CardUid, tail: DrawThen) {
 }
 
 /// An exhaust loop that C# awaits card by card (Stoke.cs:24-27,
-/// FiendFire.cs:32-35, FlakCannon.cs:38-41, both builds), then `tail`, the
+/// FiendFire.cs:32-35, FlakCannon.cs:38-41, SecondWind.cs:29-33, both
+/// builds), then `tail`, the
 /// card's code after it. When an exhaust's `AfterCardExhausted` walk suspends
 /// a draw on a reshuffle select (Dark Embrace / Joss Paper drawing into
 /// Stratagem), C# finishes that pick and draw before the next exhaust: the
@@ -96,6 +151,7 @@ fn exhaust_each(state: &mut CombatState, uids: &[CardUid], tail: DrawThen) -> bo
             }
             return true;
         }
+        after_each_exhaust(state, tail);
     }
     false
 }

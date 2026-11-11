@@ -572,3 +572,56 @@ def test_utf8_stdio_leaves_a_non_textiowrapper_stream_alone(
     monkeypatch.setattr(sys, "stdout", buf)
     a23._utf8_stdio()
     assert sys.stdout is buf
+
+
+# --------------------------------------------------------------------------- #
+# combat round cap: an invincible walk that stalls a fight ends as a harness cap
+# --------------------------------------------------------------------------- #
+class _CapBackend:
+    """A backend frozen at one C# ``combat_play`` decision at ``round``."""
+
+    def __init__(self, rnd: int) -> None:
+        self.view = {
+            "decision": "combat_play",
+            "type": "combat_play",
+            "round": rnd,
+            "context": {"act": 1, "floor": 3},
+            "player": {"hp": 999, "max_hp": 999, "block": 0, "gold": 0},
+            "enemies": [],
+            "hand": [],
+        }
+        self.acts: list = []
+
+    def start(self, **_kw: object) -> dict:
+        return self.view
+
+    def act(self, verb: str, **kw: object) -> dict:
+        self.acts.append((verb, kw))
+        raise RuntimeError("stop")
+
+    def close(self) -> None:
+        pass
+
+
+def _run_capped(monkeypatch: pytest.MonkeyPatch, rnd: int) -> tuple[a23.InvRun, list]:
+    cs, rs = _CapBackend(rnd), _CapBackend(rnd)
+    backends = iter([cs, rs])
+    monkeypatch.setattr(a23, "make_backend", lambda *_a, **_k: lambda: next(backends))
+    monkeypatch.setattr(a23, "enumerate_choices", lambda _g, _v: [("end_turn", {})])
+    out = a23.run_one_invincible("1", max_steps=1)
+    return out, cs.acts + rs.acts
+
+
+def test_combat_past_the_round_cap_ends_as_a_harness_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out, acts = _run_capped(monkeypatch, a23.COMBAT_ROUND_CAP + 1)
+    assert out.result.terminal == "combat_round_cap"
+    assert out.result.divergence is not None
+    assert out.result.divergence.kind == "harness"
+    assert acts == []
+
+
+def test_combat_at_the_round_cap_carries_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    out, _acts = _run_capped(monkeypatch, a23.COMBAT_ROUND_CAP)
+    assert out.result.terminal != "combat_round_cap"

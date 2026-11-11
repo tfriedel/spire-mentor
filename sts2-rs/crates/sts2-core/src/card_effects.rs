@@ -1189,7 +1189,7 @@ fn apply_power_to_creature_inner(
     cardless: bool,
     strength_leg: Option<TemporaryStrengthLeg>,
 ) {
-    if amount <= 0 {
+    if amount < 0 {
         return;
     }
     // C# `PowerCmd.Apply` no-ops once the combat `IsEnding`
@@ -1214,6 +1214,29 @@ fn apply_power_to_creature_inner(
     let Some(mut creature_idx) = can_receive(state) else {
         return;
     };
+    // `PowerCmd.Apply<T>(0)`: onto no instance it is a no-op (`Apply` returns
+    // on `amount == 0`, PowerCmd.cs:103 v0.107.1); onto an existing one it
+    // goes through `ModifyAmount(0)` (PowerCmd.cs:84, :228), which runs
+    // `Hook.BeforePowerAmountChanged` and the received-modify chain (Artifact
+    // eats a 0 debuff too) but no `AfterPowerAmountChanged` (offset 0).
+    // Unsettling Lamp captures a 0 Weak from Malaise X=0 there
+    // (UnsettlingLamp.cs:71-101; loadout Silent 6886 v0.107.1).
+    if amount == 0 {
+        if existing_power_uid_unioned(state, creature_idx, target_uid, kind).is_none() {
+            return;
+        }
+        fire_power_amount_observer_channels(
+            state,
+            None,
+            target_uid,
+            kind,
+            0,
+            PowerAmountObserverPhase::Before,
+            cardless,
+        );
+        let _ = try_consume_artifact_for_debuff(state, creature_idx, kind);
+        return;
+    }
 
     // Bead `sts2-rs-47jv` + `sts2-rs-7uo4`: C#-canon channel order is
     // `before_power_amount_changed` → modify chain → mutation →
@@ -3508,16 +3531,13 @@ pub(crate) fn fire_rocketpunch_free_on_status_generation(
     }
     let v0111 = state.game_version >= crate::GameVersion::V0_111_0;
     for cu in rockets {
-        if let Some(c) = state.cards.get_mut(cu.0.get() as usize - 1) {
-            if v0111 {
-                // v0.111.0: `EnergyCost.AddUntilPlayed(-1)` — one more energy
-                // off per generated Status, until played (decomp
-                // RocketPunch.cs:49).
-                let n = c.combat_var(crate::cards::VarKey::CostReductionUntilPlayed);
-                c.set_combat_var(crate::cards::VarKey::CostReductionUntilPlayed, n + 1);
-            } else {
-                c.set_locally_free(crate::cards::VarKey::FreeUntilPlayed);
-            }
+        if v0111 {
+            // v0.111.0: `EnergyCost.AddUntilPlayed(-1)` — one more energy
+            // off per generated Status, until played (decomp
+            // RocketPunch.cs:49).
+            state.add_card_cost_reduction_until_played(cu, 1);
+        } else if let Some(c) = state.cards.get_mut(cu.0.get() as usize - 1) {
+            c.set_locally_free(crate::cards::VarKey::FreeUntilPlayed);
         }
     }
 }

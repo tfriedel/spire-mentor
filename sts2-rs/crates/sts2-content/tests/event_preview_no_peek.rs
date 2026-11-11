@@ -50,7 +50,15 @@ fn walk(rs: &RunState, path: &str, depth: usize, out: &mut Vec<(String, String)>
         if o.enabled {
             let mut next = rs.clone();
             if resolve_by_index(&mut next, i).is_some() {
-                walk(&next, &format!("{path}/{}", o.option_id), depth + 1, out);
+                // The label is part of the path: a page reached by taking a
+                // DIFFERENT visible option (Endless Conveyor's grab row names
+                // the dish just eaten) is a different visible history.
+                walk(
+                    &next,
+                    &format!("{path}/{}[{}]", o.option_id, o.label),
+                    depth + 1,
+                    out,
+                );
             }
         }
     }

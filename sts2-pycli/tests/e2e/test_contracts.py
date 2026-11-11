@@ -1298,7 +1298,11 @@ def _event_options(rm, ev: str, path: list, depth: int, out: list) -> None:
             c = rm.clone()
             c.take_action({"action": "event_choice", "idx": i})
             if c.current_event_name() == ev and c.event_option_infos():
-                _event_options(c, ev, [*path, o.get("option_id")], depth - 1, out)
+                # The label is part of the visible path: Endless Conveyor's
+                # grab row names the dish taken, so two grabs of different
+                # dishes are different histories.
+                step = f"{o.get('option_id')}[{o.get('label')}]"
+                _event_options(c, ev, [*path, step], depth - 1, out)
 
 
 @needs_rs
@@ -1474,6 +1478,11 @@ def _walk(seed: int, stats: Counter, check_tokens: bool) -> str:
             fight_steps = fight_t = 0
             continue
         cs = rm.combat_state()
+        if int(cs.get_state().get("round") or 0) > C.MAX_FIGHT_TURNS:
+            # The evaluator caps a fight past MAX_FIGHT_TURNS as a loss
+            # (`ppo.e2e.evaluate`); an invincible random policy can stall a
+            # boss that long with an exhausted deck.
+            return "capped"
         if cs.get_state().get("player", {}).get("hp", 999) < 500:
             rm.set_player(hp=999, max_hp=999)
             cs = rm.combat_state()

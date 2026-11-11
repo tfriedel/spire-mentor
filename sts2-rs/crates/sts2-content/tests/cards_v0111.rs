@@ -3136,3 +3136,69 @@ fn stoke_generates_after_its_exhausts_suspended_draw() {
         );
     }
 }
+
+/// v0.107.1 Shining Strike's `CardPileCmd.Add(this, Draw, Top)`
+/// (ShiningStrike.cs:34-36) is refused once the combat is ending
+/// (`newPile.IsCombatPile && CombatManager.IsEnding`, CardPileCmd.cs:312):
+/// a lethal Strike stays out of the draw pile, so a later shuffle (Catastrophe)
+/// reads one card fewer (loadout Regent 6772 v0.107.1).
+#[test]
+fn lethal_shining_strike_does_not_return_to_the_draw_pile_v0107() {
+    let mut state = fresh(V107, CharacterId::Regent);
+    state.creatures[0].current_hp = 1;
+    let i = push_hand(&mut state, CardId::ShiningStrike, false);
+    let ss = state.player.hand[usize::from(i)];
+    let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+    assert!(sts2_core::combat_loop::combat_is_ending(&state));
+    assert!(
+        !state.player.draw.contains(&ss),
+        "the refused Add leaves the Strike out of the draw pile"
+    );
+}
+
+/// Pen Nib reads `cardSource.Pile.Type != Play` LIVE (PenNib.cs:123). A
+/// v0.107.1 Shining Strike moved itself to the draw top inside `OnPlay`
+/// (ShiningStrike.cs:36), so its Duplication replay — Pen Nib's 9th attack —
+/// is out of Play and doubles: 8 then 16 (loadout Regent 6793 v0.107.1).
+#[test]
+fn pen_nib_doubles_a_replayed_shining_strike_off_the_play_pile_v0107() {
+    let mut state = fresh(V107, CharacterId::Regent);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::PenNib,
+        counter: 7,
+        is_wax: false,
+        is_melted: false,
+    });
+    add_player_power(&mut state, 60, PowerKind::Duplication, 1);
+    let i = push_hand(&mut state, CardId::ShiningStrike, false);
+    let _ = sts2_core::combat_loop::play_card(&mut state, i, Some(0));
+    assert_eq!(enemy_hp(&state), 100 - 8 - 16);
+}
+
+/// `PowerCmd.Apply<WeakPower>(0)` onto an existing Weak goes through
+/// `ModifyAmount(0)` (PowerCmd.cs:84, :228 v0.107.1), which runs
+/// `Hook.BeforePowerAmountChanged`: Unsettling Lamp captures Malaise X=0 as
+/// its triggering card (UnsettlingLamp.cs:71-101) and finishes on it, so
+/// Neutralize+ is not doubled: Weak 1 + 0 + 2 = 3, not 5 (loadout Silent 6886
+/// v0.107.1).
+#[test]
+fn malaise_x0_onto_existing_weak_spends_unsettling_lamp_v0107() {
+    let mut state = fresh(V107, CharacterId::Silent);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::UnsettlingLamp,
+        counter: sts2_core::RelicKind::UnsettlingLamp.initial_counter(),
+        is_wax: false,
+        is_melted: false,
+    });
+    let enemy = state.enemy_uids[0];
+    add_enemy_power(&mut state, enemy, 70, PowerKind::Weak, 1);
+    state.player.energy = 0;
+    let malaise = push_hand(&mut state, CardId::Malaise, false);
+    let _ = sts2_core::combat_loop::play_card(&mut state, malaise, Some(0));
+    assert_eq!(enemy_power(&state, enemy, PowerKind::Weak), 1);
+    let neutralize = push_hand(&mut state, CardId::Neutralize, true);
+    let _ = sts2_core::combat_loop::play_card(&mut state, neutralize, Some(0));
+    assert_eq!(enemy_power(&state, enemy, PowerKind::Weak), 3);
+}

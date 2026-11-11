@@ -1,3 +1,20 @@
 {
- "detail": "search tree only available for combat decisions"
+ "runs": [
+  {
+   "enemy_min_pct": 2.2727,
+   "final_floor": 5,
+   "final_turn": 1,
+   "stem": "20260101_000000_Ironclad_G0LDEN0002",
+   "turn1_q": null,
+   "won": false
+  },
+  {
+   "enemy_min_pct": 2.2727,
+   "final_floor": 5,
+   "final_turn": null,
+   "stem": "20260101_000000_Ironclad_G0LDEN0002_2",
+   "turn1_q": null,
+   "won": false
+  }
+ ]
 }

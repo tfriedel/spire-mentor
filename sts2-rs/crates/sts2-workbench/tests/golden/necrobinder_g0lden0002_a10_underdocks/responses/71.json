@@ -27,7 +27,7 @@
      "label": "Bodyguard",
      "outcome_ordinal": null,
      "target_index": null,
-     "visits": 12
+     "visits": 13
     },
     {
      "child": 2,
@@ -35,7 +35,7 @@
      "label": "Unleash",
      "outcome_ordinal": null,
      "target_index": 0,
-     "visits": 21
+     "visits": 17
     },
     {
      "child": 3,
@@ -43,7 +43,7 @@
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
      "target_index": 0,
-     "visits": 12
+     "visits": 15
     },
     {
      "child": 4,
@@ -65,7 +65,7 @@
    "parent": null,
    "proven_loss": false,
    "proven_win": true,
-   "q": 0.5063,
+   "q": 0.5071,
    "summary": {
     "enemies": [
      {
@@ -82,7 +82,7 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 24.3045,
+   "value_sum": 24.3402,
    "visits": 48,
    "wins": 37
   },
@@ -93,7 +93,7 @@
    "children": [
     5,
     7,
-    9
+    10
    ],
    "edges": [
     {
@@ -110,10 +110,10 @@
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
      "target_index": 0,
-     "visits": 3
+     "visits": 4
     },
     {
-     "child": 9,
+     "child": 10,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -132,7 +132,7 @@
    "parent": 0,
    "proven_loss": false,
    "proven_win": true,
-   "q": 0.4608,
+   "q": 0.5028,
    "summary": {
     "enemies": [
      {
@@ -149,9 +149,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 5.5296,
-   "visits": 12,
-   "wins": 9
+   "value_sum": 6.5365,
+   "visits": 13,
+   "wins": 10
   },
   {
    "chance_action": null,
@@ -160,7 +160,7 @@
    "children": [
     6,
     8,
-    11
+    12
    ],
    "edges": [
     {
@@ -169,7 +169,7 @@
      "label": "Bodyguard",
      "outcome_ordinal": null,
      "target_index": null,
-     "visits": 10
+     "visits": 7
     },
     {
      "child": 8,
@@ -177,10 +177,10 @@
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
      "target_index": 0,
-     "visits": 8
+     "visits": 7
     },
     {
-     "child": 11,
+     "child": 12,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -199,7 +199,7 @@
    "parent": 0,
    "proven_loss": false,
    "proven_win": true,
-   "q": 0.8079,
+   "q": 0.759,
    "summary": {
     "enemies": [
      {
@@ -216,9 +216,9 @@
    },
    "target_index": 0,
    "ties": 0,
-   "value_sum": 16.9659,
-   "visits": 21,
-   "wins": 19
+   "value_sum": 12.9026,
+   "visits": 17,
+   "wins": 15
   },
   {
    "chance_action": null,
@@ -226,9 +226,9 @@
    "chance_draws": 0,
    "children": [
     7,
-    8,
-    12,
-    13
+    9,
+    13,
+    14
    ],
    "edges": [
     {
@@ -237,18 +237,18 @@
      "label": "Bodyguard",
      "outcome_ordinal": null,
      "target_index": null,
-     "visits": 2
+     "visits": 1
     },
     {
-     "child": 8,
+     "child": 9,
      "kind": "play",
      "label": "Unleash",
      "outcome_ordinal": null,
      "target_index": 0,
-     "visits": 2
+     "visits": 6
     },
     {
-     "child": 12,
+     "child": 13,
      "kind": "play",
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
@@ -256,7 +256,7 @@
      "visits": 5
     },
     {
-     "child": 13,
+     "child": 14,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -275,7 +275,7 @@
    "parent": 0,
    "proven_loss": false,
    "proven_win": true,
-   "q": 0.459,
+   "q": 0.5734,
    "summary": {
     "enemies": [
      {
@@ -292,9 +292,9 @@
    },
    "target_index": 0,
    "ties": 0,
-   "value_sum": 5.5083,
-   "visits": 12,
-   "wins": 9
+   "value_sum": 8.6004,
+   "visits": 15,
+   "wins": 12
   },
   {
    "chance_action": null,
@@ -377,25 +377,25 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    14,
-    15
+    15,
+    16
    ],
    "edges": [
     {
-     "child": 14,
+     "child": 15,
      "kind": "play",
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
      "target_index": 0,
-     "visits": 4
+     "visits": 3
     },
     {
-     "child": 15,
+     "child": 16,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
      "target_index": null,
-     "visits": 5
+     "visits": 3
     }
    ],
    "id": 6,
@@ -409,7 +409,7 @@
    "parent": 2,
    "proven_loss": false,
    "proven_win": true,
-   "q": 1.0158,
+   "q": 1.0171,
    "summary": {
     "enemies": [
      {
@@ -426,22 +426,22 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 10.1582,
-   "visits": 10,
-   "wins": 10
+   "value_sum": 7.1197,
+   "visits": 7,
+   "wins": 7
   },
   {
    "chance_action": null,
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    14,
-    16,
-    19
+    17,
+    18,
+    20
    ],
    "edges": [
     {
-     "child": 14,
+     "child": 17,
      "kind": "play",
      "label": "Unleash",
      "outcome_ordinal": null,
@@ -449,7 +449,7 @@
      "visits": 1
     },
     {
-     "child": 16,
+     "child": 18,
      "kind": "play",
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
@@ -457,7 +457,7 @@
      "visits": 1
     },
     {
-     "child": 19,
+     "child": 20,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -531,20 +531,58 @@
    },
    "target_index": 0,
    "ties": 0,
-   "value_sum": 10.2475,
-   "visits": 10,
-   "wins": 10
+   "value_sum": 7.1732,
+   "visits": 7,
+   "wins": 7
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 9,
+   "is_terminal": true,
+   "kind": "play",
+   "label": "Unleash",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 3,
+   "proven_loss": false,
+   "proven_win": true,
+   "q": 1.0247,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 0,
+      "max_hp": 47,
+      "uid": 2
+     }
+    ],
+    "energy": 1,
+    "player_block": 0,
+    "player_hp": 7,
+    "player_max_hp": 66,
+    "round": 7
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 6.1485,
+   "visits": 6,
+   "wins": 6
   },
   {
    "chance_action": "End turn",
    "chance_closed": false,
    "chance_draws": 2,
    "children": [
-    10
+    11
    ],
    "edges": [
     {
-     "child": 10,
+     "child": 11,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -552,7 +590,7 @@
      "visits": 2
     }
    ],
-   "id": 9,
+   "id": 10,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -589,11 +627,11 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    22
+    24
    ],
    "edges": [
     {
-     "child": 22,
+     "child": 24,
      "kind": "play",
      "label": "NegativePulse",
      "outcome_ordinal": null,
@@ -601,7 +639,7 @@
      "visits": 1
     }
    ],
-   "id": 10,
+   "id": 11,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -609,7 +647,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 9,
+   "parent": 10,
    "proven_loss": false,
    "proven_win": false,
    "q": -1.2311,
@@ -639,7 +677,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 11,
+   "id": 12,
    "is_terminal": true,
    "kind": "end_turn",
    "label": "End turn",
@@ -676,14 +714,14 @@
    "chance_closed": false,
    "chance_draws": 0,
    "children": [
-    16,
-    17,
     18,
-    21
+    19,
+    22,
+    23
    ],
    "edges": [
     {
-     "child": 16,
+     "child": 18,
      "kind": "play",
      "label": "Bodyguard",
      "outcome_ordinal": null,
@@ -691,7 +729,7 @@
      "visits": 1
     },
     {
-     "child": 17,
+     "child": 19,
      "kind": "play",
      "label": "Unleash",
      "outcome_ordinal": null,
@@ -699,7 +737,7 @@
      "visits": 1
     },
     {
-     "child": 18,
+     "child": 22,
      "kind": "play",
      "label": "StrikeNecrobinder",
      "outcome_ordinal": null,
@@ -707,7 +745,7 @@
      "visits": 1
     },
     {
-     "child": 21,
+     "child": 23,
      "kind": "end_turn",
      "label": "End turn",
      "outcome_ordinal": null,
@@ -715,7 +753,7 @@
      "visits": 1
     }
    ],
-   "id": 12,
+   "id": 13,
    "is_terminal": false,
    "kind": "play",
    "label": "StrikeNecrobinder",
@@ -753,7 +791,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 13,
+   "id": 14,
    "is_terminal": true,
    "kind": "end_turn",
    "label": "End turn",
@@ -791,7 +829,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 14,
+   "id": 15,
    "is_terminal": true,
    "kind": "play",
    "label": "StrikeNecrobinder",
@@ -819,9 +857,9 @@
    },
    "target_index": 0,
    "ties": 0,
-   "value_sum": 5.1237,
-   "visits": 5,
-   "wins": 5
+   "value_sum": 3.0742,
+   "visits": 3,
+   "wins": 3
   },
   {
    "chance_action": null,
@@ -829,7 +867,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 15,
+   "id": 16,
    "is_terminal": true,
    "kind": "end_turn",
    "label": "End turn",
@@ -857,47 +895,9 @@
    },
    "target_index": null,
    "ties": 0,
-   "value_sum": 5.0345,
-   "visits": 5,
-   "wins": 5
-  },
-  {
-   "chance_action": null,
-   "chance_closed": false,
-   "chance_draws": 0,
-   "children": [],
-   "edges": [],
-   "id": 16,
-   "is_terminal": false,
-   "kind": "play",
-   "label": "Bodyguard",
-   "losses": 0,
-   "node_kind": "decision",
-   "outcome_cap": 0,
-   "outcome_ordinal": null,
-   "parent": 12,
-   "proven_loss": false,
-   "proven_win": false,
-   "q": 1.0069,
-   "summary": {
-    "enemies": [
-     {
-      "hp": 6,
-      "max_hp": 47,
-      "uid": 2
-     }
-    ],
-    "energy": 0,
-    "player_block": 0,
-    "player_hp": 7,
-    "player_max_hp": 66,
-    "round": 7
-   },
-   "target_index": null,
-   "ties": 0,
-   "value_sum": 2.0138,
-   "visits": 2,
-   "wins": 2
+   "value_sum": 3.0207,
+   "visits": 3,
+   "wins": 3
   },
   {
    "chance_action": null,
@@ -913,7 +913,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 12,
+   "parent": 7,
    "proven_loss": false,
    "proven_win": true,
    "q": 1.0247,
@@ -944,14 +944,52 @@
    "children": [],
    "edges": [],
    "id": 18,
-   "is_terminal": true,
+   "is_terminal": false,
    "kind": "play",
-   "label": "StrikeNecrobinder",
+   "label": "Bodyguard",
    "losses": 0,
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 12,
+   "parent": 13,
+   "proven_loss": false,
+   "proven_win": false,
+   "q": 1.0069,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 6,
+      "max_hp": 47,
+      "uid": 2
+     }
+    ],
+    "energy": 0,
+    "player_block": 0,
+    "player_hp": 7,
+    "player_max_hp": 66,
+    "round": 7
+   },
+   "target_index": null,
+   "ties": 0,
+   "value_sum": 2.0138,
+   "visits": 2,
+   "wins": 2
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 19,
+   "is_terminal": true,
+   "kind": "play",
+   "label": "Unleash",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 13,
    "proven_loss": false,
    "proven_win": true,
    "q": 1.0247,
@@ -980,11 +1018,11 @@
    "chance_closed": false,
    "chance_draws": 1,
    "children": [
-    20
+    21
    ],
    "edges": [
     {
-     "child": 20,
+     "child": 21,
      "kind": "outcome",
      "label": "outcome #0",
      "outcome_ordinal": 0,
@@ -992,7 +1030,7 @@
      "visits": 1
     }
    ],
-   "id": 19,
+   "id": 20,
    "is_terminal": false,
    "kind": "end_turn",
    "label": "End turn",
@@ -1030,7 +1068,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 20,
+   "id": 21,
    "is_terminal": false,
    "kind": "outcome",
    "label": "outcome #0",
@@ -1038,7 +1076,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": 0,
-   "parent": 19,
+   "parent": 20,
    "proven_loss": false,
    "proven_win": false,
    "q": -1.2311,
@@ -1068,7 +1106,45 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 21,
+   "id": 22,
+   "is_terminal": true,
+   "kind": "play",
+   "label": "StrikeNecrobinder",
+   "losses": 0,
+   "node_kind": "decision",
+   "outcome_cap": 0,
+   "outcome_ordinal": null,
+   "parent": 13,
+   "proven_loss": false,
+   "proven_win": true,
+   "q": 1.0247,
+   "summary": {
+    "enemies": [
+     {
+      "hp": 0,
+      "max_hp": 47,
+      "uid": 2
+     }
+    ],
+    "energy": 0,
+    "player_block": 0,
+    "player_hp": 7,
+    "player_max_hp": 66,
+    "round": 7
+   },
+   "target_index": 0,
+   "ties": 0,
+   "value_sum": 1.0247,
+   "visits": 1,
+   "wins": 1
+  },
+  {
+   "chance_action": null,
+   "chance_closed": false,
+   "chance_draws": 0,
+   "children": [],
+   "edges": [],
+   "id": 23,
    "is_terminal": true,
    "kind": "end_turn",
    "label": "End turn",
@@ -1076,7 +1152,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 12,
+   "parent": 13,
    "proven_loss": true,
    "proven_win": false,
    "q": -1.2126,
@@ -1106,7 +1182,7 @@
    "chance_draws": 0,
    "children": [],
    "edges": [],
-   "id": 22,
+   "id": 24,
    "is_terminal": false,
    "kind": "play",
    "label": "NegativePulse",
@@ -1114,7 +1190,7 @@
    "node_kind": "decision",
    "outcome_cap": 0,
    "outcome_ordinal": null,
-   "parent": 10,
+   "parent": 11,
    "proven_loss": false,
    "proven_win": false,
    "q": -1.2311,

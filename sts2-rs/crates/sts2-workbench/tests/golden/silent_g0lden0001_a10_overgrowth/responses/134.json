@@ -1,3 +1,27 @@
 {
- "detail": "search tree only available for combat decisions"
+ "final_turn_histogram": {
+  "4": 1
+ },
+ "n_losses": 2,
+ "n_runs": 2,
+ "pattern_tags": {},
+ "representative_losses": [
+  {
+   "enemy_min_pct": 4.4444,
+   "final_turn": 4,
+   "stem": "20260101_000000_Silent_G0LDEN0001",
+   "turn1_q": null
+  },
+  {
+   "enemy_min_pct": 4.4444,
+   "final_turn": null,
+   "stem": "20260101_000000_Silent_G0LDEN0001_2",
+   "turn1_q": null
+  }
+ ],
+ "turn1_q": {
+  "max": null,
+  "mean": null,
+  "min": null
+ }
 }

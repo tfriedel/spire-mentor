@@ -23,11 +23,17 @@ pub(crate) fn play_hidden_daggers(
     _t: Option<CreatureUid>,
 ) -> EffectResult {
     // C# `HiddenDaggers.cs:OnPlay`: if `IsUpgraded`, the spawned Shivs are
-    // upgraded (`CardCmd.Upgrade(item)` per spawn; Shiv+ deals 6).
+    // upgraded (`CardCmd.Upgrade(item)` per spawn; Shiv+ deals 6). Read AFTER
+    // the awaited discard (HiddenDaggers.cs:32-33): a Sly auto-play that kills
+    // the Dampen caster re-upgrades this card first (loadout Silent 6787
+    // v0.111.0), so the Shivs carry this card's uid, not a snapshot.
+    let Some(hd) = sts2_core::card_effects::resolving_card_uid(state) else {
+        return EffectResult::Resolved;
+    };
     let shivs = sts2_core::PostChoiceEffect::SpawnInHand {
         card_id: CardId::Shiv,
         count: 2,
-        upgraded: current_card_upgraded(state),
+        upgrade_source: hd,
     };
     let original: smallvec::SmallVec<[sts2_core::CardUid; 16]> =
         state.player.hand.iter().copied().collect();
@@ -48,10 +54,7 @@ pub(crate) fn play_hidden_daggers(
                 original.iter().take(discard_count).copied().collect();
             // The Shivs wait behind every Sly auto-play, including a Sly
             // select the player answers first (GH #1131).
-            let then = sts2_core::LoopThen::Call(
-                spawn_hidden_dagger_shivs_packed,
-                u32::from(current_card_upgraded(state)),
-            );
+            let then = sts2_core::LoopThen::Call(spawn_hidden_dagger_shivs_packed, hd.0.get());
             let _ =
                 sts2_core::card_effects::discard_hand_cards_then(state, &to_discard, Some(then));
         }
@@ -89,12 +92,16 @@ pub(crate) fn play_hidden_daggers(
     EffectResult::Resolved
 }
 
-/// [`spawn_hidden_dagger_shivs`] as a Sly-loop follow-up; `upgraded` is 0 or 1.
-fn spawn_hidden_dagger_shivs_packed(state: &mut CombatState, upgraded: u32) {
+/// [`spawn_hidden_dagger_shivs`] as a Sly-loop follow-up; `hd` is the Hidden
+/// Daggers card's uid.
+fn spawn_hidden_dagger_shivs_packed(state: &mut CombatState, hd: u32) {
+    let Some(upgrade_source) = sts2_core::CardUid::new(hd) else {
+        return;
+    };
     let shivs = sts2_core::PostChoiceEffect::SpawnInHand {
         card_id: CardId::Shiv,
         count: 2,
-        upgraded: upgraded != 0,
+        upgrade_source,
     };
     spawn_hidden_dagger_shivs(state, shivs);
 }
@@ -102,14 +109,17 @@ fn spawn_hidden_dagger_shivs_packed(state: &mut CombatState, upgraded: u32) {
 /// Spawn HiddenDaggers' Shivs inline (no discard choice was opened).
 fn spawn_hidden_dagger_shivs(state: &mut CombatState, shivs: sts2_core::PostChoiceEffect) {
     let sts2_core::PostChoiceEffect::SpawnInHand {
-        count, upgraded, ..
+        count,
+        upgrade_source,
+        ..
     } = shivs
     else {
         return;
     };
     // The discard can down the last enemy (Tingsha); then `CardCmd.Upgrade`
     // is a no-op (`CombatManager.IsEnding`, CardCmd.cs:267-270, GH #1150).
-    let upgraded = upgraded && !sts2_core::combat_loop::combat_is_ending(state);
+    let upgraded = sts2_core::card_by_uid(&state.cards, upgrade_source).is_some_and(|c| c.upgraded)
+        && !sts2_core::combat_loop::combat_is_ending(state);
     for _ in 0..count {
         let shiv_uid = spawn_shiv(state, PileKind::Hand);
         if upgraded {

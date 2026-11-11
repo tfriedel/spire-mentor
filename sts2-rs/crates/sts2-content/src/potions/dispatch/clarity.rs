@@ -2,14 +2,22 @@
 use super::prelude::*;
 
 /// Clarity — player draws 1 card and gains 3 Clarity (retain cards
-/// for N turns). Port pin:
-/// `sts2-rl-agent@01c094d:sts2_env/potions/effects.py::_clarity`
-/// (`combat._draw_cards(1); t.apply_power(PowerId.CLARITY, 3)`;
-/// target defaults to user). Bead `sts2-rs-p8j1`.
+/// for N turns). Bead `sts2-rs-p8j1`.
+///
+/// C# `Clarity.OnUse` awaits `CardPileCmd.Draw` before
+/// `PowerCmd.Apply<ClarityPower>` (Clarity.cs:33-34, both builds): a draw
+/// that reshuffles into a Stratagem pick holds the power until the pick and
+/// the draw finish ([`sts2_core::DrawThen::Clarity`]).
 pub(crate) fn drink_clarity(state: &mut CombatState, _target: Option<u8>) -> EffectResult {
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, 1);
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, sts2_core::DrawThen::Clarity);
+    EffectResult::Resolved
+}
+
+/// Clarity's `PowerCmd.Apply<ClarityPower>(3)` after its draw.
+pub(crate) fn clarity_power(state: &mut CombatState) {
     if let Some(uid) = state.player.creature_uid {
         apply_power_to_creature(state, uid, PowerKind::Clarity, 3);
     }
-    EffectResult::Resolved
 }

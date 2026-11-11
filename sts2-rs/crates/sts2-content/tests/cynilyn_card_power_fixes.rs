@@ -1252,3 +1252,128 @@ fn storm_of_steel_after_killing_the_dampen_caster_upgrades_its_shivs() {
         assert_eq!(shivs, vec![true], "{v:?}: one upgraded Shiv");
     }
 }
+
+/// `HiddenDaggers.OnPlay` reads `base.IsUpgraded` AFTER its awaited discard
+/// (HiddenDaggers.cs:32-33). A discarded Ricochet's Sly auto-play that kills
+/// the Dampen caster re-upgrades the dampened Hidden Daggers, so its Shivs
+/// are upgraded (loadout Silent 6787 v0.111.0). `choose` = open the discard
+/// select (hand of 3) instead of the auto-discard (hand of 2).
+fn hidden_daggers_reupgraded_by_its_discard(choose: bool) -> Vec<bool> {
+    let mut state = fresh(V111, CharacterId::Silent);
+    let caster = add_enemy(&mut state, 2, 1);
+    let _survivor = add_enemy(&mut state, 3, 100);
+    let hd = new_card(&mut state, CardId::HiddenDaggers, true);
+    state.player.hand.push(hd);
+    let ricochet = new_card(&mut state, CardId::Ricochet, false);
+    state.player.hand.push(ricochet);
+    let filler = new_card(&mut state, CardId::DefendSilent, false);
+    state.player.hand.push(filler);
+    if choose {
+        let extra = new_card(&mut state, CardId::DefendSilent, false);
+        state.player.hand.push(extra);
+    }
+    sts2_core::monster_power_effects::install_dampen_power_handlers();
+    let player = state.player.creature_uid.expect("player");
+    sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+    let pid = state
+        .powers
+        .iter()
+        .find(|p| p.kind == PowerKind::Dampen)
+        .map(|p| p.id)
+        .expect("Dampen applied");
+    state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+    let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+        &mut state,
+        player,
+        PowerKind::Dampen,
+        Some(caster),
+    );
+    assert!(!state.cards[hd.0.get() as usize - 1].upgraded, "dampened");
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+    if choose {
+        let _ = sts2_core::apply(
+            &mut state,
+            sts2_core::Action::ResolveChoice {
+                selection: [0u8, 1].into_iter().collect(),
+            },
+        );
+    }
+    assert_eq!(hp_of(&state, caster), 0, "Ricochet killed the caster");
+    assert!(state.cards[hd.0.get() as usize - 1].upgraded, "re-upgraded");
+    state
+        .player
+        .hand
+        .iter()
+        .map(|&u| &state.cards[u.0.get() as usize - 1])
+        .filter(|c| c.card_id == CardId::Shiv)
+        .map(|c| c.upgraded)
+        .collect()
+}
+
+#[test]
+fn hidden_daggers_reads_its_upgrade_after_the_discard_auto() {
+    assert_eq!(
+        hidden_daggers_reupgraded_by_its_discard(false),
+        [true, true]
+    );
+}
+
+#[test]
+fn hidden_daggers_reads_its_upgrade_after_the_discard_choice() {
+    assert_eq!(hidden_daggers_reupgraded_by_its_discard(true), [true, true]);
+}
+
+/// `Stoke.OnPlay` reads `base.IsUpgraded` after its awaited exhausts
+/// (Stoke.cs:24-33). Charon's Ashes' damage on the first exhaust kills the
+/// Dampen caster and re-upgrades the dampened Stoke, so the generated cards
+/// are upgraded (the Hidden Daggers 6787 pattern).
+#[test]
+fn stoke_reads_its_upgrade_after_the_exhausts() {
+    let mut state = fresh(V111, CharacterId::Ironclad);
+    let caster = add_enemy(&mut state, 2, 1);
+    let _survivor = add_enemy(&mut state, 3, 100);
+    state.relics.push(sts2_core::Relic {
+        id: NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::CharonsAshes,
+        counter: 0,
+        is_wax: false,
+        is_melted: false,
+    });
+    let stoke = new_card(&mut state, CardId::Stoke, true);
+    state.player.hand.push(stoke);
+    let filler = new_card(&mut state, CardId::DefendIronclad, false);
+    state.player.hand.push(filler);
+    sts2_core::monster_power_effects::install_dampen_power_handlers();
+    let player = state.player.creature_uid.expect("player");
+    sts2_core::card_effects::apply_power_to_creature(&mut state, player, PowerKind::Dampen, 1);
+    let pid = state
+        .powers
+        .iter()
+        .find(|p| p.kind == PowerKind::Dampen)
+        .map(|p| p.id)
+        .expect("Dampen applied");
+    state.powers.get_mut_by_id(pid).expect("Dampen").applier = Some(caster);
+    let _ = sts2_core::monster_power_effects::dispatch_after_applied_for_power(
+        &mut state,
+        player,
+        PowerKind::Dampen,
+        Some(caster),
+    );
+    assert!(
+        !state.cards[stoke.0.get() as usize - 1].upgraded,
+        "dampened"
+    );
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+    assert_eq!(hp_of(&state, caster), 0, "Charon's Ashes killed the caster");
+    assert!(
+        state.cards[stoke.0.get() as usize - 1].upgraded,
+        "re-upgraded"
+    );
+    let generated: Vec<bool> = state
+        .player
+        .hand
+        .iter()
+        .map(|&u| state.cards[u.0.get() as usize - 1].upgraded)
+        .collect();
+    assert_eq!(generated, [true]);
+}

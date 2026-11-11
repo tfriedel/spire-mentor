@@ -405,3 +405,53 @@ fn frozen_and_locked_late_sweeps_agree_on_random_combats() {
     freeze_card_tables();
     assert!(card_tables_frozen());
 }
+
+/// `MakeItSo` / `RightHandHand` return with `CardPileCmd.Add(this, Hand)`
+/// (MakeItSo.cs:43, RightHandHand.cs:51), which refuses a combat pile once the
+/// combat is ending (CardPileCmd.cs:312): a lethal trigger leaves the watched
+/// card in the discard.
+#[test]
+fn late_effect_returns_are_refused_once_the_combat_is_ending() {
+    install();
+    let (mut state, make_it_so) = play_ready(
+        CharacterId::Regent,
+        &[CardId::DefendRegent; 3],
+        CardId::MakeItSo,
+        3,
+    );
+    for _ in 0..2 {
+        let _ = play_card(&mut state, 0, None);
+    }
+    set_enemy_hp(&mut state, 0);
+    assert!(sts2_core::combat_loop::combat_is_ending(&state));
+    let _ = play_card(&mut state, 0, None);
+    assert!(
+        state.player.discard.contains(&make_it_so),
+        "Make It So stays"
+    );
+
+    let (mut state, right_hand_hand) = play_ready(
+        CharacterId::Necrobinder,
+        &[CardId::Bash],
+        CardId::RightHandHand,
+        3,
+    );
+    set_enemy_hp(&mut state, 1);
+    let _ = play_card(&mut state, 0, Some(0));
+    assert!(sts2_core::combat_loop::combat_is_ending(&state));
+    assert!(
+        state.player.discard.contains(&right_hand_hand),
+        "Right Hand Hand stays"
+    );
+}
+
+fn set_enemy_hp(state: &mut CombatState, hp: i32) {
+    let enemies = state.enemy_uids.clone();
+    for c in state
+        .creatures
+        .iter_mut()
+        .filter(|c| enemies.iter().any(|e| e.0 == c.id))
+    {
+        c.current_hp = hp;
+    }
+}

@@ -1,0 +1,87 @@
+{
+ "assumptions": {
+  "energy": 3,
+  "hand": 5,
+  "samples": 200
+ },
+ "block": {
+  "per_turn": 10.9,
+  "scaling_cards": []
+ },
+ "composition": {
+  "by_rarity": {
+   "Basic": 12,
+   "Common": 3,
+   "Curse": 1,
+   "Quest": 1,
+   "Uncommon": 1
+  },
+  "by_type": {
+   "Attack": 8,
+   "Curse": 1,
+   "Quest": 1,
+   "Skill": 8
+  },
+  "dead_cards": 1,
+  "energy_curve": {
+   "0": 1,
+   "1": 14,
+   "2": 1,
+   "X": 1
+  },
+  "unupgraded_basics": 12
+ },
+ "damage": {
+  "aoe_attacks": [],
+  "attack_count": 8,
+  "per_turn": 15.0,
+  "scaling_cards": [
+   "Neutralize",
+   "Snakebite"
+  ],
+  "single_target": 15.1,
+  "vs_group": 15.0
+ },
+ "deck_size": 18,
+ "lenses": {
+  "boss": 32.1,
+  "hallway": 31.8,
+  "scaling": 32.3
+ },
+ "scores": {
+  "block": 42.1,
+  "damage": 31.3,
+  "velocity": 22.9,
+  "volume": 31.1
+ },
+ "velocity": {
+  "bottleneck": "energy",
+  "cards_per_turn": 3.2,
+  "dilution": 0.83,
+  "draw_limited_turns": 0.1,
+  "energy_limited_turns": 6.2,
+  "engine_cards": 1,
+  "extra_per_turn": 0.0,
+  "tags": {
+   "tutor": 1
+  }
+ },
+ "warnings": [
+  {
+   "severity": "info",
+   "text": "No AOE — multi-enemy fights (Gremlins, hallways) will be slow."
+  },
+  {
+   "severity": "info",
+   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+  },
+  {
+   "severity": "info",
+   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+  },
+  {
+   "severity": "warn",
+   "text": "Deck clogged with basics/curses — prioritise removals."
+  }
+ ]
+}

@@ -1095,4 +1095,79 @@ mod tests {
         assert!(differ > 0, "the widened band must change some rolls");
         assert!(n_uncommon_111 > n_uncommon_107);
     }
+
+    /// The C# pity after `k` non-rare rolls: `Math.Min(CurrentValue + 0.01f,
+    /// 0.4f)` accumulated in `float` from -0.05f (`CardRarityOdds.cs:78`).
+    fn pity_after(k: usize) -> f32 {
+        let mut cv = -0.05_f32;
+        for _ in 0..k {
+            cv = (cv + 0.01).min(0.4);
+        }
+        cv
+    }
+
+    /// `CardRarityOdds.RollWithoutChangingFutureOdds` (`CardRarityOdds.cs:
+    /// 96-110`) compares a `float` roll against `float` sums. After 27
+    /// growths the rare threshold is 0.03f + pity = 0.25f; seed 7967532's
+    /// first draw 0.2500000181 rounds to the float 0.25000003, so C# rolls
+    /// Uncommon where the f64 compare rolled Rare.
+    #[test]
+    fn card_rarity_roll_compares_in_f32() {
+        let mut odds = CardRarityOdds::new(0);
+        odds.current_value = pity_after(27);
+        let mut r = crate::dotnet_rng::Rng::from_seed(7_967_532);
+        assert_eq!(
+            odds.roll_with_dotnet(&mut r, RarityContext::Regular),
+            RewardRarity::Uncommon
+        );
+        // The pity grows in f32 too (non-rare roll).
+        let grown = (pity_after(27) + 0.01_f32).min(0.4);
+        assert_eq!(odds.current_value.to_bits(), grown.to_bits());
+    }
+
+    /// The f32 pity never reaches the 0.4 cap exactly: 45 growths of 0.01f
+    /// from -0.05f stop at 0.39999988 (the 46th lands on 0.4f via `Min`).
+    #[test]
+    fn card_rarity_pity_accumulates_in_f32() {
+        let mut odds = CardRarityOdds::new(0);
+        // Track the C# float update alongside 200 regular rolls.
+        let mut r = crate::dotnet_rng::Rng::from_seed(1);
+        let mut expected = -0.05_f32;
+        for _ in 0..200 {
+            let res = odds.roll_with_dotnet(&mut r, RarityContext::Regular);
+            expected = if res == RewardRarity::Rare {
+                -0.05
+            } else {
+                (expected + 0.01).min(0.4)
+            };
+            assert_eq!(odds.current_value.to_bits(), expected.to_bits());
+        }
+    }
+
+    /// `CardFactory.RollForUpgrade` (`CardFactory.cs:288-305`): `decimal num
+    /// = (decimal)rng.NextFloat(); if (num <= odds)`. Act index 1 gives
+    /// odds 0.25. Seed 6295900's draw 0.2500000120 is the float 0.25 →
+    /// upgrade (the raw double missed). Seed 7967532's draw 0.2500000181 is
+    /// the float 0.25000003, whose 7-digit decimal is 0.2500000 → upgrade
+    /// as well, which a plain f32 compare would miss.
+    #[test]
+    fn upgrade_roll_uses_float_then_decimal() {
+        for seed in [6_295_900_u64, 7_967_532] {
+            let mut r = crate::dotnet_rng::Rng::from_seed(seed);
+            assert!(
+                roll_for_upgrade_with_dotnet(&mut r, RewardRarity::Common, 1, 0, 0.0),
+                "seed {seed}"
+            );
+        }
+    }
+
+    /// `PotionRewardOdds.Roll` (`PotionRewardOdds.cs:54-72`): `NextFloat()`
+    /// against the float 0.4f. Seed 88495220's first draw 0.3999999985
+    /// rounds to 0.4f, which is not `< 0.4f` → no potion (f64 dropped one).
+    #[test]
+    fn potion_reward_roll_compares_in_f32() {
+        let mut odds = PotionRewardOdds::new();
+        let mut r = crate::dotnet_rng::Rng::from_seed(88_495_220);
+        assert!(!odds.roll(&mut r, false, false));
+    }
 }

@@ -50,19 +50,43 @@ pub(crate) fn on_after_turn_end_joss_paper(state: &mut CombatState, side: Side) 
     EffectResult::Resolved
 }
 
-/// C# `DrawIfThresholdMet` (`JossPaper.cs:119-127`): draw `counter / 5`
-/// cards once the counter reaches the threshold, then `counter %= 5`. The
-/// batched ethereal fold can jump the counter past one threshold at once.
+/// C# `DrawIfThresholdMet` (`JossPaper.cs:126-133`, both builds): draw
+/// `counter / 5` cards once the counter reaches the threshold, then
+/// `counter %= 5`. The batched ethereal fold can jump the counter past one
+/// threshold at once.
+///
+/// The modulo follows the AWAITED draw, and reads the counter as it is then:
+/// an exhaust during the draw (a drawn Minion Strike that Hellraiser
+/// auto-plays) counts on top of the unreduced counter and so meets the
+/// threshold again. A draw that suspended on a reshuffle select (Stratagem)
+/// leaves the counter unreduced until the resumed draw finishes
+/// ([`joss_paper_settle_after_draw`]).
 fn joss_paper_draw_if_threshold_met(state: &mut CombatState) {
     let count = joss_paper_relic_mut(state).map_or(0, |r| r.counter);
     if count < JOSS_PAPER_EXHAUST_THRESHOLD {
         return;
     }
     let draws = (count / JOSS_PAPER_EXHAUST_THRESHOLD) * JOSS_PAPER_CARDS;
-    if let Some(r) = joss_paper_relic_mut(state) {
-        r.counter = count % JOSS_PAPER_EXHAUST_THRESHOLD;
-    }
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = crate::cards::draw_via_state(state, draws);
+    let suspended = !draw_was_suspended
+        && state.pending_choice.is_some()
+        && state.pending_draw_resume.is_some();
+    if !suspended {
+        joss_paper_settle_after_draw(state);
+    }
+}
+
+/// Joss Paper's `CardsExhausted %= 5` after its draw (JossPaper.cs:132). Also
+/// run when a suspended draw finishes: a counter still at or past the
+/// threshold then belongs to a Joss Paper draw that suspended, and C# reduces
+/// it as soon as that draw returns.
+pub(crate) fn joss_paper_settle_after_draw(state: &mut CombatState) {
+    if let Some(r) = joss_paper_relic_mut(state) {
+        if r.counter >= JOSS_PAPER_EXHAUST_THRESHOLD {
+            r.counter %= JOSS_PAPER_EXHAUST_THRESHOLD;
+        }
+    }
 }
 
 /// C# `JossPaper.AfterCombatEnd` (`JossPaper.cs:137-141`) resets the

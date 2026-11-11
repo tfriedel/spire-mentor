@@ -381,6 +381,27 @@ pub const DOLL_ROOM: EventSpec = EventSpec {
 };
 
 // ── EndlessConveyor ──────────────────────────────────────────────────
+//
+// C# `EndlessConveyor` (EndlessConveyor.cs, identical in v0.107.1 and
+// v0.111.0 apart from decompiler names) is a belt loop:
+//
+// - `CalculateVars` (event start) runs `RollDish()` once.
+// - Page INITIAL offers [grab the current dish | Observe Chef].
+// - `GrabSomethingOffTheBelt` pays 40 gold (free for Golden Fysh), awaits the
+//   dish's action, rolls the next dish, and shows page GRAB_SOMETHING_OFF_THE_
+//   BELT: [grab the new dish | Leave]. The grab option is LOCKED (disabled)
+//   below 40 gold.
+// - `RollDish` (EndlessConveyor.cs:212-262): `NumOfGrabs++`; every 5th roll
+//   is Seapunk Salad with no draw; otherwise the weighted pool [Caviar 6,
+//   Spicy Snappy 3, Jelly Liver 3, Fried Eel 3] + Suspicious Condiment 3 (an
+//   open potion slot) + Clam Roll 6 (HP below max) + Golden Fysh 1 (after the
+//   first roll), minus the last dish, picked with ONE `base.Rng.NextFloat()`
+//   times the float weight sum and a strict `<` over float running sums.
+//
+// Every draw (`RollDish`, Spicy Snappy's and Observe's `NextItem`, Jelly
+// Liver's transform) is on the event's own stream, kept in
+// `event_state.rng` across pages. `event_state.scratch` holds
+// `[NumOfGrabs, last dish, current dish]` (dish codes below, -1 = none).
 
 /// `EndlessConveyor::grab` per-dish cost — C#
 /// `EndlessConveyor.cs` `CanonicalVars[0] = GoldVar(40)` (Python
@@ -388,13 +409,12 @@ pub const DOLL_ROOM: EventSpec = EventSpec {
 /// `CalculateVars` only re-rolls the current dish, leaves the Gold
 /// base value unchanged). Bead `sts2-rs-vfv16`.
 pub const ENDLESS_CONVEYOR_GRAB_COST: i32 = 40;
-
-fn endless_conveyor_grab(state: &mut RunState) -> EventOutcome {
-    state.gold = state.gold.saturating_sub(ENDLESS_CONVEYOR_GRAB_COST);
-    EventOutcome::finished(format!(
-        "Grabbed a dish ({ENDLESS_CONVEYOR_GRAB_COST}g) — multi-page belt loop + RNG-weighted dish pool deferred to 6ynt.4.multi-page + 6ynt.4.rng."
-    ))
-}
+/// `GoldVar("GoldenFyshGold", 75)` (EndlessConveyor.cs:94).
+pub const ENDLESS_CONVEYOR_GOLDEN_FYSH_GOLD: i32 = 75;
+/// `HealVar("ClamRollHeal", 10m)` (EndlessConveyor.cs:95).
+pub const ENDLESS_CONVEYOR_CLAM_ROLL_HEAL: i32 = 10;
+/// `MaxHpVar("CaviarMaxHp", 4m)` (EndlessConveyor.cs:96).
+pub const ENDLESS_CONVEYOR_CAVIAR_MAX_HP: i32 = 4;
 
 /// `EndlessConveyor` event-RNG stream name (C# `Id.Entry`, UPPER_SNAKE).
 /// `EndlessConveyor` does not override `IsShared`, so the single-player player
@@ -404,26 +424,332 @@ fn endless_conveyor_grab(state: &mut RunState) -> EventOutcome {
 /// `WELCOME_TO_WONGOS` streams.
 const ENDLESS_CONVEYOR_STREAM: &str = "ENDLESS_CONVEYOR";
 
-fn endless_conveyor_rng(state: &RunState) -> sts2_core::dotnet_rng::Rng {
-    state.rng.named(ENDLESS_CONVEYOR_STREAM)
+/// One dish on the belt. The discriminant is the `event_state.scratch` code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i16)]
+enum ConveyorDish {
+    Caviar = 0,
+    SpicySnappy = 1,
+    JellyLiver = 2,
+    FriedEel = 3,
+    SuspiciousCondiment = 4,
+    ClamRoll = 5,
+    GoldenFysh = 6,
+    SeapunkSalad = 7,
+}
+
+/// "No dish" (C# `_lastDishId = ""` / an unset `_currentDish`).
+const CONVEYOR_NO_DISH: i16 = -1;
+
+impl ConveyorDish {
+    const ALL: [Self; 8] = [
+        Self::Caviar,
+        Self::SpicySnappy,
+        Self::JellyLiver,
+        Self::FriedEel,
+        Self::SuspiciousCondiment,
+        Self::ClamRoll,
+        Self::GoldenFysh,
+        Self::SeapunkSalad,
+    ];
+
+    fn from_code(code: i16) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| *d as i16 == code)
+    }
+
+    /// The `Dish.weight` float (EndlessConveyor.cs:221-246).
+    const fn weight(self) -> f32 {
+        match self {
+            Self::Caviar | Self::ClamRoll => 6.0,
+            Self::SpicySnappy | Self::JellyLiver | Self::FriedEel | Self::SuspiciousCondiment => {
+                3.0
+            }
+            Self::GoldenFysh => 1.0,
+            Self::SeapunkSalad => 0.0,
+        }
+    }
+
+    /// `Dish.optionKey` = `ENDLESS_CONVEYOR.pages.ALL.options.<id>`.
+    const fn loc_key(self) -> &'static str {
+        match self {
+            Self::Caviar => "ENDLESS_CONVEYOR.pages.ALL.options.CAVIAR",
+            Self::SpicySnappy => "ENDLESS_CONVEYOR.pages.ALL.options.SPICY_SNAPPY",
+            Self::JellyLiver => "ENDLESS_CONVEYOR.pages.ALL.options.JELLY_LIVER",
+            Self::FriedEel => "ENDLESS_CONVEYOR.pages.ALL.options.FRIED_EEL",
+            Self::SuspiciousCondiment => "ENDLESS_CONVEYOR.pages.ALL.options.SUSPICIOUS_CONDIMENT",
+            Self::ClamRoll => "ENDLESS_CONVEYOR.pages.ALL.options.CLAM_ROLL",
+            Self::GoldenFysh => "ENDLESS_CONVEYOR.pages.ALL.options.GOLDEN_FYSH",
+            Self::SeapunkSalad => "ENDLESS_CONVEYOR.pages.ALL.options.SEAPUNK_SALAD",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Caviar => "Caviar (40g)",
+            Self::SpicySnappy => "Spicy Snappy (40g)",
+            Self::JellyLiver => "Jelly Liver (40g)",
+            Self::FriedEel => "Fried Eel (40g)",
+            Self::SuspiciousCondiment => "Suspicious Condiment (40g)",
+            Self::ClamRoll => "Clam Roll (40g)",
+            Self::GoldenFysh => "Golden Fysh (free)",
+            Self::SeapunkSalad => "Seapunk Salad (40g)",
+        }
+    }
+
+    const fn description(self) -> &'static str {
+        match self {
+            Self::Caviar => "Gain 4 Max HP.",
+            Self::SpicySnappy => "Upgrade a random card.",
+            Self::JellyLiver => "Transform a card.",
+            Self::FriedEel => "Gain a random Colorless card.",
+            Self::SuspiciousCondiment => "Procure a random potion.",
+            Self::ClamRoll => "Heal 10 HP.",
+            Self::GoldenFysh => "Gain 75 gold.",
+            Self::SeapunkSalad => "Add Feeding Frenzy to your deck.",
+        }
+    }
+}
+
+/// The belt's `[NumOfGrabs, _lastDishId, _currentDish]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConveyorBelt {
+    num_grabs: i16,
+    last: i16,
+    current: i16,
+}
+
+/// The weighted candidates of a non-Seapunk `RollDish`, in C# list order
+/// (EndlessConveyor.cs:219-238), for a belt whose `NumOfGrabs` is already
+/// incremented.
+fn conveyor_dish_pool(state: &RunState, belt: &ConveyorBelt) -> Vec<ConveyorDish> {
+    use ConveyorDish as D;
+    let mut list = vec![D::Caviar, D::SpicySnappy, D::JellyLiver, D::FriedEel];
+    // `Owner.HasOpenPotionSlots`.
+    if state.potions.len() < state.potion_belt_cap() {
+        list.push(D::SuspiciousCondiment);
+    }
+    if state.current_hp != state.max_hp {
+        list.push(D::ClamRoll);
+    }
+    if belt.num_grabs > 1 {
+        list.push(D::GoldenFysh);
+    }
+    list.retain(|d| *d as i16 != belt.last);
+    list
+}
+
+/// C# `RollDish` (EndlessConveyor.cs:212-262) against the player's state
+/// right now (open potion slot, HP below max).
+fn conveyor_roll_dish(
+    state: &RunState,
+    belt: &mut ConveyorBelt,
+    rng: &mut sts2_core::dotnet_rng::Rng,
+) {
+    use ConveyorDish as D;
+    belt.num_grabs += 1;
+    if belt.num_grabs % 5 == 0 {
+        belt.last = D::SeapunkSalad as i16;
+        belt.current = D::SeapunkSalad as i16;
+        return;
+    }
+    let list = conveyor_dish_pool(state, belt);
+    // `float num3 += weight; float num4 = NextFloat() * num3;` then
+    // `num5 += weight; if (num4 < num5)` — all float.
+    let total = list.iter().fold(0.0_f32, |acc, d| acc + d.weight());
+    let roll = rng.next_float_f32() * total;
+    let mut running = 0.0_f32;
+    for dish in list {
+        running += dish.weight();
+        if roll < running {
+            belt.last = dish as i16;
+            belt.current = dish as i16;
+            return;
+        }
+    }
+    // A `NextFloat()` that rounds up to 1.0f matches nothing: C# keeps the
+    // previous dish (no assignment in the loop).
+}
+
+/// The belt after event start: the stored scratch, or C#'s `CalculateVars`
+/// roll on a fresh event stream when nothing has been stored yet. Returns
+/// the event stream positioned after every draw so far.
+fn conveyor_belt_and_rng(state: &RunState) -> (ConveyorBelt, sts2_core::dotnet_rng::Rng) {
+    if let [num_grabs, last, current] = state.event_state.scratch[..] {
+        let rng = state
+            .event_state
+            .rng
+            .clone()
+            .unwrap_or_else(|| state.rng.named(ENDLESS_CONVEYOR_STREAM));
+        return (
+            ConveyorBelt {
+                num_grabs,
+                last,
+                current,
+            },
+            rng,
+        );
+    }
+    let mut belt = ConveyorBelt {
+        num_grabs: 0,
+        last: CONVEYOR_NO_DISH,
+        current: CONVEYOR_NO_DISH,
+    };
+    let mut rng = state.rng.named(ENDLESS_CONVEYOR_STREAM);
+    conveyor_roll_dish(state, &mut belt, &mut rng);
+    (belt, rng)
+}
+
+fn conveyor_store(state: &mut RunState, belt: ConveyorBelt, rng: sts2_core::dotnet_rng::Rng) {
+    state.event_state.scratch = vec![belt.num_grabs, belt.last, belt.current];
+    state.event_state.rng = Some(rng);
+}
+
+/// C# `CalculateVars` → `RollDish()` at event start, on the state the
+/// player enters with (before any out-of-combat potion use could open a
+/// slot). Idempotent per event visit.
+pub fn endless_conveyor_before_event_started(state: &mut RunState) {
+    if state.event_state.scratch.is_empty() {
+        let (belt, rng) = conveyor_belt_and_rng(state);
+        conveyor_store(state, belt, rng);
+    }
+}
+
+/// C# `GrabSomethingOffTheBelt` (EndlessConveyor.cs:121-135).
+fn endless_conveyor_grab(state: &mut RunState) -> EventOutcome {
+    use ConveyorDish as D;
+    let (mut belt, mut rng) = conveyor_belt_and_rng(state);
+    let dish = D::from_code(belt.current);
+    if dish != Some(D::GoldenFysh) {
+        state.gold = state.gold.saturating_sub(ENDLESS_CONVEYOR_GRAB_COST).max(0);
+    }
+    let description = match dish {
+        Some(D::Caviar) => {
+            state.gain_max_hp(ENDLESS_CONVEYOR_CAVIAR_MAX_HP);
+            "Ate Caviar: +4 Max HP."
+        }
+        Some(D::ClamRoll) => {
+            state.heal(ENDLESS_CONVEYOR_CLAM_ROLL_HEAL);
+            "Ate a Clam Roll: healed."
+        }
+        Some(D::GoldenFysh) => {
+            state.gain_gold(ENDLESS_CONVEYOR_GOLDEN_FYSH_GOLD);
+            "Caught the Golden Fysh: +75 gold."
+        }
+        Some(D::SpicySnappy) => {
+            // `base.Rng.NextItem(deck.Where(IsUpgradable))` → Upgrade; an
+            // empty list draws nothing (EndlessConveyor.cs:197-206).
+            let upgradable: Vec<usize> = state
+                .master_deck
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| c.is_upgradable().then_some(i))
+                .collect();
+            if !upgradable.is_empty() {
+                let pick = rng.next_int_exclusive(0, upgradable.len() as i32) as usize;
+                state.master_deck[upgradable[pick]].upgrade_for(state.game_version);
+            }
+            "Ate a Spicy Snappy: upgraded a card."
+        }
+        Some(D::JellyLiver) => {
+            conveyor_jelly_liver(state, &mut rng);
+            "Ate a Jelly Liver: transform a card."
+        }
+        Some(D::FriedEel) => {
+            // `CardFactory.CreateForReward(owner, 1,
+            // ForNonCombatWithDefaultOdds(ColorlessCardPool))` → deck
+            // (EndlessConveyor.cs:186-191): base odds, no pity, no upgrade
+            // roll, on PlayerRng.Rewards; the reward-option hooks run.
+            let ids = crate::cards::spec_index::roll_colorless_reward_options_no_upgrade(state, 1);
+            if let Some(card) = ids
+                .first()
+                .and_then(|&id| crate::cards::spec_index::card_pod_from_id(id, false))
+            {
+                super::shared::add_created_for_reward_card(state, card);
+            }
+            "Ate a Fried Eel: gained a colorless card."
+        }
+        Some(D::SuspiciousCondiment) => {
+            // One `PlayerRng.Rewards.NextItem` over character ++ shared
+            // potions, offered as a populated PotionReward and awaited
+            // (EndlessConveyor.cs:150-161). Claimed here, before the next
+            // `RollDish` reads `HasOpenPotionSlots` — the drain would claim
+            // it only after this handler returns. The dish is only on the
+            // belt with a slot open, so the claim always fits.
+            if let Some(kind) = crate::potions::all::roll_event_potion_full_pool(
+                &mut state.rng.rewards,
+                state.character_id,
+            ) {
+                let _ = state.claim_potion_reward(kind);
+            }
+            "Ate a Suspicious Condiment: gained a potion."
+        }
+        Some(D::SeapunkSalad) => {
+            // `CreateCard<FeedingFrenzy>` → `CardPileCmd.Add(Deck)`.
+            if let Some(card) = crate::cards::spec_index::card_pod_from_id(
+                sts2_core::cards::CardId::FeedingFrenzyCard,
+                false,
+            ) {
+                state.add_card_to_deck_with_hooks(
+                    card,
+                    sts2_core::relic_effects::AddSource::EventGain,
+                );
+            }
+            "Ate a Seapunk Salad: gained Feeding Frenzy."
+        }
+        None => "The belt was empty.",
+    };
+    conveyor_roll_dish(state, &mut belt, &mut rng);
+    conveyor_store(state, belt, rng);
+    state.event_state.page = 1;
+    EventOutcome {
+        finished: false,
+        description: description.to_string(),
+        effects: Vec::new(),
+    }
+}
+
+/// C# `JellyLiver` (EndlessConveyor.cs:163-170): pick 1 deck card
+/// (`FromDeckForTransformation`), then `TransformToRandom(card, base.Rng)`.
+/// The transform's one event-stream draw precedes the next `RollDish`, so
+/// it is reserved here: an interactive host queues the pick with the
+/// stream position (`skip_reads`) and this stream skips past it; a
+/// non-interactive host transforms the first deck card now (the
+/// MorphicGrove convention).
+fn conveyor_jelly_liver(state: &mut RunState, rng: &mut sts2_core::dotnet_rng::Rng) {
+    let Some(original) = state.master_deck.first().map(|c| c.card_id) else {
+        return;
+    };
+    let skip_reads = rng.counter();
+    if state.interactive_card_transform {
+        state
+            .pending_deck_transforms
+            .push(sts2_core::PendingDeckTransform {
+                event_stream_roll: Some((ENDLESS_CONVEYOR_STREAM, skip_reads)),
+                ..Default::default()
+            });
+        let _ = rng.next_int(0, 1);
+        return;
+    }
+    if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
+        state,
+        state.character_id,
+        original,
+        ENDLESS_CONVEYOR_STREAM,
+        skip_reads,
+    ) {
+        let _ = rng.next_int(0, 1);
+        if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
+            state.master_deck.remove(0);
+            state.add_card_to_deck_with_hooks(card, sts2_core::relic_effects::AddSource::EventGain);
+        }
+    }
 }
 
 fn endless_conveyor_observe(state: &mut RunState) -> EventOutcome {
-    // C# `EndlessConveyor.ObserveChef` (EndlessConveyor.cs:265):
+    // C# `EndlessConveyor.ObserveChef` (EndlessConveyor.cs:268-278):
     //   CardCmd.Upgrade(base.Rng.NextItem(Deck.Cards.Where(IsUpgradable)))
-    // The upgrade target is picked off the event-local `base.Rng`. That stream
-    // is NOT fresh at this point: `CalculateVars` (`EndlessConveyor.cs:109`)
-    // calls `RollDish()` once before any option runs, and the first `RollDish`
-    // (NumOfGrabs=1, so `% 5 != 0`) consumes exactly ONE `base.Rng.NextFloat()`
-    // — the weighted dish pick (`EndlessConveyor.cs:251`). The dish-list
-    // composition (potion slots / current-vs-max HP / GOLDEN_FYSH at
-    // NumOfGrabs>1 / last-dish removal) only changes WHICH dish is chosen, not
-    // the draw COUNT, so for the Observe-from-initial-page path the counter is
-    // advanced by precisely one `NextFloat` regardless of game state. We
-    // replay that single draw on a fresh event stream, then `NextItem` =
-    // `NextInt(0, count)` (`Rng.cs:157`) over the upgradable deck cards (deck
-    // order), and `CardCmd.Upgrade` the chosen card. Same event-RNG shape as
-    // `slippery_bridge_overcome` / `wongo_leave`, plus the one RollDish prefix.
+    // on the event stream, after `CalculateVars`' `RollDish` draw.
+    let (_, mut rng) = conveyor_belt_and_rng(state);
     let upgradable: Vec<usize> = state
         .master_deck
         .iter()
@@ -433,12 +759,64 @@ fn endless_conveyor_observe(state: &mut RunState) -> EventOutcome {
     if upgradable.is_empty() {
         return EventOutcome::finished("Observed chef — no upgradable card.");
     }
-    let mut rng = endless_conveyor_rng(state);
-    // CalculateVars → RollDish: one NextFloat before any option runs.
-    let _ = rng.next_float(1.0);
     let pick = rng.next_int_exclusive(0, upgradable.len() as i32) as usize;
     state.master_deck[upgradable[pick]].upgrade_for(state.game_version);
     EventOutcome::finished("Observed chef — upgraded a card.")
+}
+
+fn endless_conveyor_leave(_state: &mut RunState) -> EventOutcome {
+    EventOutcome::finished("Left the conveyor.")
+}
+
+/// Page INITIAL = [grab, observe]; page GRAB_SOMETHING_OFF_THE_BELT =
+/// [grab, leave]. The grab row names the current dish, or is the disabled
+/// LOCKED row below 40 gold (`GenerateGrabSomethingOffTheBeltOption`,
+/// EndlessConveyor.cs:137-144 — Golden Fysh included).
+fn endless_conveyor_generate_options(state: &RunState, spec: &EventSpec) -> Vec<EventOptionInfo> {
+    use sts2_core::events::EventVar;
+    let (belt, _) = conveyor_belt_and_rng(state);
+    let base = super::default_option_info_from_spec(state, spec);
+    let take = |id: &str| {
+        base.iter()
+            .find(|o| o.option_id == id)
+            .cloned()
+            .expect("conveyor option")
+    };
+    let mut grab = take("grab");
+    match ConveyorDish::from_code(belt.current) {
+        Some(dish) if state.gold >= ENDLESS_CONVEYOR_GRAB_COST => {
+            grab.label = dish.label().to_string();
+            grab.description = dish.description().to_string();
+            grab.loc_key = dish.loc_key();
+            grab.vars = vec![
+                ("Gold", EventVar::Int(i64::from(ENDLESS_CONVEYOR_GRAB_COST))),
+                (
+                    "GoldenFyshGold",
+                    EventVar::Int(i64::from(ENDLESS_CONVEYOR_GOLDEN_FYSH_GOLD)),
+                ),
+                (
+                    "ClamRollHeal",
+                    EventVar::Int(i64::from(ENDLESS_CONVEYOR_CLAM_ROLL_HEAL)),
+                ),
+                (
+                    "CaviarMaxHp",
+                    EventVar::Int(i64::from(ENDLESS_CONVEYOR_CAVIAR_MAX_HP)),
+                ),
+            ];
+        }
+        _ => {
+            grab.enabled = false;
+            grab.label = "Broke".to_string();
+            grab.description = "Not enough gold.".to_string();
+            grab.loc_key = "ENDLESS_CONVEYOR.pages.ALL.options.LOCKED";
+        }
+    }
+    let second = if state.event_state.page == 0 {
+        take("observe")
+    } else {
+        take("leave")
+    };
+    vec![grab, second]
 }
 
 const ENDLESS_CONVEYOR_OPTIONS: &[EventOptionSpec] = &[
@@ -446,11 +824,8 @@ const ENDLESS_CONVEYOR_OPTIONS: &[EventOptionSpec] = &[
         option_id: "grab",
         loc_key: "",
         default_label: "Grab Something (40g)",
-        default_description: "Random dish (40g per grab).",
-        default_vars: &[(
-            "FoulPotions",
-            EventVarSpec::Int(POTION_COURIER_FOUL_POTIONS as i64),
-        )],
+        default_description: "Take the current dish (40g per grab).",
+        default_vars: &[],
         vars_fn: None,
         title_vars_fn: None,
         handler: endless_conveyor_grab,
@@ -465,18 +840,25 @@ const ENDLESS_CONVEYOR_OPTIONS: &[EventOptionSpec] = &[
         title_vars_fn: None,
         handler: endless_conveyor_observe,
     },
+    EventOptionSpec {
+        option_id: "leave",
+        loc_key: "ENDLESS_CONVEYOR.pages.GRAB_SOMETHING_OFF_THE_BELT.options.LEAVE",
+        default_label: "Leave",
+        default_description: "Leave the conveyor.",
+        default_vars: &[],
+        vars_fn: None,
+        title_vars_fn: None,
+        handler: endless_conveyor_leave,
+    },
 ];
 
-/// `is_allowed`: `endless_conveyor_allowed` (`gold >= 105`) — wired.
-/// `observe` (1-card upgrade) wired via the event-RNG replay
-/// (`CalculateVars→RollDish` NextFloat + `ObserveChef` NextItem) — bead
-/// `sts2-rs-778r7`. `grab` belt loop + dish pool stay deferred
-/// (`6ynt.4.multi-page` + `6ynt.4.rng`).
+/// `is_allowed`: `endless_conveyor_allowed` (`Gold >= 120`). Multi-page belt
+/// loop; see the section comment above.
 pub const ENDLESS_CONVEYOR: EventSpec = EventSpec {
     id: EventId::EndlessConveyor,
     python_name: "EndlessConveyor",
     is_allowed: endless_conveyor_allowed,
-    generate_options: super::default_option_info_from_spec,
+    generate_options: endless_conveyor_generate_options,
     options: ENDLESS_CONVEYOR_OPTIONS,
 };
 
@@ -1610,12 +1992,230 @@ mod tests {
 
     // ── EndlessConveyor ────────────────────────────────────────────
 
+    /// Put the belt at `[num_grabs, last = current = dish]` with the event
+    /// stream `draws` reads in, as if that many draws had happened.
+    fn conveyor_at(rs: &mut RunState, num_grabs: i16, dish: ConveyorDish, draws: u32) {
+        let mut rng = rs.rng.named(ENDLESS_CONVEYOR_STREAM);
+        for _ in 0..draws {
+            let _ = rng.next_int(0, 1);
+        }
+        rs.event_state.scratch = vec![num_grabs, dish as i16, dish as i16];
+        rs.event_state.rng = Some(rng);
+    }
+
+    fn conveyor_option_ids(rs: &RunState) -> Vec<&'static str> {
+        endless_conveyor_generate_options(rs, &ENDLESS_CONVEYOR)
+            .iter()
+            .map(|o| o.option_id)
+            .collect()
+    }
+
+    fn fill_potion_belt(rs: &mut RunState) {
+        while rs.potions.len() < rs.potion_belt_cap() {
+            rs.potions.push(sts2_core::potions::PotionKind::FirePotion);
+        }
+    }
+
+    /// `CalculateVars` rolls the first dish at event start (one event-stream
+    /// draw) and binding again does not re-roll; page INITIAL is
+    /// [grab, observe].
     #[test]
-    fn endless_conveyor_grab_deducts_grab_cost() {
-        let mut rs = rs_with_gold(100);
+    fn endless_conveyor_event_start_rolls_one_dish() {
+        let mut rs = rs_with_gold(200);
+        super::super::dispatch::begin_event(&mut rs, EventId::EndlessConveyor);
+        assert_eq!(rs.event_state.scratch.len(), 3);
+        assert_eq!(rs.event_state.scratch[0], 1, "NumOfGrabs");
+        assert_eq!(rs.event_state.rng.as_ref().unwrap().counter(), 1);
+        endless_conveyor_before_event_started(&mut rs);
+        assert_eq!(rs.event_state.rng.as_ref().unwrap().counter(), 1);
+        assert_eq!(conveyor_option_ids(&rs), ["grab", "observe"]);
+    }
+
+    /// The pool (EndlessConveyor.cs:219-238): four base dishes, Suspicious
+    /// Condiment only with an open potion slot, Clam Roll only below max HP,
+    /// Golden Fysh only after the first roll, and never the last dish.
+    #[test]
+    fn endless_conveyor_dish_pool_composition() {
+        use ConveyorDish as D;
+        let mut rs = rs_with_gold(200);
+        rs.current_hp = rs.max_hp;
+        fill_potion_belt(&mut rs);
+        let first = ConveyorBelt {
+            num_grabs: 1,
+            last: CONVEYOR_NO_DISH,
+            current: CONVEYOR_NO_DISH,
+        };
+        assert_eq!(
+            conveyor_dish_pool(&rs, &first),
+            [D::Caviar, D::SpicySnappy, D::JellyLiver, D::FriedEel]
+        );
+        rs.potions.clear();
+        rs.current_hp = rs.max_hp - 1;
+        let later = ConveyorBelt {
+            num_grabs: 2,
+            last: D::SpicySnappy as i16,
+            current: D::SpicySnappy as i16,
+        };
+        assert_eq!(
+            conveyor_dish_pool(&rs, &later),
+            [
+                D::Caviar,
+                D::JellyLiver,
+                D::FriedEel,
+                D::SuspiciousCondiment,
+                D::ClamRoll,
+                D::GoldenFysh
+            ]
+        );
+    }
+
+    /// The pick is float math (EndlessConveyor.cs:247-261): seed 88495220's
+    /// draw 0.3999999985 is 0.4f, and 0.4f * 15f rounds to 6.0f, which is
+    /// not `< 6` (Caviar's running sum), so C# serves Spicy Snappy. A double
+    /// roll (5.99999998) would have served Caviar.
+    #[test]
+    fn endless_conveyor_roll_dish_is_float_math() {
+        let mut rs = rs_with_gold(200);
+        rs.current_hp = rs.max_hp;
+        fill_potion_belt(&mut rs);
+        let mut belt = ConveyorBelt {
+            num_grabs: 0,
+            last: CONVEYOR_NO_DISH,
+            current: CONVEYOR_NO_DISH,
+        };
+        let mut rng = sts2_core::dotnet_rng::Rng::from_seed(88_495_220);
+        conveyor_roll_dish(&rs, &mut belt, &mut rng);
+        assert_eq!(belt.current, ConveyorDish::SpicySnappy as i16);
+        assert_eq!(belt.last, ConveyorDish::SpicySnappy as i16);
+    }
+
+    /// Every 5th roll is Seapunk Salad and draws nothing
+    /// (EndlessConveyor.cs:214-220).
+    #[test]
+    fn endless_conveyor_fifth_roll_is_seapunk_without_a_draw() {
+        let rs = rs_with_gold(200);
+        let mut belt = ConveyorBelt {
+            num_grabs: 4,
+            last: ConveyorDish::Caviar as i16,
+            current: ConveyorDish::Caviar as i16,
+        };
+        let mut rng = rs.rng.named(ENDLESS_CONVEYOR_STREAM);
+        conveyor_roll_dish(&rs, &mut belt, &mut rng);
+        assert_eq!(belt.current, ConveyorDish::SeapunkSalad as i16);
+        assert_eq!(rng.counter(), 0);
+    }
+
+    /// Grab pays 40, eats the dish, rolls the next one and opens page
+    /// GRAB_SOMETHING_OFF_THE_BELT = [grab, leave] (EndlessConveyor.cs:121-135).
+    #[test]
+    fn endless_conveyor_grab_caviar_pays_and_continues() {
+        let mut rs = rs_with_gold(200);
+        let max_before = rs.max_hp;
+        conveyor_at(&mut rs, 1, ConveyorDish::Caviar, 1);
         let outcome = (ENDLESS_CONVEYOR.options[0].handler)(&mut rs);
-        assert!(outcome.finished);
-        assert_eq!(rs.gold, 100 - ENDLESS_CONVEYOR_GRAB_COST);
+        assert!(!outcome.finished);
+        assert_eq!(rs.gold, 200 - ENDLESS_CONVEYOR_GRAB_COST);
+        assert_eq!(rs.max_hp, max_before + ENDLESS_CONVEYOR_CAVIAR_MAX_HP);
+        assert_eq!(rs.event_state.page, 1);
+        assert_eq!(rs.event_state.scratch[0], 2, "NumOfGrabs");
+        assert_ne!(rs.event_state.scratch[2], ConveyorDish::Caviar as i16);
+        assert_eq!(rs.event_state.rng.as_ref().unwrap().counter(), 2);
+        assert_eq!(conveyor_option_ids(&rs), ["grab", "leave"]);
+        let leave = (ENDLESS_CONVEYOR.options[2].handler)(&mut rs);
+        assert!(leave.finished);
+    }
+
+    /// Golden Fysh is free and pays 75 (EndlessConveyor.cs:123-126,193-196).
+    #[test]
+    fn endless_conveyor_golden_fysh_is_free() {
+        let mut rs = rs_with_gold(200);
+        conveyor_at(&mut rs, 2, ConveyorDish::GoldenFysh, 1);
+        let _ = (ENDLESS_CONVEYOR.options[0].handler)(&mut rs);
+        assert_eq!(rs.gold, 200 + ENDLESS_CONVEYOR_GOLDEN_FYSH_GOLD);
+    }
+
+    /// Below 40 gold the grab row is LOCKED, even for Golden Fysh
+    /// (EndlessConveyor.cs:137-144).
+    #[test]
+    fn endless_conveyor_grab_locked_below_cost() {
+        let mut rs = rs_with_gold(39);
+        conveyor_at(&mut rs, 2, ConveyorDish::GoldenFysh, 1);
+        rs.event_state.page = 1;
+        let opts = endless_conveyor_generate_options(&rs, &ENDLESS_CONVEYOR);
+        assert_eq!(opts[0].option_id, "grab");
+        assert!(!opts[0].enabled);
+        assert_eq!(opts[0].loc_key, "ENDLESS_CONVEYOR.pages.ALL.options.LOCKED");
+        assert!(opts[1].enabled);
+    }
+
+    /// The locked grab cannot be taken, so its preview shows nothing: resolving
+    /// it on the preview clone ate the hidden dish and charged the gold, and
+    /// the preview moved with the event seed.
+    #[test]
+    fn endless_conveyor_locked_grab_previews_nothing() {
+        let mut rs = rs_with_gold(200);
+        super::super::dispatch::begin_event(&mut rs, EventId::EndlessConveyor);
+        conveyor_at(&mut rs, 2, ConveyorDish::Caviar, 1);
+        rs.event_state.page = 1;
+        rs.gold = 39;
+        let d = super::super::dispatch::preview_option_effect(&rs, 0).expect("preview");
+        assert_eq!((d.gold_delta, d.hp_delta, d.max_hp_delta), (0, 0, 0));
+    }
+
+    /// Seapunk Salad adds Feeding Frenzy (EndlessConveyor.cs:180-184).
+    #[test]
+    fn endless_conveyor_seapunk_salad_adds_feeding_frenzy() {
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = rs_with_gold(200);
+        conveyor_at(&mut rs, 5, ConveyorDish::SeapunkSalad, 4);
+        let _ = (ENDLESS_CONVEYOR.options[0].handler)(&mut rs);
+        assert!(rs
+            .master_deck
+            .iter()
+            .any(|c| c.card_id == sts2_core::cards::CardId::FeedingFrenzyCard));
+        assert_eq!(rs.gold, 200 - ENDLESS_CONVEYOR_GRAB_COST);
+    }
+
+    /// Suspicious Condiment claims its potion (one Rewards read) before the
+    /// next `RollDish` reads `HasOpenPotionSlots` (EndlessConveyor.cs:150-161).
+    #[test]
+    fn endless_conveyor_condiment_claims_the_potion_first() {
+        let mut rs = rs_with_gold(200);
+        rs.potions.clear();
+        let cap = rs.potion_belt_cap();
+        for _ in 1..cap {
+            rs.potions.push(sts2_core::potions::PotionKind::FirePotion);
+        }
+        let rewards_before = rs.rng.rewards.counter();
+        conveyor_at(&mut rs, 1, ConveyorDish::SuspiciousCondiment, 1);
+        let _ = (ENDLESS_CONVEYOR.options[0].handler)(&mut rs);
+        assert_eq!(rs.potions.len(), cap, "belt now full");
+        assert_eq!(rs.rng.rewards.counter(), rewards_before + 1);
+    }
+
+    /// Jelly Liver queues the transform pick at the current event-stream
+    /// position and reserves its one draw ahead of the next `RollDish`
+    /// (EndlessConveyor.cs:163-170).
+    #[test]
+    fn endless_conveyor_jelly_liver_reserves_the_transform_draw() {
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = rs_with_gold(200);
+        rs.interactive_card_transform = true;
+        rs.master_deck.push(
+            crate::cards::spec_index::card_pod_from_id(
+                sts2_core::cards::CardId::StrikeIronclad,
+                false,
+            )
+            .unwrap(),
+        );
+        conveyor_at(&mut rs, 1, ConveyorDish::JellyLiver, 1);
+        let _ = (ENDLESS_CONVEYOR.options[0].handler)(&mut rs);
+        assert_eq!(rs.pending_deck_transforms.len(), 1);
+        assert_eq!(
+            rs.pending_deck_transforms[0].event_stream_roll,
+            Some((ENDLESS_CONVEYOR_STREAM, 1))
+        );
+        assert_eq!(rs.event_state.rng.as_ref().unwrap().counter(), 3);
     }
 
     #[test]
@@ -1717,6 +2317,18 @@ mod tests {
         let price = i32::from(rs.event_state.scratch[0]);
         let _ = (FAKE_MERCHANT.options[0].handler)(&mut rs);
         assert_eq!(rs.gold, 200 - price);
+    }
+
+    /// `MerchantRelicEntry.cs:45` prices in float: the first `Shops` draw of
+    /// seed 49287 is 0.59999989 → jitter 1.02999997 (f64) whose f32 is
+    /// 1.03f, and 50 * 1.03f = 51.5f banker-rounds to 52. The f64 product
+    /// 51.4999984 gave 51.
+    #[test]
+    fn fake_merchant_price_is_float_math() {
+        let mut rs = rs_with_gold(200);
+        rs.rng.shops = sts2_core::dotnet_rng::Rng::from_seed(49287);
+        fake_merchant_before_event_started(&mut rs);
+        assert_eq!(rs.event_state.scratch[0], 52);
     }
 
     #[test]

@@ -937,11 +937,14 @@ fn apply_damage_with_final_impl(
     // teardown or AfterDeath sibling reaction appends its own.
     if crate::event_log::armed(state) {
         let receiver = crate::event_log::LogCreature::of_uid(state, target);
-        let dealer_who = crate::event_log::LogCreature::of_dealer(state, dealer);
+        // A dealer-less hit (Poison's `CreatureCmd.Damage(.., null, null)`)
+        // is a source-less entry, as in C#.
+        let dealer_who = (!matches!(dealer, crate::hooks::CreatureRef::Nobody))
+            .then(|| crate::event_log::LogCreature::of_dealer(state, dealer));
         crate::event_log::record(
             state,
             crate::event_log::EventLogEntry::DamageReceived {
-                dealer: Some(dealer_who),
+                dealer: dealer_who,
                 receiver,
                 // C# `DamageResult.UnblockedDamage` — what got past block and
                 // the modify pipeline, UNCLAMPED. `hp_loss` (the clamped

@@ -158,6 +158,15 @@ fn roll_tezcatara(rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
     ]
 }
 
+/// `base.Rng.NextFloat() < 0.3333333f` (`Orobas.cs:196`, both builds): the
+/// roll is the `float` C# `NextFloat()` returns and the literal is a `float`.
+/// A double sample in [0.33333329857, 0.3333333) rounds to the float
+/// 0.33333331 = `0.3333333f`, which is not `<`, so C# offers Sea Glass where
+/// an `f64` compare offered Prismatic Gem.
+fn orobas_rolls_prismatic_gem(roll: f32) -> bool {
+    roll < 0.333_333_3_f32
+}
+
 /// `Orobas.GenerateInitialOptions`. RNG order: (1) pick the SeaGlass
 /// character variant from the other-character pool, (2) `NextFloat() < 1/3`
 /// PrismaticGem vs SeaGlass, (3) `NextItem` over `pool1 ++ [item]`,
@@ -176,8 +185,7 @@ fn roll_orobas(
         let _ = rng.next_int_exclusive(0, cond.num_other_characters as i32);
     }
     // (2) PrismaticGem (1/3) vs SeaGlass.
-    // `NextFloat() < 0.3333333f` (Orobas.cs:196): both sides single precision.
-    let item = if rng.next_float_f32() < 0.333_333_3_f32 {
+    let item = if orobas_rolls_prismatic_gem(rng.next_float_f32()) {
         PrismaticGem
     } else {
         SeaGlass
@@ -811,5 +819,20 @@ mod tests {
         assert!(act3_seen.contains(&RelicId::PhilosophersStone));
         assert!(!act3_seen.contains(&RelicId::Ectoplasm));
         assert!(!act3_seen.contains(&RelicId::Sozu));
+    }
+
+    /// `Orobas.cs:196` compares floats. The double 0.33333329986 is below
+    /// the decimal 0.3333333 but rounds to the float `0.3333333f` itself, so
+    /// C# rolls Sea Glass. No seed in 3e8 hits this ~1.4e-9-wide window, so
+    /// the test pins the compare on a constructed sample.
+    #[test]
+    fn orobas_prismatic_gem_roll_is_an_f32_compare() {
+        let d = 0.333_333_299_86_f64;
+        assert!(d < 0.333_333_3_f64);
+        #[allow(clippy::cast_possible_truncation)]
+        let roll = d as f32;
+        assert_eq!(roll, 0.333_333_3_f32);
+        assert!(!orobas_rolls_prismatic_gem(roll));
+        assert!(orobas_rolls_prismatic_gem(0.333_333_28_f32));
     }
 }

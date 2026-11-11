@@ -1670,7 +1670,7 @@ pub const HUNGRY_FOR_MUSHROOMS: EventSpec = EventSpec {
 /// it, so WingCharm / Glitter / FresnelLens / the eggs see the card before
 /// `CardPileCmd.Add`. No `IsCardReward` flag (no `CardReward` wrapper), so
 /// SilverCrucible / SilkenTress return early (see `offer_card_slate`).
-fn add_created_for_reward_card(state: &mut RunState, card: sts2_core::cards::Card) {
+pub(super) fn add_created_for_reward_card(state: &mut RunState, card: sts2_core::cards::Card) {
     let mut cards = state.offer_card_slate(vec![card], false);
     if let Some(card) = cards.pop() {
         state.add_card_to_deck_with_hooks(card, sts2_core::relic_effects::AddSource::EventGain);

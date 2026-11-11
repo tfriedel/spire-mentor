@@ -90,7 +90,9 @@ fn trigger_poison_v0111(state: &mut CombatState, e: CreatureUid) {
         apply_effect(
             state,
             Effect::DealHpLoss {
-                dealer: CreatureRef::Enemy(e),
+                // `CreatureCmd.Damage(..., Owner, Amount, Unblockable |
+                // Unpowered, null, null)`: no dealer (PoisonPower.cs:66-79).
+                dealer: CreatureRef::Nobody,
                 target: CreatureRef::Enemy(e),
                 amount: current,
                 props: ValueProps::UNBLOCKABLE.union(ValueProps::UNPOWERED),

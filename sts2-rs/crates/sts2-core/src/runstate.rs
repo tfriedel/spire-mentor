@@ -6136,6 +6136,30 @@ pub const GUILTY_MAX_COMBATS: i32 = 5;
 #[cfg(test)]
 mod tests {
 
+    /// `RelicFactory.cs:92-93` rolls `float num = rng.NextFloat()` against
+    /// 0.5f / 0.83f. Seed 17972581's first draw 0.4999999857 is the float
+    /// 0.5 (Uncommon, f64 said Common); seed 19414603's 0.8299999859 is the
+    /// float 0.83f (Rare, f64 said Uncommon). The treasure-room roll shares
+    /// the thresholds.
+    #[test]
+    fn relic_rarity_roll_compares_in_f32() {
+        use crate::dotnet_rng::Rng;
+        assert_eq!(
+            roll_relic_rarity(&mut Rng::from_seed(17_972_581)),
+            RelicRarity::Uncommon
+        );
+        assert_eq!(
+            roll_relic_rarity(&mut Rng::from_seed(19_414_603)),
+            RelicRarity::Rare
+        );
+        let mut rs = RunState::new();
+        rs.rng.treasure_room = Rng::from_seed(17_972_581);
+        assert_eq!(
+            rs.roll_treasure_relic_rarity(),
+            crate::card_rewards::RewardRarity::Uncommon
+        );
+    }
+
     /// C# `Player.HasEventPet()` (`Player.cs:250-256`): a pet relic OR a
     /// `ByrdonisEgg` in the deck. Feeds Pael's `!HasEventPet()` PaelsLegion
     /// gate (`Pael.cs:173-178`) — holding Byrdpip used to leave Legion in

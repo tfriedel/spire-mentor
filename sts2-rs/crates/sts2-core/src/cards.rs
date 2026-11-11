@@ -1527,6 +1527,7 @@ impl Card {
             self.set_combat_var(VarKey::CostDebtThisCombat, debt - restored);
         } else {
             self.cost = i8::try_from(restored).unwrap_or(i8::MAX);
+            self.absorb_cost_debts();
         }
         self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, 0);
         self.set_combat_var(VarKey::SneckoRollLive, 0);
@@ -1536,6 +1537,41 @@ impl Card {
         }
         if live & !SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED != SNECKO_ROLL_FLAG_PREOWNED {
             self.set_combat_var(VarKey::CostAbsolutelySet, 0);
+        }
+    }
+
+    /// Pay the below-zero debts ([`VarKey::CostDebtThisCombat`],
+    /// [`VarKey::CostDebtThisTurn`]) out of a positive `cost`.
+    ///
+    /// The collapsed model keeps "debt only while `cost` is 0". A roll's expiry
+    /// breaks that: a Relative shave that landed while the roll held the card
+    /// at 0 (Stomp's `AddThisTurn(-1)` on a Snecko 0, Banshee's Cry's
+    /// `AddThisCombat(-2)` under Enlightenment's 1) became a debt, and the
+    /// revealed base now carries it. C# just sums the Relative modifiers
+    /// (`CardEnergyCost.GetWithModifiers`), so the local cost is already right,
+    /// but a later reduce-only cap (Enlightenment+, `min(current, 1)`) read the
+    /// undebted `cost` and the debt then came off the capped value: C# 1,
+    /// Rust 0. The this-turn part moves into the Stomp / Pinpoint bank so the
+    /// turn-start restore still adds it back.
+    fn absorb_cost_debts(&mut self) {
+        let combat = self.combat_var(VarKey::CostDebtThisCombat);
+        let paid = combat.min(i32::from(self.cost));
+        if paid > 0 {
+            self.cost -= paid as i8;
+            self.set_combat_var(VarKey::CostDebtThisCombat, combat - paid);
+        }
+        let turn = self.combat_var(VarKey::CostDebtThisTurn);
+        let paid = turn.min(i32::from(self.cost));
+        if paid > 0 {
+            let bank = match self.card_id {
+                CardId::Stomp => VarKey::StompCostReductionThisTurn,
+                CardId::Pinpoint => VarKey::PinpointCostReductionThisTurn,
+                _ => return,
+            };
+            self.cost -= paid as i8;
+            self.set_combat_var(VarKey::CostDebtThisTurn, turn - paid);
+            let banked = self.combat_var(bank);
+            self.set_combat_var(bank, banked + paid);
         }
     }
 
@@ -1785,7 +1821,7 @@ impl Card {
         self.downgrade_with(|id, up| crate::build_card_for_version(id, up, version))
     }
 
-    fn upgrade_with(&mut self, factory: impl Fn(CardId, bool) -> Option<Card>) -> bool {
+    pub(crate) fn upgrade_with(&mut self, factory: impl Fn(CardId, bool) -> Option<Card>) -> bool {
         // C# `CardCmd.Upgrade` skips a card that isn't `IsUpgradable`
         // (`CardCmd.cs:273-276`), and every gameplay upgrade goes through it
         // (Bellows, Bone Tea, Armaments+, Apotheosis, the potions, the rest
@@ -1851,13 +1887,27 @@ impl Card {
             // `_base`).
             if cost_delta < 0 {
                 let new_base = upgraded.cost.max(0);
+                let live = self.combat_var(VarKey::SneckoRollLive);
+                let banked = self.combat_var(VarKey::SneckoCostDeltaThisTurn);
+                // What the roll's expiry reveals (`cost - banked`).
+                let revealed = i32::from(self.cost) - banked;
                 self.cost = self.cost.min(new_base);
-                if self.combat_var(VarKey::SneckoRollLive) != 0
-                    || self.combat_var(VarKey::SneckoCostDeltaThisTurn) != 0
-                {
+                if live != 0 || banked != 0 {
+                    // The upgrade moves `_base` under the roll and keeps the
+                    // Relative modifiers folded before it: a Banshee's Cry
+                    // shaved to 7 by an Ethereal play, Snecko-rolled and then
+                    // upgraded reveals `7 - 2 = 5`, not the bare new base 7.
+                    // An Absolute under the roll (Confused) is clamped instead.
+                    let preowned =
+                        live & !SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED == SNECKO_ROLL_FLAG_PREOWNED;
+                    let revealed = if preowned {
+                        revealed.min(i32::from(new_base))
+                    } else {
+                        revealed + i32::from(cost_delta)
+                    };
                     self.set_combat_var(
                         VarKey::SneckoCostDeltaThisTurn,
-                        i32::from(self.cost) - i32::from(new_base),
+                        i32::from(self.cost) - revealed,
                     );
                 }
             }
@@ -1927,7 +1977,10 @@ impl Card {
         self.downgrade_with(|id, up| crate::lookup_card_factory().and_then(|f| f(id, up)))
     }
 
-    fn downgrade_with(&mut self, factory: impl Fn(CardId, bool) -> Option<Card>) -> bool {
+    pub(crate) fn downgrade_with(
+        &mut self,
+        factory: impl Fn(CardId, bool) -> Option<Card>,
+    ) -> bool {
         if !self.upgraded {
             return false;
         }
@@ -1948,7 +2001,22 @@ impl Card {
     }
 
     fn revert_upgrade_delta(&mut self, base: &Card, upgraded: &Card) {
-        if base.cost >= 0 && self.combat_var(VarKey::CostAbsolutelySet) == 0 {
+        if self.combat_var(VarKey::CostAbsolutelySet) != 0 {
+            // C# `ResetForDowngrade` (CardEnergyCost.cs:387-392) only resets
+            // `_base`; an Absolute local modifier (a Confused / Snecko roll,
+            // Touch of Insanity's 0, an Enlightenment cap that lowered the
+            // card) keeps owning the evaluated cost. Dampen downgrading a
+            // Confused-rolled 2 left it at 3 (`roll - delta`). What a live
+            // Snecko roll reveals when it expires is the base under it, so
+            // that moves by the delta (an Absolute under the roll stays).
+            let live = self.combat_var(VarKey::SneckoRollLive);
+            let preowned = live & !SNECKO_ROLL_OVER_FREE_UNTIL_PLAYED == SNECKO_ROLL_FLAG_PREOWNED;
+            let banked = self.combat_var(VarKey::SneckoCostDeltaThisTurn);
+            if (live != 0 || banked != 0) && !preowned {
+                let delta = i32::from(base.cost) - i32::from(upgraded.cost);
+                self.set_combat_var(VarKey::SneckoCostDeltaThisTurn, banked - delta);
+            }
+        } else if base.cost >= 0 {
             // C# `ResetForDowngrade` restores `_base = Canonical` and keeps the
             // Relative `AddThisCombat` modifiers, so the cost re-resolves to
             // `max(0, base + modifiers)` (CardEnergyCost.cs GetWithModifiers).

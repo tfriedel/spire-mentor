@@ -2633,9 +2633,9 @@
    "child_ids": [],
    "combat_log": [
     {
-     "actor": "Nibbit",
-     "actor_side": "enemy",
-     "actor_uid": 2,
+     "actor": null,
+     "actor_side": null,
+     "actor_uid": null,
      "amount": 7,
      "blocked": 0,
      "hp_after": 14,
@@ -2652,8 +2652,8 @@
      "target": "Nibbit",
      "target_side": "enemy",
      "target_uid": 2,
-     "text": "Nibbit dealt 7 damage to Nibbit using Slice.",
-     "verb": "dealt"
+     "text": "Nibbit took 7 damage.",
+     "verb": "took"
     },
     {
      "actor": "Nibbit",

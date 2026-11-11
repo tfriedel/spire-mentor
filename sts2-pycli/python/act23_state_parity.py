@@ -125,6 +125,19 @@ ALL_CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
 # parity signal.
 MAX_SELECT_INDEX = 255
 
+#: An INVINCIBLE_HP walk past this combat round ends as a harness cap (mirrors
+#: sts2-cli ``MAX_COMBAT_ROUNDS``). A fight the walk cannot win can repeat
+#: forever with the pinned HP: Test Subject phase 2's Multi Claw gains a hit
+#: each turn (TestSubject.cs:206, 305-310) and Painful Stabs adds a Wound per
+#: unblocked hit (PainfulStabsPower.cs:34-62), so by round 200 the piles hold
+#: ~21k Wounds and the C# oracle's per-step pile serialization stalls
+#: (Necrobinder 6595 v0.107.1, both engines in lockstep).
+COMBAT_ROUND_CAP = 100
+
+#: Terminals that end a run on a harness limit, not a divergence: the sweep
+#: buckets them as clean, like ``max_steps``.
+HARNESS_CLEAN_TERMINALS = frozenset({"combat_round_cap"})
+
 
 def _act_of(view: dict[str, Any] | None) -> int | None:
     """Best-effort current act index from either engine's state dict.
@@ -1119,6 +1132,19 @@ def run_one_invincible(
                     res.terminal = "checkpointed"
                     return out
 
+            if (
+                invincible
+                and cs_dec == "combat_play"
+                and int(cs_view.get("round") or 0) > COMBAT_ROUND_CAP
+            ):
+                res.divergence = Divergence(
+                    step,
+                    cs_snap.phase,
+                    [f"combat passed round {COMBAT_ROUND_CAP} under INVINCIBLE_HP"],
+                    "harness",
+                )
+                res.terminal = "combat_round_cap"
+                return out
             choices = enumerate_choices(g, cs_view)
             if not choices:
                 res.divergence = Divergence(
@@ -1270,7 +1296,7 @@ def _worker(
     label = kwargs.pop("label")
     out = run_one_invincible(**kwargs)
     res = out.result
-    sig = run_signature(res)
+    sig = f"clean:{res.terminal}" if res.terminal in HARNESS_CLEAN_TERMINALS else run_signature(res)
     div = None
     if res.divergence is not None:
         div = f"{res.divergence.phase}@{res.divergence.step}: {res.divergence.fields[:2]}"

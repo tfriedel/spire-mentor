@@ -435,4 +435,30 @@ mod tests {
             .insert(RoomType::Monster, 1.0);
         assert_eq!(rs.resolve_unknown_room(BTreeSet::new()), RoomType::Monster);
     }
+
+    /// `UnknownMapPointOdds.Roll` (`UnknownMapPointOdds.cs:140-175`) sums the
+    /// odds in `float` and compares a `float` roll with `<=`. Each seed's
+    /// first draw sits just above a cumulative boundary (0.1, 0.12, 0.15) in
+    /// double but rounds onto it in float, so C# picks the earlier room.
+    #[test]
+    fn roll_compares_float_cumulative_odds() {
+        let candidates: BTreeSet<RoomType> = [
+            RoomType::Monster,
+            RoomType::Elite,
+            RoomType::Treasure,
+            RoomType::Shop,
+            RoomType::Event,
+        ]
+        .into_iter()
+        .collect();
+        for (seed, want) in [
+            (59_306_271_u64, RoomType::Monster),
+            (16_718_349, RoomType::Treasure),
+            (25_847_251, RoomType::Shop),
+        ] {
+            let mut odds = UnknownMapPointOdds::new();
+            let mut r = Rng::from_seed(seed);
+            assert_eq!(odds.roll(&mut r, &candidates), want, "seed {seed}");
+        }
+    }
 }

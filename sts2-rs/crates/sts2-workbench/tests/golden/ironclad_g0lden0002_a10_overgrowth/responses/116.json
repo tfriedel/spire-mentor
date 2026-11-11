@@ -1,64 +1,56 @@
 {
- "points": [
+ "config": {
+  "c_puct": 2.5,
+  "depth": 200,
+  "draw_widening_c": 2.0,
+  "hidden_info": "beliefdraw",
+  "seed": 1,
+  "sims": 48,
+  "threads": 1
+ },
+ "pv": null,
+ "scores": [
   {
-   "act": 1,
-   "deck_size": 11,
-   "floor": 1,
-   "idx": 0,
-   "scores": {
-    "block": 36.3,
-    "damage": 29.8,
-    "velocity": 1.9,
-    "volume": 12.7
-   }
+   "action": "STRIKE_IRONCLAD.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": true,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.2032,
+   "q_saturated": false,
+   "stable_idx": 1,
+   "target_index": null,
+   "visits": 16,
+   "win_prob": 1.0
   },
   {
-   "act": 1,
-   "deck_size": 12,
-   "floor": 2,
-   "idx": 21,
-   "scores": {
-    "block": 35.8,
-    "damage": 31.2,
-    "velocity": 2.4,
-    "volume": 13.9
-   }
+   "action": "DEFEND_IRONCLAD.title",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.1998,
+   "q_saturated": false,
+   "stable_idx": 0,
+   "target_index": null,
+   "visits": 16,
+   "win_prob": 1.0
   },
   {
-   "act": 1,
-   "deck_size": 13,
-   "floor": 3,
-   "idx": 38,
-   "scores": {
-    "block": 33.4,
-    "damage": 34.2,
-    "velocity": 1.9,
-    "volume": 12.9
-   }
-  },
-  {
-   "act": 1,
-   "deck_size": 13,
-   "floor": 4,
-   "idx": 53,
-   "scores": {
-    "block": 37.1,
-    "damage": 34.2,
-    "velocity": 1.9,
-    "volume": 13.4
-   }
-  },
-  {
-   "act": 1,
-   "deck_size": 14,
-   "floor": 4,
-   "idx": 54,
-   "scores": {
-    "block": 34.9,
-    "damage": 36.5,
-    "velocity": 0.0,
-    "volume": 0.0
-   }
+   "action": "end turn",
+   "hp_n": 0,
+   "hp_sd": null,
+   "is_best": false,
+   "low_confidence": false,
+   "mean_final_hp": null,
+   "q": 1.1759,
+   "q_saturated": false,
+   "stable_idx": -1,
+   "target_index": null,
+   "visits": 16,
+   "win_prob": 1.0
   }
  ]
 }

@@ -618,9 +618,8 @@ pub struct EventOptionInfo {
     /// Empty when the choice has no row in that table: the Ancient / Neow
     /// relic offers (their text comes from `ancients.json` / `relics.json`
     /// via the relic itself) and a handful of options whose loc row is
-    /// picked per-run from a set (Colorful Philosophers' character pools,
-    /// Endless Conveyor's dishes). Fall back to `label` / `description`
-    /// there.
+    /// picked per-run from a set (Colorful Philosophers' character pools).
+    /// Fall back to `label` / `description` there.
     pub loc_key: &'static str,
     /// Values for the `{VarName}` placeholders in the localized template,
     /// as `(name, value)` — e.g. `("Gold", EventVar::Int(61))` for

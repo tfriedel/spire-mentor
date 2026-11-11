@@ -26,17 +26,15 @@ pub(crate) fn play_eidolon(state: &mut CombatState, _target: Option<CreatureUid>
     // Snapshot the hand, then exhaust each card. The Eidolon card itself is on
     // the Play pile (not in hand), so the snapshot is the exact set the C#
     // iterates. `exhaust_card_uid` fires `after_card_exhausted` on the power +
-    // relic buses, matching C# `CardCmd.Exhaust`.
+    // relic buses, matching C# `CardCmd.Exhaust`. C# awaits each exhaust and
+    // counts every iteration (`exhaustedCount++` follows the awaited
+    // `CardCmd.Exhaust` unconditionally, Eidolon.cs:46-50), so the count is
+    // the snapshot's size; an exhaust whose Dark Embrace draw reshuffles into
+    // a Stratagem pick holds the later exhausts and the Intangible until the
+    // pick and the draw finish ([`crate::cards::draw_then::exhaust_then`]).
     let hand: Vec<sts2_core::CardUid> = state.player.hand.to_vec();
-    let mut exhausted_count: i32 = 0;
-    for uid in hand {
-        if sts2_core::card_effects::exhaust_card_uid(state, uid) {
-            exhausted_count += 1;
-        }
-    }
-    if exhausted_count >= 9 {
-        apply_power_to_player(state, PowerKind::Intangible, 1);
-    }
+    let count = u8::try_from(hand.len()).unwrap_or(u8::MAX);
+    crate::cards::draw_then::exhaust_then(state, &hand, sts2_core::DrawThen::Eidolon(count));
     EffectResult::Resolved
 }
 

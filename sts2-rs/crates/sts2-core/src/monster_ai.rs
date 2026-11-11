@@ -1614,7 +1614,10 @@ impl MonsterAi {
             .iter()
             .map(|b| b.effective_weight(&self.state_log) as f32)
             .collect();
-        let total: f32 = weights.iter().fold(0.0_f32, |acc, &w| acc + w);
+        // .NET `Enumerable.Sum(Func<T, float>)` accumulates in double and
+        // casts the result to float once.
+        #[allow(clippy::cast_possible_truncation)]
+        let total = weights.iter().map(|&w| f64::from(w)).sum::<f64>() as f32;
         if total <= 0.0 {
             // Bead `sts2-rs-zdjjx`: C# `RandomBranchState.GetNextState`
             // (RandomBranchState.cs:114-128) ALWAYS calls `rng.NextFloat(max)`,
@@ -3216,5 +3219,46 @@ mod tests {
             }),
         );
         MonsterAi::new(states, "loop1");
+    }
+
+    /// `RandomBranchState.GetNextState` (`RandomBranchState.cs:114-128`) is
+    /// float math: `float num = rng.NextFloat(max); num -= weight; if (num <=
+    /// 0f)`. Seed 1144774's first draw is 0.5000000137; times 2 that rounds
+    /// to the float 2.0 * 0.5 = 1.0f, so `1.0f - 1f <= 0f` picks branch 0.
+    /// The f64 remainder 1.0000000274 - 1 > 0 picked branch 1.
+    #[test]
+    fn random_branch_subtracts_in_f32() {
+        let branch = |id| WeightedBranch {
+            state_id: id,
+            repeat_type: MoveRepeatType::CanRepeatForever,
+            max_times: 1,
+            weight: 1.0,
+            cooldown: 0,
+        };
+        let mv = |id| {
+            MonsterState::Move(MoveState {
+                id,
+                effect: noop_effect,
+                intents: smallvec![Intent::Attack { damage: 5 }],
+                follow_up: Some("root"),
+                must_perform_once: false,
+            })
+        };
+        let mut states = BTreeMap::new();
+        states.insert(
+            "root",
+            MonsterState::RandomBranch(RandomBranchState {
+                id: "root",
+                branches: smallvec![branch("a"), branch("b")],
+            }),
+        );
+        states.insert("a", mv("a"));
+        states.insert("b", mv("b"));
+        states.insert("start", mv("start"));
+        // Start on a Move (the constructor resolves a branch initial state
+        // with a throwaway RNG), then roll into the branch.
+        let mut ai = MonsterAi::new(states, "start");
+        ai.on_move_performed();
+        assert_eq!(ai.roll_move_seeded(1_144_774).id, "a");
     }
 }

@@ -6024,17 +6024,16 @@ pub fn modify_card_cost(
             //
             // This is an ADDITIVE contribution (`originalCost - Amount`), not a
             // set-to-0, so it uses [`CardCostMod::Add`] like Tangled /
-            // BorrowedTime; the dispatcher's trailing `.max(0)` reproduces C#'s
-            // `if (modifiedCost < 0m) modifiedCost = default` clamp.
+            // BorrowedTime, capped at the running cost so it reproduces C#'s
+            // own `if (modifiedCost < 0m) modifiedCost = default` floor before
+            // the next listener adds to it.
             //
-            // The `originalCost <= 0` gate reads `ctx.base_cost`, which is
-            // exactly C#'s `originalCost` at this point in the chain: the
-            // engine applies the LOCAL zeroing riders (`FreeThisTurn` /
-            // `FreeUntilPlayed`) into `base_cost` before the global walk, the
-            // same order as C# `CardEnergyCost.GetWithModifiers` (local
-            // modifiers, then `Hook.ModifyEnergyCostInCombat`).
+            // The `originalCost <= 0` gate reads `ctx.base_cost`, which the
+            // dispatcher sets to the running cost: the local cost (C#
+            // `CardEnergyCost.GetWithModifiers` folds the local modifiers
+            // first) plus every earlier listener's contribution.
             if power.amount > 0 && card_type == CardType::Power && ctx.base_cost > 0 {
-                Some(CardCostMod::Add(-power.amount))
+                Some(CardCostMod::Add(-power.amount.min(ctx.base_cost)))
             } else {
                 None
             }
@@ -8628,12 +8627,10 @@ pub fn after_side_turn_start(
                 // i-th iteration deals `Amount - i`). Precomputed here so the
                 // value is independent of when the paired decrements resolve.
                 effects.push(Effect::DealHpLoss {
-                    dealer: owner, // Python passes dealer=None; Rust uses owner
-                    // as a sentinel since CreatureRef is non-optional. The
-                    // `dealer` slot for an UNPOWERED hit is unused by listener
-                    // guards (no Phase-2 listener fires on dealer == owner for
-                    // UNPOWERED damage), so this is observationally identical
-                    // to Python's `dealer=None`.
+                    // C# `PoisonPower.Trigger` / v0.107.1 `AfterSideTurnStart`
+                    // pass no dealer: `CreatureCmd.Damage(ctx, Owner, Amount,
+                    // Unblockable | Unpowered, null, null)` (PoisonPower.cs).
+                    dealer: CreatureRef::Nobody,
                     target: owner,
                     amount: power.amount - i,
                     props: ValueProps::UNBLOCKABLE.union(ValueProps::UNPOWERED),
@@ -11284,6 +11281,259 @@ fn dispatch_after_damage_given_body(
         }
     }
 
+    // ── React: the player's dealer-side powers, in insertion order ──────
+    // Reaper Form, Monarch's Gaze and Envenom/Concoct fire in the order the
+    // player gained them (see [`react_player_dealer_powers`]).
+    react_player_dealer_powers(state, ctx, unblocked_damage, total_damage);
+
+    // ── React: SicEmPower (target-side, Necrobinder) ───────────────────
+    // C# `SicEmPower.AfterDamageGiven` (SicEmPower.cs:24-31): when the
+    // PLAYER'S OSTY deals damage to the marked enemy (the power's owner), the
+    // Osty is summoned/grown by `Amount` (`OstyCmd.Summon`). The C# guards are
+    // `dealer is Osty && osty.PetOwner.Creature == Applier && target == Owner`;
+    // in single-player the Osty's owner is always the player, so the faithful
+    // check collapses to "dealer == player.pet_uid && target carries SicEm".
+    // C# fires `AfterDamageGiven` unconditionally (CreatureCmd.cs:266 — outside
+    // the `UnblockedDamage > 0` block), so this is NOT gated on the powered /
+    // unblocked predicate below; a fully-blocked or lethal Osty hit still grows
+    // the pet. The dead-target corpse is retained in `state.creatures`, so the
+    // SicEm instance is still findable after a killing blow.
+    // present_kinds lane gate (perf): no live SicEmPower ⇒ the target scan
+    // below provably finds nothing. Bit-identical skip.
+    if power_kind_live(state, PowerKind::SicEmPower) {
+        if let (CreatureRef::Enemy(dealer_uid), Some(pet_uid)) = (ctx.dealer, state.player.pet_uid)
+        {
+            if dealer_uid == pet_uid {
+                if let Some(target_uid) = ctx.target.to_creature_uid(state) {
+                    let sic_em_amount = state
+                        .creatures
+                        .iter()
+                        .find(|c| c.id == target_uid.0)
+                        .and_then(|c| {
+                            c.powers.iter().find_map(|u| {
+                                state
+                                    .powers
+                                    .iter()
+                                    .find(|p| p.id == u.0 && p.kind == PowerKind::SicEmPower)
+                                    .map(|p| p.amount)
+                            })
+                        });
+                    if let Some(amount) = sic_em_amount {
+                        state.summon_osty(amount);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── React: dealer-side AfterDamageGiven powers ─────────────────────
+    // Shared C# gate: `IsPoweredAttack() && result.UnblockedDamage > 0`.
+    // `unblocked_damage` is the post-block residual, so a fully-blocked
+    // powered hit correctly triggers neither Envenom nor PaperCuts.
+    if !ctx.props.is_powered() || unblocked_damage <= 0 {
+        return;
+    }
+    if ctx.target.to_creature_uid(state).is_none() {
+        return;
+    }
+    match ctx.dealer {
+        // Player-dealer Envenom / Concoct ran in
+        // [`react_player_dealer_powers`], in power insertion order.
+        CreatureRef::Player => {}
+        // Enemy-dealer PaperCuts: C# `PaperCutsPower.AfterDamageGiven`
+        // (PaperCutsPower.cs:16-22) — when the owner lands a powered attack on
+        // the PLAYER with unblocked damage > 0, the player PERMANENTLY loses
+        // `Amount` max HP. Fires per hit (a multi-hit move applies it once per
+        // connecting hit, matching the C# per-hit `AfterDamageGiven`). Carried
+        // only by ScrollOfBiting at this pin. Bead `sts2-rs-ybtmu`.
+        //
+        // Enemy-dealer PainfulStabs: C# `PainfulStabsPower.AfterAttack`
+        // (PainfulStabsPower.cs:33-62) — when the owner lands a POWERED attack
+        // on the player, each receiver gets `Amount * num` Wound cards added to
+        // its Discard pile, where `num` is the count of that receiver's damage
+        // results with `UnblockedDamage > 0`. C# evaluates this once per
+        // `AttackCommand` over all results; the Rust engine fires
+        // `after_damage_given` per damage result instead, so adding `Amount`
+        // Wounds on each connecting (unblocked) hit accumulates to the same
+        // `Amount * num` total. The shared `IsPoweredAttack() &&
+        // UnblockedDamage > 0` gate above mirrors C#'s `IsPoweredAttack()` plus
+        // the per-result `UnblockedDamage > 0` filter; `TargetSide != Owner.Side`
+        // is the `target == Player` guard. Carried only by TestSubject's first
+        // form at this pin (TestSubject.cs:268). Bead `sts2-rs-rb25f`.
+        CreatureRef::Enemy(dealer_uid) => {
+            if !matches!(ctx.target, CreatureRef::Player) {
+                return;
+            }
+            let Some(player_uid) = state.player.creature_uid else {
+                return;
+            };
+            // present_kinds lane gate (perf): neither PaperCuts nor
+            // PainfulStabs live ⇒ nothing to collect. Bit-identical skip.
+            let pk = state.powers.present_kinds();
+            if !pk.intersects(&crate::PowerKindSet::from_kinds(&[
+                PowerKind::PaperCuts,
+                PowerKind::PainfulStabs,
+            ])) {
+                return;
+            }
+            let mut pending_papercuts: SmallVec<[i32; 2]> = SmallVec::new();
+            let mut pending_painful_stabs: SmallVec<[i32; 2]> = SmallVec::new();
+            if let Some(dealer) = state.creatures.iter().find(|c| c.id == dealer_uid.0) {
+                for puid in dealer.powers.iter().copied() {
+                    if let Some(power) = state.powers.get_by_id(puid.0) {
+                        match power.kind {
+                            // A dealer killed mid-attack (Thorns in its own
+                            // hit's `BeforeDamageReceived`) is already out of
+                            // C#'s `IterateHookListeners` when this hit's
+                            // `AfterDamageGiven` fires (CreatureCmd.cs:285,412),
+                            // so its PaperCuts no longer triggers (Ironclad
+                            // v0.111.0 full seed 2674: one max-HP loss too many).
+                            PowerKind::PaperCuts if dealer.current_hp > 0 => {
+                                pending_papercuts.push(power.amount);
+                            }
+                            PowerKind::PainfulStabs => pending_painful_stabs.push(power.amount),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            for amount in pending_papercuts {
+                state.creature_lose_max_hp(player_uid, amount);
+            }
+            // The Wounds land in `AfterAttack`, after the whole hit chain
+            // (`combat_loop`'s end-of-attack flush): a Thorns kill mid-chain
+            // whose Gremlin Horn draw reshuffles the discard shuffles none of
+            // them in (loadout Silent 1157 v0.107.1).
+            for amount in pending_painful_stabs {
+                if amount > 0 {
+                    let owed = &mut state.combat_log.painful_stabs_wounds_owed;
+                    *owed = owed.saturating_add(u8::try_from(amount).unwrap_or(u8::MAX));
+                }
+            }
+        }
+        CreatureRef::Ally(_) | CreatureRef::Nobody => {}
+    }
+}
+
+/// The player's dealer-side `AfterDamageGiven` powers, walked in the order the
+/// player gained them. C# `Hook.AfterDamageGiven` (Hook.cs) visits the
+/// listeners through `IterateHookListeners`, i.e. the owner's powers in
+/// insertion order, so an Envenom gained before Reaper Form lands its Poison
+/// on the target ahead of the Doom, and after it when gained later. The
+/// target's power LIST order follows. Reaper Form and Monarch's Gaze keep
+/// their summed single application (one instance each in practice); each
+/// Envenom / Concoct instance applies its own Poison.
+fn react_player_dealer_powers(
+    state: &mut CombatState,
+    ctx: &DamageCtx,
+    unblocked_damage: i32,
+    total_damage: i32,
+) {
+    let concoct = state.game_version >= crate::GameVersion::V0_111_0
+        && power_kind_live(state, PowerKind::Concoct);
+    if !(concoct
+        || power_kind_live(state, PowerKind::ReaperForm)
+        || power_kind_live(state, PowerKind::MonarchsGaze)
+        || power_kind_live(state, PowerKind::Envenom))
+    {
+        return;
+    }
+    let order: SmallVec<[(PowerKind, i32); 4]> = state
+        .player_power_uids()
+        .iter()
+        .filter_map(|u| state.powers.get_by_id(u.0))
+        .filter(|p| {
+            matches!(
+                p.kind,
+                PowerKind::ReaperForm | PowerKind::MonarchsGaze | PowerKind::Envenom
+            ) || (concoct && p.kind == PowerKind::Concoct)
+        })
+        .map(|p| (p.kind, p.amount))
+        .collect();
+    let (mut reaper_done, mut gaze_done) = (false, false);
+    let mut poisoned: Option<CreatureUid> = None;
+    for (kind, amount) in order {
+        match kind {
+            PowerKind::ReaperForm => {
+                if !reaper_done {
+                    reaper_done = true;
+                    react_reaper_form(state, ctx, total_damage);
+                }
+            }
+            PowerKind::MonarchsGaze => {
+                if !gaze_done {
+                    gaze_done = true;
+                    react_monarchs_gaze(state, ctx);
+                }
+            }
+            _ => {
+                // C# `EnvenomPower.AfterDamageGiven` (EnvenomPower.cs:20-26),
+                // and v0.111.0 `ConcoctPower.AfterDamageGiven`
+                // (ConcoctPower.cs:20) with the same body: `dealer == Owner &&
+                // IsPoweredAttack() && UnblockedDamage > 0` → `Apply<
+                // PoisonPower>(target, Amount, Owner, null)`. No card source,
+                // so Unsettling Lamp does not double it (loadout Silent 1062
+                // v0.111.0). The killing hit still poisons its target:
+                // `AfterDamageGiven` runs before `Kill` (CreatureCmd.cs:390,
+                // :409) and `CanReceivePowers` is not an alive check
+                // (Creature.cs:300-316), so the corpse takes the Poison and
+                // Outbreak counts it (Silent full-tier seed:1859).
+                if !ctx.props.is_powered()
+                    || unblocked_damage <= 0
+                    || !matches!(ctx.dealer, CreatureRef::Player)
+                {
+                    continue;
+                }
+                let Some(target_uid) = ctx.target.to_creature_uid(state) else {
+                    continue;
+                };
+                crate::card_effects::apply_power_to_creature_cardless_allow_dead(
+                    state,
+                    target_uid,
+                    PowerKind::Poison,
+                    amount,
+                );
+                poisoned = Some(target_uid);
+            }
+        }
+    }
+    // `Kill` then strips the Poison again (`RemoveAllPowersAfterDeath`,
+    // CreatureCmd.cs:533; Poison keeps the base
+    // `ShouldPowerBeRemovedAfterOwnerDeath() => true`), and Rust's own corpse
+    // strips already ran at the HP write, so drop it off a dead target once
+    // its apply hooks have fired.
+    if let Some(target_uid) = poisoned {
+        let target_dead = state
+            .creatures
+            .iter()
+            .any(|c| c.id == target_uid.0 && c.current_hp <= 0);
+        if target_dead {
+            let corpse_poison: SmallVec<[std::num::NonZeroU32; 2]> = state
+                .creatures
+                .iter()
+                .find(|c| c.id == target_uid.0)
+                .map(|c| {
+                    c.powers
+                        .iter()
+                        .filter(|u| {
+                            state
+                                .powers
+                                .get_by_id(u.0)
+                                .is_some_and(|p| p.kind == PowerKind::Poison)
+                        })
+                        .map(|u| u.0)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for pid in corpse_poison {
+                state.drop_power(pid);
+            }
+        }
+    }
+}
+
+/// C# `ReaperFormPower.AfterDamageGiven`; see [`react_player_dealer_powers`].
+fn react_reaper_form(state: &mut CombatState, ctx: &DamageCtx, total_damage: i32) {
     // ── React: ReaperFormPower (dealer-side, Necrobinder) ──────────────
     // C# `ReaperFormPower.AfterDamageGiven` (ReaperFormPower.cs): `if dealer
     // != null && (dealer == Owner || dealer.PetOwner?.Creature == Owner) &&
@@ -11358,7 +11608,10 @@ fn dispatch_after_damage_given_body(
             }
         }
     }
+}
 
+/// C# `MonarchsGazePower.AfterDamageGiven`; see [`react_player_dealer_powers`].
+fn react_monarchs_gaze(state: &mut CombatState, ctx: &DamageCtx) {
     // ── React: MonarchsGazePower (dealer-side, Regent) ─────────────────
     // C# `MonarchsGazePower.AfterDamageGiven` (MonarchsGazePower.cs): `if
     // dealer == Owner && props.IsPoweredAttack() { PowerCmd.Apply<
@@ -11472,221 +11725,6 @@ fn dispatch_after_damage_given_body(
                 }
             }
         }
-    }
-
-    // ── React: SicEmPower (target-side, Necrobinder) ───────────────────
-    // C# `SicEmPower.AfterDamageGiven` (SicEmPower.cs:24-31): when the
-    // PLAYER'S OSTY deals damage to the marked enemy (the power's owner), the
-    // Osty is summoned/grown by `Amount` (`OstyCmd.Summon`). The C# guards are
-    // `dealer is Osty && osty.PetOwner.Creature == Applier && target == Owner`;
-    // in single-player the Osty's owner is always the player, so the faithful
-    // check collapses to "dealer == player.pet_uid && target carries SicEm".
-    // C# fires `AfterDamageGiven` unconditionally (CreatureCmd.cs:266 — outside
-    // the `UnblockedDamage > 0` block), so this is NOT gated on the powered /
-    // unblocked predicate below; a fully-blocked or lethal Osty hit still grows
-    // the pet. The dead-target corpse is retained in `state.creatures`, so the
-    // SicEm instance is still findable after a killing blow.
-    // present_kinds lane gate (perf): no live SicEmPower ⇒ the target scan
-    // below provably finds nothing. Bit-identical skip.
-    if power_kind_live(state, PowerKind::SicEmPower) {
-        if let (CreatureRef::Enemy(dealer_uid), Some(pet_uid)) = (ctx.dealer, state.player.pet_uid)
-        {
-            if dealer_uid == pet_uid {
-                if let Some(target_uid) = ctx.target.to_creature_uid(state) {
-                    let sic_em_amount = state
-                        .creatures
-                        .iter()
-                        .find(|c| c.id == target_uid.0)
-                        .and_then(|c| {
-                            c.powers.iter().find_map(|u| {
-                                state
-                                    .powers
-                                    .iter()
-                                    .find(|p| p.id == u.0 && p.kind == PowerKind::SicEmPower)
-                                    .map(|p| p.amount)
-                            })
-                        });
-                    if let Some(amount) = sic_em_amount {
-                        state.summon_osty(amount);
-                    }
-                }
-            }
-        }
-    }
-
-    // ── React: dealer-side AfterDamageGiven powers ─────────────────────
-    // Shared C# gate: `IsPoweredAttack() && result.UnblockedDamage > 0`.
-    // `unblocked_damage` is the post-block residual, so a fully-blocked
-    // powered hit correctly triggers neither Envenom nor PaperCuts.
-    if !ctx.props.is_powered() || unblocked_damage <= 0 {
-        return;
-    }
-    let Some(target_uid) = ctx.target.to_creature_uid(state) else {
-        return;
-    };
-    match ctx.dealer {
-        // Player-dealer Envenom: a powered hit applies Poison equal to each
-        // Envenom stack to the struck target.
-        CreatureRef::Player => {
-            // Read the player's powers through the mirror+legacy UNION
-            // (`player_power_uids`), not the bare `state.player.powers`
-            // legacy vec. `apply_power_to_creature{,_with_applier}` install a
-            // freshly-applied player power into the player's mirror Creature
-            // (`state.creatures[player_uid].powers`) ONLY — the legacy vec is
-            // not written on the apply path — so a card-applied Envenom (the
-            // ENVENOM card routes through `apply_power_to_creature`) lives in
-            // the mirror alone. Iterating the bare vec therefore missed it and
-            // every Silent attack (Shiv/Strike) failed to apply Envenom's
-            // Poison, while C# applied it (Silent sweep MONSTER_STATE
-            // `monsters[*].powers` POISON cluster, seeds 236/477/…). The
-            // union accessor is the same owning-side reader MonarchsGaze uses
-            // just above (`player_power_amount`).
-            // present_kinds lane gate (perf): no live Envenom ⇒ nothing to
-            // collect; also skips the `player_power_uids` union allocation.
-            // Bit-identical skip.
-            //
-            // v0.111.0 `ConcoctPower.AfterDamageGiven` (decomp
-            // ConcoctPower.cs:20) has the same body — `dealer == Owner &&
-            // IsPoweredAttack() && UnblockedDamage > 0` → `Apply<PoisonPower>(
-            // target, Amount, Owner)` — so it rides this walk, in power order.
-            let concoct = state.game_version >= crate::GameVersion::V0_111_0
-                && power_kind_live(state, PowerKind::Concoct);
-            let mut pending_envenom: SmallVec<[i32; 2]> = SmallVec::new();
-            if power_kind_live(state, PowerKind::Envenom) || concoct {
-                for uid in state.player_power_uids() {
-                    if let Some(power) = state.powers.get_by_id(uid.0) {
-                        if power.kind == PowerKind::Envenom
-                            || (concoct && power.kind == PowerKind::Concoct)
-                        {
-                            pending_envenom.push(power.amount);
-                        }
-                    }
-                }
-            }
-            // The killing hit still poisons its target: C# runs
-            // `Hook.AfterDamageGiven` before `Kill` (`CreatureCmd.cs:390, :409`)
-            // and `CanReceivePowers` is not an alive check (`Creature.cs:300-316`),
-            // so the corpse takes the Poison and Outbreak counts it (Silent
-            // full-tier seed:1859). Same synchronous killing-blow corpse case as
-            // MonarchsGaze, hence `allow_dead`. `Kill` then strips it again
-            // (`RemoveAllPowersAfterDeath`, `CreatureCmd.cs:533`; Poison keeps
-            // the base `ShouldPowerBeRemovedAfterOwnerDeath() => true`), and
-            // Rust's own corpse strips already ran at the HP write, so drop
-            // the Poison off a dead target once its apply hooks have fired.
-            let target_dead = !pending_envenom.is_empty()
-                && state
-                    .creatures
-                    .iter()
-                    .any(|c| c.id == target_uid.0 && c.current_hp <= 0);
-            // `PowerCmd.Apply<PoisonPower>(target, Amount, Owner, null)`
-            // (EnvenomPower.cs:24, ConcoctPower.cs:20): no card source, so
-            // Unsettling Lamp does not double it, while the attacking card's
-            // own debuff still triggers the Lamp (loadout Silent 1062
-            // v0.111.0: Suppress's Weak doubled, the Envenom Poison not;
-            // Rust doubled both, Poison cs=1 rs=2).
-            for amount in pending_envenom {
-                crate::card_effects::apply_power_to_creature_cardless_allow_dead(
-                    state,
-                    target_uid,
-                    PowerKind::Poison,
-                    amount,
-                );
-            }
-            if target_dead {
-                let corpse_poison: SmallVec<[std::num::NonZeroU32; 2]> = state
-                    .creatures
-                    .iter()
-                    .find(|c| c.id == target_uid.0)
-                    .map(|c| {
-                        c.powers
-                            .iter()
-                            .filter(|u| {
-                                state
-                                    .powers
-                                    .get_by_id(u.0)
-                                    .is_some_and(|p| p.kind == PowerKind::Poison)
-                            })
-                            .map(|u| u.0)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for pid in corpse_poison {
-                    state.drop_power(pid);
-                }
-            }
-        }
-        // Enemy-dealer PaperCuts: C# `PaperCutsPower.AfterDamageGiven`
-        // (PaperCutsPower.cs:16-22) — when the owner lands a powered attack on
-        // the PLAYER with unblocked damage > 0, the player PERMANENTLY loses
-        // `Amount` max HP. Fires per hit (a multi-hit move applies it once per
-        // connecting hit, matching the C# per-hit `AfterDamageGiven`). Carried
-        // only by ScrollOfBiting at this pin. Bead `sts2-rs-ybtmu`.
-        //
-        // Enemy-dealer PainfulStabs: C# `PainfulStabsPower.AfterAttack`
-        // (PainfulStabsPower.cs:33-62) — when the owner lands a POWERED attack
-        // on the player, each receiver gets `Amount * num` Wound cards added to
-        // its Discard pile, where `num` is the count of that receiver's damage
-        // results with `UnblockedDamage > 0`. C# evaluates this once per
-        // `AttackCommand` over all results; the Rust engine fires
-        // `after_damage_given` per damage result instead, so adding `Amount`
-        // Wounds on each connecting (unblocked) hit accumulates to the same
-        // `Amount * num` total. The shared `IsPoweredAttack() &&
-        // UnblockedDamage > 0` gate above mirrors C#'s `IsPoweredAttack()` plus
-        // the per-result `UnblockedDamage > 0` filter; `TargetSide != Owner.Side`
-        // is the `target == Player` guard. Carried only by TestSubject's first
-        // form at this pin (TestSubject.cs:268). Bead `sts2-rs-rb25f`.
-        CreatureRef::Enemy(dealer_uid) => {
-            if !matches!(ctx.target, CreatureRef::Player) {
-                return;
-            }
-            let Some(player_uid) = state.player.creature_uid else {
-                return;
-            };
-            // present_kinds lane gate (perf): neither PaperCuts nor
-            // PainfulStabs live ⇒ nothing to collect. Bit-identical skip.
-            let pk = state.powers.present_kinds();
-            if !pk.intersects(&crate::PowerKindSet::from_kinds(&[
-                PowerKind::PaperCuts,
-                PowerKind::PainfulStabs,
-            ])) {
-                return;
-            }
-            let mut pending_papercuts: SmallVec<[i32; 2]> = SmallVec::new();
-            let mut pending_painful_stabs: SmallVec<[i32; 2]> = SmallVec::new();
-            if let Some(dealer) = state.creatures.iter().find(|c| c.id == dealer_uid.0) {
-                for puid in dealer.powers.iter().copied() {
-                    if let Some(power) = state.powers.get_by_id(puid.0) {
-                        match power.kind {
-                            // A dealer killed mid-attack (Thorns in its own
-                            // hit's `BeforeDamageReceived`) is already out of
-                            // C#'s `IterateHookListeners` when this hit's
-                            // `AfterDamageGiven` fires (CreatureCmd.cs:285,412),
-                            // so its PaperCuts no longer triggers (Ironclad
-                            // v0.111.0 full seed 2674: one max-HP loss too many).
-                            PowerKind::PaperCuts if dealer.current_hp > 0 => {
-                                pending_papercuts.push(power.amount);
-                            }
-                            PowerKind::PainfulStabs => pending_painful_stabs.push(power.amount),
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            for amount in pending_papercuts {
-                state.creature_lose_max_hp(player_uid, amount);
-            }
-            // The Wounds land in `AfterAttack`, after the whole hit chain
-            // (`combat_loop`'s end-of-attack flush): a Thorns kill mid-chain
-            // whose Gremlin Horn draw reshuffles the discard shuffles none of
-            // them in (loadout Silent 1157 v0.107.1).
-            for amount in pending_painful_stabs {
-                if amount > 0 {
-                    let owed = &mut state.combat_log.painful_stabs_wounds_owed;
-                    *owed = owed.saturating_add(u8::try_from(amount).unwrap_or(u8::MAX));
-                }
-            }
-        }
-        CreatureRef::Ally(_) | CreatureRef::Nobody => {}
     }
 }
 
@@ -13762,7 +13800,19 @@ pub fn dispatch_modify_card_cost(state: &CombatState, ctx: &CardCostCtx) -> i32 
     let mut add_acc: i32 = ctx.base_cost;
     let mut override_min: Option<i32> = None;
     for listener in iter_power_listeners(state) {
-        match modify_card_cost(state, listener, ctx) {
+        // C# threads ONE running cost through the early pass
+        // (`Hook.ModifyEnergyCostInCombat`, Hook.cs:1727-1743): each
+        // listener's `originalCost` is the previous one's `modifiedCost`.
+        // Curious reads it (`originalCost <= 0` → skip) and floors its own
+        // result at 0 (CuriousPower.cs:12-33), so Borrowed Time's +1 applied
+        // before it gives a 0-cost Power `0 + 1 - 1 = 0`, and a Curious 2
+        // before it gives a 1-cost Power `max(0, 1 - 2) + 1 = 1`. Summing the
+        // deltas against the local base gave 1 and 0.
+        let step = CardCostCtx {
+            base_cost: add_acc,
+            ..*ctx
+        };
+        match modify_card_cost(state, listener, &step) {
             Some(CardCostMod::Override(c)) => {
                 override_min = Some(override_min.map_or(c, |o| o.min(c)));
             }
@@ -14245,6 +14295,9 @@ const BEFORE_CARD_PLAYED_POWERS_KINDS: crate::PowerKindSet = crate::PowerKindSet
     PowerKind::Storm,
     PowerKind::Subroutine,
     PowerKind::TheSealedThrone,
+    PowerKind::FreeAttack,
+    PowerKind::FreeSkill,
+    PowerKind::FreePower,
 ]);
 
 /// Power-side `before_card_played` REACTIVE bodies (mutating). The hooks-bus
@@ -14564,6 +14617,25 @@ fn dispatch_before_card_played_powers_body(
     // Veilpiercer charge granted DanseMacabre block in C# (cs=6 rs=0). Bead
     // `sts2-rs-4wppb`.
     let mut veilpiercer_removed = false;
+    // Free{Attack,Skill,Power} (C# `FreePowerPower.BeforeCardPlayed`,
+    // FreePowerPower.cs:44-62, and its Attack/Skill twins): a play of the
+    // matching type spends one stack (`PowerCmd.Decrement`) IN listener
+    // order, so — as with Veilpiercer — a DanseMacabre listed after a Free*
+    // power this play removes re-reads the live cost and sees the card's real
+    // one (random-loadout Necrobinder 6868 v0.111.0: cs=44 rs=40). The
+    // played card's type keys the stack; with no card (`card_uid` None) no
+    // Free* stack is spent. One stack per iteration: C# keeps one Counter
+    // instance per kind.
+    let free_kind = card_uid
+        .and_then(|cuid| crate::card_by_uid(&state.cards, cuid))
+        .and_then(|card| match card.card_type {
+            crate::cards::CardType::Attack => Some(PowerKind::FreeAttack),
+            crate::cards::CardType::Skill => Some(PowerKind::FreeSkill),
+            crate::cards::CardType::Power => Some(PowerKind::FreePower),
+            _ => None,
+        });
+    let mut free_spent = false;
+    let mut free_removed = false;
     // A replay whose play-start cost was Veilpiercer's 0 for an Ethereal card,
     // with no Veilpiercer left now (an earlier iteration spent the last
     // charge): the live cost is the card's real one (GH #1150).
@@ -14587,7 +14659,9 @@ fn dispatch_before_card_played_powers_body(
             PowerKind::DanseMacabre => {
                 let cost = match card_uid {
                     Some(cuid)
-                        if (veilpiercer_removed || veilpiercer_gone_since_play_start)
+                        if (veilpiercer_removed
+                            || veilpiercer_gone_since_play_start
+                            || free_removed)
                             && !state
                                 .cards
                                 .get(cuid.0.get() as usize - 1)
@@ -14619,6 +14693,19 @@ fn dispatch_before_card_played_powers_body(
                         c.powers.retain(|u| u.0 != uid.0);
                     }
                     veilpiercer_removed = true;
+                } else if let Some(p) = state.powers.get_mut_by_id(uid.0) {
+                    p.amount -= 1;
+                }
+            }
+            k if !free_spent && Some(k) == free_kind => {
+                free_spent = true;
+                if amount <= 1 {
+                    state.powers.retain(|p| p.id != uid.0);
+                    state.player.powers.retain(|u| u.0 != uid.0);
+                    for c in &mut state.creatures {
+                        c.powers.retain(|u| u.0 != uid.0);
+                    }
+                    free_removed = true;
                 } else if let Some(p) = state.powers.get_mut_by_id(uid.0) {
                     p.amount -= 1;
                 }
@@ -17102,7 +17189,7 @@ pub fn dispatch_after_card_played_other_creatures(state: &mut CombatState, ctx: 
 ///
 /// No owner check: a co-op teammate's Midnights get cheaper too, and so do
 /// ours when they exhaust (GH #1004). Their piles wait in `state.allies`.
-fn reduce_midnight_costs_v0111(state: &mut CombatState) {
+pub(crate) fn reduce_midnight_costs_v0111(state: &mut CombatState) {
     let midnights: SmallVec<[CardUid; 4]> = std::iter::once(&state.player)
         .chain(state.allies.iter())
         .flat_map(|p| {
@@ -17124,7 +17211,8 @@ fn reduce_midnight_costs_v0111(state: &mut CombatState) {
     for u in midnights {
         // `ReduceCostBy` is `EnergyCost.AddThisCombat(-1)`: unclamped, so a
         // shave below 0 (under Enlightenment's this-turn cap) still lands
-        // once the cap expires (loadout Ironclad 5514 v0.111.0).
+        // once the cap expires (loadout Ironclad 5514 v0.111.0), and it folds
+        // after a live local zero.
         state.add_card_cost_this_combat(u, -1);
         if let Some(c) = state.cards.get_mut(u.0.get() as usize - 1) {
             let counted = c.combat_var(crate::cards::VarKey::MidnightExhaustsCounted);
@@ -17147,7 +17235,7 @@ fn reduce_midnight_costs_v0111(state: &mut CombatState) {
 /// count, which is all of them.
 pub fn midnight_entered_combat_v0111(state: &mut CombatState, uid: CardUid) {
     let total = i32::try_from(crate::coop::cards_exhausted_this_combat(state)).unwrap_or(i32::MAX);
-    let Some(c) = state.cards.get_mut(uid.0.get() as usize - 1) else {
+    let Some(c) = state.cards.get(uid.0.get() as usize - 1) else {
         return;
     };
     if c.card_id != crate::cards::CardId::Midnight {
@@ -17155,10 +17243,12 @@ pub fn midnight_entered_combat_v0111(state: &mut CombatState, uid: CardUid) {
     }
     let missed = total - c.combat_var(crate::cards::VarKey::MidnightExhaustsCounted);
     if missed > 0 {
-        c.set_combat_var(crate::cards::VarKey::MidnightExhaustsCounted, total);
         // `AddThisCombat(-amount)`, unclamped like the exhaust shave, and
-        // shown on top of a live local zero.
+        // after a local zero a generated free-this-turn copy already carries
+        // (the sibling of Banshee's Cry's entered-combat shave).
         state.add_card_cost_this_combat(uid, -missed);
+        state.cards[uid.0.get() as usize - 1]
+            .set_combat_var(crate::cards::VarKey::MidnightExhaustsCounted, total);
     }
 }
 

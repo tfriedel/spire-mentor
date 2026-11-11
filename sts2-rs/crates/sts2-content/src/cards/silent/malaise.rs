@@ -22,12 +22,15 @@ pub(crate) fn play_malaise(state: &mut CombatState, target: Option<CreatureUid>)
     if current_card_upgraded(state) {
         amt += 1;
     }
+    // C# `Malaise.cs:40-41`: Strength(-X) is applied BEFORE Weak(X).
+    // Order is observable when the target has Artifact (it negates
+    // the first debuff applied), so Strength must drain first.
+    // A card-sourced drain: Unsettling Lamp sees (and doubles) it, see
+    // `fold_player_card_signed_apply`. C# applies both even at X = 0: a 0
+    // Weak onto an existing Weak still runs `BeforePowerAmountChanged`
+    // (Unsettling Lamp captures it; loadout Silent 6886 v0.107.1). A 0
+    // Strength reads as a buff, so no Before listener reacts to it.
     if amt > 0 {
-        // C# `Malaise.cs:40-41`: Strength(-X) is applied BEFORE Weak(X).
-        // Order is observable when the target has Artifact (it negates
-        // the first debuff applied), so Strength must drain first.
-        // A card-sourced drain: Unsettling Lamp sees (and doubles) it, see
-        // `fold_player_card_signed_apply`.
         let drain = sts2_core::card_effects::fold_player_card_signed_apply(
             state,
             t,
@@ -35,8 +38,8 @@ pub(crate) fn play_malaise(state: &mut CombatState, target: Option<CreatureUid>)
             -amt,
         );
         apply_power_signed_to_creature(state, t, PowerKind::Strength, drain);
-        apply_power_to_enemy(state, t, PowerKind::Weak, amt);
     }
+    apply_power_to_enemy(state, t, PowerKind::Weak, amt);
     EffectResult::Resolved
 }
 

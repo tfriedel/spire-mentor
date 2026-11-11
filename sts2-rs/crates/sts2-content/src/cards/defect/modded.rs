@@ -10,6 +10,7 @@ pub(crate) fn play_modded(state: &mut CombatState, _t: Option<CreatureUid>) -> E
     // `OnUpgrade UpgradeValueBy(1m)` → 1 base / 2 upgraded draws.
     // (`RepeatVar(1)` for orb slot is NOT upgrade-scaled.)
     let draws = if current_card_upgraded(state) { 2 } else { 1 };
+    let draw_was_suspended = state.pending_draw_resume.is_some();
     let _ = sts2_core::cards::draw_via_state(state, draws);
     // C# `OrbCmd.AddSlots` stacks on the character's `BaseOrbSlotCount`
     // (Defect = 3). A fresh combat belt is lazily capacity-0 until the first
@@ -24,15 +25,19 @@ pub(crate) fn play_modded(state: &mut CombatState, _t: Option<CreatureUid>) -> E
     // `BaseOrbSlotCount` of 0); a belt Bulk Up emptied grows from 0.
     sts2_core::orbs::ensure_character_base_slots(state);
     state.player.orbs.add_slots(1);
-    // Bump the just-played card's persistent cost (mirrors Python
-    // `card.cost += 1`, which mutates the CardInstance held in the
-    // master deck — the next play of this same instance costs +1).
+    // C# raises the cost only after the awaited draw (Modded.cs:27-28, both
+    // builds): a draw that reshuffles into a Stratagem pick holds it.
+    crate::cards::draw_then::after_draw(state, draw_was_suspended, sts2_core::DrawThen::Modded);
+    EffectResult::Resolved
+}
+
+/// Modded's `EnergyCost.AddThisCombat(1)` on the just-played card
+/// (Modded.cs:28): pays off a below-zero cost debt first, as C#'s unclamped
+/// Relative does.
+pub(crate) fn modded_cost_up(state: &mut CombatState) {
     if let Some(uid) = sts2_core::card_effects::resolving_card_uid(state) {
-        // `EnergyCost.AddThisCombat(1)` (Modded.cs:28): pays off a
-        // below-zero cost debt first, as C#'s unclamped Relative does.
         state.add_card_cost_this_combat(uid, 1);
     }
-    EffectResult::Resolved
 }
 
 #[must_use]

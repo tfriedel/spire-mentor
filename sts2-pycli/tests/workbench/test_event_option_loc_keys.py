@@ -161,6 +161,19 @@ def _wired() -> dict[str, set[str]]:
             names = set(_TUPLE_HEAD_RE.findall(body))
             for key in _info_loc_keys(body, source):
                 out.setdefault(key, set()).update(names)
+        # A presenter that re-points an option at a per-item key from a
+        # `const fn loc_key(self)` match (Endless Conveyor's dish) and then
+        # assigns that option's `vars` supplies those vars to every key the
+        # match can return.
+        for assign in re.finditer(
+            r"(\w+)\.loc_key\s*=\s*\w+\.loc_key\(\);\s*\n\s*\1\.vars\s*=\s*vec!\[(.*?)\];",
+            source,
+            re.S,
+        ):
+            names = set(_TUPLE_HEAD_RE.findall(assign.group(2)))
+            for table in re.finditer(r"fn loc_key\(self\)[^{]*\{(.*?)\n    \}", source, re.S):
+                for key in re.findall(r'"([^"]+)"', table.group(1)):
+                    out.setdefault(key, set()).update(names)
         # Dynamic presenters hard-code a loc_key on an EventOptionInfo /
         # helper; those are gated for existence only (their vars are runtime).
         for m in re.finditer(r'loc_key:\s*"([^"]+)"', source):

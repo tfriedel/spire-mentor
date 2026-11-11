@@ -1,0 +1,84 @@
+{
+ "assumptions": {
+  "energy": 3,
+  "hand": 5,
+  "samples": 200
+ },
+ "block": {
+  "per_turn": 8.6,
+  "scaling_cards": []
+ },
+ "composition": {
+  "by_rarity": {
+   "Basic": 10,
+   "Common": 3,
+   "Curse": 1
+  },
+  "by_type": {
+   "Attack": 9,
+   "Curse": 1,
+   "Skill": 4
+  },
+  "dead_cards": 1,
+  "energy_curve": {
+   "1": 11,
+   "2": 2
+  },
+  "unupgraded_basics": 9
+ },
+ "damage": {
+  "aoe_attacks": [],
+  "attack_count": 9,
+  "per_turn": 18.2,
+  "scaling_cards": [
+   "Bash",
+   "Molten Fist"
+  ],
+  "single_target": 18.2,
+  "vs_group": 18.1
+ },
+ "deck_size": 14,
+ "lenses": {
+  "boss": 23.9,
+  "hallway": 28.9,
+  "scaling": 21.3
+ },
+ "scores": {
+  "block": 34.9,
+  "damage": 36.5,
+  "velocity": 0.0,
+  "volume": 0.0
+ },
+ "velocity": {
+  "bottleneck": "energy",
+  "cards_per_turn": 2.5,
+  "dilution": 1.0,
+  "draw_limited_turns": 0.0,
+  "energy_limited_turns": 7.0,
+  "engine_cards": 0,
+  "extra_per_turn": 0.0,
+  "tags": {}
+ },
+ "warnings": [
+  {
+   "severity": "warn",
+   "text": "Thin on block and no block engine — big hits will land in Act 2+."
+  },
+  {
+   "severity": "info",
+   "text": "No AOE — multi-enemy fights (Gremlins, hallways) will be slow."
+  },
+  {
+   "severity": "info",
+   "text": "Low velocity — few draw/energy cards; you'll often draw the wrong hand."
+  },
+  {
+   "severity": "info",
+   "text": "Energy-limited — cards stranded in hand; more energy helps, more draw won't."
+  },
+  {
+   "severity": "warn",
+   "text": "Deck clogged with basics/curses — prioritise removals."
+  }
+ ]
+}

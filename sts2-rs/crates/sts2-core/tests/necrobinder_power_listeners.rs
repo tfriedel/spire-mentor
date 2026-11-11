@@ -1616,3 +1616,87 @@ fn chains_applied_before_iteration_binds_the_status_card() {
         [true, true, false, false],
     );
 }
+
+/// Push a non-Ethereal cost-`cost` card of `card_type`, held in the hand.
+fn push_hand_card(state: &mut CombatState, card_type: CardType, cost: i8) -> CardUid {
+    let uid = CardUid::new(state.cards.len() as u32 + 1).expect("nonzero card uid");
+    state.cards.push(Card {
+        uid,
+        card_type,
+        cost,
+        ..Card::pod_defaults()
+    });
+    state.player.hand.push(uid);
+    uid
+}
+
+/// C# `FreePowerPower.BeforeCardPlayed` (FreePowerPower.cs:44-62) decrements
+/// INSIDE the `Hook.BeforeCardPlayed` listener walk, and
+/// `DanseMacabrePower.BeforeCardPlayed` (DanseMacabrePower.cs:24) reads
+/// `EnergyCost.GetResolved()` live. A DanseMacabre listed AFTER a FreePower
+/// this play removes sees the card's real cost 3 and grants its block
+/// (random-loadout Necrobinder 6868 v0.111.0: Eternal Armor, cs=44 rs=40).
+#[test]
+fn danse_macabre_reads_live_cost_after_free_power_runs_out() {
+    let mut state = CombatState::default();
+    state.player.current_hp = 50;
+    state.player.max_hp = 50;
+    let _ = state.init_player_creature();
+    let card = push_hand_card(&mut state, CardType::Power, 3);
+    push_player_power(&mut state, PowerKind::FreePower, 1);
+    push_player_power(&mut state, PowerKind::DanseMacabre, 4);
+    assert_eq!(
+        hooks::effective_card_cost(&state, card),
+        0,
+        "free under FreePower"
+    );
+
+    hooks::dispatch_before_card_played_powers_for_card(&mut state, 0, false, Some(card));
+    assert!(
+        !state.powers.iter().any(|p| p.kind == PowerKind::FreePower),
+        "the play spends the last FreePower stack in the walk"
+    );
+    assert_eq!(
+        state.player.block, 4,
+        "DanseMacabre sees the restored cost 3"
+    );
+}
+
+/// The mirror order: a DanseMacabre listed BEFORE the FreePower runs while
+/// the card still costs 0, so it grants nothing; the FreePower is still spent.
+#[test]
+fn danse_macabre_before_free_power_sees_the_free_cost() {
+    let mut state = CombatState::default();
+    state.player.current_hp = 50;
+    state.player.max_hp = 50;
+    let _ = state.init_player_creature();
+    let card = push_hand_card(&mut state, CardType::Power, 3);
+    push_player_power(&mut state, PowerKind::DanseMacabre, 4);
+    push_player_power(&mut state, PowerKind::FreePower, 1);
+
+    hooks::dispatch_before_card_played_powers_for_card(&mut state, 0, false, Some(card));
+    assert!(!state.powers.iter().any(|p| p.kind == PowerKind::FreePower));
+    assert_eq!(
+        state.player.block, 0,
+        "DanseMacabre ran while the card was free"
+    );
+}
+
+/// A Free* stack only answers its own card type, and a stack above 1 is
+/// decremented, not removed (`PowerCmd.Decrement`).
+#[test]
+fn free_attack_in_the_walk_spends_one_stack_of_its_own_type_only() {
+    let mut state = CombatState::default();
+    state.player.current_hp = 50;
+    state.player.max_hp = 50;
+    let _ = state.init_player_creature();
+    let skill = push_hand_card(&mut state, CardType::Skill, 1);
+    let attack = push_hand_card(&mut state, CardType::Attack, 1);
+    let fa = push_player_power(&mut state, PowerKind::FreeAttack, 2);
+    let amount = |s: &CombatState| s.powers.iter().find(|p| p.id == fa.0).map(|p| p.amount);
+
+    hooks::dispatch_before_card_played_powers_for_card(&mut state, 1, false, Some(skill));
+    assert_eq!(amount(&state), Some(2), "a Skill leaves FreeAttack alone");
+    hooks::dispatch_before_card_played_powers_for_card(&mut state, 0, false, Some(attack));
+    assert_eq!(amount(&state), Some(1), "an Attack spends one stack");
+}

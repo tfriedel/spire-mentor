@@ -76,6 +76,11 @@ pub(crate) fn right_hand_hand_late_effect(
     if !state.player.discard.contains(&watched_uid) {
         return;
     }
+    // `CardPileCmd.Add(this, Hand)` (RightHandHand.cs:51) refuses a combat
+    // pile once the combat is ending (CardPileCmd.cs:312).
+    if sts2_core::combat_loop::combat_is_ending(state) {
+        return;
+    }
     let _moved = card_effects::scan_piles_and_move_to_hand(
         state,
         state

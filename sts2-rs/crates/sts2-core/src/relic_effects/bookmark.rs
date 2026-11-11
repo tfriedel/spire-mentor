@@ -49,9 +49,7 @@ pub(crate) fn after_flush_bookmark(state: &mut CombatState) {
         .run_rng
         .combat_card_selection
         .next_int_exclusive(0, eligible.len() as i32) as usize];
-    if let Some(card) = crate::card_by_uid_mut(&mut state.cards, chosen) {
-        card.add_cost_reduction_until_played(1);
-    }
+    state.add_card_cost_reduction_until_played(chosen, 1);
 }
 
 /// No channel listener: Bookmark is called from the flush (see

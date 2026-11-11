@@ -494,7 +494,9 @@ fn create_random_potions_from_pool(
 ) -> Vec<PotionKind> {
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
-        // `float` roll against `float` thresholds (PotionFactory.cs:73-74).
+        // `float num = rng.NextFloat(); num <= 0.1f ? Rare : num <= 0.35f ?
+        // Uncommon : Common` (`PotionFactory.cs:82-83`, both builds): the
+        // sample is an `f32`, so 0.1000000011 rounds onto 0.1f and is Rare.
         let roll = rng.next_float_f32();
         let rarity = if roll <= 0.1_f32 {
             PotionRarity::Rare
@@ -882,5 +884,15 @@ mod tests {
             PotionRarity::Common,
             "seed 0 roll (else) + `== rarity` filter selects Common"
         );
+    }
+
+    /// `PotionFactory.cs:82-83`: `float num = rng.NextFloat(); num <= 0.1f ?
+    /// Rare : ...`. Seed 59306271's first draw 0.1000000011 rounds to 0.1f,
+    /// so C# rolls Rare; the f64 compare rolled Uncommon.
+    #[test]
+    fn random_potion_rarity_compares_in_f32() {
+        let mut rng = DotNetRng::from_seed(59_306_271);
+        let out = create_random_potions_from_pool(&mut rng, one_per_rarity_pool(), 1);
+        assert_eq!(spec_for(out[0]).rarity, PotionRarity::Rare);
     }
 }

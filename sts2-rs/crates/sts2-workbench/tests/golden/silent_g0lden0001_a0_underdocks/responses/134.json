@@ -1,12 +1,12 @@
 {
  "details": [],
  "error": null,
- "label": "Map → (2,8)",
+ "label": "remove_card",
  "step": {
   "action_label": "",
   "assets_base": "https://assets.test",
   "chosen_action": null,
-  "decision": "shop",
+  "decision": "card_select",
   "idx": 0,
   "meta": {
    "act": 1,
@@ -29,239 +29,420 @@
    "bg_col": 2,
    "bg_row": 8,
    "bg_seed": 1772253313,
+   "can_skip": true,
    "card_removal_cost": 75,
    "cards": [
     {
-     "card_cost": 2,
      "color": "green",
-     "cost": 52,
-     "description": "Deal 15 damage.\nNext turn, draw 2 cards.",
-     "description_rich": "Deal 15 damage.\nNext turn, draw 2 cards.",
-     "id": "PREDATOR",
-     "image": "https://assets.test/card_atlas/silent/predator.png",
+     "cost": 1,
+     "description": "Deal 9 damage.",
+     "description_rich": "Deal 9 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
      "index": 0,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Predator",
-     "on_sale": false,
-     "rarity": "Common",
-     "type": "Attack"
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": true
     },
     {
-     "card_cost": 1,
      "color": "green",
-     "cost": 25,
-     "description": "Sly.\nDeal 6 damage to ALL enemies.",
-     "description_rich": "[gold]Sly[/gold].\nDeal 6 damage to ALL enemies.",
-     "id": "FLICK_FLACK",
-     "image": "https://assets.test/card_atlas/silent/flick_flack.png",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
      "index": 1,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Flick-Flack",
-     "on_sale": true,
-     "rarity": "Common",
-     "type": "Attack"
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "card_cost": 2,
      "color": "green",
-     "cost": 51,
-     "description": "Sly.\nGain 6 Block.",
-     "description_rich": "[gold]Sly[/gold].\nGain 6 Block.",
-     "id": "UNTOUCHABLE",
-     "image": "https://assets.test/card_atlas/silent/untouchable.png",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
      "index": 2,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Untouchable",
-     "on_sale": false,
-     "rarity": "Common",
-     "type": "Skill"
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "card_cost": 1,
      "color": "green",
-     "cost": 51,
-     "description": "Gain 4 Block.\nNext turn, gain 4 Block.",
-     "description_rich": "Gain 4 Block.\nNext turn, gain 4 Block.",
-     "id": "DODGE_AND_ROLL",
-     "image": "https://assets.test/card_atlas/silent/dodge_and_roll.png",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
      "index": 3,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Dodge and Roll",
-     "on_sale": false,
-     "rarity": "Common",
-     "type": "Skill"
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "card_cost": 1,
      "color": "green",
-     "cost": 75,
-     "description": "Gain 2 Dexterity.",
-     "description_rich": "Gain 2 Dexterity.",
-     "id": "FOOTWORK",
-     "image": "https://assets.test/card_atlas/silent/footwork.png",
+     "cost": 1,
+     "description": "Deal 6 damage.",
+     "description_rich": "Deal 6 damage.",
+     "id": "STRIKE_SILENT",
+     "image": "https://assets.test/card_atlas/silent/strike_silent.png",
      "index": 4,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Footwork",
-     "on_sale": false,
-     "rarity": "Uncommon",
-     "type": "Power"
+     "name": "Strike",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "card_cost": 1,
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": 5,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": 6,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": 7,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": 8,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 5 Block.",
+     "description_rich": "Gain 5 Block.",
+     "id": "DEFEND_SILENT",
+     "image": "https://assets.test/card_atlas/silent/defend_silent.png",
+     "index": 9,
+     "name": "Defend",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 0,
+     "description": "Deal 3 damage.\nApply 1 Weak.",
+     "description_rich": "Deal 3 damage.\nApply 1 Weak.",
+     "id": "NEUTRALIZE",
+     "image": "https://assets.test/card_atlas/silent/neutralize.png",
+     "index": 10,
+     "name": "Neutralize",
+     "rarity": "Basic",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 8 Block.\nDiscard 1 card.",
+     "description_rich": "Gain 8 Block.\nDiscard 1 card.",
+     "id": "SURVIVOR",
+     "image": "https://assets.test/card_atlas/silent/survivor.png",
+     "index": 11,
+     "name": "Survivor",
+     "rarity": "Basic",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
      "color": "colorless",
-     "cost": 88,
+     "cost": 1,
      "description": "Deal 14 damage.",
      "description_rich": "Deal 14 damage.",
      "id": "ULTIMATE_STRIKE",
      "image": "https://assets.test/card_atlas/colorless/ultimate_strike.png",
-     "index": 5,
-     "is_available": true,
-     "is_stocked": true,
+     "index": 12,
      "name": "Ultimate Strike",
-     "on_sale": false,
      "rarity": "Uncommon",
-     "type": "Attack"
+     "type": "Attack",
+     "upgraded": false
     },
     {
-     "card_cost": 3,
-     "color": "colorless",
-     "cost": 175,
-     "description": "Whenever you play an Attack, add a random Attack into your Hand.",
-     "description_rich": "Whenever you play an Attack, add a random Attack into your [gold]Hand[/gold].",
-     "id": "CALAMITY",
-     "image": "https://assets.test/card_atlas/colorless/calamity.png",
-     "index": 6,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Calamity",
-     "on_sale": false,
-     "rarity": "Rare",
-     "type": "Power"
+     "color": "green",
+     "cost": 1,
+     "description": "Gain 6 Block.\nAdd 1 Shiv into your Hand.",
+     "description_rich": "Gain 6 Block.\nAdd 1 Shiv into your Hand.",
+     "id": "CLOAK_AND_DAGGER",
+     "image": "https://assets.test/card_atlas/silent/cloak_and_dagger.png",
+     "index": 13,
+     "name": "Cloak and Dagger",
+     "rarity": "Common",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 8 damage.\nApply 1 Weak.",
+     "description_rich": "Deal 8 damage.\nApply 1 Weak.",
+     "id": "SUCKER_PUNCH",
+     "image": "https://assets.test/card_atlas/silent/sucker_punch.png",
+     "index": 14,
+     "name": "Sucker Punch",
+     "rarity": "Common",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 2,
+     "description": "Retain.\nApply 7 Poison.",
+     "description_rich": "[gold]Retain[/gold].\nApply 7 Poison.",
+     "id": "SNAKEBITE",
+     "image": "https://assets.test/card_atlas/silent/snakebite.png",
+     "index": 15,
+     "name": "Snakebite",
+     "rarity": "Common",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 1,
+     "description": "Deal 9 damage.\nDraw 1 card.\nDiscard 1 card.",
+     "description_rich": "Deal 9 damage.\nDraw 1 card.\nDiscard 1 card.",
+     "id": "DAGGER_THROW",
+     "image": "https://assets.test/card_atlas/silent/dagger_throw.png",
+     "index": 16,
+     "name": "Dagger Throw",
+     "rarity": "Common",
+     "type": "Attack",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 0,
+     "description": "Gain 4 Block.",
+     "description_rich": "Gain 4 Block.",
+     "id": "DEFLECT",
+     "image": "https://assets.test/card_atlas/silent/deflect.png",
+     "index": 17,
+     "name": "Deflect",
+     "rarity": "Common",
+     "type": "Skill",
+     "upgraded": false
+    },
+    {
+     "color": "green",
+     "cost": 2,
+     "description": "Deal 15 damage.\nNext turn, draw 2 cards.",
+     "description_rich": "Deal 15 damage.\nNext turn, draw 2 cards.",
+     "id": "PREDATOR",
+     "image": "https://assets.test/card_atlas/silent/predator.png",
+     "index": 18,
+     "name": "Predator",
+     "rarity": "Common",
+     "type": "Attack",
+     "upgraded": false
     }
    ],
-   "decision": "shop",
+   "context": "remove",
+   "decision": "card_select",
    "floor": 9,
+   "max_select": 1,
+   "min_select": 0,
    "options": [
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 0
+      "indices": "0"
      },
      "enabled": true,
-     "label": "Buy PREDATOR.title (52g)"
+     "label": "STRIKE_SILENT.title"
     },
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 1
+      "indices": "1"
      },
      "enabled": true,
-     "label": "Buy FLICK_FLACK.title (25g)"
+     "label": "STRIKE_SILENT.title"
     },
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 2
+      "indices": "2"
      },
      "enabled": true,
-     "label": "Buy UNTOUCHABLE.title (51g)"
+     "label": "STRIKE_SILENT.title"
     },
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 3
+      "indices": "3"
      },
      "enabled": true,
-     "label": "Buy DODGE_AND_ROLL.title (51g)"
+     "label": "STRIKE_SILENT.title"
     },
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 4
+      "indices": "4"
      },
      "enabled": true,
-     "label": "Buy FOOTWORK.title (75g)"
+     "label": "STRIKE_SILENT.title"
     },
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 5
+      "indices": "5"
      },
      "enabled": true,
-     "label": "Buy ULTIMATE_STRIKE.title (88g)"
+     "label": "DEFEND_SILENT.title"
     },
     {
-     "action": "buy_card",
+     "action": "select_cards",
      "args": {
-      "card_index": 6
+      "indices": "6"
      },
      "enabled": true,
-     "label": "Buy CALAMITY.title (175g)"
+     "label": "DEFEND_SILENT.title"
     },
     {
-     "action": "buy_relic",
+     "action": "select_cards",
      "args": {
-      "relic_index": 0
+      "indices": "7"
      },
      "enabled": true,
-     "label": "Buy ANCHOR.title (177g)"
+     "label": "DEFEND_SILENT.title"
     },
     {
-     "action": "buy_relic",
+     "action": "select_cards",
      "args": {
-      "relic_index": 1
+      "indices": "8"
      },
      "enabled": true,
-     "label": "Buy BOOK_OF_FIVE_RINGS.title (182g)"
+     "label": "DEFEND_SILENT.title"
     },
     {
-     "action": "buy_relic",
+     "action": "select_cards",
      "args": {
-      "relic_index": 2
+      "indices": "9"
      },
      "enabled": true,
-     "label": "Buy LEES_WAFFLE.title (179g)"
+     "label": "DEFEND_SILENT.title"
     },
     {
-     "action": "buy_potion",
+     "action": "select_cards",
      "args": {
-      "potion_index": 0
+      "indices": "10"
      },
      "enabled": true,
-     "label": "Buy ENERGY_POTION.title (51g)"
+     "label": "NEUTRALIZE.title"
     },
     {
-     "action": "buy_potion",
+     "action": "select_cards",
      "args": {
-      "potion_index": 1
+      "indices": "11"
      },
      "enabled": true,
-     "label": "Buy POISON_POTION.title (50g)"
+     "label": "SURVIVOR.title"
     },
     {
-     "action": "buy_potion",
+     "action": "select_cards",
      "args": {
-      "potion_index": 2
+      "indices": "12"
      },
      "enabled": true,
-     "label": "Buy EXPLOSIVE_AMPOULE.title (48g)"
+     "label": "ULTIMATE_STRIKE.title"
     },
     {
-     "action": "remove_card",
+     "action": "select_cards",
+     "args": {
+      "indices": "13"
+     },
+     "enabled": true,
+     "label": "CLOAK_AND_DAGGER.title"
+    },
+    {
+     "action": "select_cards",
+     "args": {
+      "indices": "14"
+     },
+     "enabled": true,
+     "label": "SUCKER_PUNCH.title"
+    },
+    {
+     "action": "select_cards",
+     "args": {
+      "indices": "15"
+     },
+     "enabled": true,
+     "label": "SNAKEBITE.title"
+    },
+    {
+     "action": "select_cards",
+     "args": {
+      "indices": "16"
+     },
+     "enabled": true,
+     "label": "DAGGER_THROW.title"
+    },
+    {
+     "action": "select_cards",
+     "args": {
+      "indices": "17"
+     },
+     "enabled": true,
+     "label": "DEFLECT.title"
+    },
+    {
+     "action": "select_cards",
+     "args": {
+      "indices": "18"
+     },
+     "enabled": true,
+     "label": "PREDATOR.title"
+    },
+    {
+     "action": "skip_select",
      "args": {},
      "enabled": true,
-     "label": "Remove a card (75g)"
-    },
-    {
-     "action": "leave_room",
-     "args": {},
-     "enabled": true,
-     "label": "Leave shop"
+     "label": "Skip"
     }
    ],
    "player": {
@@ -500,9 +681,22 @@
       "rarity": "Common",
       "type": "Skill",
       "upgraded": false
+     },
+     {
+      "color": "green",
+      "cost": 2,
+      "description": "Deal 15 damage.\nNext turn, draw 2 cards.",
+      "description_rich": "Deal 15 damage.\nNext turn, draw 2 cards.",
+      "id": "PREDATOR",
+      "image": "https://assets.test/card_atlas/silent/predator.png",
+      "index": 18,
+      "name": "Predator",
+      "rarity": "Common",
+      "type": "Attack",
+      "upgraded": false
      }
     ],
-    "gold": 198,
+    "gold": 95,
     "hp": 27,
     "max_hp": 70,
     "name": "Silent",
@@ -513,6 +707,12 @@
       "id": "BLOCK_POTION",
       "image": "https://assets.test/potion_atlas/block_potion.png",
       "name": "Block Potion"
+     },
+     {
+      "description": "Gain 2 Energy.",
+      "id": "ENERGY_POTION",
+      "image": "https://assets.test/potion_atlas/energy_potion.png",
+      "name": "Energy Potion"
      }
     ],
     "relics": [
@@ -532,66 +732,54 @@
    },
    "potions": [
     {
-     "cost": 51,
-     "description": "Gain 2 Energy.",
+     "cost": 999999,
      "id": "ENERGY_POTION",
-     "image": "https://assets.test/potion_atlas/energy_potion.png",
      "index": 0,
-     "is_available": true,
-     "is_stocked": true,
-     "name": "Energy Potion"
+     "is_available": false,
+     "is_stocked": false,
+     "name": "ENERGY_POTION.title"
     },
     {
      "cost": 50,
-     "description": "Apply 6 Poison.",
      "id": "POISON_POTION",
-     "image": "https://assets.test/potion_atlas/poison_potion.png",
      "index": 1,
      "is_available": true,
      "is_stocked": true,
-     "name": "Poison Potion"
+     "name": "POISON_POTION.title"
     },
     {
      "cost": 48,
-     "description": "Deal 10 damage to ALL enemies.",
      "id": "EXPLOSIVE_AMPOULE",
-     "image": "https://assets.test/potion_atlas/explosive_ampoule.png",
      "index": 2,
      "is_available": true,
      "is_stocked": true,
-     "name": "Explosive Ampoule"
+     "name": "EXPLOSIVE_AMPOULE.title"
     }
    ],
    "relics": [
     {
      "cost": 177,
-     "description": "Start each combat with 10 Block.",
      "id": "ANCHOR",
-     "image": "https://assets.test/relic_atlas/anchor.png",
      "index": 0,
      "is_available": true,
-     "is_stocked": true,
-     "name": "Anchor"
+     "is_stocked": false,
+     "name": "ANCHOR.title"
     },
     {
      "cost": 182,
-     "description": "Every 5 cards you add to your Deck, heal 20 HP.",
      "id": "BOOK_OF_FIVE_RINGS",
-     "image": "https://assets.test/relic_atlas/book_of_five_rings.png",
      "index": 1,
      "is_available": true,
-     "is_stocked": true,
-     "name": "Book of Five Rings"
+     "is_stocked": false,
+     "name": "BOOK_OF_FIVE_RINGS.title"
     },
     {
      "cost": 179,
-     "description": "Upon pickup, raise your Max HP by 7 and heal all of your HP.",
      "id": "LEES_WAFFLE",
-     "image": "https://assets.test/relic_atlas/lees_waffle.png",
      "index": 2,
      "is_available": true,
-     "is_stocked": true,
-     "name": "Lee's Waffle"
+     "is_stocked": false,
+     "name": "LEES_WAFFLE.title"
     }
    ]
   }

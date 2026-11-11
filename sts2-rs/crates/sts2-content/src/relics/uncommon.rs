@@ -974,11 +974,19 @@ fn listener_pen_nib_modify_damage(state: &CombatState, ctx: &hooks::DamageCtx) -
         return DamageMul::ONE;
     }
     let source = sts2_core::card_effects::resolving_card_uid(state);
-    if pen_nib_doubles(state, relic.counter, source, source.is_some()) {
+    if pen_nib_doubles(state, relic.counter, source, source_in_play(state, source)) {
         DamageMul::new(2, 1)
     } else {
         DamageMul::ONE
     }
+}
+
+/// C# `cardSource.Pile.Type == PileType.Play`, read live (PenNib.cs:123): a
+/// v0.107.1 Shining Strike has already moved itself to the draw top in its
+/// `OnPlay` (ShiningStrike.cs:36), so its Duplication replay is out of Play
+/// (loadout Regent 6793 v0.107.1).
+fn source_in_play(state: &CombatState, source: Option<sts2_core::CardUid>) -> bool {
+    source.is_some_and(|u| state.player.play.contains(&u))
 }
 
 /// Pen Nib's card gate for a `cardSource` that is (`source_in_play`) or is
@@ -1016,7 +1024,12 @@ pub(crate) fn pen_nib_fold_rescale(
         return (1, 1);
     };
     let resolving = sts2_core::card_effects::resolving_card_uid(state);
-    let seen = pen_nib_doubles(state, relic.counter, resolving, resolving.is_some());
+    let seen = pen_nib_doubles(
+        state,
+        relic.counter,
+        resolving,
+        source_in_play(state, resolving),
+    );
     let wanted = pen_nib_doubles(state, relic.counter, Some(fold_source), false);
     (if wanted { 2 } else { 1 }, if seen { 2 } else { 1 })
 }

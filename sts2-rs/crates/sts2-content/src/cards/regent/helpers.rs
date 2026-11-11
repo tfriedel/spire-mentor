@@ -695,6 +695,11 @@ pub(crate) fn make_it_so_late_effect(
     if count == 0 || !count.is_multiple_of(interval) {
         return;
     }
+    // `CardPileCmd.Add(this, Hand)` (MakeItSo.cs:43) refuses a combat pile
+    // once the combat is ending (CardPileCmd.cs:312).
+    if sts2_core::combat_loop::combat_is_ending(state) {
+        return;
+    }
     // Move the watched card from whichever non-Hand pile it occupies
     // back to Hand, with the same overflow-to-discard guard the
     // engine uses elsewhere.

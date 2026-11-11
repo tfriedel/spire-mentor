@@ -2770,15 +2770,18 @@ pub enum PostChoiceEffect {
     /// exhaust choice resolves; the power applies regardless of whether a
     /// card was exhausted, so callers fire it inline on an empty hand).
     ApplyPlayerPower(PowerKind, i32),
-    /// Generate `count` copies of `card_id` (upgraded when `upgraded`) into
-    /// the player's hand AFTER the selection resolves. HiddenDaggers
+    /// Generate `count` copies of `card_id` into the player's hand AFTER the
+    /// selection resolves, upgraded when the card `upgrade_source` is
+    /// upgraded at that point. HiddenDaggers
     /// (`CardCmd.Discard(FromHandForDiscard(…))` then `Shiv.CreateInHand`):
     /// a discarded Sly card auto-plays inside `Discard`, so its draw lands
-    /// before the Shivs (GH #1054).
+    /// before the Shivs (GH #1054), and `base.IsUpgraded` is read after the
+    /// discard (HiddenDaggers.cs:32-33): a Sly kill of the Dampen caster
+    /// re-upgrades it first (loadout Silent 6787 v0.111.0).
     SpawnInHand {
         card_id: cards::CardId,
         count: u8,
-        upgraded: bool,
+        upgrade_source: CardUid,
     },
     /// Exhaust the first draw card ([`CombatState::exhaust_first_draw_card`])
     /// and gain `strength` Strength. v0.107.1 Toasty Mittens: its
@@ -3019,6 +3022,31 @@ pub enum DrawThen {
     /// after its awaited exhausts; the hit count is the statuses counted
     /// before them.
     FlakCannon(u8),
+    /// SecondWind.cs:29-33 (both builds): the block it gains after each
+    /// awaited exhaust, this much per card.
+    SecondWind(u8),
+    /// GlowwaterPotion.cs OnUse (both builds): its `Draw(10)` after the
+    /// awaited exhausts of every hand card.
+    Glowwater,
+    /// Clarity.cs:33-34 (both builds): Apply<ClarityPower>(3) after the
+    /// potion's draw.
+    Clarity,
+    /// A hand select's awaited `CardCmd.Exhaust` loop with nothing after it
+    /// (Purity.cs:28-31, Ashwater.cs OnUse, upgraded True Grit, Cleanse,
+    /// TyrannyPower.cs:36-39; both builds). See [`resolve_exhaust_from_hand`].
+    ExhaustSelected,
+    /// The same, then Apply<StrengthPower>(n): Brand.cs:42-49, v0.111.0
+    /// ToastyMittens.cs:31-43.
+    ExhaustSelectedThenStrength(u8),
+    /// The same, then Apply<EnergyNextTurnPower>(n): Scavenge.cs:31-36.
+    ExhaustSelectedThenEnergyNextTurn(u8),
+    /// v0.107.1 Eidolon.cs:44-54: Apply<IntangiblePower>(1) after its awaited
+    /// exhausts of the hand when the loop ran at least 9 times (the payload is
+    /// that count).
+    Eidolon(u8),
+    /// Modded.cs:27-28 (both builds): `EnergyCost.AddThisCombat(1)` on the
+    /// played Modded after its draw.
+    Modded,
 }
 
 impl DrawThen {
@@ -3033,7 +3061,16 @@ impl DrawThen {
     pub const fn follows_exhaust_walk(self) -> bool {
         matches!(
             self,
-            Self::Stoke(_) | Self::StokePlus(_) | Self::FiendFire(_) | Self::FlakCannon(_)
+            Self::Stoke(_)
+                | Self::StokePlus(_)
+                | Self::FiendFire(_)
+                | Self::FlakCannon(_)
+                | Self::SecondWind(_)
+                | Self::Glowwater
+                | Self::ExhaustSelected
+                | Self::ExhaustSelectedThenStrength(_)
+                | Self::ExhaustSelectedThenEnergyNextTurn(_)
+                | Self::Eidolon(_)
         )
     }
 }
@@ -6853,10 +6890,8 @@ impl CombatState {
             .copied()
             .collect();
         for uid in combat_pile_uids {
-            if self
-                .cards
-                .iter()
-                .any(|c| c.uid == uid && c.card_id == crate::cards::CardId::Melancholy)
+            if crate::card_by_uid(&self.cards, uid)
+                .is_some_and(|c| c.card_id == crate::cards::CardId::Melancholy)
             {
                 // C# `EnergyCost.AddThisCombat(-1)`, clamped only at the
                 // final cost read.
@@ -8810,6 +8845,9 @@ impl CombatState {
         } else {
             pdr
         };
+        // The draw is done: a Joss Paper whose draw this was reduces its
+        // counter now (JossPaper.cs:131-132, both builds).
+        crate::relic_effects::joss_paper::joss_paper_settle_after_draw(self);
         // Scrape's discard follows its own draw's completion (Scrape.cs
         // OnPlay); it was the play that owned this draw, so it comes before
         // any later code parked on the same draw.
@@ -9937,10 +9975,8 @@ impl CombatState {
             // 4113/4597/5402). When not Confused the block above is skipped, so
             // ordering is behavior-neutral. `AddThisCombat` is unclamped: a
             // shave below 0 stays as cost debt (like Midnight's).
-            if card_id == crate::cards::CardId::KinglyKick {
-                if let Some(uid) = self.cards.get(idx).map(|c| c.uid) {
-                    self.add_card_cost_this_combat(uid, -1);
-                }
+            if card_id == crate::cards::CardId::KinglyKick && idx < self.cards.len() {
+                self.add_card_cost_this_combat(self.cards[idx].uid, -1);
             }
             // Bead `sts2-rs-kese5` (f933s sub-1): ChainsOfBindingPower
             // AfterCardDrawn. C# `ChainsOfBindingPower.cs` (v0.103.2)
@@ -10654,13 +10690,12 @@ impl CombatState {
     pub fn exhaust_hand(&mut self) {
         let uids: smallvec::SmallVec<[crate::CardUid; 10]> =
             self.player.hand.iter().copied().collect();
-        for uid in uids {
-            // exhaust_card_uid handles pile removal + dual-fire of
-            // `after_card_exhausted`. Returns false for already-exhausted
-            // uids (defensive — should not happen since we snapshot from
-            // the hand pile).
-            let _ = crate::card_effects::exhaust_card_uid(self, uid);
-        }
+        // `exhaust_card_uid` handles pile removal + dual-fire of
+        // `after_card_exhausted`. Each `CardCmd.Exhaust` is awaited (Pael's
+        // Eye, PaelsEye.cs:124-127, both builds): one whose Dark Embrace draw
+        // reshuffles into a Stratagem pick holds the rest, which park on that
+        // draw as owed exhausts.
+        let _ = exhaust_cards_parking(self, &uids, DrawThen::ExhaustSelected);
     }
 
     /// Count cards the player has played this turn, optionally filtered
@@ -10949,33 +10984,52 @@ impl CombatState {
     }
 
     /// One Banshee's Cry `EnergyCost.AddThisCombat(-2)` (BansheesCry.cs:10).
-    /// Appended while a local zero is live (a generated free-this-turn copy)
-    /// it folds after it: `0 - 2`, so a global surcharge (Borrowed Time) skips
-    /// the negative cost (loadout Necrobinder 3109 v0.111.0: C# 0, Rust 1).
+    /// Appended after a live local zero (a generated free-this-turn copy), so
+    /// a global surcharge (Borrowed Time) skips the negative cost (loadout
+    /// Necrobinder 3109 v0.111.0: C# 0, Rust 1).
     fn shave_banshees_cry(&mut self, uid: CardUid) {
         self.add_card_cost_this_combat(uid, -2);
     }
 
-    /// C# `EnergyCost.AddThisCombat(delta)` on the card `uid`: a Relative
-    /// local modifier for the rest of combat
-    /// ([`cards::Card::add_cost_this_combat`]). Local modifiers fold in
-    /// insertion order (`CardEnergyCost.cs:110-115`), so one appended while a
-    /// local `Absolute(0)` is live (`SetToFreeThisTurn`, `SetUntilPlayed(0)`,
-    /// Flatten after an Osty attack) also shows on top of that zero
-    /// ([`cards::VarKey::CostAddedAfterLocalZero`]): a negative result makes
-    /// `Hook.ModifyEnergyCostInCombat` skip the global surcharges (Borrowed
-    /// Time, Tangled). X-cost cards take no modifier.
+    /// C# `EnergyCost.AddThisCombat(delta)` on card `uid`: a Relative local
+    /// modifier appended AFTER every live one (`CardEnergyCost.cs:110-115`
+    /// folds them in insertion order, unclamped). Under a live local zero
+    /// (`SetToFreeThisTurn`, `SetUntilPlayed(0)`, Flatten's `SetThisTurn(0)`)
+    /// the card shows `0 + delta` until that zero expires
+    /// ([`crate::cards::VarKey::CostAddedAfterLocalZero`]); the base takes the
+    /// delta either way ([`crate::cards::Card::add_cost_this_combat`]).
+    ///
+    /// Every in-combat `AddThisCombat` that can land on a card other than the
+    /// one being played goes through here: a free-this-turn Melancholy shaved
+    /// by a death read 0 instead of -1, so Borrowed Time's surcharge made it
+    /// cost 1 (C# 0). Same for Midnight, Kingly Kick, Transfigure, Banshee's
+    /// Cry, Up My Sleeve, Modded and Frantic Escape. X-cost cards take no
+    /// modifier.
     pub fn add_card_cost_this_combat(&mut self, uid: CardUid, delta: i32) {
-        let idx = uid.get() as usize - 1;
-        let zeroed = self
-            .cards
-            .get(idx)
+        let zeroed = card_by_uid(&self.cards, uid)
             .is_some_and(|c| !c.is_x_cost() && crate::hooks::card_cost_locally_zeroed(self, c));
-        if let Some(c) = self.cards.get_mut(idx) {
+        if let Some(c) = card_by_uid_mut(&mut self.cards, uid) {
             c.add_cost_this_combat(delta);
             if zeroed {
-                let key = cards::VarKey::CostAddedAfterLocalZero;
-                c.set_combat_var(key, c.combat_var(key).saturating_add(delta));
+                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
+                c.set_combat_var(key, c.combat_var(key) + delta);
+            }
+        }
+    }
+
+    /// C# `EnergyCost.AddUntilPlayed(-amount)` on card `uid` (Bookmark,
+    /// Slumbering Essence, v0.111.0 Rocket Punch): like
+    /// [`Self::add_card_cost_this_combat`], it folds after a live local zero
+    /// (`CardEnergyCost.cs:110-115`), so a Transfigured free card that Bookmark
+    /// picks reads `0 + 1 - 1 = 0`, not 1.
+    pub fn add_card_cost_reduction_until_played(&mut self, uid: CardUid, amount: i32) {
+        let zeroed = card_by_uid(&self.cards, uid)
+            .is_some_and(|c| !c.is_x_cost() && crate::hooks::card_cost_locally_zeroed(self, c));
+        if let Some(c) = card_by_uid_mut(&mut self.cards, uid) {
+            c.add_cost_reduction_until_played(amount);
+            if zeroed {
+                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
+                c.set_combat_var(key, c.combat_var(key) - amount);
             }
         }
     }
@@ -13333,20 +13387,14 @@ fn resolve_transfigure_card_in_hand(state: &mut CombatState, pc: &PendingChoice,
 /// pays off a below-zero `AddThisCombat` debt first.
 pub fn apply_transfigure(state: &mut CombatState, uid: CardUid) {
     let idx = uid.0.get() as usize - 1;
-    let zeroed = state
-        .cards
-        .get(idx)
-        .is_some_and(|c| crate::hooks::card_cost_locally_zeroed(state, c));
-    if let Some(card) = state.cards.get_mut(idx) {
-        if !card.is_x_cost() && card.cost >= 0 {
-            card.add_cost_this_combat(1);
-            if zeroed {
-                let key = crate::cards::VarKey::CostAddedAfterLocalZero;
-                card.set_combat_var(key, card.combat_var(key) + 1);
-            }
-        }
-        card.base_replay_count = card.base_replay_count.saturating_add(1);
+    let Some(card) = state.cards.get(idx) else {
+        return;
+    };
+    if !card.is_x_cost() && card.cost >= 0 {
+        state.add_card_cost_this_combat(uid, 1);
     }
+    let card = &mut state.cards[idx];
+    card.base_replay_count = card.base_replay_count.saturating_add(1);
 }
 
 /// Resolve a [`ChoiceKind::AutoPlaySkillFromHand`] pending choice
@@ -13725,16 +13773,73 @@ fn resolve_foregone_conclusion_from_draw(
 /// removes it from hand and fires the `on_card_exhausted` listeners).
 /// Invalid indices / cards no longer in hand are skipped. Mirrors C#
 /// `CardSelectCmd.FromHand` → `CardCmd.Exhaust`. Bead `sts2-rs-1xmxp`.
+///
+/// C# awaits each `CardCmd.Exhaust`, then the code after the loop (Brand's
+/// Strength, Brand.cs:42-49; Scavenge's Energy Next Turn, Scavenge.cs:31-36;
+/// Purity.cs:28-31; both builds). When an exhaust's `AfterCardExhausted`
+/// walk suspends a draw on a reshuffle select (Dark Embrace drawing into
+/// Stratagem), C# finishes that pick and draw first: the cards still owed
+/// are marked ([`crate::cards::VarKey::ExhaustOwedAfterDraw`]) and the rest
+/// parks on the draw as a [`DrawThen`] tail, which exhausts them and runs
+/// the follow-up when it resumes.
 fn resolve_exhaust_from_hand(state: &mut CombatState, pc: &PendingChoice, selection: &[u8]) {
-    for &sel_idx in selection {
-        let Some(opt) = pc.options.get(usize::from(sel_idx)) else {
-            continue;
-        };
-        if let Some(uid) = opt.card_uid {
-            let _ = crate::card_effects::exhaust_card_uid(state, uid);
+    let uids: smallvec::SmallVec<[CardUid; 16]> = selection
+        .iter()
+        .filter_map(|&sel_idx| {
+            pc.options
+                .get(usize::from(sel_idx))
+                .and_then(|o| o.card_uid)
+        })
+        .collect();
+    let tail = match pc.post_effect {
+        None => Some(DrawThen::ExhaustSelected),
+        Some(PostChoiceEffect::GainStrength(n)) => u8::try_from(n)
+            .ok()
+            .map(DrawThen::ExhaustSelectedThenStrength),
+        Some(PostChoiceEffect::ApplyPlayerPower(PowerKind::EnergyNextTurn, n)) => u8::try_from(n)
+            .ok()
+            .map(DrawThen::ExhaustSelectedThenEnergyNextTurn),
+        // Burning Pact's draw defers itself (`PostChoiceEffect::DrawCards`).
+        Some(_) => None,
+    };
+    match tail {
+        Some(tail) => {
+            if exhaust_cards_parking(state, &uids, tail) {
+                return;
+            }
+        }
+        None => {
+            for &uid in &uids {
+                let _ = crate::card_effects::exhaust_card_uid(state, uid);
+            }
         }
     }
     apply_post_choice_effect(state, pc.post_effect);
+}
+
+/// `CardCmd.Exhaust` each of `uids` in order, awaiting each: when one's
+/// `AfterCardExhausted` walk suspends a draw on a reshuffle select (Dark
+/// Embrace drawing into Stratagem), the cards still owed are marked
+/// ([`crate::cards::VarKey::ExhaustOwedAfterDraw`]) and `tail` parks on the
+/// draw, which exhausts them when it resumes. Returns `true` when parked.
+pub(crate) fn exhaust_cards_parking(
+    state: &mut CombatState,
+    uids: &[CardUid],
+    tail: DrawThen,
+) -> bool {
+    let draw_was_suspended = state.pending_draw_resume.is_some();
+    for (i, &uid) in uids.iter().enumerate() {
+        let _ = crate::card_effects::exhaust_card_uid(state, uid);
+        if state.park_draw_then(draw_was_suspended, tail) {
+            for (order, &rest) in (1..).zip(&uids[i + 1..]) {
+                if let Some(card) = card_by_uid_mut(&mut state.cards, rest) {
+                    card.set_combat_var(crate::cards::VarKey::ExhaustOwedAfterDraw, order);
+                }
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Apply a [`PendingChoice::post_effect`] after its selection resolves.
@@ -13849,12 +13954,13 @@ fn apply_post_choice_effect(state: &mut CombatState, effect: Option<PostChoiceEf
         Some(PostChoiceEffect::SpawnInHand {
             card_id,
             count,
-            upgraded,
+            upgrade_source,
         }) => {
             // Hidden Daggers' discard can down the last enemy (Tingsha); then
             // `CardCmd.Upgrade` is a no-op (`CombatManager.IsEnding`,
             // CardCmd.cs:267-270, GH #1150).
-            let upgraded = upgraded && !crate::combat_loop::combat_is_ending(state);
+            let upgraded = card_by_uid(&state.cards, upgrade_source).is_some_and(|c| c.upgraded)
+                && !crate::combat_loop::combat_is_ending(state);
             for _ in 0..count {
                 let Some(card) = build_card_for_version(card_id, upgraded, state.game_version)
                 else {
@@ -16986,6 +17092,9 @@ pub fn legal_actions(state: &CombatState) -> SmallVec<[Action; 16]> {
 const AFTER_DRAWN_DEFERRED: i32 = 1;
 const AFTER_DRAWN_FROM_HAND_DRAW: i32 = 2;
 const AFTER_DRAWN_AUTO_PLAYED: i32 = 4;
+
+#[cfg(test)]
+mod cost_model_audit_tests;
 
 #[cfg(test)]
 mod tests {

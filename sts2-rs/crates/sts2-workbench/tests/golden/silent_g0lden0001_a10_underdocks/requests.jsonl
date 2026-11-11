@@ -115,11 +115,11 @@
 {"i": 114, "method": "POST", "route": "/api/live/action", "body": {"action": "end_turn", "args": {}}, "status": 200, "sha256": "eaa40db76fa077c52d7866462dc40d8f2d3fbaed7eefa3252e6524e9eaba5bb3", "decision": "game_over"}
 {"i": 115, "method": "POST", "route": "/api/live/quit", "body": null, "status": 200, "sha256": "4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93", "decision": null}
 {"i": 116, "method": "GET", "route": "/api/runs", "body": null, "status": 200, "sha256": "aa02dcbbd3dbd450fbf03c2e09986663e4599b69d410f316ad9b773c589f039e", "decision": null}
-{"i": 117, "method": "GET", "route": "/api/runs/stat?path=<work>/logs/20260101_000000_Silent_G0LDEN0001_2.jsonl", "body": null, "status": 200, "sha256": "6880459448a5c835f2becfa5981c1464128ee506fb475728c8415d449db0bb63", "decision": null}
+{"i": 117, "method": "GET", "route": "/api/runs/stat?path=<work>/logs/20260101_000000_Silent_G0LDEN0001_2.jsonl", "body": null, "status": 200, "sha256": "f6ba1108ff7ad5c33b70772a760ea17142944b1fd298bbc8b5b62e80c9f008e4", "decision": null}
 {"i": 118, "method": "POST", "route": "/api/load", "body": {"path": "<work>/logs/20260101_000000_Silent_G0LDEN0001_2.jsonl"}, "status": 200, "sha256": "6fb16bf8d7472da56edb673ddefe2d2229cf45a8fa3da9f0f2dd0aa4617a8388", "decision": null}
-{"i": 119, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "3eda27fafd3849acceeae16f260cdd05e2ae86f57365a334a30510aa817be56f", "decision": null}
+{"i": 119, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "0be7ce8026e18d56691a0ff4641402732e4ae783220c9384b9a2e975c95d4c18", "decision": null}
 {"i": 120, "method": "GET", "route": "/api/map", "body": null, "status": 200, "sha256": "8e3789451a08c64f1457668a12daaf9476f2c802b557650b5d9a0cdf080862d4", "decision": null}
-{"i": 121, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "3eda27fafd3849acceeae16f260cdd05e2ae86f57365a334a30510aa817be56f", "decision": null}
+{"i": 121, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "0be7ce8026e18d56691a0ff4641402732e4ae783220c9384b9a2e975c95d4c18", "decision": null}
 {"i": 122, "method": "GET", "route": "/api/step/0", "body": null, "status": 200, "sha256": "56cb7787c9d1f945e5dc45fc47c4da3899225e236ec70e3bc64f7f7a085db259", "decision": null}
 {"i": 123, "method": "GET", "route": "/api/step/3", "body": null, "status": 200, "sha256": "b910661f8090da468f78f121cf9e6e4674f3a7f7a0511eed9bf628f089f568b8", "decision": null}
 {"i": 124, "method": "GET", "route": "/api/step/41", "body": null, "status": 200, "sha256": "d093ff5dc3666bb9143acc467d06b812c5db2d87fdd46a6ca9c8624c16d08726", "decision": null}

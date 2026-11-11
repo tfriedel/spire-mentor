@@ -405,7 +405,11 @@ fn after_player_turn_start_stub(state: &mut CombatState) {
 /// outer one ([`crate::card_effects::play_discarded_sly`]).
 fn imbued_run(state: &mut CombatState, imbued: &[CardUid]) {
     for (i, &uid) in imbued.iter().enumerate() {
-        if state.is_over {
+        // `CardCmd.AutoPlay` returns at once when the combat `IsOverOrEnding`
+        // (CardCmd.cs:54-57, both builds), not only once it is over: an
+        // Imbued Capture Spirit that kills the last enemy leaves the next
+        // Imbued card unplayed where it sits.
+        if crate::combat_loop::combat_is_ending(state) {
             break;
         }
         imbued_play_one(state, uid);
@@ -507,7 +511,7 @@ fn before_flush_stub(state: &mut CombatState) {
     let hand: Vec<CardUid> = state.player.hand.iter().copied().collect();
     for uid in hand {
         let idx = (uid.get() as usize).saturating_sub(1);
-        let Some(card) = state.cards.get_mut(idx) else {
+        let Some(card) = state.cards.get(idx) else {
             continue;
         };
         if !card.has_enchantment(EnchantmentId::SlumberingEssence) {
@@ -516,7 +520,7 @@ fn before_flush_stub(state: &mut CombatState) {
         if card.is_x_cost() {
             continue;
         }
-        card.add_cost_reduction_until_played(1);
+        state.add_card_cost_reduction_until_played(uid, 1);
     }
 }
 

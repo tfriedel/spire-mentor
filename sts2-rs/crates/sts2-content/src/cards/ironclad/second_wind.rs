@@ -44,17 +44,13 @@ pub(crate) fn play_second_wind(state: &mut CombatState, _t: Option<CreatureUid>)
             )
         })
         .collect();
-    let per = if current_upgraded(state) { 7 } else { 5 };
-    for uid in to_exhaust {
-        // Per C#: Exhaust THEN GainBlock, once per card.
-        // `exhaust_hand_card` moves Hand→Exhaust AND fires
-        // `after_card_exhausted` on the hooks bus (FeelNoPain, DarkEmbrace)
-        // and then the relic-effects bus (CharonsAshes, ForgottenSoul).
-        exhaust_hand_card(state, uid);
-        // One GainBlock call per card so the modify_block / after_block_gained
-        // chain fires N times (matching C#), not once on a lump sum.
-        gain_block_player(state, per);
-    }
+    let per: u8 = if current_upgraded(state) { 7 } else { 5 };
+    // Per C#: Exhaust THEN GainBlock, once per card, each awaited
+    // (SecondWind.cs:29-33, both builds). An exhaust whose Dark Embrace draw
+    // reshuffles into a Stratagem pick holds that card's block and the later
+    // exhausts until the pick and the draw finish
+    // ([`crate::cards::draw_then::exhaust_then`]).
+    crate::cards::draw_then::exhaust_then(state, &to_exhaust, sts2_core::DrawThen::SecondWind(per));
     EffectResult::Resolved
 }
 
