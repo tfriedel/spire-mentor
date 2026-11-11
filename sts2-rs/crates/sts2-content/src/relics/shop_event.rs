@@ -3024,6 +3024,10 @@ fn push_deck_card(rs: &mut RunState, card_id: sts2_core::cards::CardId) {
     if let Some(spec) =
         crate::names::find_deck_card_spec(&crate::names::deck_card_spec_pool(), card_id)
     {
+        // The deck card is copied into combat as it stands, so it must carry
+        // the run's game build's numbers (Whistle costs 2 and Relax blocks 16
+        // on v0.111.0).
+        let spec = crate::cards::v0111::spec_for(spec, rs.game_version);
         card.card_type = spec.card_type;
         card.cost = spec.cost;
         card.base_damage = spec.base_damage;
@@ -5855,6 +5859,45 @@ mod tests {
         let added = &rs.master_deck[0];
         assert_eq!(added.card_id, sts2_core::cards::CardId::Whistle);
         assert!(!added.upgraded);
+    }
+
+    /// A relic's deck card carries the card's numbers in the run's game
+    /// build. The deck card is copied into combat as it stands
+    /// (`run_bridge::enter_combat`), so the v0.107.1 numbers would be played
+    /// on v0.111.0: Whistle costs 3 -> 2 (`Whistle.cs:23`), Relax blocks
+    /// 15 -> 16 (`Relax.cs` `BlockVar`). Found in the cynilyn fork.
+    #[test]
+    fn relic_deck_cards_carry_the_game_builds_numbers() {
+        use sts2_core::cards::CardId;
+        use sts2_core::runstate::RunState;
+        use sts2_core::GameVersion;
+        crate::relics::dispatch::ensure_installed();
+
+        for (version, whistle_cost, relax_block) in [
+            (GameVersion::V0_107_1, 3, 15),
+            (GameVersion::V0_111_0, 2, 16),
+        ] {
+            let mut rs = RunState::new();
+            rs.game_version = version;
+            rs.relics.push(RelicId::TanxsWhistle);
+            rs.last_obtained_relic = Some(RelicId::TanxsWhistle);
+            let _ = sts2_core::run_effects::dispatch_after_obtained(&mut rs);
+            assert_eq!(rs.master_deck.len(), 1, "{version:?}");
+            assert_eq!(rs.master_deck[0].card_id, CardId::Whistle, "{version:?}");
+            assert_eq!(rs.master_deck[0].cost, whistle_cost, "{version:?}");
+            assert_eq!(rs.master_deck[0].base_damage, 33, "{version:?}");
+
+            let mut rs = RunState::new();
+            rs.game_version = version;
+            rs.relics.push(RelicId::PaelsHorn);
+            rs.last_obtained_relic = Some(RelicId::PaelsHorn);
+            let _ = sts2_core::run_effects::dispatch_after_obtained(&mut rs);
+            assert_eq!(rs.master_deck.len(), PAELS_HORN_CARDS, "{version:?}");
+            for card in &rs.master_deck {
+                assert_eq!(card.card_id, CardId::Relax, "{version:?}");
+                assert_eq!(card.base_block, relax_block, "{version:?}");
+            }
+        }
     }
 
     /// Bead `sts2-rs-70anj.4` (Wave 4 body-fill, batch 2):
