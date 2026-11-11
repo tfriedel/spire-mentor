@@ -833,13 +833,6 @@ class Learner:
 
         if unknown := sorted(set(cfg.f9_tolerate) - set(KNOWN_ISSUES)):
             raise UsageError(f"--f9-tolerate {unknown}: not in invariants.KNOWN_ISSUES")
-        if cfg.rust_env and self._teacher_flags()[1]:
-            # The run teacher reads `run_obs`, which rsenv rows do not carry: the
-            # workers would raise at the first round the teacher is on, days in.
-            raise UsageError(
-                "--rust-env cannot serve a run teacher (--run-teacher / --teacher-pair): "
-                "its rows carry no run_obs; run with --rust-env false"
-            )
         OC.atomic_write_text(self.sd.p(OC.LEARNER_PID), json.dumps(OC.pid_record(argv=argv)) + "\n")
         import sts2_client
 
@@ -968,6 +961,17 @@ class Learner:
             raise UsageError("a campaign needs budget_decisions >= 1e10 (plan §6)")
         self.cfg = cfg = self._run_seeds(cfg, algo.cfg.budget_decisions)
         self.algo = algo
+        if cfg.rust_env and self.teachers is not None and self.teachers.run is not None:
+            # The run teacher's features read `run_obs`, which rsenv rows do not carry,
+            # so the workers raise at the first round it is on. Refuse that at launch
+            # when it is on now. A loaded teacher whose schedule is already off (the
+            # Ironclad lane: --teacher-pair R3, beta and lambda_KS at 0) is fine.
+            if self._teacher_on():
+                raise UsageError(
+                    "--rust-env cannot serve the run teacher, which is on at "
+                    f"{self.decisions} decisions (its rows carry no run_obs); "
+                    "run with --rust-env false until its schedule ends"
+                )
         self.lr_watch = S.LrWatch(algo.cfg)
         self.net_inf = net_from_state(
             net_ck, schema_sha256=SCHEMA_SHA256, vocab_sha256=self.stamps["vocab_sha256"]

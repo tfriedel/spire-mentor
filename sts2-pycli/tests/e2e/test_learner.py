@@ -1577,10 +1577,21 @@ def test_refusals_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert L.main([*base, "--max-iters", "1", "--f9-tolerate", '["nope"]']) == OC.EXIT_USAGE
     # A fill event the schema does not know (contracts.FILL_EVENTS).
     assert L.main([*base, "--max-iters", "1", "--filled", '["nope"]']) == OC.EXIT_USAGE
-    # The Rust env with a run teacher: its rows carry no run_obs, so the workers would
-    # raise at the first round the teacher is on, not at launch.
-    rt = ["--rust-env", "true", "--run-teacher", "any.onnx"]
-    assert L.main([*base, "--max-iters", "1", *rt]) == OC.EXIT_USAGE
+
+
+def test_rust_env_refuses_a_run_teacher_only_while_it_is_on(tmp_path: Path) -> None:
+    """rsenv rows carry no run_obs, so the run teacher's features cannot be made: a
+    launch with --rust-env and the run teacher on is a UsageError, not a worker crash
+    at the first round. A loaded teacher whose schedule is already off (the Ironclad
+    lane resumes with --teacher-pair R3 and beta, lambda_KS at 0) is accepted."""
+    with pytest.raises(L.UsageError, match="rust-env cannot serve the run teacher"):
+        make_learner(make_cfg(tmp_path / "on", rust_env=True))
+
+    class Off(TeacherLearner):
+        def _teacher_on(self) -> bool:
+            return False
+
+    make_learner(make_cfg(tmp_path / "off", rust_env=True), cls=Off).stop()
 
 
 def test_a_lane_draws_its_run_seeds_from_its_prereg_block(tmp_path: Path) -> None:
