@@ -1588,6 +1588,41 @@ pub(crate) fn run_seat_stage(state: &mut CombatState, stage: SeatRun) {
     run_seats(state, stage, after);
 }
 
+/// [`run_seat_stage`] while the seated player's own turn start is parked on a
+/// screen of theirs (Toasty Mittens' exhaust, Toolbox, a Stratagem reshuffle
+/// in the draw). The open choice and the resume records that go with it are
+/// one per state, not per seat, so they are set aside while the teammates'
+/// stages run and put back after. Left in place, a teammate's stage took the
+/// screen for its own and answered it as theirs (GH #989: the host's Mittens
+/// pick went to seat 1000 and the host's Strike stayed in hand).
+pub(crate) fn run_seat_stage_beside_park(state: &mut CombatState, stage: SeatRun) {
+    let choice = state.pending_choice.take();
+    let draw = state.pending_draw_resume.take();
+    let collect = state.pending_collect_resume.take();
+    let autoplay = state.pending_autoplay_resume.take();
+    run_seat_stage(state, stage);
+    debug_assert!(
+        state.is_over
+            || (state.pending_choice.is_none()
+                && state.pending_draw_resume.is_none()
+                && state.pending_collect_resume.is_none()
+                && state.pending_autoplay_resume.is_none()),
+        "a teammate's stage left a suspension open"
+    );
+    if choice.is_some() {
+        state.pending_choice = choice;
+    }
+    if draw.is_some() {
+        state.pending_draw_resume = draw;
+    }
+    if collect.is_some() {
+        state.pending_collect_resume = collect;
+    }
+    if autoplay.is_some() {
+        state.pending_autoplay_resume = autoplay;
+    }
+}
+
 /// [`run_seat_stage`] for the teammates ahead of us in the run's player order,
 /// called where the stage begins for us.
 pub(crate) fn run_seats_ahead(state: &mut CombatState, stage: SeatRun) {

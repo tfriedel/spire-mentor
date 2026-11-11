@@ -1136,8 +1136,9 @@ fn fire_side_turn_start_on_setup_pause(state: &mut CombatState, already_fired: b
         return false;
     }
     if !state.is_over {
-        // Every teammate's `SetupPlayerTurn` starts before the side walk.
-        crate::coop::run_seat_stage(state, crate::coop::SeatRun::Setup);
+        // Every teammate's `SetupPlayerTurn` starts before the side walk. Our
+        // screen stays ours while they set up.
+        crate::coop::run_seat_stage_beside_park(state, crate::coop::SeatRun::Setup);
         if !combat_is_ending(state) {
             fire_after_side_turn_start(state);
         }
