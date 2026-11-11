@@ -22,8 +22,10 @@
 //! Run mode (M3): a scenario whose `meta.json` carries `scenario.ppo` served
 //! the committed champion on the Python side; this test loads the same ONNX
 //! bytes from the sibling checkout before replaying it, so the panel
-//! probabilities, node values and the WPA review hash-match (tract, same
-//! bytes, both hosts). Without a net the `ppo` brain falls back to each
+//! probabilities, node values and the WPA review match (tract, same bytes,
+//! both hosts). They hash-match, except where a value sits on a rounding tie
+//! and two CPUs round it one step apart; [`NET_OUTPUT_ROUTES`] allows that one
+//! step. Without a net the `ppo` brain falls back to each
 //! host's own heuristic (see above), so `autobattle/verdict` — which grades
 //! against the brain's pick — is structural in those scenarios only.
 //!
@@ -68,6 +70,51 @@ const STRUCTURAL_ROUTES: &[&str] = &[
     "/api/search_tree",
     "/api/regret-review",
 ];
+
+/// Routes whose numbers come out of the PPO net, compared to within one step
+/// of the 4th decimal (#1278) instead of by hash. Tract's matmul kernels
+/// differ by CPU (SIMD width, FMA), so the same ONNX bytes can give a value
+/// one f32 step apart on two machines. Every value is rounded to 4 decimals, so
+/// that difference is invisible unless the value sits on a rounding tie, and
+/// then it is a whole step: `runmode_ironclad_run1_a0` node 48 is
+/// 0.823650002480 here, which rounds to 0.8237. The machine that recorded it
+/// got 0.8236. Every other route still has to match by hash.
+const NET_OUTPUT_ROUTES: &[&str] = &[
+    "/api/live/timeline",
+    "/api/live/ppo-policy",
+    "/api/live/wpa-review",
+    "/api/live/wpa-verify",
+    "/api/timeline",
+    "/api/wpa-review",
+];
+
+/// One step of the 4th decimal, plus slack for the f64 nearest each decimal.
+const ROUNDING_STEP: f64 = 1.0e-4 + 1.0e-9;
+
+/// Two normalized bodies are equal except that floats may differ by one step
+/// of the 4th decimal. Integers, strings, keys and lengths must match exactly.
+fn equal_within_one_step(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, xv)| y.get(k).is_some_and(|yv| equal_within_one_step(xv, yv)))
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .zip(y)
+                    .all(|(xv, yv)| equal_within_one_step(xv, yv))
+        }
+        (Value::Number(x), Value::Number(y)) if x.is_f64() || y.is_f64() => {
+            match (x.as_f64(), y.as_f64()) {
+                (Some(xf), Some(yf)) => (xf - yf).abs() <= ROUNDING_STEP,
+                _ => false,
+            }
+        }
+        _ => a == b,
+    }
+}
 
 /// The route without its query string.
 fn route_path(route: &str) -> &str {
@@ -385,10 +432,21 @@ fn replay_scenario(dir: &Path) -> Vec<String> {
         }
         if status != req.status || hash != req.sha256 {
             let stored = dir.join("responses").join(format!("{}.json", req.i));
-            let detail = if stored.is_file() {
+            let py = stored.is_file().then(|| {
                 let py: Value = serde_json::from_str(&fs::read_to_string(&stored).expect("stored"))
                     .expect("stored json");
-                first_diff(&normalize(&py), &norm, "$").unwrap_or_else(|| {
+                normalize(&py)
+            });
+            if status == req.status
+                && NET_OUTPUT_ROUTES.contains(&route_path(&req.route))
+                && py
+                    .as_ref()
+                    .is_some_and(|py| equal_within_one_step(py, &norm))
+            {
+                continue;
+            }
+            let detail = if let Some(py) = &py {
+                first_diff(py, &norm, "$").unwrap_or_else(|| {
                     "(bodies equal, hash differs — canonical serialization mismatch)".to_string()
                 })
             } else {
@@ -555,4 +613,27 @@ fn normalization_matches_the_dump_contract() {
         sha256_hex("abc"),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
+}
+
+/// #1278: a net value on a rounding tie may land one 4th-decimal step apart;
+/// anything more, and any non-float difference, still fails.
+#[test]
+fn net_outputs_tolerate_one_rounding_step_only() {
+    let py = normalize(&json!({"nodes": [{"value": 0.8236, "n": 3, "label": "a"}]}));
+    let one = normalize(&json!({"nodes": [{"value": 0.8237, "n": 3, "label": "a"}]}));
+    let two = normalize(&json!({"nodes": [{"value": 0.8238, "n": 3, "label": "a"}]}));
+    let int = normalize(&json!({"nodes": [{"value": 0.8236, "n": 4, "label": "a"}]}));
+    let text = normalize(&json!({"nodes": [{"value": 0.8236, "n": 3, "label": "b"}]}));
+    let extra = normalize(&json!({"nodes": [{"value": 0.8236, "n": 3, "label": "a", "x": 1}]}));
+    assert!(equal_within_one_step(&py, &py));
+    assert!(equal_within_one_step(&py, &one));
+    assert!(!equal_within_one_step(&py, &two));
+    assert!(!equal_within_one_step(&py, &int));
+    assert!(!equal_within_one_step(&py, &text));
+    assert!(!equal_within_one_step(&py, &extra));
+    // The edge itself: the raw value here, and the f32 one step below it.
+    let here = normalize(&json!({ "v": f64::from(0.823_65_f32) }));
+    let there = normalize(&json!({ "v": f64::from(f32::from_bits(0.823_65_f32.to_bits() - 1)) }));
+    assert_ne!(here, there);
+    assert!(equal_within_one_step(&here, &there));
 }
