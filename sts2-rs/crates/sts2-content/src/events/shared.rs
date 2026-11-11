@@ -454,7 +454,15 @@ fn aroma_let_go(state: &mut RunState) -> EventOutcome {
     // C# LetGo: `CardSelectCmd.FromDeckForTransformation` pick-1 →
     // `CardCmd.TransformToRandom(card, base.Rng)`. CanonicalVars is
     // empty (no CalculateVars roll), so the transform is read #1 of
-    // the event's own stream — skip 0.
+    // the event's own stream — skip 0. With nothing transformable the
+    // select returns empty and opens no screen (CardSelectCmd.cs).
+    let Some(first) = state
+        .master_deck
+        .iter()
+        .position(crate::cards::spec_index::card_is_transformable_in_deck)
+    else {
+        return EventOutcome::finished("No card could be transformed.");
+    };
     if state.interactive_card_transform {
         state
             .pending_deck_transforms
@@ -464,22 +472,22 @@ fn aroma_let_go(state: &mut RunState) -> EventOutcome {
             });
         EventOutcome::finished("Pick a card to transform.")
     } else {
-        // Auto mode: transform the first deck card off the same stream.
-        if let Some(original) = state.master_deck.first().map(|c| c.card_id) {
-            if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
-                state,
-                state.character_id,
-                original,
-                AROMA_OF_CHAOS_STREAM,
-                0,
-            ) {
-                if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
-                    state.master_deck.remove(0);
-                    state.add_card_to_deck_with_hooks(
-                        card,
-                        sts2_core::relic_effects::AddSource::EventGain,
-                    );
-                }
+        // Auto mode: transform the first transformable deck card off the
+        // same stream.
+        let original = state.master_deck[first].card_id;
+        if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
+            state,
+            state.character_id,
+            original,
+            AROMA_OF_CHAOS_STREAM,
+            0,
+        ) {
+            if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
+                state.master_deck.remove(first);
+                state.add_card_to_deck_with_hooks(
+                    card,
+                    sts2_core::relic_effects::AddSource::EventGain,
+                );
             }
         }
         EventOutcome::finished("Transformed a card.")
@@ -2150,10 +2158,30 @@ mod tests {
         assert!(rs.relics.is_empty());
     }
 
+    /// `FromDeckForTransformation` returns empty with no select when no deck
+    /// card is transformable (an Eternal Forbidden Grimoire).
+    #[test]
+    fn aroma_let_go_without_a_transformable_card_queues_no_pick() {
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = RunState::new();
+        rs.interactive_card_transform = true;
+        rs.master_deck = vec![crate::cards::spec_index::card_pod_from_id(
+            sts2_core::cards::CardId::ForbiddenGrimoire,
+            false,
+        )
+        .unwrap()];
+        let outcome = (AROMA_OF_CHAOS.options[0].handler)(&mut rs);
+        assert!(outcome.finished);
+        assert!(rs.pending_deck_transforms.is_empty());
+    }
+
     #[test]
     fn aroma_let_go_interactive_queues_event_stream_transform() {
         let mut rs = RunState::new();
         rs.interactive_card_transform = true;
+        let mut strike = sts2_core::cards::Card::pod_defaults();
+        strike.card_id = sts2_core::cards::CardId::StrikeIronclad;
+        rs.master_deck.push(strike);
         let outcome = (AROMA_OF_CHAOS.options[0].handler)(&mut rs);
         assert!(outcome.finished);
         assert_eq!(rs.pending_deck_transforms.len(), 1);

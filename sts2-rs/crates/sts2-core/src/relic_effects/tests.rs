@@ -3799,6 +3799,67 @@ fn art_of_war_inert_round_one() {
     );
 }
 
+/// C# `ArtOfWar.AfterCardPlayed` ignores an Attack while
+/// `AnyAttacksPlayedLastTurn` is set, and `AfterEnergyReset` (turn > 1)
+/// clears both flags. An Attack auto-played on the enemy turn (Centennial
+/// Puzzle's draw into Hellraiser) therefore counts for nothing: the next
+/// turn gets no energy for the turn before it, and the turn after that does.
+/// Rust recorded the enemy-turn Attack and kept it past the energy reset,
+/// so it withheld the energy one turn later (loadout Ironclad 8774
+/// v0.111.0: energy cs=6 rs=5).
+#[test]
+#[serial_test::serial(global_registry)]
+fn art_of_war_ignores_an_enemy_turn_attack_after_an_attack_turn() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(70, 70);
+    state.round = 3;
+    give_player_relic(&mut state, RelicKind::ArtOfWar);
+    // The player's turn had an Attack; its turn end shifted it to "last".
+    set_art_of_war_counter(&mut state, ART_OF_WAR_LAST_TURN_BIT);
+    // An Attack played on the enemy turn.
+    let uid = push_card(&mut state, 77, crate::cards::CardType::Attack);
+    let _ = on_after_card_played_art_of_war(&mut state, &make_card_ctx(uid));
+    assert_eq!(
+        art_of_war_counter(&state),
+        ART_OF_WAR_LAST_TURN_BIT,
+        "an Attack while last turn's flag is set is not recorded"
+    );
+
+    // Player turn 3: no energy (attacks on turn 2), both flags cleared.
+    let energy_before = state.player.energy;
+    let _ = dispatch_after_energy_reset(&mut state);
+    assert_eq!(state.player.energy, energy_before);
+    assert_eq!(
+        art_of_war_counter(&state),
+        0,
+        "the energy reset clears both"
+    );
+
+    // No Attack on turn 3: turn 4 gains the energy.
+    let _ = dispatch_after_turn_end(&mut state, Side::Player);
+    state.round = 4;
+    let energy_before = state.player.energy;
+    let _ = dispatch_after_energy_reset(&mut state);
+    assert_eq!(state.player.energy, energy_before + 1);
+}
+
+/// C# `AfterEnergyReset` clears `AnyAttacksPlayedThisTurn` on turn > 1, so an
+/// Attack recorded before the reset (an enemy-turn auto-play while last
+/// turn's flag was clear) does not carry into the new turn.
+#[test]
+#[serial_test::serial(global_registry)]
+fn art_of_war_energy_reset_clears_an_attack_recorded_before_it() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(70, 70);
+    state.round = 3;
+    give_player_relic(&mut state, RelicKind::ArtOfWar);
+    set_art_of_war_counter(&mut state, ART_OF_WAR_THIS_TURN_BIT);
+    let energy_before = state.player.energy;
+    let _ = dispatch_after_energy_reset(&mut state);
+    assert_eq!(state.player.energy, energy_before + 1);
+    assert_eq!(art_of_war_counter(&state), 0);
+}
+
 #[test]
 #[serial_test::serial(global_registry)]
 fn art_of_war_turn_end_shifts_this_turn_to_last_turn() {

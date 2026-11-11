@@ -10631,8 +10631,17 @@ pub(crate) fn dispatch_after_damage_received_enemy_target(
 }
 
 /// The three stages of [`dispatch_after_damage_received`]: the power walk,
-/// the relic channel, the lanes. `hook`'s bit gates the first and the last
+/// the relic channel, the lanes. `hook`'s bit gates the power stages
 /// separately, because a relic handler may add a power in between.
+///
+/// Every lane reacts to a power on the hit creature (`ctx.target`). C#
+/// `Hook.AfterDamageReceived` walks `CombatState.IterateHookListeners`, which
+/// visits each creature's powers and then, for a player, that player's
+/// relics, allies before enemies. So on a hit to the player the lanes
+/// (Inferno, Rupture, Slippery, ...) are the player's own powers and run
+/// before the player's relics: an Inferno counterattack that kills the last
+/// enemy ends the combat before Centennial Puzzle draws. On a hit to an enemy
+/// or an ally pet they run after the player's relics.
 #[allow(clippy::inline_always)]
 #[inline(always)]
 fn after_damage_received_staged(
@@ -10641,31 +10650,38 @@ fn after_damage_received_staged(
     damage: i32,
     hook: PowerHook,
 ) {
+    let lanes = |state: &mut CombatState| {
+        power_hook_dispatch(state, hook, |state| {
+            after_damage_received_lanes(
+                state,
+                ctx,
+                damage,
+                hook != PowerHook::AfterDamageReceivedEnemyTarget,
+            );
+        });
+    };
+    let player_hit = matches!(ctx.target, CreatureRef::Player);
+
     power_hook_dispatch(state, hook, |state| {
         let effects = collect_after_damage_received(state, ctx);
         apply_effects(state, &effects);
     });
+    if player_hit {
+        lanes(state);
+    }
 
     // Bead `sts2-rs-9jhc`: relic-side `after_damage_received` fan-out
-    // (CentennialPuzzle / BurningBlood-style listeners). Fires after
-    // the power-side walk so relics see the same post-mitigation
-    // `damage` value, but before the Inferno post-walk so relics
-    // observe state before Inferno's enemy-fan-out lands. Listeners
-    // gate on `ctx.target == player_uid` + `damage > 0` per Python
-    // convention; the dispatcher itself does not pre-filter. Empty-
-    // bus early-out preserves the no-listener fast path.
+    // (CentennialPuzzle / BurningBlood-style listeners), with the same
+    // post-mitigation `damage` value. Listeners gate on `ctx.target` +
+    // `damage > 0` themselves; the dispatcher does not pre-filter. Empty-bus
+    // early-out preserves the no-listener fast path.
     if relic_channel_live(state, PlannedChannel::AfterDamageReceived) {
         let _ = crate::relic_effects::dispatch_after_damage_received(state, ctx, damage);
     }
 
-    power_hook_dispatch(state, hook, |state| {
-        after_damage_received_lanes(
-            state,
-            ctx,
-            damage,
-            hook != PowerHook::AfterDamageReceivedEnemyTarget,
-        );
-    });
+    if !player_hit {
+        lanes(state);
+    }
 }
 
 /// HardenedShell's `AfterDamageReceived` tally (HardenedShellPower.cs:50-68):
@@ -30859,6 +30875,74 @@ mod tests {
             state.player.current_hp, 50,
             "after_side_turn_start walk must skip Inferno (cluster dispatches it)",
         );
+    }
+
+    /// C# `Hook.AfterDamageReceived` walks the player's powers before the
+    /// player's relics (`CombatState.IterateHookListeners`), so on a hit to
+    /// the player, Inferno's counterattack lands before Centennial Puzzle's
+    /// draw. When that counterattack kills the last enemy the combat is
+    /// ending, and `CardPileCmd.Draw` returns at once (CardPileCmd.cs). Rust
+    /// ran the relic channel first: Centennial Puzzle drew 3 and reshuffled
+    /// the discard pile, so the next combat's draw pile was shuffled from a
+    /// different `shuffle` RNG counter (loadout Ironclad 8701/8704 v0.107.1).
+    #[test]
+    #[serial_test::serial(global_registry)]
+    fn an_inferno_kill_on_a_player_hit_lands_before_centennial_puzzle_draws() {
+        use std::num::NonZeroU32;
+        crate::relic_effects::ensure_installed();
+        let (mut state, enemy_ref) = state_with_enemy_power(PowerKind::Ritual, 0);
+        let CreatureRef::Enemy(enemy_uid) = enemy_ref else {
+            panic!("state_with_enemy_power returns Enemy ref");
+        };
+        if let Some(c) = state.creatures.iter_mut().find(|c| c.id == enemy_uid.0) {
+            c.current_hp = 3;
+        }
+        state.player.current_hp = 50;
+        state.player.max_hp = 50;
+        state.init_player_creature();
+        state.side = Side::Player;
+        let inferno_uid = power_uid(2);
+        state
+            .powers
+            .push(Power::new(inferno_uid.0, PowerKind::Inferno, 6));
+        state.player.powers.push(inferno_uid);
+        state.relics.push(crate::Relic {
+            id: NonZeroU32::new(100).expect("nz"),
+            kind: crate::RelicKind::CentennialPuzzle,
+            counter: 0,
+            is_wax: false,
+            is_melted: false,
+        });
+        for raw in 1..=3 {
+            let uid = CardUid::new(raw).expect("nz");
+            state.cards.push(crate::cards::Card {
+                uid,
+                card_id: crate::cards::CardId::StrikeIronclad,
+                cost: crate::CardEnergyCost::new(1),
+                card_type: crate::cards::CardType::Attack,
+                ..crate::cards::Card::pod_defaults()
+            });
+            state.player.draw.push(uid);
+        }
+
+        let ctx = DamageCtx {
+            dealer: CreatureRef::Player,
+            target: CreatureRef::Player,
+            props: ValueProps(ValueProps::UNBLOCKABLE.0 | ValueProps::UNPOWERED.0),
+        };
+        dispatch_after_damage_received(&mut state, &ctx, 1);
+
+        let enemy_hp = state
+            .creatures
+            .iter()
+            .find(|c| c.id == enemy_uid.0)
+            .map_or(0, |c| c.current_hp);
+        assert!(enemy_hp <= 0, "Inferno's counterattack kills the enemy");
+        assert!(
+            state.player.hand.is_empty(),
+            "the combat is ending, so Centennial Puzzle draws nothing"
+        );
+        assert_eq!(state.player.draw.len(), 3);
     }
 
     /// **Inferno counterattack**: when the owner takes unblocked damage

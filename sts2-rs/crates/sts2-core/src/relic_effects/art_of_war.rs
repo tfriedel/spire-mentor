@@ -20,8 +20,13 @@ pub(crate) fn on_after_card_played_art_of_war(
     if !is_attack {
         return EffectResult::NotImplemented;
     }
+    // C# `ArtOfWar.AfterCardPlayed` returns while `AnyAttacksPlayedLastTurn`
+    // is set (ArtOfWar.cs): an Attack played between the player's turn end
+    // and the next energy reset (an enemy-turn auto-play) is not recorded.
     if let Some(r) = art_of_war_relic_mut(state) {
-        r.counter |= ART_OF_WAR_THIS_TURN_BIT;
+        if r.counter & ART_OF_WAR_LAST_TURN_BIT == 0 {
+            r.counter |= ART_OF_WAR_THIS_TURN_BIT;
+        }
     }
     EffectResult::Resolved
 }
@@ -62,6 +67,12 @@ pub(crate) fn on_after_energy_reset_art_of_war(state: &mut CombatState) -> Effec
             && r.kind == crate::RelicKind::ArtOfWar
             && (r.counter & ART_OF_WAR_LAST_TURN_BIT) != 0
     });
+    // C# `ArtOfWar.AfterEnergyReset` clears both flags on turn > 1, after the
+    // energy check (ArtOfWar.cs), so nothing recorded before the reset
+    // carries into the new turn.
+    if let Some(r) = art_of_war_relic_mut(state) {
+        r.counter = 0;
+    }
     if attacks_last_turn {
         return EffectResult::NotImplemented;
     }

@@ -802,7 +802,16 @@ fn symbiote_kill_fire(state: &mut RunState) -> EventOutcome {
     // `CardCmd.TransformToRandom(item, base.Rng)`. `base.Rng` is the SYMBIOTE
     // event stream with no prior draw (no CalculateVars roll precedes it), so
     // `skip_reads = 0`. Queue the interactive transform pick → `card_select`;
-    // auto mode transforms the first deck card off the same stream.
+    // auto mode transforms the first transformable deck card off the same
+    // stream. With nothing transformable the select returns empty and opens
+    // no screen (CardSelectCmd.cs), so nothing is queued.
+    let Some(first) = state
+        .master_deck
+        .iter()
+        .position(crate::cards::spec_index::card_is_transformable_in_deck)
+    else {
+        return EventOutcome::finished("No card could be transformed.");
+    };
     if state.interactive_card_transform {
         state
             .pending_deck_transforms
@@ -812,21 +821,20 @@ fn symbiote_kill_fire(state: &mut RunState) -> EventOutcome {
             });
         EventOutcome::finished("Pick a card to transform.")
     } else {
-        if let Some(original) = state.master_deck.first().map(|c| c.card_id) {
-            if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
-                state,
-                state.character_id,
-                original,
-                SYMBIOTE_STREAM,
-                0,
-            ) {
-                if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
-                    state.master_deck.remove(0);
-                    state.add_card_to_deck_with_hooks(
-                        card,
-                        sts2_core::relic_effects::AddSource::EventGain,
-                    );
-                }
+        let original = state.master_deck[first].card_id;
+        if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
+            state,
+            state.character_id,
+            original,
+            SYMBIOTE_STREAM,
+            0,
+        ) {
+            if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
+                state.master_deck.remove(first);
+                state.add_card_to_deck_with_hooks(
+                    card,
+                    sts2_core::relic_effects::AddSource::EventGain,
+                );
             }
         }
         EventOutcome::finished("Transformed a card.")
@@ -856,12 +864,30 @@ const SYMBIOTE_OPTIONS: &[EventOptionSpec] = &[
     },
 ];
 
+/// `Symbiote.GenerateInitialOptions`: Approach is replaced by the
+/// null-handler `APPROACH_LOCKED` option, in the same slot, when no deck card
+/// passes `Corrupted.CanEnchant`.
+fn symbiote_generate_options(state: &RunState, spec: &EventSpec) -> Vec<EventOptionInfo> {
+    let mut opts = default_option_info_from_spec(state, spec);
+    if !state.master_deck.iter().any(symbiote_can_enchant) {
+        for opt in opts.iter_mut().filter(|o| o.option_id == "approach") {
+            opt.enabled = false;
+            opt.loc_key = "SYMBIOTE.pages.INITIAL.options.APPROACH_LOCKED";
+            opt.label = "Locked".to_string();
+            opt.description = "None of your Attacks can be Enchanted.".to_string();
+            opt.vars = Vec::new();
+            opt.title_vars = Vec::new();
+        }
+    }
+    opts
+}
+
 pub const SYMBIOTE: EventSpec = EventSpec {
     id: EventId::Symbiote,
     python_name: "Symbiote",
     // C# `CurrentActIndex > 0` (Act 2+). Bead `sts2-rs-1hiht`.
     is_allowed: allowed_act_2_plus,
-    generate_options: default_option_info_from_spec,
+    generate_options: symbiote_generate_options,
     options: SYMBIOTE_OPTIONS,
 };
 
@@ -1579,7 +1605,19 @@ fn whispering_hug(state: &mut RunState) -> EventOutcome {
     // C# Hug: `CardSelectCmd.FromDeckForTransformation` (pick 1) →
     // `CardCmd.TransformToRandom(item, base.Rng)` — the EVENT stream,
     // read #2 (CalculateVars' gold roll consumed read #1 at entry) —
-    // then 9 unblockable damage only after the transform.
+    // then 9 unblockable damage only after the transform. With nothing
+    // transformable the select returns empty, opens no screen
+    // (CardSelectCmd.cs), and the damage follows at once.
+    let Some(first) = state
+        .master_deck
+        .iter()
+        .position(crate::cards::spec_index::card_is_transformable_in_deck)
+    else {
+        let lost = state.lose_hp(WHISPERING_HUG_DAMAGE);
+        return EventOutcome::finished(format!(
+            "No card could be transformed, took {lost} damage."
+        ));
+    };
     if state.interactive_card_transform {
         state
             .pending_deck_transforms
@@ -1590,23 +1628,23 @@ fn whispering_hug(state: &mut RunState) -> EventOutcome {
             });
         EventOutcome::finished("Pick a card to transform (9 damage follows).")
     } else {
-        // Auto mode (parity-fuzz / headless): transform the first deck
-        // card with the same event-stream roll, then take the damage.
-        if let Some(original) = state.master_deck.first().map(|c| c.card_id) {
-            if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
-                state,
-                state.character_id,
-                original,
-                WHISPERING_HOLLOW_STREAM,
-                1,
-            ) {
-                if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
-                    state.master_deck.remove(0);
-                    state.add_card_to_deck_with_hooks(
-                        card,
-                        sts2_core::relic_effects::AddSource::EventGain,
-                    );
-                }
+        // Auto mode (parity-fuzz / headless): transform the first
+        // transformable deck card with the same event-stream roll, then take
+        // the damage.
+        let original = state.master_deck[first].card_id;
+        if let Some(new_id) = crate::cards::spec_index::roll_transform_replacement_event_stream(
+            state,
+            state.character_id,
+            original,
+            WHISPERING_HOLLOW_STREAM,
+            1,
+        ) {
+            if let Some(card) = crate::cards::spec_index::card_pod_from_id(new_id, false) {
+                state.master_deck.remove(first);
+                state.add_card_to_deck_with_hooks(
+                    card,
+                    sts2_core::relic_effects::AddSource::EventGain,
+                );
             }
         }
         let lost = state.lose_hp(WHISPERING_HUG_DAMAGE);
@@ -1920,6 +1958,46 @@ mod tests {
         assert!(opts[1].enabled);
     }
 
+    /// `Symbiote.GenerateInitialOptions`: Approach becomes the null-handler
+    /// `APPROACH_LOCKED` option, in its slot, when no deck card passes
+    /// `Corrupted.CanEnchant`.
+    #[test]
+    fn symbiote_approach_locked_without_an_enchantable_attack() {
+        crate::cards::dispatch::ensure_installed();
+        let card = |id| crate::cards::spec_index::card_pod_from_id(id, false).unwrap();
+        let mut rs = fresh();
+        rs.master_deck = vec![card(CardId::ForbiddenGrimoire)];
+        let opts = (SYMBIOTE.generate_options)(&rs, &SYMBIOTE);
+        assert!(!opts[0].enabled);
+        assert_eq!(
+            opts[0].loc_key,
+            "SYMBIOTE.pages.INITIAL.options.APPROACH_LOCKED"
+        );
+        assert!(opts[1].enabled, "Kill with Fire stays open");
+        rs.master_deck.push(card(CardId::StrikeIronclad));
+        let opts = (SYMBIOTE.generate_options)(&rs, &SYMBIOTE);
+        assert!(opts[0].enabled);
+    }
+
+    /// `FromDeckForTransformation` returns empty with no select when no deck
+    /// card is transformable (CardSelectCmd.cs). Two Eternal Forbidden
+    /// Grimoires: C# finished the event, Rust opened an empty card_select
+    /// (loadout Necrobinder 8771 v0.107.1).
+    #[test]
+    fn symbiote_kill_with_fire_queues_no_pick_without_a_transformable_card() {
+        crate::cards::dispatch::ensure_installed();
+        let card = |id| crate::cards::spec_index::card_pod_from_id(id, false).unwrap();
+        let mut rs = fresh();
+        rs.interactive_card_transform = true;
+        rs.master_deck = vec![
+            card(CardId::ForbiddenGrimoire),
+            card(CardId::ForbiddenGrimoire),
+        ];
+        run(&SYMBIOTE, "kill_fire", &mut rs);
+        assert!(rs.pending_deck_transforms.is_empty());
+        assert_eq!(rs.master_deck.len(), 2);
+    }
+
     #[test]
     fn symbiote_both_options_open_deck_card_selects() {
         crate::cards::dispatch::ensure_installed();
@@ -2176,6 +2254,9 @@ mod tests {
     fn whispering_hug_interactive_queues_event_stream_transform_with_post_damage() {
         let mut rs = fresh();
         rs.interactive_card_transform = true;
+        let mut strike = sts2_core::cards::Card::pod_defaults();
+        strike.card_id = sts2_core::cards::CardId::StrikeIronclad;
+        rs.master_deck.push(strike);
         run(&WHISPERING_HOLLOW, "hug", &mut rs);
         // Damage is deferred to the transform resolve (C# fires it only
         // after the pick), so HP is untouched here.
@@ -2189,6 +2270,24 @@ mod tests {
         assert_eq!(pending.post_hp_loss, WHISPERING_HUG_DAMAGE);
         assert!(pending.fixed_target.is_none());
         assert!(rs.pending_rewards.is_empty());
+    }
+
+    /// `FromDeckForTransformation` returns empty with no select when no deck
+    /// card is transformable; Hug's damage still follows (WhisperingHollow.cs).
+    #[test]
+    fn whispering_hug_without_a_transformable_card_only_takes_damage() {
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = fresh();
+        rs.interactive_card_transform = true;
+        rs.master_deck =
+            vec![
+                crate::cards::spec_index::card_pod_from_id(CardId::ForbiddenGrimoire, false)
+                    .unwrap(),
+            ];
+        run(&WHISPERING_HOLLOW, "hug", &mut rs);
+        assert!(rs.pending_deck_transforms.is_empty());
+        assert_eq!(rs.current_hp, 40 - WHISPERING_HUG_DAMAGE);
+        assert_eq!(rs.master_deck[0].card_id, CardId::ForbiddenGrimoire);
     }
 
     #[test]

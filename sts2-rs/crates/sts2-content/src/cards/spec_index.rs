@@ -2221,6 +2221,14 @@ pub fn card_is_removable_instance(card: &sts2_core::cards::Card) -> bool {
     }
 }
 
+/// C# `CardSelectCmd.FromDeckForTransformation`'s pool test: `Type != Quest`
+/// and `IsTransformable`, which in the Deck pile is `IsRemovable` (not
+/// Eternal).
+#[must_use]
+pub fn card_is_transformable_in_deck(card: &sts2_core::cards::Card) -> bool {
+    !card.is_quest() && card_is_removable_instance(card)
+}
+
 /// The spec-only half of [`card_is_removable_instance`]: removability from a
 /// bare [`CardId`], with no instance to read enchantments off.
 ///
