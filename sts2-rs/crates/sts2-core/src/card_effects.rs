@@ -219,6 +219,50 @@ pub fn deal_damage_to_all_alive_enemies_counting_kills(
     })
 }
 
+/// One `CreatureCmd.Damage` whose targets are the player AND every alive
+/// enemy, the player first: Foul Potion's `CombatState.Creatures.Where(c =>
+/// !c.IsPet)` (FoulPotion.cs), where `Creatures` lists the allies before the
+/// enemies (CombatState.cs). Its `Kill(killedCreatures)` comes after every
+/// result's after-hit hooks, so an enemy it fells dies only after the player's
+/// hit has run its hooks (Centennial Puzzle's draw comes before Gremlin
+/// Horn's energy).
+///
+/// The player's hit runs after the enemies lose their HP but before their
+/// after-hit hooks. C# takes the player's HP first, but nothing between the
+/// two HP losses reads the other. What matters is that the player's hooks see
+/// the enemies' HP already gone: a draw is refused once the hit has left no
+/// enemy alive (`CardPileCmd.Draw` checks `IsOverOrEnding`), exactly as when
+/// the felled enemies were killed before the player's hit. The player's death
+/// resolves at the step's `check_combat_end`, before any win.
+pub fn deal_damage_to_player_and_all_alive_enemies(
+    state: &mut CombatState,
+    base: i32,
+    props: ValueProps,
+) {
+    // `if (dealer.IsDead) return`; the player is the dealer.
+    if state.player.current_hp <= 0 {
+        return;
+    }
+    damage::with_deferred_enemy_deaths(state, |state| {
+        let _ = deal_damage_to_all_alive_enemies_counting_kills_inner(state, base, props, None);
+        // The player's hit runs its hooks inline, like a tail the batch
+        // flushes, so the enemies' tails stay queued behind it.
+        let enemy_tails = state.combat_log.deferred_hit_tails.take();
+        let _ = crate::combat_loop::apply_damage_to_player(
+            state,
+            CreatureRef::Player,
+            base,
+            props,
+            None,
+        );
+        let player_tails = std::mem::replace(&mut state.combat_log.deferred_hit_tails, enemy_tails);
+        debug_assert!(
+            player_tails.is_none_or(|t| t.is_empty()),
+            "the player's hit queued tails"
+        );
+    });
+}
+
 fn deal_damage_to_all_alive_enemies_counting_kills_inner(
     state: &mut CombatState,
     base: i32,
