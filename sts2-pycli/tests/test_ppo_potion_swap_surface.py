@@ -180,6 +180,9 @@ def test_pad_indices_did_not_move():
     assert len(vocab.FIXED_KINDS) == vocab.N_FIXED, "no spare fixed row left"
 
 
+COVER_SEEDS = (5, 12, 13, 15)
+
+
 @pytest.mark.slow
 def test_live_path_carries_the_offer_into_the_state_token(monkeypatch):
     """End-to-end over the real engine — the one thing the tests above cannot
@@ -205,47 +208,58 @@ def test_live_path_carries_the_offer_into_the_state_token(monkeypatch):
     `oc_env.is_some()`, so an OC table would resolve the swap rule-side and
     never yield it as a decision — the exact set this test needs to inspect.
 
-    Seed 17 is a known cover seed: with the flag on it produces exactly one
-    full-belt potion reward at A0 (re-censused 2026-11-02: seed 17 is the
-    only swap over 0..20; seed 15 lost its swap to the #1054 round-5
-    parity fixes, seed 5 lost its swap earlier). If an engine
-    change moves the cover this test fails loudly — re-derive it by censusing
-    `potion_swap` over seeds 0..20 rather than deleting the assertion, because
-    "no swap ever surfaced" is precisely the invisibility bug being closed
-    here.
-    """
-    from ppo.env import PpoRunEnv, Terminal
+    `COVER_SEEDS` are known cover seeds: with the flag on, each produces at
+    least one full-belt potion reward at A0. Re-censused 2026-11-12 over
+    0..39 (GH #1301): 5, 12, 13, 15, 27, 31, 36, 38 swap. Seed 17, the
+    previous single cover seed, had lost its swap by then (most likely to
+    act 1 rolling from the seed, `7320dbe99`); 15 and 5 had each drifted
+    out earlier and drifted back in. A
+    single seed broke on every engine change that touched the route, so
+    the test now takes the first seed of a small set that surfaces a swap.
+    If an engine change empties the whole set, the test fails loudly —
+    re-derive it by censusing `potion_swap` over seeds 0..39 rather than
+    deleting the assertion, because "no swap ever surfaced" is precisely
+    the invisibility bug being closed here.
 
+    The test is `slow`, so `just test` skips it; `just test-slow` and
+    `just test-public-shape` (`-m "not oracle"`) run it.
+    """
     monkeypatch.setenv("STS2_RUNAI_POTION_SWAP", "1")
     monkeypatch.delenv("STS2_RUNAI_POTION_OC", raising=False)
 
-    env = PpoRunEnv(seed=17, expert=True)
-    for out in env.expert_run():
+    out = next((o for seed in COVER_SEEDS if (o := _first_potion_swap(seed))), None)
+    if out is None:
+        pytest.fail(f"no cover seed in {COVER_SEEDS} produces a potion swap — re-derive them")
+
+    offered = out.obs.get("pending_potion_swap")
+    belt = out.obs.get("potions")
+    assert offered, "obs carries no offered potion on the live path"
+    assert out.surface == "potion-swap"
+
+    feat = encoder.featurize_row(out.obs, out.actions, out.metrics)
+    state_cat = feat.obs_cat.tolist()[0]
+    assert state_cat[8] == vocab.surface_index("potion-swap")
+    assert state_cat[3] == vocab.potions().index(offered)
+    assert state_cat[3] != encoder.empty_cat()[3], "offer fell back to the pad row"
+
+    for action, cat in zip(out.actions, feat.act_cat.tolist(), strict=True):
+        slot = action.get("discard_slot")
+        if slot is None:
+            assert cat[6] == vocab.fixed_index("decline_potion")
+        else:
+            assert cat[3] == vocab.potions().index(belt[slot]), f"slot {slot}"
+
+
+def _first_potion_swap(seed):
+    """The first `potion_swap` decision of an expert run on `seed`, or None."""
+    from ppo.env import PpoRunEnv, Terminal
+
+    for out in PpoRunEnv(seed=seed, expert=True).expert_run():
         if isinstance(out, Terminal):
-            break
-        if not (out.actions and out.actions[0]["action"] == "potion_swap"):
-            continue
-
-        offered = out.obs.get("pending_potion_swap")
-        belt = out.obs.get("potions")
-        assert offered, "obs carries no offered potion on the live path"
-        assert out.surface == "potion-swap"
-
-        feat = encoder.featurize_row(out.obs, out.actions, out.metrics)
-        state_cat = feat.obs_cat.tolist()[0]
-        assert state_cat[8] == vocab.surface_index("potion-swap")
-        assert state_cat[3] == vocab.potions().index(offered)
-        assert state_cat[3] != encoder.empty_cat()[3], "offer fell back to the pad row"
-
-        for action, cat in zip(out.actions, feat.act_cat.tolist(), strict=True):
-            slot = action.get("discard_slot")
-            if slot is None:
-                assert cat[6] == vocab.fixed_index("decline_potion")
-            else:
-                assert cat[3] == vocab.potions().index(belt[slot]), f"slot {slot}"
-        return
-
-    pytest.fail("seed 17 no longer produces a potion swap — re-derive the cover seed")
+            return None
+        if out.actions and out.actions[0]["action"] == "potion_swap":
+            return out
+    return None
 
 
 # --- the startup banner (GH #545) -------------------------------------------
