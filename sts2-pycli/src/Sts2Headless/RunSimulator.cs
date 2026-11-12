@@ -6116,38 +6116,15 @@ public class RunSimulator
         // potion price jitter.
         PatchTestModeRelicRewards();
 
+        // Lord's Parasol buys the shop out only after the room-entry hooks have
+        // run, as in the real game (its TestMode-off branch yields a frame first).
+        PatchLordsParasolAfterRoomHooks();
+
         // Same failure mode, different singleton: event legs that deref
         // `NGame.Instance` (screen shake/rumble) unguarded. DenseVegetation loses its
         // ambush fight, Amalgamator eats two basics without granting the Ultimate,
         // PunchOff adds the curse without offering the relic.
         PatchEventScreenShake();
-
-        // Patch DecimillipedeSegment.ReattachMove to a headless-safe
-        // reimplementation: the original heals via DoReattach() and then
-        // calls ChangePhobiaModeTexture, which derefs NCombatRoom.Instance
-        // WITHOUT `?.` — an NRE in headless that aborts ExecuteEnemyTurn at
-        // the reviving segment's slot (siblings skipped, EndEnemyTurn and the
-        // next player-turn start lost). Source of the DECIMILLIPEDE sweep
-        // divergence family (seeds 3771/5577/5765/2796/4256/5398).
-        PatchDecimillipedeReattach();
-
-        // Patch Vantom.DismemberMove to a headless-safe reimplementation.
-        // The real move (Vantom.cs:164) calls `NGame.Instance.DoHitStop(...)`
-        // WITHOUT the null-conditional `?.` that every other Vantom VFX call
-        // uses — so in headless mode (NGame.Instance == null) it throws an
-        // unhandled NullReferenceException mid-enemy-turn, which TaskHelper
-        // swallows and leaves combat wedged on the Enemy side (manifesting as
-        // the "EndTurn stuck" Vantom artifact). The replacement applies the two
-        // STATE effects faithfully (deal DismemberDamage + add 3 Wounds to
-        // discard) and drops only the VFX. Bead sts2-rs-34zix.
-        PatchVantomDismember();
-
-        // Patch SlumberingBeetle.AfterAddedToRoom: the original derefs
-        // NCombatRoom.Instance for sleep VFX after applying Plating+Slumber;
-        // null in headless → swallowed NRE wedges combat-start (the
-        // SLUMBERING_BEETLE_NORMAL combat never reaches PlayPhase). Bead
-        // sts2-rs-ybtmu.
-        PatchSlumberingBeetle();
 
         // Patch TalkCmd.Play to no-op. It spawns a speech-bubble VFX bound to the
         // speaker's scene node, which doesn't exist in headless mode — the deref
@@ -6201,32 +6178,6 @@ public class RunSimulator
         // its relic loop; v0.111.0 made it null-safe. See PatchLordsParasol.
         PatchLordsParasol();
 #endif
-
-        // Patch Whirlwind.OnPlay + FlashOfSteel.OnPlay to headless-safe
-        // reimplementations. Both deref combat-room / target scene nodes for
-        // VFX BEFORE the damage resolves (Whirlwind: NHorizontalLinesVfx /
-        // NSmokyVignetteVfx; FlashOfSteel: NThinSliceVfx.Create(target)) —
-        // null in headless → swallowed NRE that aborts OnPlay, so the card
-        // deals no damage / draws nothing and vanishes into limbo. The
-        // replacements reproduce only the STATE effects (the multi-hit /
-        // single attack + draw). Coverage-sweep PILE_COUNT: WHIRLWIND,
-        // FLASH_OF_STEEL, CALAMITY_CARD (sts2-rs-q6bix).
-        PatchCardOnPlay(
-            "MegaCrit.Sts2.Core.Models.Cards.Whirlwind",
-            nameof(YieldPatches.WhirlwindOnPlayPrefix),
-            "Whirlwind.OnPlay");
-        PatchCardOnPlay(
-            "MegaCrit.Sts2.Core.Models.Cards.FlashOfSteel",
-            nameof(YieldPatches.FlashOfSteelOnPlayPrefix),
-            "FlashOfSteel.OnPlay");
-        // Slice.OnPlay uses the same NThinSliceVfx.Create(target) deref as
-        // FlashOfSteel (null NCombatRoom.Instance in headless), aborting before
-        // the 6 damage. Coverage-sweep PILE_COUNT: SLICE, CALAMITY_CARD (which
-        // plays a generated Slice). Bead sts2-rs-q6bix.
-        PatchCardOnPlay(
-            "MegaCrit.Sts2.Core.Models.Cards.Slice",
-            nameof(YieldPatches.SliceOnPlayPrefix),
-            "Slice.OnPlay");
 
         // Patch RollingBoulderPower.AfterPlayerTurnStart to the headless-safe
         // DoDamage-direct branch. The real hook (RollingBoulderPower.cs) only
@@ -6902,10 +6853,11 @@ public class RunSimulator
                     }
                 }
 
-                // Cmd.CustomScaledWait(float, float, bool, CancellationToken) does NOT
-                // route through the Wait(float) overload patched above — it awaits the
-                // Wait(float, CancellationToken, bool) overload, which is left unpatched
-                // and never completes in headless when FastMode != Instant. The event
+                // Neither build has a Wait(float) overload, so the lookup above misses
+                // and the fallback patches BOTH Wait overloads (GH #1285 inventory).
+                // Cmd.CustomScaledWait(float, float, bool, CancellationToken) is
+                // patched separately: before it was, it awaited a wait that never
+                // completed in headless when FastMode != Instant. The event
                 // option's `Chosen()` task then hangs at that await, so the continuation
                 // AFTER the wait (e.g. JungleMaze "Join Forces" GainGold, UnrestSite
                 // "Rest Anyways" AddCursesToDeck(PoorSleep)) is silently dropped from the
@@ -7017,6 +6969,45 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch TestMode relic rewards: {ex.Message}");
+        }
+    }
+
+    // `LordsParasol.AfterRoomEntered` starts `PurchaseEverything` fire-and-forget
+    // (LordsParasol.cs:27). With TestMode off, the real game's purchase body first
+    // awaits `NRun.Instance.AwaitProcessFrame()` and two `Cmd.Wait`s (:40-52), so
+    // control goes back to `Hook.AfterRoomEntered` and every later listener in the
+    // snapshot (MealTicket, MawBank, ...) runs BEFORE anything is bought. Under
+    // TestMode that block is skipped and nothing in the purchase loop yields in the
+    // host, so the shop is bought out INSIDE the hook loop and the later listeners
+    // see the bought relics: MawBank's 12 gold then triggers a just-bought
+    // DragonFruit (+1 max HP) that the real game has not bought yet. Flipping
+    // TestMode off would not help (NRun is null, so no frame passes, and Cmd.Wait is
+    // a no-op), so defer the purchases until `Hook.AfterRoomEntered` has finished.
+    private static void PatchLordsParasolAfterRoomHooks()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.lordsparasolorder");
+            Type?[] loadable;
+            try { loadable = typeof(RelicModel).Assembly.GetTypes(); }
+            catch (System.Reflection.ReflectionTypeLoadException tle) { loadable = tle.Types; }
+            var parasol = loadable.OfType<Type>()
+                .FirstOrDefault(t => t.Name == "LordsParasol" && typeof(RelicModel).IsAssignableFrom(t));
+            var entered = parasol == null ? null : AccessTools.Method(parasol, "AfterRoomEntered");
+            YieldPatches.ParasolPurchaseEverything = parasol == null ? null : AccessTools.Method(parasol, "PurchaseEverything");
+            var hook = AccessTools.Method(typeof(MegaCrit.Sts2.Core.Hooks.Hook), "AfterRoomEntered");
+            if (entered == null || hook == null || YieldPatches.ParasolPurchaseEverything == null)
+            {
+                Console.Error.WriteLine("[WARN] LordsParasol/Hook.AfterRoomEntered not found; Parasol buys inside the room-entry hooks");
+                return;
+            }
+            harmony.Patch(entered, prefix: new HarmonyMethod(typeof(YieldPatches), nameof(YieldPatches.LordsParasolDeferPrefix)));
+            harmony.Patch(hook, postfix: new HarmonyMethod(typeof(YieldPatches), nameof(YieldPatches.AfterRoomEnteredRunDeferredParasolPostfix)));
+            Console.Error.WriteLine("[INFO] Patched LordsParasol.AfterRoomEntered (purchases after the room-entry hooks)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch LordsParasol purchase order: {ex.Message}");
         }
     }
 
@@ -7202,142 +7193,10 @@ public class RunSimulator
         }
     }
 
-    private static void PatchDecimillipedeReattach()
-    {
-        try
-        {
-            var harmony = new Harmony("sts2headless.decimillipedereattach");
-            // Private instance async method on the shared base class
-            // (covers Front/Middle/Back):
-            // Task ReattachMove(IReadOnlyList<Creature>).
-            var m = typeof(MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment).GetMethod(
-                "ReattachMove",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (m != null)
-            {
-                var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.DecimillipedeReattachPrefix),
-                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-                if (prefix != null)
-                {
-                    harmony.Patch(m, new HarmonyMethod(prefix));
-                    Console.Error.WriteLine("[INFO] Patched DecimillipedeSegment.ReattachMove (headless-safe: DoReattach heal only, skips unguarded NCombatRoom phobia-texture NRE, sts2-rs-8lwnq)");
-                }
-            }
-            else
-            {
-                Console.Error.WriteLine("[WARN] Could not find DecimillipedeSegment.ReattachMove");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[WARN] Failed to patch DecimillipedeSegment.ReattachMove: {ex.Message}");
-        }
-    }
-
-    private static void PatchVantomDismember()
-    {
-        try
-        {
-            var harmony = new Harmony("sts2headless.vantomdismember");
-            // Private instance async method: Task DismemberMove(IReadOnlyList<Creature>).
-            var m = typeof(MegaCrit.Sts2.Core.Models.Monsters.Vantom).GetMethod(
-                "DismemberMove",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (m != null)
-            {
-                var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.VantomDismemberPrefix),
-                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-                if (prefix != null)
-                {
-                    harmony.Patch(m, new HarmonyMethod(prefix));
-                    Console.Error.WriteLine("[INFO] Patched Vantom.DismemberMove (headless-safe: skips unguarded NGame.Instance.DoHitStop NRE, sts2-rs-34zix)");
-                }
-            }
-            else
-            {
-                Console.Error.WriteLine("[WARN] Could not find Vantom.DismemberMove");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[WARN] Failed to patch Vantom.DismemberMove: {ex.Message}");
-        }
-    }
-
-    private static void PatchSlumberingBeetle()
-    {
-        try
-        {
-            var harmony = new Harmony("sts2headless.slumberingbeetle");
-            // public override async Task AfterAddedToRoom().
-            var m = typeof(MegaCrit.Sts2.Core.Models.Monsters.SlumberingBeetle).GetMethod(
-                "AfterAddedToRoom",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            if (m != null)
-            {
-                var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SlumberingBeetleAfterAddedPrefix),
-                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-                if (prefix != null)
-                {
-                    harmony.Patch(m, new HarmonyMethod(prefix));
-                    Console.Error.WriteLine("[INFO] Patched SlumberingBeetle.AfterAddedToRoom (headless-safe: applies Plating+Slumber, skips NCombatRoom sleep-VFX NRE, sts2-rs-ybtmu)");
-                }
-            }
-            else
-            {
-                Console.Error.WriteLine("[WARN] Could not find SlumberingBeetle.AfterAddedToRoom");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[WARN] Failed to patch SlumberingBeetle: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Patch a card's `protected override async Task OnPlay(PlayerChoiceContext,
-    /// CardPlay)` with a headless-safe Harmony prefix (see
-    /// YieldPatches.*OnPlayPrefix). Generic over the card type so the
-    /// VFX-NRE card patches (Whirlwind / FlashOfSteel) share one installer.
-    /// </summary>
-    private static void PatchCardOnPlay(string cardTypeName, string prefixName, string label)
-    {
-        try
-        {
-            var harmony = new Harmony("sts2headless.cardonplay." + label);
-            var cardType = Type.GetType(cardTypeName + ", " + typeof(MegaCrit.Sts2.Core.Models.CardModel).Assembly.GetName().Name)
-                ?? typeof(MegaCrit.Sts2.Core.Models.CardModel).Assembly.GetType(cardTypeName);
-            if (cardType == null)
-            {
-                Console.Error.WriteLine($"[WARN] Could not find card type {cardTypeName}");
-                return;
-            }
-            var m = cardType.GetMethod(
-                "OnPlay",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (m == null)
-            {
-                Console.Error.WriteLine($"[WARN] Could not find {label}");
-                return;
-            }
-            var prefix = typeof(YieldPatches).GetMethod(prefixName,
-                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-            if (prefix != null)
-            {
-                harmony.Patch(m, new HarmonyMethod(prefix));
-                Console.Error.WriteLine($"[INFO] Patched {label} (headless-safe: skips card-VFX node-deref NRE, sts2-rs-q6bix)");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[WARN] Failed to patch {label}: {ex.Message}");
-        }
-    }
-
     /// <summary>
     /// Patch a power's `public override async Task AfterPlayerTurnStart(
     /// PlayerChoiceContext, Player)` with a headless-safe Harmony prefix.
-    /// Sibling to PatchCardOnPlay for turn-start power hooks whose real
+    /// For turn-start power hooks whose real
     /// bodies deref Godot scene/signal nodes that are absent in headless
     /// (RollingBoulderPower's NRollingBoulderVfx Connect; EntropyPower's
     /// interactive CardSelectCmd). sts2-rs-ioty0 / sts2-rs-isooo.
@@ -7383,8 +7242,14 @@ public class RunSimulator
         {
             var t = typeof(MegaCrit.Sts2.Core.Commands.CardSelectCmd);
             var bf = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
-            var stack = t.GetField("_selectorStack", bf)?.GetValue(null);
-            stack?.GetType().GetMethod("Clear")?.Invoke(stack, null);
+            // v0.111.0 also has `_localSelectorStack`; the game's own
+            // `CardSelectCmd.Reset` (CardSelectCmd.cs:164) clears both on run
+            // cleanup, but only with TestMode off, so the host has to.
+            foreach (var name in new[] { "_selectorStack", "_localSelectorStack" })
+            {
+                var stack = t.GetField(name, bf)?.GetValue(null);
+                stack?.GetType().GetMethod("Clear")?.Invoke(stack, null);
+            }
         }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] ClearCardSelector: {ex.Message}"); }
     }
@@ -8440,6 +8305,46 @@ public class RunSimulator
             return __exception;
         }
 
+        internal static System.Reflection.MethodInfo? ParasolPurchaseEverything;
+        private static readonly List<(RelicModel Relic, MerchantRoom Room)> DeferredParasolPurchases = new();
+
+        /// <summary>Queue Lord's Parasol's shop buy-out instead of starting it inside
+        /// the hook loop; see <c>PatchLordsParasolAfterRoomHooks</c>.</summary>
+        public static bool LordsParasolDeferPrefix(RelicModel __instance, AbstractRoom room, ref Task __result)
+        {
+            if (room is not MerchantRoom merchant) return true;
+            DeferredParasolPurchases.Add((__instance, merchant));
+            __result = Task.CompletedTask;
+            return false;
+        }
+
+        public static void AfterRoomEnteredRunDeferredParasolPostfix(ref Task __result)
+        {
+            __result = RunDeferredParasolPurchases(__result);
+        }
+
+        private static async Task RunDeferredParasolPurchases(Task hooks)
+        {
+            try
+            {
+                await hooks;
+            }
+            finally
+            {
+                if (DeferredParasolPurchases.Count > 0)
+                {
+                    var pending = DeferredParasolPurchases.ToList();
+                    DeferredParasolPurchases.Clear();
+                    foreach (var (relic, room) in pending)
+                    {
+                        // Fire-and-forget, exactly as LordsParasol.cs:27 does.
+                        var task = (Task?)ParasolPurchaseEverything!.Invoke(relic, new object[] { room.GetLocalInventory() });
+                        if (task != null) TaskHelper.RunSafely(task);
+                    }
+                }
+            }
+        }
+
         /// <summary>
         /// Skip <c>ActionQueueSet.PopAction</c> for an action that already FINISHED and
         /// is in no queue any more. <see cref="GameSyncContext"/> runs a posted
@@ -8654,125 +8559,6 @@ public class RunSimulator
         /// <summary>Harmony prefix for void-returning methods: skip the original.</summary>
         public static bool NoOpPrefix() => false;
 
-        /// <summary>
-        /// Harmony prefix: replace Vantom.DismemberMove with a headless-safe
-        /// version. The original derefs `NGame.Instance.DoHitStop(...)` without
-        /// `?.` (Vantom.cs:164); NGame.Instance is null in headless → NRE that
-        /// wedges the enemy turn. We reproduce only the STATE effects.
-        /// Bead sts2-rs-34zix.
-        /// </summary>
-        /// <summary>
-        /// Harmony prefix: replace DecimillipedeSegment.ReattachMove with a
-        /// headless-safe version. The original awaits ReattachPower.DoReattach
-        /// (the revive heal — the only STATE effect) and then calls
-        /// ChangePhobiaModeTexture, which derefs NCombatRoom.Instance without
-        /// a null guard — NRE in headless that aborts the enemy walk at the
-        /// reviving segment's slot. Reproduce only the heal. sts2-rs-8lwnq.
-        /// </summary>
-        public static bool DecimillipedeReattachPrefix(
-            object __instance,
-            System.Collections.Generic.IReadOnlyList<MegaCrit.Sts2.Core.Entities.Creatures.Creature> targets,
-            ref Task __result)
-        {
-            __result = DecimillipedeReattachSafe(__instance);
-            return false; // skip original
-        }
-
-        private static async Task DecimillipedeReattachSafe(object segment)
-        {
-            try
-            {
-                var creature = ((MegaCrit.Sts2.Core.Models.MonsterModel)segment).Creature;
-                var power = creature.GetPower<MegaCrit.Sts2.Core.Models.Powers.ReattachPower>();
-                if (power != null)
-                {
-                    await power.DoReattach();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WARN] Decimillipede reattach safe: {ex.Message}");
-            }
-        }
-
-        public static bool VantomDismemberPrefix(
-            object __instance,
-            System.Collections.Generic.IReadOnlyList<MegaCrit.Sts2.Core.Entities.Creatures.Creature> targets,
-            ref Task __result)
-        {
-            __result = VantomDismemberSafe(__instance, targets);
-            return false; // skip original
-        }
-
-        private static async Task VantomDismemberSafe(
-            object vantom,
-            System.Collections.Generic.IReadOnlyList<MegaCrit.Sts2.Core.Entities.Creatures.Creature> targets)
-        {
-            try
-            {
-                // Real (ascension-aware) DismemberDamage from the instance.
-                var dmgProp = vantom.GetType().GetProperty("DismemberDamage",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                int dmg = Convert.ToInt32(dmgProp!.GetValue(vantom));
-                // Faithful damage: monster attack for DismemberDamage (no VFX).
-                await MegaCrit.Sts2.Core.Commands.DamageCmd.Attack(dmg)
-                    .FromMonster((MegaCrit.Sts2.Core.Models.MonsterModel)vantom)
-                    .Execute(null);
-                // Add 3 Wounds to the player's discard (addedByPlayer: false),
-                // matching Vantom.cs:166.
-                await MegaCrit.Sts2.Core.Commands.CardPileCmd
-                    .AddToCombatAndPreview<MegaCrit.Sts2.Core.Models.Cards.Wound>(
-                        targets,
-                        MegaCrit.Sts2.Core.Entities.Cards.PileType.Discard,
-                        3,
-                        creator: null);  // v0.107.1: param renamed addedByPlayer(bool)->creator(Player?)
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WARN] Vantom dismember safe: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Harmony prefix: replace SlumberingBeetle.AfterAddedToRoom with a
-        /// headless-safe version. The original applies Plating + Slumber, then
-        /// derefs `NCombatRoom.Instance.GetCreatureNode(...)` for the sleep
-        /// VFX (SlumberingBeetle.cs:78); NCombatRoom.Instance is null in
-        /// headless → NRE that wedges combat-start (the player turn never
-        /// reaches PlayPhase, so DetectDecisionPoint mis-returns card_reward).
-        /// We reproduce only the STATE effects (the two power applies).
-        /// Bead sts2-rs-ybtmu.
-        /// </summary>
-        public static bool SlumberingBeetleAfterAddedPrefix(object __instance, ref Task __result)
-        {
-            __result = SlumberingBeetleAfterAddedSafe(__instance);
-            return false; // skip original
-        }
-
-        private static async Task SlumberingBeetleAfterAddedSafe(object beetle)
-        {
-            try
-            {
-                var creature = ((MegaCrit.Sts2.Core.Models.MonsterModel)beetle).Creature;
-                // Ascension-aware PlatingAmount (private prop): 18 @ ToughEnemies else 15.
-                var platingProp = beetle.GetType().GetProperty("PlatingAmount",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                int plating = platingProp != null ? Convert.ToInt32(platingProp.GetValue(beetle)) : 15;
-                // v0.107.1: PowerCmd.Apply gained a leading PlayerChoiceContext.
-                // These spawn-power applications take no player choices, so use a
-                // ThrowingPlayerChoiceContext (mirrors the game's AutoSlay usage).
-                var spawnCtx = new MegaCrit.Sts2.Core.GameActions.Multiplayer.ThrowingPlayerChoiceContext();
-                await MegaCrit.Sts2.Core.Commands.PowerCmd
-                    .Apply<MegaCrit.Sts2.Core.Models.Powers.PlatingPower>(spawnCtx, creature, plating, creature, null);
-                await MegaCrit.Sts2.Core.Commands.PowerCmd
-                    .Apply<MegaCrit.Sts2.Core.Models.Powers.SlumberPower>(spawnCtx, creature, 3m, creature, null);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WARN] SlumberingBeetle AfterAddedToRoom safe: {ex.Message}");
-            }
-        }
-
 #if !GAME_V0111
         /// <summary>
         /// Lord's Parasol's v0.107.1 shop sweep without the Godot UI it touches
@@ -8809,172 +8595,14 @@ public class RunSimulator
 #endif
 
         /// <summary>
-        /// Harmony prefix: headless-safe Whirlwind.OnPlay. The original
-        /// (Whirlwind.cs) builds NHorizontalLinesVfx / NSmokyVignetteVfx and
-        /// adds them to NCombatRoom.Instance / NRun.Instance scene nodes
-        /// BEFORE the DamageCmd — null in headless → swallowed NRE, so the
-        /// X-cost multi-hit never lands and the card vanishes. We reproduce
-        /// only the attack. Bead sts2-rs-q6bix (PILE_COUNT: WHIRLWIND,
-        /// CALAMITY_CARD).
-        /// </summary>
-        public static bool WhirlwindOnPlayPrefix(
-            object __instance,
-            MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext choiceContext,
-            MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay,
-            ref Task __result)
-        {
-#if GAME_V0111
-            __result = WhirlwindOnPlaySafe(__instance, choiceContext, cardPlay);
-#else
-            __result = WhirlwindOnPlaySafe(__instance, choiceContext);
-#endif
-            return false;
-        }
-
-        private static async Task WhirlwindOnPlaySafe(
-            object cardObj,
-#if GAME_V0111
-            PlayerChoiceContext choiceContext,
-            CardPlay cardPlay)
-#else
-            MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext choiceContext)
-#endif
-        {
-            try
-            {
-                var card = (MegaCrit.Sts2.Core.Models.CardModel)cardObj;
-                int num = card.ResolveEnergyXValue();
-                // Only the VFX/SFX sit behind `num > 0` in Whirlwind.cs (both
-                // builds); the DamageCmd runs even at X=0, and AttackCommand
-                // fires BeforeAttack/AfterAttack around its 0-hit loop, so Vigor
-                // latches and is spent (VigorPower.cs:30-54, :80-85). Gating the
-                // attack on `num > 0` kept the Vigor in C# (GH #1054,
-                // Ironclad-2024 act3 b0 / 4143 b3: player.powers cs=+1).
-                if (card.CombatState != null)
-                {
-                    await MegaCrit.Sts2.Core.Commands.DamageCmd
-                        .Attack(card.DynamicVars.Damage.BaseValue)
-                        .WithHitCount(num)
-#if GAME_V0111
-                        // v0.111.0: `FromCard(this, cardPlay)` (Whirlwind.cs:42).
-                        .FromCard(card, cardPlay)
-#else
-                        .FromCard(card)
-#endif
-                        .TargetingAllOpponents(card.CombatState)
-                        .Execute(choiceContext);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WARN] Whirlwind OnPlay safe: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Harmony prefix: headless-safe FlashOfSteel.OnPlay. The original
-        /// (FlashOfSteel.cs) adds NThinSliceVfx.Create(cardPlay.Target) to the
-        /// combat-room VFX container BEFORE the DamageCmd + Draw — the target
-        /// node deref throws NRE in headless, so the 5 damage + draw-1 never
-        /// happen and the card vanishes. We reproduce the attack + draw. Bead
-        /// sts2-rs-q6bix (PILE_COUNT: FLASH_OF_STEEL).
-        /// </summary>
-        public static bool FlashOfSteelOnPlayPrefix(
-            object __instance,
-            MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext choiceContext,
-            MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay,
-            ref Task __result)
-        {
-            __result = FlashOfSteelOnPlaySafe(__instance, choiceContext, cardPlay);
-            return false;
-        }
-
-        private static async Task FlashOfSteelOnPlaySafe(
-            object cardObj,
-            MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext choiceContext,
-            MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay)
-        {
-            try
-            {
-                var card = (MegaCrit.Sts2.Core.Models.CardModel)cardObj;
-                if (cardPlay.Target != null)
-                {
-                    await MegaCrit.Sts2.Core.Commands.DamageCmd
-                        .Attack(card.DynamicVars.Damage.BaseValue)
-#if GAME_V0111
-                        // v0.111.0: `FromCard(this, cardPlay)` (FlashOfSteel.cs:39).
-                        .FromCard(card, cardPlay)
-#else
-                        .FromCard(card)
-#endif
-                        .Targeting(cardPlay.Target)
-                        .Execute(choiceContext);
-                }
-                await MegaCrit.Sts2.Core.Commands.CardPileCmd
-                    .Draw(choiceContext, card.DynamicVars.Cards.BaseValue, card.Owner);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WARN] FlashOfSteel OnPlay safe: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Harmony prefix: headless-safe Slice.OnPlay. The original (Slice.cs)
-        /// adds NThinSliceVfx.Create(cardPlay.Target) to the combat-room VFX
-        /// container BEFORE the DamageCmd — the same NThinSliceVfx pattern as
-        /// FlashOfSteel — so the target/combat-room node deref throws NRE in
-        /// headless, the 6 damage never lands, and the card vanishes into the
-        /// Play pile (never flushed to discard). We reproduce only the attack.
-        /// Bead sts2-rs-q6bix (PILE_COUNT: SLICE, and CALAMITY_CARD which plays
-        /// a generated Slice).
-        /// </summary>
-        public static bool SliceOnPlayPrefix(
-            object __instance,
-            MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext choiceContext,
-            MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay,
-            ref Task __result)
-        {
-            __result = SliceOnPlaySafe(__instance, choiceContext, cardPlay);
-            return false;
-        }
-
-        private static async Task SliceOnPlaySafe(
-            object cardObj,
-            MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext choiceContext,
-            MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay)
-        {
-            try
-            {
-                var card = (MegaCrit.Sts2.Core.Models.CardModel)cardObj;
-                if (cardPlay.Target != null)
-                {
-                    await MegaCrit.Sts2.Core.Commands.DamageCmd
-                        .Attack(card.DynamicVars.Damage.BaseValue)
-#if GAME_V0111
-                        // v0.111.0: `FromCard(this, cardPlay)` (Slice.cs:35).
-                        .FromCard(card, cardPlay)
-#else
-                        .FromCard(card)
-#endif
-                        .Targeting(cardPlay.Target)
-                        .Execute(choiceContext);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WARN] Slice OnPlay safe: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Harmony prefix: headless-safe RollingBoulderPower.AfterPlayerTurnStart.
-        /// The real hook only takes the DoDamage-direct branch under
-        /// TestMode.IsOn; otherwise it constructs NRollingBoulderVfx and calls
-        /// GodotObject.Connect(StringName, Callable, uint), which the headless
-        /// GodotStubs lack → MissingMethodException (swallowed), so no boulder
-        /// damage lands and the turn wedges. Bead sts2-rs-ioty0 (q6bix
-        /// PILE_COUNT: ROLLING_BOULDER).
+        /// Harmony prefix: RollingBoulderPower.AfterPlayerTurnStart as the live
+        /// game runs it (decomp v0.111.0 Models.Powers/RollingBoulderPower.cs:28-59).
+        /// Kept on purpose (GH #1285): the original would run headless, but it
+        /// takes its TestMode.IsOn branch, which is not what the live game does.
+        /// The live branch is driven by the NRollingBoulderVfx animation, so it
+        /// cannot run headless. Originally added because the GodotStubs lacked
+        /// GodotObject.Connect (bead sts2-rs-ioty0, q6bix PILE_COUNT:
+        /// ROLLING_BOULDER); pinned by test_rolling_boulder_real_game_order.py.
         ///
         /// The TestMode branch is not what the real game does. It deals one
         /// multi-target DoDamage(HittableEnemies), whose Kill(killedCreatures)
@@ -9277,27 +8905,6 @@ public class RunSimulator
             }
             catch (Exception ex) { Console.Error.WriteLine($"[WARN] Bundle patch: {ex.Message}"); }
 
-            // Patch Neutralize.OnPlay to avoid the NThinSliceVfx.Create NRE (same
-            // Godot-node deref as Slice/FlashOfSteel); the replacement keeps the
-            // real DamageCmd.Attack path so attack hooks (Vigor) still fire.
-            try
-            {
-                var neutralizeType = typeof(MegaCrit.Sts2.Core.Models.Cards.Neutralize);
-                var neutralizeOnPlay = neutralizeType.GetMethod("OnPlay",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                if (neutralizeOnPlay != null)
-                {
-                    var neutPrefix = typeof(LocPatches).GetMethod(nameof(LocPatches.NeutralizePrefix),
-                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-                    if (neutPrefix != null)
-                    {
-                        harmony.Patch(neutralizeOnPlay, new HarmonyMethod(neutPrefix));
-                        Console.Error.WriteLine("[INFO] Patched Neutralize.OnPlay");
-                    }
-                }
-            }
-            catch (Exception ex) { Console.Error.WriteLine($"[WARN] Neutralize patch: {ex.Message}"); }
-
             // Patch HasEntry to always return true
             PatchMethod(harmony, typeof(LocTable), "HasEntry", nameof(LocPatches.HasEntryPrefix));
 
@@ -9363,47 +8970,6 @@ public class RunSimulator
             return false;
         }
 
-
-        /// <summary>Harmony prefix: replace Neutralize.OnPlay with a headless-safe
-        /// attack (real DamageCmd.Attack builder, so Vigor latches+consumes) + weak,
-        /// dropping only the NThinSliceVfx.Create Godot-node deref that NREs.</summary>
-        public static bool NeutralizePrefix(CardModel __instance, ref Task __result,
-            PlayerChoiceContext choiceContext, CardPlay cardPlay)
-        {
-            if (cardPlay.Target == null) { __result = Task.CompletedTask; return false; }
-            __result = NeutralizeSafe(__instance, choiceContext, cardPlay);
-            return false;
-        }
-
-        private static async Task NeutralizeSafe(CardModel card, PlayerChoiceContext ctx, CardPlay play)
-        {
-            try
-            {
-                // Use the real attack builder — the SAME path SliceOnPlaySafe /
-                // FlashOfSteelOnPlaySafe keep — so Hook.BeforeAttack/AfterAttack
-                // fire: VigorPower latches on the first powered-card attack and is
-                // consumed HERE, matching Neutralize.cs:44-47 and the Rust engine.
-                // The bare CreatureCmd.Damage used before skipped those hooks,
-                // leaving a phantom un-consumed Vigor on the player (the parity
-                // artifact "silent-neutralize"). The NRE the patch originally
-                // worked around was the NThinSliceVfx.Create deref in OnPlay
-                // (same as Slice/FlashOfSteel), NOT the DamageCmd itself, so the
-                // builder path is headless-safe. WithAttackerAnim is omitted (no
-                // animation in headless), exactly as Slice/FlashOfSteel do.
-                await DamageCmd.Attack(card.DynamicVars.Damage.BaseValue)
-#if GAME_V0111
-                    // v0.111.0: `FromCard(this, cardPlay)` (Neutralize.cs:43).
-                    .FromCard(card, play)
-#else
-                    .FromCard(card)
-#endif
-                    .Targeting(play.Target!)
-                    .Execute(ctx);
-                await PowerCmd.Apply<WeakPower>(ctx, play.Target!, card.DynamicVars["WeakPower"].BaseValue,
-                    card.Owner.Creature, card);  // v0.107.1: leading PlayerChoiceContext
-            }
-            catch (Exception ex) { Console.Error.WriteLine($"[WARN] Neutralize safe: {ex.Message}"); }
-        }
 
         public static bool HasEntryPrefix(ref bool __result)
         {
