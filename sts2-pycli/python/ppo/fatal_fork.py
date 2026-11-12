@@ -130,7 +130,7 @@ def play_and_fork(job: tuple[Any, ...]) -> dict[str, Any]:
 
     t0 = time.time()
     try:
-        kwargs: dict[str, Any] = {} if act1 == "overgrowth" else {"act1": act1}
+        kwargs: dict[str, Any] = {"act1": act1}
         env = PpoRunEnv(seed=seed, ascension=ascension, character=character, **kwargs)
         proxy = _SnapshotAgent(env.agent)
         env.agent = proxy

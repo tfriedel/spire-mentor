@@ -328,7 +328,7 @@ def main(argv: list[str] | None = None) -> None:
     # fixed-act arms and `compare` them — do NOT compare a fixed arm against
     # `roll` (see `_act1_composition`).
     p_sweep.add_argument(
-        "--act1", default="overgrowth", choices=["overgrowth", "underdocks", "roll"]
+        "--act1", default="roll", choices=["overgrowth", "underdocks", "roll"]
     )
     p_sweep.add_argument("--sims", type=int, default=None, help="debug sims override")
     p_sweep.add_argument("--boss-sims", type=int, default=None)

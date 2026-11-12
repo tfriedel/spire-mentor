@@ -401,15 +401,16 @@ struct SweepArgs {
     #[arg(long)]
     ascension: Option<u8>,
 
-    /// Which Act-1 model to walk (GH #544): `overgrowth` (default) |
-    /// `underdocks` | `roll`.
+    /// Which Act-1 model to walk (GH #544): `overgrowth` | `underdocks` |
+    /// `roll` (default).
     ///
-    /// Same token set as the PyO3 `act1` kwarg. `overgrowth` is the default
-    /// so an unflagged sweep measures exactly what it measured before the
-    /// Underdocks port. NOTE `overgrowth` vs `underdocks` is a PAIRED
+    /// Same token set and default as the PyO3 `act1` kwarg: `roll` picks the
+    /// act from the seed, as the real game does. Pass `overgrowth` to compare
+    /// against a number measured before the default changed (those were all
+    /// Overgrowth). NOTE `overgrowth` vs `underdocks` is a PAIRED
     /// comparison over a fixed panel; `roll` is not paired with either,
     /// because the act then depends on the seed.
-    #[arg(long, default_value = "overgrowth", value_parser = Act1Choice::parse)]
+    #[arg(long, default_value = "roll", value_parser = Act1Choice::parse)]
     act1: Act1Choice,
 
     /// Debug override: non-boss sims (taints the frozen budget — recorded in the policy label).
@@ -514,7 +515,7 @@ struct OneCellArgs {
     #[arg(long, default_value = "none", value_parser = CombatBudgetKind::parse)]
     combat: CombatBudgetKind,
     /// Act-1 model (threaded from the parent sweep — see `SweepArgs::act1`).
-    #[arg(long, default_value = "overgrowth", value_parser = Act1Choice::parse)]
+    #[arg(long, default_value = "roll", value_parser = Act1Choice::parse)]
     act1: Act1Choice,
     #[arg(long)]
     sims: Option<u32>,

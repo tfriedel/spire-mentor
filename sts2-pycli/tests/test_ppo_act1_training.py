@@ -9,9 +9,11 @@ import pytest
 from ppo.env import PpoRunEnv
 
 
-def test_env_defaults_to_overgrowth():
-    env = PpoRunEnv(seed=7, character="Ironclad")
-    assert env.rm.act1 == "overgrowth"
+def test_env_defaults_to_the_seed_roll():
+    """No `act1` means the real game's seed-driven pick, not Overgrowth."""
+    for s in range(1, 40):
+        default = PpoRunEnv(seed=s, character="Ironclad").rm.act1
+        assert default == PpoRunEnv(seed=s, character="Ironclad", act1="roll").rm.act1
 
 
 def test_env_can_be_pointed_at_underdocks():

@@ -368,14 +368,14 @@ class PpoRunEnv:
     # act this engine modelled before the Underdocks port), "underdocks", or
     # "roll" (the real game's seed-driven pick, ~50/50).
     #
-    # The DEFAULT stays "overgrowth" so every existing test, fixture and panel
-    # keeps meaning what it meant. A campaign that wants Underdocks in its
-    # training distribution passes "roll" here AND on the arena arm it is
-    # compared against — an arena arm and a training env that disagree about
+    # The DEFAULT is "roll", like the real game, the C# host, the PyO3
+    # `RunManager` and the arena. It was "overgrowth" before; a number measured
+    # then is Overgrowth-only, so compare against it with "overgrowth" here AND
+    # on the arena arm. An arena arm and a training env that disagree about
     # the act is the same silent-divergence class as the potion-swap flag,
     # which is why G1 (`tests/test_ppo_env_parity.py`) is parameterised over
     # this token.
-    act1: str = "overgrowth"
+    act1: str = "roll"
     # GH #803: the game build this run simulates ("v0.107.1" / "v0.111.0").
     # None means the process-wide selection, `sts2_client.GAME_VERSION`
     # (`STS2_GAME_VERSION`, or `--game-version` on the entry point), which

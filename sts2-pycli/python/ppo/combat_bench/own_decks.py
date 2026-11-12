@@ -263,7 +263,7 @@ def harvest_run(job: tuple[Any, ...]) -> dict[str, Any]:
 
     t0 = time.time()
     try:
-        kwargs: dict[str, Any] = {} if act1 == "overgrowth" else {"act1": act1}
+        kwargs: dict[str, Any] = {"act1": act1}
         env = PpoRunEnv(seed=seed, ascension=ascension, character="Ironclad", **kwargs)
         rec = _EntryRecorder(env.agent, seed, ascension)
         env.agent = rec

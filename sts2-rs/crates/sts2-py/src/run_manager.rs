@@ -162,7 +162,7 @@ impl PyRunManager {
 #[pymethods]
 impl PyRunManager {
     #[new]
-    #[pyo3(signature = (seed = 0, character = "Ironclad", deck = None, max_hp = None, string_seed = None, ascension_level = 0, neow_start = false, interactive_card_removal = None, direct_event_relic_grant = None, interactive_card_upgrade = None, interactive_card_transform = None, interactive_potion_swap = false, act1 = "overgrowth", game_version = None, mode = None))]
+    #[pyo3(signature = (seed = 0, character = "Ironclad", deck = None, max_hp = None, string_seed = None, ascension_level = 0, neow_start = false, interactive_card_removal = None, direct_event_relic_grant = None, interactive_card_upgrade = None, interactive_card_transform = None, interactive_potion_swap = false, act1 = "roll", game_version = None, mode = None))]
     // A PyO3 constructor mirroring the optional-kwarg surface; the arg list
     // tracks the run's configurable knobs (seed forms, deck/hp overrides,
     // neow-start, C#-faithful UI toggles) rather than a bundled options struct.
@@ -335,10 +335,11 @@ impl PyRunManager {
         }
         // GH #544: which of the two Act-1 models this run walks. Must be set
         // BEFORE `initialize_run_setup`, which pre-generates every act's
-        // rooms off `up_front`. Defaults to `"overgrowth"` — the single Act 1
-        // this engine modelled before the Underdocks port — so no existing
-        // caller changes behaviour. `"roll"` reproduces the real game's
-        // seed-driven pick.
+        // rooms off `up_front`. Defaults to `"roll"`, the real game's
+        // seed-driven pick with everything unlocked and discovered; the C#
+        // host defaults the same way, so a parity pair that passes neither
+        // still agrees. `"overgrowth"` / `"underdocks"` pin a variant (the
+        // default was `"overgrowth"` before this change).
         let mut inner = match act1 {
             "overgrowth" => inner.with_act1(ActVariant::Overgrowth),
             "underdocks" => inner.with_act1(ActVariant::Underdocks),

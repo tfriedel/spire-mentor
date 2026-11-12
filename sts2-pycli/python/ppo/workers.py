@@ -97,7 +97,7 @@ def play_one(
     combat_ckpt: str | None = None,
     max_steps: int | None = None,
     search: dict[str, Any] | None = None,
-    act1: str = "overgrowth",
+    act1: str = "roll",
     curse_inject_p: float = 0.0,
 ) -> dict[str, Any]:
     """Play one full run inside the current process.
@@ -156,8 +156,7 @@ def play_one(
         env_kwargs["combat"] = combat
         env_kwargs["surrogate_path"] = surrogate_path
         env_kwargs["combat_ckpt"] = combat_ckpt
-    if act1 != "overgrowth":
-        env_kwargs["act1"] = act1
+    env_kwargs["act1"] = act1
     if curse_inject_p:
         env_kwargs["curse_inject_p"] = curse_inject_p
     # Expert mode drives every decision with the HeuristicRunAgent; policy
@@ -474,7 +473,7 @@ def play_batch(
     combat_ckpt: str | None = None,
     mp_context: str = "spawn",
     search: dict[str, Any] | None = None,
-    act1: str = "overgrowth",
+    act1: str = "roll",
     curse_inject_p: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Play `seeds` across a spawn-context process pool; one row per run.

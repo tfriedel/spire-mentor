@@ -40,11 +40,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--act1",
         type=str,
-        default="overgrowth",
+        default="roll",
         choices=["overgrowth", "underdocks", "roll"],
         help=(
-            "which Act-1 model to walk (GH #545). Default 'overgrowth' keeps "
-            "every historical probe number comparable. Pair 'overgrowth' "
+            "which Act-1 model to walk (GH #545). Default 'roll', the real "
+            "game's seed-driven pick; probe numbers from before that default "
+            "are Overgrowth-only, so compare them with 'overgrowth'. Pair 'overgrowth' "
             "against 'underdocks' for a paired act-difficulty delta; do NOT "
             "pair either against 'roll', where the act is a function of the "
             "seed and a per-seed diff mixes the act change with everything "

@@ -207,7 +207,7 @@ class PPOConfig:
     # produced this champion. A champion trained on one mixture and later
     # evaluated under another is a silent divergence — nothing about the
     # tensor reveals it.
-    act1: str = "overgrowth"
+    act1: str = "roll"
     # GH #977: probability that a collection run starts with one random
     # removable curse in its deck (`PpoRunEnv.curse_inject_p`). Collection
     # only; evaluation never injects. Recorded in the cfg so a champion says

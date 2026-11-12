@@ -67,19 +67,41 @@ def walk(request):
     return _walk(request.param)
 
 
+def _swallowed_event_entries(log) -> list[tuple]:
+    """Event decisions auto-resolved on ARRIVAL, i.e. not after an event decision.
+
+    That is the #302 bug: the room's first decision never reached the policy.
+    A later page of the same event may legitimately have one option and be
+    auto-resolved: Round Tea Party's PICK_FIGHT page offers only
+    CONTINUE_FIGHT (RoundTeaParty.cs:50). The walks reach it now that act 1
+    rolls from the seed (seed 1003 is Underdocks on v0.111.0).
+    """
+    return [
+        log[i]
+        for i in range(len(log))
+        if log[i][1] == "event"
+        and log[i][3] == "single-option-auto"
+        and not (i > 0 and log[i - 1][1] == "event")
+    ]
+
+
 def test_no_event_room_is_auto_resolved(walk) -> None:
-    """The bug, stated directly: an event must never be `single-option-auto`.
+    """The bug, stated directly: an event room's entry must never be `single-option-auto`.
 
     This is the assertion that fails against the pre-fix env — every ordinary
     event room took exactly this branch.
     """
     _, log = walk
-    swallowed = [
-        (phase, surface, klass)
-        for _, phase, surface, klass in log
-        if phase == "event" and klass == "single-option-auto"
-    ]
+    swallowed = _swallowed_event_entries(log)
     assert not swallowed, f"{len(swallowed)} event rooms auto-resolved without a decision"
+
+
+def test_a_follow_up_page_with_one_option_is_not_an_entry() -> None:
+    """The narrowing above still catches the #302 shape and only it."""
+    entry = [(5, "map_choice", "path", "net"), (6, "event", "event", "single-option-auto")]
+    follow_up = [(5, "event", "event", "net"), (6, "event", "event", "single-option-auto")]
+    assert _swallowed_event_entries(entry) == [entry[1]]
+    assert _swallowed_event_entries(follow_up) == []
 
 
 def test_ordinary_events_reach_the_policy() -> None:

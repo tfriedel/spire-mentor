@@ -117,7 +117,7 @@ def main() -> int:
     ap.add_argument("--procs", type=int, default=8)
     ap.add_argument(
         "--act1",
-        default="overgrowth",
+        default="roll",
         help="act-1 model: overgrowth | underdocks | roll (roll = the deployed mix)",
     )
     ap.add_argument("--out", type=str, default="../logs/2026-08-19-potion-oc")

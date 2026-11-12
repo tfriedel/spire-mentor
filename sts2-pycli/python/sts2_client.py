@@ -752,9 +752,9 @@ class Game:
                 ``"underdocks"``, or ``"roll"`` to reproduce the real lobby's
                 seed-driven pick off the ``act_selection`` stream. STS2 ships
                 TWO acts at index 0 and the roll happens in ``StartRunLobby``,
-                which this harness bypasses; leaving this None keeps the
-                historical default (``GetDefaultList()`` => Overgrowth), which
-                is what made every act-1 parity number so far vacuous.
+                which this harness bypasses. None means ``"roll"``, as in the
+                real game with everything unlocked and discovered (it used to
+                mean Overgrowth on every seed).
             interactive_potion_swap: GH #1069. A potion reward that finds a
                 full belt parks as a ``potion_swap`` decision (discard a held
                 potion to take it, or decline), as the real reward screen

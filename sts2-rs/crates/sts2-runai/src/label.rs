@@ -378,7 +378,7 @@ mod tests {
             boss_sims_override: None,
             max_steps: 3000,
             livelock_stall_limit: DEFAULT_LIVELOCK_STALL_LIMIT,
-            act1: crate::arena::Act1Choice::default(),
+            act1: crate::arena::Act1Choice::Overgrowth,
             audit: true,
             ablate: None,
         }

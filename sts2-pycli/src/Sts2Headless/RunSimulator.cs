@@ -509,9 +509,12 @@ public class RunSimulator
             // compared Overgrowth against Overgrowth -- a check that could not
             // fail. `act1` reopens that axis: "overgrowth" / "underdocks" force
             // a variant, "roll" reproduces the real lobby roll off the
-            // `act_selection` stream. Null keeps the historical default.
+            // `act_selection` stream. Null means "roll", as in the real game:
+            // the act comes from the seed, with everything unlocked and
+            // discovered (TestMode keeps ActModel.cs:563's first-discovery
+            // force dead). It used to mean Overgrowth on every seed.
+            act1 ??= "roll";
             IReadOnlyList<ActModel>? acts = null;
-            if (act1 != null)
             {
                 var chosen = ResolveAct1(act1, seedStr, playedSave);
                 if (chosen == null)

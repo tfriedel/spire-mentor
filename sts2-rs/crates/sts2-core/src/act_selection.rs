@@ -31,14 +31,15 @@
 //! stores it on [`crate::runstate::RunState::act1`], and
 //! `run_room_gen::generate_all_rooms` builds act 1 from it.
 //!
-//! **A run does not roll by default.** `RunState::act1` defaults to
-//! [`ActVariant::Overgrowth`], the single Act 1 this engine modelled before
-//! the port, so every existing measurement keeps describing the same
-//! distribution. Opt in per run with
-//! [`crate::run_manager::RunManager::with_rolled_act1`] (or the PyO3
-//! `act1="roll"` kwarg). Flipping that default is a separate decision — it
-//! makes ~50% of runs Underdocks and re-bases every absolute win-rate anchor
-//! in the repo; GH #544 tracks measuring the difficulty gap first.
+//! **The run-facing defaults roll; the engine core does not.** The PyO3
+//! `RunManager` (`act1="roll"`), the arena (`Act1Choice::Roll`), `PpoRunEnv`
+//! and the C# host all default to the seed-driven pick, as the real game
+//! does with everything unlocked and discovered. Win rates measured before
+//! that change were Overgrowth-only. Inside the engine,
+//! `RunState::act1` still starts as [`ActVariant::Overgrowth`]: a bare
+//! [`crate::run_manager::RunManager::new`] is a building block, and the
+//! callers above apply the roll with
+//! [`crate::run_manager::RunManager::with_rolled_act1`].
 //!
 //! # Save-state dependence (the reason a seed alone is not enough)
 //!
