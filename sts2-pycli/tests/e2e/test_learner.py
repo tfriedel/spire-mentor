@@ -20,6 +20,7 @@ import math
 import os
 import shutil
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -156,6 +157,7 @@ class FakeSource:
         self.run_ends = 0
         self.stopped = False
         self.sent_rows = 0
+        self.recv_s = 0.0  # no pipes, no reader
 
     # ── the source interface ──
 
@@ -1348,6 +1350,7 @@ _VOLATILE = {
     "collect_s",
     "fwd_s",
     "wait_s",
+    "recv_s",
     "policy_swaps",
     "stamps",
     "workers",
@@ -2181,6 +2184,119 @@ def test_rollout_workers_start_under_the_thread_caps(
     assert got == [(OC.WORKER_THREAD_ENV, 1)] * 2
 
 
+READER_PROBE = '''
+import os
+import time
+
+
+def _boom():
+    raise ValueError("cannot unpickle this")
+
+
+class Unpicklable:
+    """Pickles fine in the worker; unpickling it in the learner raises."""
+
+    def __reduce__(self):
+        return (_boom, ())
+
+
+def worker_main(wid, conn, cfg):
+    """A stand-in `actors.worker_main`: an observation per reply, as many rounds as
+    `cfg` says, and then, if `cfg` says so, an exit, a message that cannot be unpickled
+    or one larger than the pipe's buffer."""
+    big = cfg.get("big", {}).get(str(wid))
+    for k in range(cfg["rounds"]):
+        conn.send(("obs", wid, k))
+        if conn.recv()[0] == "stop":
+            return
+    act = cfg.get("then", {}).get(str(wid))
+    if act == "exit":
+        os._exit(3)
+    if act == "unpicklable":
+        conn.send(Unpicklable())
+    if big is not None:  # once the learner has (likely) begun to stop
+        time.sleep(1.0)
+        conn.send(b"x" * big)
+    while conn.recv()[0] != "stop":
+        pass
+'''
+
+
+@pytest.fixture
+def reader_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """`ProcessSource(reader=True)` over `READER_PROBE` workers."""
+    (tmp_path / "e2e_reader_probe.py").write_text(READER_PROBE, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))  # a spawned child gets this sys.path
+    import e2e_reader_probe
+
+    monkeypatch.setattr(actors, "worker_main", e2e_reader_probe.worker_main)
+    made: list[L.ProcessSource] = []
+
+    def make(n: int, **cfg: Any) -> L.ProcessSource:
+        made.append(L.ProcessSource(n, {"rounds": 2, **cfg}, sync=False, reader=True))
+        return made[-1]
+
+    yield make
+    for src in made:
+        src.stop()
+
+
+def _reader_round(src: L.ProcessSource, want: int) -> list[Any]:
+    """One serving round over the workers until `want` messages have come; replies."""
+    got: list[tuple[int, Any]] = []
+    while len(got) < want:
+        got += [(i, src.recv(i)) for i in src.ready()]
+    for i, _m in got:
+        src.send(i, ("act", [], {}))
+    return sorted(m for _i, m in got)
+
+
+@pytest.mark.timeout(60)
+def test_pipe_reader_serves_every_worker_each_round(reader_probe: Any) -> None:
+    """With the reader thread, `ready`/`recv` give each worker's message once a round,
+    and the reader's receive time is counted."""
+    src = reader_probe(3)
+    assert _reader_round(src, 3) == [("obs", w, 0) for w in range(3)]
+    assert _reader_round(src, 3) == [("obs", w, 1) for w in range(3)]
+    assert src.recv_s > 0.0
+
+
+@pytest.mark.timeout(60)
+def test_pipe_reader_names_a_worker_that_died(reader_probe: Any) -> None:
+    """A worker that exits is reported by `ready` as that worker, with its exit code,
+    not by a bare broken pipe on the next `send`."""
+    src = reader_probe(3, rounds=1, then={"1": "exit"})
+    _reader_round(src, 3)
+    with pytest.raises(RuntimeError, match=r"rollout worker 1 failed: EOFError.*\(1, \d+, 3\)"):
+        while True:
+            _reader_round(src, 3)
+
+
+@pytest.mark.timeout(60)
+def test_pipe_reader_raises_a_message_it_cannot_unpickle(reader_probe: Any) -> None:
+    """A message that fails to unpickle in the reader thread reaches the learner as an
+    error naming the worker; before, the thread died and `ready` waited forever."""
+    src = reader_probe(2, rounds=1, then={"0": "unpicklable"})
+    _reader_round(src, 2)
+    with pytest.raises(RuntimeError, match="rollout worker 0 failed: ValueError") as ei:
+        src.ready()
+    assert isinstance(ei.value.__cause__, ValueError)
+
+
+@pytest.mark.timeout(60)
+def test_pipe_reader_drains_through_stop(reader_probe: Any) -> None:
+    """A worker blocked sending a message larger than the pipe's buffer when `stop`
+    comes can finish it and exit: the reader keeps reading, so `stop` does not wait
+    out its deadline and kill it."""
+    src = reader_probe(4, rounds=1, big={str(w): 16 << 20 for w in range(4)})
+    _reader_round(src, 4)
+    procs = list(src.procs)
+    t = time.time()
+    src.stop()
+    assert time.time() - t < 10.0
+    assert [p.exitcode for p in procs] == [0] * 4
+
+
 def test_eval_commands_run_under_the_thread_caps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2418,7 +2534,7 @@ def test_workers_on_another_build_stop_the_learner(
     lr = L.Learner(cfg, updater="local", clock=lambda: S.ANNEAL_START - 86400.0)
     monkeypatch.setenv("STS2_GAME_VERSION", "v0.107.1")  # what the spawned workers select
     try:
-        with pytest.raises(RuntimeError, match="rollout worker died"):
+        with pytest.raises(RuntimeError, match=r"rollout worker \d+ failed"):
             lr.train()
     finally:
         with contextlib.suppress(Exception):

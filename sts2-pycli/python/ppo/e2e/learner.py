@@ -110,6 +110,7 @@ import json
 import math
 import os
 import queue
+import selectors
 import shlex
 import shutil
 import signal
@@ -257,6 +258,9 @@ class Cfg:
     rank_threads: int = 2
     sync_rounds: bool = False  # wait for every worker each round, in worker order
     sync_updates: bool = False  # wait for each update before collecting the next batch
+    # Receive the workers' messages in a thread (`ProcessSource` `reader`), so the pipe
+    # reads overlap the serving loop's work. Which rows a round serves is timing either way.
+    pipe_reader: bool = True
     # Serving: the student and the combat teacher score a round as this many forwards,
     # rows sorted by token count, each padded to its own length. 1 = one padded batch,
     # S0's numbers bit for bit. More saves device time but costs host time per forward
@@ -591,9 +595,21 @@ def closed_form_lr(row: dict[str, Any], cfg: S.ScheduleCfg) -> dict[str, float]:
 
 class ProcessSource:
     """`workers` spawned `actors.worker_main` processes over duplex pipes, each started
-    under `ops_contract.WORKER_THREAD_ENV`."""
+    under `ops_contract.WORKER_THREAD_ENV`.
 
-    def __init__(self, n: int, wcfg: dict[str, Any], sync: bool) -> None:
+    With `reader` (not with `sync`), one daemon thread (`_read`) receives every
+    worker's message as soon as it is sent, so the pipe reads (which release the GIL)
+    overlap the serving loop's own work instead of running inside it. A worker sends
+    again only after its reply, so each pipe has at most one message in flight, and
+    `ready` takes whatever has arrived, as `wait` would have shown it ready. The thread
+    hands a failure to the main thread instead of dying with it: a pipe that ends or
+    breaks, or a message that cannot be unpickled, arrives as an error item that
+    `ready` raises (naming the worker), and anything else that stops the thread does
+    too; `ready` never waits on a thread that is gone. It keeps reading through `stop`,
+    so a worker blocked sending a large message can finish it, read the stop and exit,
+    instead of being killed at the deadline (#1151 is the same for the update ranks)."""
+
+    def __init__(self, n: int, wcfg: dict[str, Any], sync: bool, reader: bool = False) -> None:
         ctx = get_context("spawn")
         self.sync = sync
         self.conns: list[Any] = []
@@ -606,36 +622,120 @@ class ProcessSource:
                 b.close()
                 self.conns.append(a)
                 self.procs.append(p)
+        #: The reader's summed seconds in `Connection.recv` (the pipe read and the
+        #: unpickle), which then sit outside the serving loop's `wait_s`; 0 without it.
+        self.recv_s = 0.0
+        self._got: dict[int, Any] = {}
+        self._inbox: queue.Queue[tuple[int, Any, BaseException | None]] | None = None
+        self._halt = threading.Event()
+        self._reader: threading.Thread | None = None
+        if reader and not sync:
+            self._inbox = queue.Queue()
+            self._reader = threading.Thread(
+                target=self._read, args=(list(self.conns),), name="e2e-pipe-reader", daemon=True
+            )
+            self._reader.start()
+
+    def _read(self, conns: list[Any]) -> None:
+        """Every worker's messages into `_inbox` as (wid, msg, None), and its failure as
+        (wid, None, exc); once halted, received messages are dropped. Ends when every
+        pipe has ended, or a failure of its own ends it, as (-1, None, exc)."""
+        inbox = self._inbox
+        assert inbox is not None
+        sel = selectors.DefaultSelector()
+        try:
+            for i, c in enumerate(conns):
+                sel.register(c, selectors.EVENT_READ, (i, c))
+            while sel.get_map():
+                for key, _ev in sel.select(timeout=0.5):
+                    i, c = key.data
+                    t = time.perf_counter()
+                    try:
+                        msg = c.recv()
+                    except BaseException as e:  # EOF, a torn or unpicklable message
+                        sel.unregister(c)  # its stream can no longer be trusted
+                        if not self._halt.is_set():
+                            inbox.put((i, None, e))
+                        continue
+                    self.recv_s += time.perf_counter() - t
+                    if not self._halt.is_set():
+                        inbox.put((i, msg, None))
+        except BaseException as e:  # handed over: `ready` raises it
+            inbox.put((-1, None, e))
+        finally:
+            sel.close()
+
+    def _take(self, block: bool) -> tuple[int, Any, BaseException | None] | None:
+        assert self._inbox is not None and self._reader is not None
+        while True:
+            try:
+                return self._inbox.get(timeout=5.0) if block else self._inbox.get_nowait()
+            except queue.Empty:
+                if not block:
+                    return None
+                if not self._reader.is_alive():  # all pipes ended without an error item
+                    raise RuntimeError("the pipe reader ended") from None
 
     def ready(self) -> list[int]:
         if self.sync:
             return list(range(len(self.conns)))
-        got = wait(self.conns)
-        return sorted(self.conns.index(c) for c in got)
+        if self._inbox is None:
+            got = wait(self.conns)
+            return sorted(self.conns.index(c) for c in got)
+        item = self._take(block=True)
+        while item is not None:
+            i, msg, err = item
+            if err is not None:
+                raise self._dead(i, err)
+            if i in self._got:
+                raise RuntimeError(f"rollout worker {i}: a second message before its reply")
+            self._got[i] = msg
+            item = self._take(block=False)
+        return sorted(self._got)
+
+    def _dead(self, wid: int, err: BaseException | None) -> RuntimeError:
+        """The error for worker `wid`'s pipe failing with `err`; a worker that is dead
+        has its exit code by then, normally (it may lag the EOF a moment)."""
+        deadline = time.time() + 0.5
+        while wid >= 0 and self.procs[wid].exitcode is None and time.time() < deadline:
+            time.sleep(0.02)
+        dead = [(w, p.pid, p.exitcode) for w, p in enumerate(self.procs) if p.exitcode is not None]
+        who = "the pipe reader" if wid < 0 else f"rollout worker {wid}"
+        e = RuntimeError(f"{who} failed: {err!r}; exited (wid, pid, exitcode): {dead}")
+        e.__cause__ = err
+        return e
 
     def recv(self, i: int) -> Any:
+        if self._inbox is not None:
+            return self._got.pop(i)
         try:
             return self.conns[i].recv()
-        except EOFError:
-            dead = [
-                (w, p.pid, p.exitcode) for w, p in enumerate(self.procs) if p.exitcode is not None
-            ]
-            raise RuntimeError(f"a rollout worker died: (wid, pid, exitcode) {dead}") from None
+        except EOFError as e:
+            raise self._dead(i, e) from e
 
     def send(self, i: int, msg: Any) -> None:
-        self.conns[i].send(msg)
+        try:
+            self.conns[i].send(msg)
+        except OSError as e:  # BrokenPipe: it died after its message
+            raise self._dead(i, e) from e
 
     def stop(self) -> None:
+        self._halt.set()
         for c in self.conns:
-            with contextlib.suppress(BrokenPipeError, OSError):
+            with contextlib.suppress(OSError):
                 c.send(("stop",))
-        deadline = time.time() + 30
+        deadline = time.time() + 30  # the reader drains meanwhile, so the workers can exit
         for p in self.procs:
             p.join(timeout=max(0.1, deadline - time.time()))
             if p.is_alive():
                 p.kill()  # workers ignore SIGTERM
                 p.join(timeout=10)
+        if self._reader is not None:  # every pipe has ended: it reads their EOFs and ends
+            self._reader.join(timeout=10)
+        for c in self.conns:
+            c.close()
         self.conns, self.procs = [], []
+        self._got.clear()
 
 
 # ── updaters ─────────────────────────────────────────────────────────────
@@ -1152,7 +1252,9 @@ class Learner:
             self.updater = ProcessUpdater(devs, self.rank_cfg(), self.init_path)
         Path(self.init_path).unlink(missing_ok=True)  # the ranks hold it now
         if self.source is None:
-            self.source = ProcessSource(cfg.workers, self.worker_cfg(), cfg.sync_rounds)
+            self.source = ProcessSource(
+                cfg.workers, self.worker_cfg(), cfg.sync_rounds, reader=cfg.pipe_reader
+            )
         elif not hasattr(self.source, "ready"):  # a factory: called with the worker cfg
             self.source = self.source(self.worker_cfg())
 
@@ -1392,6 +1494,7 @@ class Learner:
             "batch_rows": 0,
             "fwd_s": 0.0,
             "wait_s": 0.0,
+            "recv_s": 0.0,
             "policy_swaps": 0,
         }
 
@@ -1409,6 +1512,7 @@ class Learner:
         self.draw_log.append((c, seed, torch.rand(4, generator=probe, device=self.dev_i).tolist()))
         st = self._new_stats()
         t0 = time.time()
+        r0 = self.source.recv_s
         while self.n_new < cfg.iter_decisions:
             if self._stop_wanted():
                 return None
@@ -1474,6 +1578,7 @@ class Learner:
                 self._ingest_end(e, st)
             self._ops_tick()
         st["collect_s"] = time.time() - t0
+        st["recv_s"] = self.source.recv_s - r0
         st["collection"] = c
         st["sampler_seed"] = seed
         return st
@@ -2026,6 +2131,7 @@ class Learner:
             "collect_s": cst["collect_s"],
             "fwd_s": cst["fwd_s"],
             "wait_s": cst["wait_s"],
+            "recv_s": cst["recv_s"],
             "policy_swaps": cst["policy_swaps"],
             "batch_mean": cst["batch_rows"] / max(1, cst["batches"]),
             "rows": cst["rows"],
