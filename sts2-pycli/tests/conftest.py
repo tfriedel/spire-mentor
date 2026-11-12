@@ -101,6 +101,10 @@ _REQUIREMENTS: dict[str, tuple[Path, str]] = {
         _MONO / "logs" / "2026-11-07-instinct-live" / "run1-requests.jsonl.gz",
         "private run logs (logs/ is not exported) + the private Instinct net (data/e2e)",
     ),
+    "host_overrides": (
+        _PYCLI / "data" / "host_overrides.json",
+        "names game methods; not exported (GH #1299)",
+    ),
     "decomp_v0111": (
         _MONO / "sts2-wiki" / "decompiled" / "v0.111.0",
         "the C# decompilation (decompiled/ is not exported)",
@@ -177,6 +181,8 @@ _NEEDS: dict[str, str] = {
     "test_elite_gap_tools.py::test_takeover_records_both_first_turns_with_rollouts": "combat_bench",
     "test_leaf_correction.py::test_play_and_label_rebuilds_the_final_value": "combat_bench",
     # --- the e2e F9 ledger's card types, checked against the v0.111.0 decomp
+    # --- the reviewed override table (and the decomp the IlPatcher rows hash)
+    "test_host_override_fingerprints.py": "host_overrides",
     "e2e/test_e2e_invariants.py::test_no_v0111_power_is_typed_as_a_non_power": "decomp_v0111",
     "e2e/test_e2e_invariants.py::test_the_instanced_powers_match_the_decomp": "decomp_v0111",
 }

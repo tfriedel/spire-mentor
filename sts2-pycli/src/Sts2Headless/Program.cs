@@ -227,6 +227,10 @@ class Program
             case "legal_actions":
                 return sim.LegalActions();
 
+            // GH #1299: hash every game method a host prefix can skip.
+            case "override_fingerprints":
+                return OverrideFingerprints.Collect(cmd.TryGetProperty("dump", out var dmp) && dmp.GetBoolean());
+
             case "get_state":
                 return sim.GetState();
 
