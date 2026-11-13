@@ -225,7 +225,7 @@ internal class LocLookup
                 var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(file));
                 if (data != null) target[name] = data;
             }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
     }
 
@@ -327,6 +327,10 @@ public class RunSimulator
     // Pending rewards for card selection (populated after combat, before proceeding)
     private List<Reward>? _pendingRewards;
     private CardReward? _pendingCardReward;
+    // GH #1296 / #1315: the card reward's alternatives as last shown (Skip left
+    // out: skip_card_reward is that). Reroll (Driftwood) and Sacrifice (Pael's
+    // Wing) come from the game's own CardRewardAlternative.Generate.
+    private List<CardRewardAlternative> _shownAlternatives = new();
     // The room's further CardRewards, offered one after another once the
     // first resolves (TheHunt's Fatal extra, PrayerWheel's / WhiteStar's second reward).
     private readonly Queue<CardReward> _queuedCardRewards = new();
@@ -372,6 +376,11 @@ public class RunSimulator
 
     private readonly HeadlessCardSelector _cardSelector = new();
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
+    // Crystal Sphere played by the client (Referee.InteractiveSphere): the
+    // minigame parks here and each divination is one `crystal_sphere_click`.
+    private MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame? _pendingSphere;
+    private TaskCompletionSource? _pendingSphereTcs;
+
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
     // Pending shop card removal: the OnTryPurchaseWrapper task that finishes
@@ -403,6 +412,26 @@ public class RunSimulator
     // keeps the historical silent drop.
     private bool _interactivePotionSwap;
     private readonly List<PotionModel> _pendingPotionSwaps = new();
+
+    // GH #1282 (Referee.InteractiveRewards): the open reward screen. Each entry
+    // keeps the index it was first listed under, so taking one does not
+    // renumber the rest. A combat entry holds its Reward; a treasure entry
+    // holds the chest relic, which TreasureRoomRelicSynchronizer rolled on
+    // room entry. Null when no reward screen is open.
+    private sealed record RewardEntry(int Index, Reward? Reward, RelicModel? ChestRelic);
+    private List<RewardEntry>? _rewardScreen;
+    // GH #1296: a reward screen an event, relic or rest site opened
+    // (RewardsCmd.OfferCustom → RewardsSet.Offer → testSelector). The selector
+    // awaits `Choice` while the client takes or skips; the game task that
+    // offered the screen stays parked like one at a card selection.
+    private sealed record CustomRewardScreen(
+        List<RewardEntry> Entries, TaskCompletionSource<(string Command, int Index)> Choice);
+    private volatile CustomRewardScreen? _customScreen;
+    // The thread that answers the client. A screen offered on it cannot wait
+    // for the client (the wait would block the reply), so it is taken as before.
+    private readonly int _hostThreadId = Environment.CurrentManagedThreadId;
+    // The chest was opened (its gold paid out) in the current treasure room.
+    private bool _treasureOpened;
 
     /// <summary>
     /// After a reward was selected, park a potion reward that bounced off a
@@ -489,6 +518,8 @@ public class RunSimulator
             _loc.Lang = lang;
             _interactivePotionSwap = interactivePotionSwap;
             _pendingPotionSwaps.Clear();
+            _rewardScreen = null;
+            _treasureOpened = false;
             EnsureModelDbInitialized();
 
             var player = CreatePlayer(character, playedSave);
@@ -786,7 +817,7 @@ public class RunSimulator
         var vars = new Dictionary<string, object?>();
         if (relic != null)
         {
-            try { foreach (var dv in relic.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch { }
+            try { foreach (var dv in relic.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
         var d = new Dictionary<string, object?>
         {
@@ -811,7 +842,7 @@ public class RunSimulator
         var vars = new Dictionary<string, object?>();
         if (potion != null)
         {
-            try { foreach (var dv in potion.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch { }
+            try { foreach (var dv in potion.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
         var d = new Dictionary<string, object?>
         {
@@ -879,13 +910,13 @@ public class RunSimulator
         var relics = new List<object?>();
         foreach (var r in ModelDb.AllRelics)
         {
-            try { relics.Add(RelicOfferDict(r)); } catch { }
+            try { relics.Add(RelicOfferDict(r)); } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
 
         var potions = new List<object?>();
         foreach (var p in ModelDb.AllPotions)
         {
-            try { potions.Add(PotionOfferDict(p)); } catch { }
+            try { potions.Add(PotionOfferDict(p)); } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
 
         var cards = new List<object?>();
@@ -895,7 +926,7 @@ public class RunSimulator
             {
                 var cm = c.ToMutable();
                 var stats = new Dictionary<string, object?>();
-                try { foreach (var dv in cm.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in cm.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 cards.Add(new Dictionary<string, object?>
                 {
                     ["id"] = c.Id.Entry,
@@ -905,7 +936,7 @@ public class RunSimulator
                     ["upgraded"] = cm.IsUpgraded,
                 });
             }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
 
         return new Dictionary<string, object?>
@@ -1335,6 +1366,43 @@ public class RunSimulator
     public Dictionary<string, object?> LegalActions() =>
         _gameThread.Submit(LegalActionsImpl);
 
+    /// <summary>
+    /// GH #1282: what the potion popup allows outside combat, per held slot.
+    /// NPotionPopup.RefreshButtons out of combat: Use is enabled only for an
+    /// AnyTime potion that passes its own usability check (FoulPotion: the
+    /// merchant only); Discard always; both off while the player cannot
+    /// remove potions, and for a queued potion or a dead owner.
+    /// </summary>
+    public Dictionary<string, object?> PotionBelt() =>
+        _gameThread.Submit(() =>
+        {
+            if (_runState == null) return Error("No run in progress");
+            var player = _runState.Players[0];
+#if GAME_V0111
+            bool canRemove = player.CanUseOrRemovePotions;
+#else
+            bool canRemove = player.CanRemovePotions;
+#endif
+            bool alive = player.Creature != null && !player.Creature.IsDead;
+            var slots = new List<Dictionary<string, object?>>();
+            var held = player.Potions?.ToList() ?? new();
+            for (int i = 0; i < held.Count; i++)
+            {
+                var potion = held[i];
+                if (potion == null) continue;
+                bool open = canRemove && alive && !potion.IsQueued;
+                slots.Add(new Dictionary<string, object?>
+                {
+                    ["potion_index"] = i,
+                    ["usable"] = open
+                        && potion.Usage == MegaCrit.Sts2.Core.Entities.Potions.PotionUsage.AnyTime
+                        && potion.PassesCustomUsabilityCheck,
+                    ["discardable"] = open,
+                });
+            }
+            return new Dictionary<string, object?> { ["type"] = "ok", ["slots"] = slots };
+        });
+
     private Dictionary<string, object?> LegalActionsImpl()
     {
         try
@@ -1749,7 +1817,7 @@ public class RunSimulator
             }
 #endif
         }
-        catch { /* best-effort diagnostic */ }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); /* best-effort diagnostic */ }
         return d;
     }
 
@@ -1838,7 +1906,7 @@ public class RunSimulator
             if (RunManager.Instance.IsInProgress || _runState != null)
             {
                 Log("Cleaning up previous run before loading save");
-                try { RunManager.Instance.ActionExecutor.Cancel(); } catch { }
+                try { RunManager.Instance.ActionExecutor.Cancel(); } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 try { if (RunManager.Instance.IsInProgress) RunManager.Instance.CleanUp(graceful: true); } catch (Exception ex) { LogException("CleanUp", ex); }
                 ClearCardSelector();
                 // A task stashed by the OUTGOING run can never be driven by the
@@ -2144,6 +2212,8 @@ public class RunSimulator
                     return DoSelectCardReward(player, args);
                 case "skip_card_reward":
                     return DoSkipCardReward(player);
+                case "card_reward_alternative":
+                    return DoCardRewardAlternative(player, args);
                 case "buy_card":
                     return DoBuyCard(player, args);
                 case "buy_relic":
@@ -2164,10 +2234,17 @@ public class RunSimulator
                     return DoDiscardPotion(player, args);
                 case "potion_swap":
                     return DoPotionSwap(player, args);
+                case "crystal_sphere_click":
+                    return DoCrystalSphereClick(args);
+                case "take_reward":
+                    return _customScreen != null ? DoCustomReward("take", args) : DoTakeReward(player, args);
+                case "skip_reward":
+                    return _customScreen != null ? DoCustomReward("skip", args) : DoSkipReward(args);
                 case "leave_room":
                     return DoLeaveRoom(player);
                 case "proceed":
-                    return DoProceed(player);
+                    if (_customScreen != null) return DoCustomReward("proceed", args);
+                    return _rewardScreen != null ? DoProceedFromRewards() : DoProceed(player);
                 default:
                     return Error($"Unknown action: {action}");
             }
@@ -2194,6 +2271,8 @@ public class RunSimulator
         _eventOptionChosen = false;
         ResetEventAdvanceTracking();
         _pendingRewards = null;
+        _rewardScreen = null;
+        _treasureOpened = false;
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
 
         var col = Convert.ToInt32(args["col"]);
@@ -2652,6 +2731,77 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    /// <summary>
+    /// The card reward screen's extra buttons as the game builds them
+    /// (<c>CardRewardAlternative.Generate</c>, CardReward.OnSelect), minus Skip.
+    /// </summary>
+    private List<Dictionary<string, object?>> ShowAlternatives(IEnumerable<CardRewardAlternative>? alternatives)
+    {
+        _shownAlternatives = (alternatives ?? Enumerable.Empty<CardRewardAlternative>())
+            .Where(a => !string.Equals(a.OptionId, "Skip", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return _shownAlternatives.Select((a, i) => new Dictionary<string, object?>
+        {
+            ["index"] = i,
+            ["id"] = a.OptionId.ToUpperInvariant(),
+            ["name"] = _loc.Bilingual("card_reward_ui", "OPTION_" + a.OptionId.ToUpperInvariant() + ".name"),
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Press one of the card reward's alternative buttons. What follows is the
+    /// alternative's own <c>AfterSelected</c>, as in CardReward.OnSelect: Reroll
+    /// (DoNothing) shows the new cards, Sacrifice (EndSelectionAndCompleteReward)
+    /// closes the reward with no card.
+    /// </summary>
+    private Dictionary<string, object?> DoCardRewardAlternative(Player player, Dictionary<string, object?>? args)
+    {
+        if (args == null || !args.TryGetValue("alternative_index", out var raw) || raw == null)
+            return Error("card_reward_alternative requires 'alternative_index'");
+        int idx = Convert.ToInt32(raw);
+        if (idx < 0 || idx >= _shownAlternatives.Count)
+            return Error($"Invalid alternative index {idx}, {_shownAlternatives.Count} available");
+        var alternative = _shownAlternatives[idx];
+        Log($"Card reward alternative: {alternative.OptionId}");
+
+        // An event's reward: the game's own OnSelect loop is blocked in the
+        // selector; hand it the alternative and let it run on.
+        if (_cardSelector.HasPendingReward)
+        {
+            _cardSelector.ResolveAlternative(alternative);
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+            DrainEventOptionTaskIfDue();
+            DrivePurchaseTask();
+            DrainRestSiteTaskIfDue();
+            return DetectDecisionPoint();
+        }
+
+        if (_pendingCardReward == null)
+            return Error("No pending card reward");
+        try
+        {
+            alternative.OnSelect().GetAwaiter().GetResult();
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+        }
+        catch (Exception ex) { LogException("Card reward alternative", ex); }
+
+        switch (alternative.AfterSelected)
+        {
+            case MegaCrit.Sts2.Core.Entities.Rewards.PostAlternateCardRewardAction.EndSelectionAndCompleteReward:
+                // The reward is used up: what a pick does, without the card.
+                ReleaseCardReward(_pendingCardReward);
+                _pendingCardReward = _queuedCardRewards.Count > 0 ? _queuedCardRewards.Dequeue() : null;
+                break;
+            case MegaCrit.Sts2.Core.Entities.Rewards.PostAlternateCardRewardAction.EndSelectionAndDoNotCompleteReward:
+                return DoSkipCardReward(player);
+            default:
+                break;  // DoNothing (Reroll): the same reward, new cards
+        }
+        return DetectDecisionPoint();
+    }
+
     private Dictionary<string, object?> DoBuyCard(Player player, Dictionary<string, object?>? args)
     {
         if (_runState?.CurrentRoom is not MerchantRoom merchantRoom)
@@ -2682,13 +2832,15 @@ public class RunSimulator
 
     private Dictionary<string, object?> DoBuyRelic(Player player, Dictionary<string, object?>? args)
     {
-        if (_runState?.CurrentRoom is not MerchantRoom merchantRoom)
+        var fake = OpenFakeMerchant();
+        var merchantRoom = _runState?.CurrentRoom as MerchantRoom;
+        if (merchantRoom == null && fake == null)
             return Error("Not in a shop");
         if (args == null || !args.ContainsKey("relic_index"))
             return Error("buy_relic requires 'relic_index'");
 
         var idx = Convert.ToInt32(args["relic_index"]);
-        var entries = GameApi.LocalInventory(merchantRoom).RelicEntries;
+        var entries = fake != null ? fake.Inventory.RelicEntries : GameApi.LocalInventory(merchantRoom!).RelicEntries;
         if (idx < 0 || idx >= entries.Count) return Error($"Invalid relic index {idx}");
 
         var entry = entries[idx];
@@ -2716,12 +2868,14 @@ public class RunSimulator
             // selection surfaced, stash the purchase task in `_pendingPurchaseTask`
             // so DoSelectCards (MerchantRoom branch) drives it to completion after
             // the player resolves the selection.
-            var task = RunOnPool(() => GameApi.Purchase(entry, merchantRoom));
+            var task = RunOnPool(() => fake != null
+                ? GameApi.PurchaseFrom(entry, fake.Inventory)
+                : GameApi.Purchase(entry, merchantRoom!));
             WaitUntilOptionTaskSettles(task, "relic-purchase task or selection");
             // A `select_cards` screen (PARITY118's deck card-select) or a card
             // reward (Orrery's 5) parks the task in `_pendingPurchaseTask`;
             // DrivePurchaseTask carries it on after each resolution.
-            if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+            if (AnySelectionPending())
             {
                 _pendingPurchaseTask = task;
                 WaitForActionExecutor();
@@ -3023,8 +3177,15 @@ public class RunSimulator
         // so a null target silently no-ops the whole effect (the potion is
         // consumed but block/strength/energy never land). In single-player
         // AnyPlayer == the local player's creature.
-        if (potionTargetType == TargetType.Self
-            || potionTargetType == TargetType.TargetedNoCreature
+        // TargetedNoCreature (only Foul Potion outside combat, thrown at a
+        // merchant) takes NO target: UsePotionAction checks
+        // PotionModel.IsValidTarget, which accepts null and rejects any
+        // creature for that type, so passing the player cancelled the use.
+        if (potionTargetType == TargetType.TargetedNoCreature)
+        {
+            target = null;
+        }
+        else if (potionTargetType == TargetType.Self
             || potionTargetType == TargetType.AnyPlayer)
         {
             target = player.Creature;
@@ -3052,6 +3213,11 @@ public class RunSimulator
         // All other target types (None, All, etc.) → leave target as null
 
         Log($"Using potion: {potion.GetType().Name} at slot {idx} target={target?.GetType().Name ?? "none"}");
+        // GH #1294: Foul Potion thrown at the Fake Merchant. FoulPotion.OnUse
+        // reaches FakeMerchant.FoulPotionThrown only through the event's
+        // NFakeMerchant node, which a headless run lacks, so the throw is
+        // played here after the potion is used.
+        var foulAt = potion is MegaCrit.Sts2.Core.Models.Potions.FoulPotion ? OpenFakeMerchant() : null;
         try
         {
             var action = new MegaCrit.Sts2.Core.GameActions.UsePotionAction(potion, target, CombatManager.Instance.IsInProgress);
@@ -3072,7 +3238,19 @@ public class RunSimulator
         {
             LogException("Use potion failed", ex);
             // Try manual discard as fallback
-            try { MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potion).GetAwaiter().GetResult(); } catch { }
+            try { MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potion).GetAwaiter().GetResult(); } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
+        }
+
+        if (foulAt != null && !foulAt.StartedFight)
+        {
+            try
+            {
+                foulAt.FoulPotionThrown((MegaCrit.Sts2.Core.Models.Potions.FoulPotion)potion).GetAwaiter().GetResult();
+                _syncCtx.Pump();
+                WaitFor(() => _runState?.CurrentRoom is CombatRoom, 2000, "Fake Merchant fight room");
+                if (_runState?.CurrentRoom is CombatRoom) DriveNestedEventCombatToPlayPhase();
+            }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
 
         return DetectDecisionPoint();
@@ -3117,7 +3295,7 @@ public class RunSimulator
                 // `ModifyRestSiteHealRewards` card goes through
                 // `RewardsCmd.OfferCustom` INSIDE `ChooseOption`, before its
                 // tail clears the options (`RestSiteSynchronizer.cs:140-149`).
-                if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+                if (AnySelectionPending())
                 {
                     // Stash the task so DoSelectCards / DoSelectCardReward /
                     // DoSkipCardReward can await its completion (the upgrade,
@@ -3194,7 +3372,7 @@ public class RunSimulator
                         // as the task is still making progress, so the selection is
                         // ALWAYS observed and the task ALWAYS stashed/driven.
                         WaitUntilOptionTaskSettles(task, "event option task or selection/bundle");
-                        if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
+                        if (AnySelectionPending())
                         {
                             // The option's `Chosen()` (e.g. a relic AfterObtained that
                             // opens a card selection) is suspended at the `await`. Stash
@@ -3252,6 +3430,7 @@ public class RunSimulator
                 if (!localEvent.IsFinished && !advanced && optCountAfter > 0)
                 {
                     Log($"Event {localEvent.GetType().Name} didn't advance, force-finishing");
+                    HostFaults.Record($"force-finish:no-advance:{localEvent.GetType().Name}", null);
                     ForceToMap();
                 }
             }
@@ -3265,7 +3444,7 @@ public class RunSimulator
     {
         Log("Leaving room");
         try { GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult(); }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         _syncCtx.Pump();
         WaitForActionExecutor();
 
@@ -3326,12 +3505,23 @@ public class RunSimulator
 
     #region Decision Point Detection
 
+    /// <summary>Set when the player abandons the run; the next decision is game over.</summary>
+    internal static volatile bool RunAbandoned;
+
     private Dictionary<string, object?> DetectDecisionPoint()
     {
         if (_runState == null)
             return Error("No run in progress");
 
         var player = _runState.Players[0];
+
+        // The player abandoned the run (Trial.DoubleDown): over, and lost.
+        if (RunAbandoned)
+        {
+            var abandoned = GameOverState(false);
+            abandoned["abandoned"] = true;
+            return abandoned;
+        }
 
         // Check game over (death). A WON run also ends with dead players:
         // RunManager.WinRun → OnEnded(isVictory: true) → GuaranteeKillAllPlayers.
@@ -3348,6 +3538,23 @@ public class RunSimulator
         if (_pendingPotionSwaps.Count > 0)
             return PotionSwapState(player);
 
+        if (_pendingSphere != null)
+            return CrystalSphereState(player, _pendingSphere);
+
+        if (_customScreen is { } customScreen)
+        {
+            var state = new Dictionary<string, object?>
+            {
+                ["type"] = "decision",
+                ["decision"] = "rewards",
+                ["context"] = RunContext(),
+                ["rewards"] = customScreen.Entries.Select(RewardItem).ToList(),
+                ["from_event"] = true,
+                ["player"] = PlayerSummary(player),
+            };
+            return state;
+        }
+
         // Check if there's a pending bundle selection (Scroll Boxes: pick 1 of N packs)
         if (_pendingBundles != null && _pendingBundleTcs != null && !_pendingBundleTcs.Task.IsCompleted)
         {
@@ -3357,9 +3564,10 @@ public class RunSimulator
                 ["cards"] = bundle.Select(card =>
                 {
                     var stats = new Dictionary<string, object?>();
-                    try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                    try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                     return new Dictionary<string, object?>
                     {
+                        ["id"] = card.Id.ToString(),
                         ["name"] = _loc.Card(card.Id.Entry),
                         ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
                         ["type"] = card.Type.ToString(),
@@ -3386,7 +3594,7 @@ public class RunSimulator
             var cards = rewardCards.Select((cr, i) =>
             {
                 var stats = new Dictionary<string, object?>();
-                try { foreach (var dv in cr.Card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in cr.Card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -3394,6 +3602,7 @@ public class RunSimulator
                     ["name"] = _loc.Card(cr.Card.Id.Entry),
                     ["cost"] = cr.Card.EnergyCost?.GetResolved() ?? 0,
                     ["type"] = cr.Card.Type.ToString(),
+                    ["upgraded"] = cr.Card.IsUpgraded,
                     ["rarity"] = cr.Card.Rarity.ToString(),
                     ["description"] = _loc.Bilingual("cards", cr.Card.Id.Entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
@@ -3408,6 +3617,7 @@ public class RunSimulator
                 ["context"] = RunContext(),
                 ["cards"] = cards,
                 ["can_skip"] = true,
+                ["alternatives"] = ShowAlternatives(_cardSelector.PendingRewardAlternatives),
                 ["from_event"] = true,
                 ["player"] = PlayerSummary(_runState!.Players[0]),
             };
@@ -3420,7 +3630,7 @@ public class RunSimulator
             var opts = _cardSelector.PendingOptions.Select((card, i) =>
             {
                 var stats = new Dictionary<string, object?>();
-                try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -3522,6 +3732,11 @@ public class RunSimulator
         // Event room
         if (room is EventRoom eventRoom)
         {
+            // GH #1294: the Fake Merchant has no options; its page is a shop
+            // (NFakeMerchant + NMerchantInventory over FakeMerchant.Inventory)
+            // and Proceed only opens the map (NFakeMerchant.HideScreen).
+            if (OpenFakeMerchant() is { } fake)
+                return FakeMerchantShopState(fake, player);
             return EventChoiceState(eventRoom);
         }
 
@@ -3606,7 +3821,7 @@ public class RunSimulator
                 if (dv.Name == "Rooms")
                     return (int)dv.BaseValue;
         }
-        catch { /* fall through to default */ }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); /* fall through to default */ }
         return 3;
     }
 
@@ -3873,7 +4088,7 @@ public class RunSimulator
                 fieldName,
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     /// <summary>
@@ -3886,7 +4101,7 @@ public class RunSimulator
     private static bool SafeCardBool(Func<bool> read)
     {
         try { return read(); }
-        catch { return false; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return false; }
     }
 
     private static int? SafeRelicCounter(RelicModel r)
@@ -3904,7 +4119,7 @@ public class RunSimulator
             }
             return null;
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     private static Dictionary<string, object?>? PowerVars(PowerModel pw)
@@ -3930,7 +4145,7 @@ public class RunSimulator
                 d["Facing"] = Convert.ToInt32(facing, System.Globalization.CultureInfo.InvariantCulture);
             return d.Count > 0 ? d : null;
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     /// <summary>
@@ -3966,7 +4181,7 @@ public class RunSimulator
                 fieldName,
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     /// <summary>
@@ -3990,7 +4205,7 @@ public class RunSimulator
                 && KnowledgeDemonCurseCounterField.GetValue(m) is int curse)
                 d["curse_of_knowledge_counter"] = curse;
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         AppendMoveMachineState(d, m);
     }
 
@@ -4041,7 +4256,7 @@ public class RunSimulator
                 ai["forced_next"] = m.NextMove.FollowUpStateId;
             d["ai"] = ai;
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
     }
 
     // Null when the cost model cannot be read at all — NOT -1, which the
@@ -4058,7 +4273,7 @@ public class RunSimulator
             var v = ec.GetWithModifiers(CostModifiers.Local);
             return v < 0 ? -1 : v;
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     // CardEnergyCost._localModifiers. The list itself is the one piece of the
@@ -4162,7 +4377,7 @@ public class RunSimulator
             }
             return Math.Max(0, cost);
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     /// <summary>
@@ -4203,12 +4418,12 @@ public class RunSimulator
                         intentInfo["damage"] = atk.GetSingleDamage(playerCreatures, e);
                         intentInfo["hits"] = atk.Repeats;
                     }
-                    catch { }
+                    catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 }
                 intents.Add(intentInfo);
             }
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         return intents;
     }
 
@@ -4221,7 +4436,7 @@ public class RunSimulator
             foreach (var dv in c.DynamicVars.Values)
                 stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue;
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         var starCost = c.BaseStarCost;
         var cardInfo = new Dictionary<string, object?>
@@ -4312,12 +4527,12 @@ public class RunSimulator
         if (c.Enchantment != null)
         {
             cardInfo["enchantment"] = _loc.Bilingual("enchantments", c.Enchantment.Id.Entry + ".title");
-            try { if (c.Enchantment.Amount != 0) cardInfo["enchantment_amount"] = c.Enchantment.Amount; } catch { }
+            try { if (c.Enchantment.Amount != 0) cardInfo["enchantment_amount"] = c.Enchantment.Amount; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
         if (c.Affliction != null)
         {
             cardInfo["affliction"] = _loc.Bilingual("afflictions", c.Affliction.Id.Entry + ".title");
-            try { if (c.Affliction.Amount != 0) cardInfo["affliction_amount"] = c.Affliction.Amount; } catch { }
+            try { if (c.Affliction.Amount != 0) cardInfo["affliction_amount"] = c.Affliction.Amount; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
         return cardInfo;
     }
@@ -4521,7 +4736,7 @@ public class RunSimulator
                 playPile = inPlay.Select((c, i) =>
                     SerializeCombatCard(c, i, pcs, includePlayability: false)).ToList();
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         List<Dictionary<string, object?>> exhaustPile = new();
         try
         {
@@ -4530,7 +4745,7 @@ public class RunSimulator
                 exhaustPile = exhaust.Select((c, i) =>
                     SerializeCombatCard(c, i, pcs, includePlayability: false)).ToList();
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         // Per-turn play state the mid-turn ShouldPlay gates need (Ringing /
         // Normality / Sloth buckets + ChainsOfBinding's once-per-turn Bound
@@ -4544,7 +4759,7 @@ public class RunSimulator
             if (BoundCardPlayedThisTurn(combatState, player.Creature))
                 playerSummary["bound_card_played_this_turn"] = true;
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         var result = new Dictionary<string, object?>
         {
@@ -4723,6 +4938,7 @@ public class RunSimulator
             // reward surfaces / drains cleanly on the next decision detect.
             _rewardsProcessed = false;
             _pendingRewards = null;
+            _rewardScreen = null;
             DropCardRewards();
             _queuedRemovalRewards.Clear();
             _removalRewardTask = null;
@@ -4764,6 +4980,16 @@ public class RunSimulator
                 MegaCrit.Sts2.Core.Hooks.Hook.BeforeCombatRewardOffered(rewardsSet, _runState!, combatRoom).GetAwaiter().GetResult();
                 _syncCtx.Pump();
 #endif
+
+                // GH #1282: the player takes or skips each reward, in any
+                // order (DoTakeReward / DoSkipReward / DoProceedFromRewards).
+                if (Referee.InteractiveRewards)
+                {
+                    DropCardRewards();
+                    _rewardScreen = rewards.Select((r, i) => new RewardEntry(i, r, null)).ToList();
+                    _pendingRewards = rewards;
+                    return DetectDecisionPoint();
+                }
 
                 // Auto-collect gold and potions, but present card choices to agent
                 var cardRewards = new List<CardReward>();
@@ -4813,6 +5039,15 @@ public class RunSimulator
                 _pendingRewards = null;
             }
             catch (Exception ex) { LogException("Generate rewards", ex); }
+        }
+
+        // GH #1282: the reward screen stays open until the player proceeds.
+        // A card removal reward the player took opens its deck select first.
+        if (_rewardScreen != null)
+        {
+            if (OfferNextCardRemovalReward()) return DetectDecisionPoint();
+            if (_rewardScreen.Count > 0) return RewardScreenState(player);
+            _rewardScreen = null;  // everything taken: nothing left to decide
         }
 
         // No more pending rewards — proceed
@@ -4900,7 +5135,7 @@ public class RunSimulator
         var cards = _pendingCardReward.Cards.Select((c, i) =>
         {
             var stats = new Dictionary<string, object?>();
-            try { foreach (var dv in c.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+            try { foreach (var dv in c.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
             return new Dictionary<string, object?>
             {
                 ["index"] = i,
@@ -4909,6 +5144,9 @@ public class RunSimulator
                 ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
+                // A reward card can come already upgraded (act 2+ odds, an egg
+                // relic); without the flag it reads as the plain card.
+                ["upgraded"] = c.IsUpgraded,
                 ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["after_upgrade"] = GetUpgradedInfo(c),
@@ -4922,6 +5160,7 @@ public class RunSimulator
             ["context"] = RunContext(),
             ["cards"] = cards,
             ["can_skip"] = _pendingCardReward.CanSkip,
+            ["alternatives"] = ShowAlternatives(CardRewardAlternative.Generate(_pendingCardReward)),
             ["gold_earned"] = _runState!.Players[0].Gold - _goldBeforeCombat,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
@@ -4944,10 +5183,11 @@ public class RunSimulator
 
         try
         {
+            HostFaults.MaybeInject("ForceToMap");  // GH #1283 fail-closed test
             GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
             _syncCtx.Pump();
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         if (_runState?.CurrentRoom is not MapRoom)
         {
@@ -4978,6 +5218,7 @@ public class RunSimulator
             if (stuck)
             {
                 Log($"Event {localEvent.GetType().Name}: same options after choice, force-finishing");
+            HostFaults.Record($"force-finish:same-options:{localEvent.GetType().Name}", null);
                 _eventOptionChosen = false;
                 ForceToMap();
                 return MapSelectState();
@@ -4995,12 +5236,12 @@ public class RunSimulator
                 GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
                 _syncCtx.Pump();
             }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
             // Force to map if still in event room
             if (_runState?.CurrentRoom is EventRoom)
             {
                 try { RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult(); _syncCtx.Pump(); }
-                catch { }
+                catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
             }
             return _runState?.CurrentRoom is MapRoom ? MapSelectState() : DetectDecisionPoint();
         }
@@ -5010,7 +5251,7 @@ public class RunSimulator
         {
             Log($"Event {localEvent.GetType().Name} has no options, auto-skipping");
             try { RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult(); _syncCtx.Pump(); }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
             return MapSelectState();
         }
 
@@ -5077,7 +5318,7 @@ public class RunSimulator
                             optVars[dv.Name] = (int)dv.BaseValue;
                     }
                 }
-                catch { }
+                catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 // Relic-offer options (event relic pools — e.g. Nonupeipe's
                 // SignetRing — and Neow) carry their relic model directly on the
                 // option. Pull its DynamicVars so {Gold}/{Heal}/… resolve to real
@@ -5095,7 +5336,7 @@ public class RunSimulator
                         var optionId = parts.Length > 0 ? parts[^1] : opt.TextKey;
                         optRelic = ModelDb.GetByIdOrNull<RelicModel>(new ModelId("RELIC", optionId))?.ToMutable();
                     }
-                    catch { }
+                    catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 }
                 if (optRelic != null)
                 {
@@ -5105,7 +5346,7 @@ public class RunSimulator
                         foreach (var dv in optRelic.DynamicVars.Values)
                             optVars[dv.Name] = (int)dv.BaseValue;
                     }
-                    catch { }
+                    catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 }
 
                 // The game's OWN verdict on whether taking this option ends the run,
@@ -5222,6 +5463,39 @@ public class RunSimulator
         };
     }
 
+    /// <summary>The local Fake Merchant event while its shop is open: the
+    /// player is still in its room and no Foul Potion fight started. The
+    /// event is already finished on entry (no options:
+    /// <c>EventModel.SetEventState</c>), so that flag says nothing here.</summary>
+    private MegaCrit.Sts2.Core.Models.Events.FakeMerchant? OpenFakeMerchant() =>
+        _runState?.CurrentRoom is EventRoom
+        && RunManager.Instance.EventSynchronizer?.GetLocalEvent() is MegaCrit.Sts2.Core.Models.Events.FakeMerchant fake
+        && !fake.StartedFight && fake.Inventory != null
+            ? fake : null;
+
+    private Dictionary<string, object?> FakeMerchantShopState(MegaCrit.Sts2.Core.Models.Events.FakeMerchant fake, Player player)
+    {
+        var relics = fake.Inventory.RelicEntries.Select((e, i) =>
+        {
+            var dict = RelicOfferDict(e.Model, i);
+            dict["cost"] = e.Cost;
+            dict["is_stocked"] = e.IsStocked;
+            return dict;
+        }).ToList();
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "shop",
+            ["event_name"] = "FAKE_MERCHANT",
+            ["context"] = RunContext(),
+            ["cards"] = new List<object?>(),
+            ["relics"] = relics,
+            ["potions"] = new List<object?>(),
+            ["card_removal_cost"] = null,
+            ["player"] = PlayerSummary(player),
+        };
+    }
+
     private Dictionary<string, object?> ShopState(MerchantRoom merchantRoom, Player player)
     {
         var inv = GameApi.LocalInventory(merchantRoom);
@@ -5239,12 +5513,17 @@ public class RunSimulator
                     if (card != null)
                     {
                         cardCost = card.EnergyCost?.GetResolved() ?? 0;
-                        var mutable = card.ToMutable();
+                        // A stocked card is already mutable, so ToMutable()
+                        // throws MutableModelException and the shop loses every
+                        // card's stats (GH #1283 census: ~40% of runs). Fixed in
+                        // referee mode only: the default payload feeds measured
+                        // pipelines, so changing it there is a separate decision.
+                        var mutable = Referee.Mode && card.IsMutable ? card : card.ToMutable();
                         foreach (var dv in mutable.DynamicVars.Values)
                             stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue;
                     }
                 }
-                catch { }
+                catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -5295,8 +5574,267 @@ public class RunSimulator
         };
     }
 
+    #region Reward screen (GH #1282)
+
+    // In the game every reward on the reward screen is optional and taken in
+    // any order (NRewardsScreen); the chest relic can be skipped too
+    // (TreasureRoomRelicSynchronizer.SkipRelicLocally). With
+    // Referee.InteractiveRewards the host lists them as a `rewards` decision:
+    // take_reward / skip_reward by the index each was first listed under, and
+    // proceed to leave the rest. A potion that meets a full belt still parks
+    // the potion_swap decision (NotePotionRewardOutcome); a taken card reward
+    // opens the card_reward decision; a taken card removal its deck select.
+
+    private Dictionary<string, object?> RewardScreenState(Player player) => new()
+    {
+        ["type"] = "decision",
+        ["decision"] = "rewards",
+        ["context"] = RunContext(),
+        ["rewards"] = _rewardScreen!.Select(RewardItem).ToList(),
+        ["player"] = PlayerSummary(player),
+    };
+
+    private Dictionary<string, object?> RewardItem(RewardEntry entry)
+    {
+        var item = new Dictionary<string, object?> { ["index"] = entry.Index };
+        void Relic(RelicModel relic)
+        {
+            item["type"] = "relic";
+            item["id"] = relic.Id.Entry;
+            item["name"] = _loc.Relic(relic.Id.Entry);
+            item["description"] = _loc.Bilingual("relics", relic.Id.Entry + ".description");
+        }
+        if (entry.ChestRelic != null)
+        {
+            Relic(entry.ChestRelic);
+            return item;
+        }
+        switch (entry.Reward)
+        {
+            case GoldReward gold:
+                item["type"] = "gold";
+                item["amount"] = gold.Amount;
+                break;
+            case MegaCrit.Sts2.Core.Rewards.RelicReward relic when relic.Relic != null:
+                Relic(relic.Relic);
+                break;
+            case MegaCrit.Sts2.Core.Rewards.PotionReward potion when potion.Potion != null:
+                item["type"] = "potion";
+                item["id"] = potion.Potion.Id.Entry;
+                item["name"] = _loc.Potion(potion.Potion.Id.Entry);
+                item["description"] = _loc.Bilingual("potions", potion.Potion.Id.Entry + ".description");
+                break;
+            case MegaCrit.Sts2.Core.Rewards.SpecialCardReward special:
+                item["type"] = "special_card";
+                if (special.GetType().GetField("_card", NonPublic)?.GetValue(special) is CardModel card)
+                {
+                    item["id"] = card.Id.ToString();
+                    item["name"] = _loc.Card(card.Id.Entry);
+                    item["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description");
+                }
+                break;
+            case CardReward:
+                // The button only says "add a card"; the cards show once taken.
+                item["type"] = "card";
+                break;
+            case CardRemovalReward:
+                item["type"] = "card_removal";
+                break;
+            default:
+                item["type"] = "other";
+                item["name"] = entry.Reward?.GetType().Name;
+                break;
+        }
+        return item;
+    }
+
+    private RewardEntry? FindRewardEntry(Dictionary<string, object?>? args)
+    {
+        if (_rewardScreen == null || args == null || !args.TryGetValue("reward_index", out var raw) || raw == null)
+            return null;
+        int index = Convert.ToInt32(raw);
+        return _rewardScreen.FirstOrDefault(e => e.Index == index);
+    }
+
+    private Dictionary<string, object?> DoTakeReward(Player player, Dictionary<string, object?>? args)
+    {
+        var entry = FindRewardEntry(args);
+        if (entry == null) return Error("take_reward: no such reward on the reward screen");
+        _rewardScreen!.Remove(entry);
+        if (entry.ChestRelic != null)
+        {
+            CollectTreasureRelic();
+            return DetectDecisionPoint();
+        }
+        switch (entry.Reward)
+        {
+            case CardReward cardReward:
+                Log("take_reward: opening a card reward");
+                _pendingCardReward = cardReward;
+                break;
+            case CardRemovalReward removal:
+                Log("take_reward: opening a card removal");
+                _queuedRemovalRewards.Enqueue(removal);
+                break;
+            case Reward reward:
+                Log($"take_reward: {reward.GetType().Name}");
+                try
+                {
+                    // Same call the auto-collect path makes.
+                    reward.SelectUnsynchronized().GetAwaiter().GetResult();
+                    _syncCtx.Pump();
+                    NotePotionRewardOutcome(reward);
+                }
+                catch (Exception ex) { LogException("Take reward", ex); }
+                break;
+        }
+        return DetectDecisionPoint();
+    }
+
+    private void SkipRewardEntry(RewardEntry entry)
+    {
+        if (entry.ChestRelic != null)
+        {
+            Log($"skip_reward: chest relic {entry.ChestRelic.Id.Entry}");
+            try
+            {
+                var chestSync = RunManager.Instance.TreasureRoomRelicSynchronizer;
+                chestSync.SkipRelicLocally();
+                WaitForActionExecutor();
+                _syncCtx.Pump();
+            }
+            catch (Exception ex) { LogException("Skip chest relic", ex); }
+            return;
+        }
+        Log($"skip_reward: {entry.Reward?.GetType().Name}");
+        // What leaving the screen does to every reward not taken
+        // (RewardsSetSynchronizer.SkipRewardsSet): history entries, and a
+        // CardReward drops its RelicObtained subscription.
+        try { entry.Reward?.OnSkipped(); }
+        catch (Exception ex) { LogException("Skip reward", ex); }
+    }
+
+    /// <summary>
+    /// The reward screen an event or relic offers, under Referee.InteractiveRewards
+    /// (GH #1296): list the rewards, take or skip each as the client says, in its
+    /// order; leaving skips the rest, as dismissing NRewardsScreen does
+    /// (RewardsSetSynchronizer.SkipLocalRewardsSet). Runs inside the game's
+    /// RewardsSet.Offer, on the task that offered the screen.
+    /// </summary>
+    internal async Task PlayCustomRewardScreen(RewardsSet set, MegaCrit.Sts2.Core.Multiplayer.Game.RewardsSetSynchronizer sync)
+    {
+        var entries = set.Rewards.Select((r, i) => new RewardEntry(i, r, null)).ToList();
+        while (entries.Count > 0 && !sync.IsRewardsSetCompleted(set))
+        {
+            var choice = new TaskCompletionSource<(string Command, int Index)>();
+            _customScreen = new CustomRewardScreen(entries, choice);
+            var (command, index) = await choice.Task;
+            if (command == "proceed") break;
+            var entry = entries.First(e => e.Index == index);
+            entries.Remove(entry);
+            if (command == "take")
+            {
+                Log($"take_reward (event screen): {entry.Reward!.GetType().Name}");
+                await sync.SelectLocalReward(entry.Reward!);
+                NotePotionRewardOutcome(entry.Reward!);
+            }
+            else Log($"skip_reward (event screen): {entry.Reward?.GetType().Name}");
+        }
+        _customScreen = null;
+        if (!sync.IsRewardsSetCompleted(set)) sync.SkipLocalRewardsSet();
+    }
+
+    /// <summary>
+    /// The client's answer to an event's reward screen: hand it to the waiting
+    /// selector, then carry the parked game task on to its next stop.
+    /// </summary>
+    private Dictionary<string, object?> DoCustomReward(string command, Dictionary<string, object?>? args)
+    {
+        var screen = _customScreen!;
+        int index = -1;
+        if (command != "proceed")
+        {
+            if (args == null || !args.TryGetValue("reward_index", out var raw) || raw == null)
+                return Error($"{command}_reward requires 'reward_index'");
+            index = Convert.ToInt32(raw);
+            if (screen.Entries.All(e => e.Index != index))
+                return Error($"{command}_reward: no such reward on the reward screen");
+        }
+        _customScreen = null;
+        // From the pool, as ResolveSelection does: the continuation runs inline
+        // and can block in GetSelectedCardReward (a card reward on the screen).
+        var done = Task.Run(() => screen.Choice.TrySetResult((command, index)));
+        WaitFor(() => done.IsCompleted || AnySelectionPending(), 30000,
+            "event reward screen (until done or the next selection)");
+        _syncCtx.Pump();
+        WaitForActionExecutor(stopOnSelection: true);
+        DrainEventOptionTaskIfDue();
+        DrivePurchaseTask();
+        DrainRestSiteTaskIfDue();
+        return DetectDecisionPoint();
+    }
+
+    private Dictionary<string, object?> DoSkipReward(Dictionary<string, object?>? args)
+    {
+        var entry = FindRewardEntry(args);
+        if (entry == null) return Error("skip_reward: no such reward on the reward screen");
+        _rewardScreen!.Remove(entry);
+        SkipRewardEntry(entry);
+        return DetectDecisionPoint();
+    }
+
+    /// <summary>Leaves the reward screen; every reward still on it is skipped.</summary>
+    private Dictionary<string, object?> DoProceedFromRewards()
+    {
+        foreach (var entry in _rewardScreen!) SkipRewardEntry(entry);
+        _rewardScreen = null;
+        return DetectDecisionPoint();
+    }
+
+    /// <summary>
+    /// The treasure room under Referee.InteractiveRewards: the chest's gold is
+    /// paid on opening, as in the game (OneOffSynchronizer.DoTreasureRoomRewards);
+    /// its relic goes on the reward screen; leaving runs the extra rewards and
+    /// returns to the map.
+    /// </summary>
+    private Dictionary<string, object?> InteractiveTreasureState(TreasureRoom treasureRoom)
+    {
+        var player = _runState!.Players[0];
+        if (!_treasureOpened)
+        {
+            _treasureOpened = true;
+            Log("Treasure room — opening the chest");
+            WaitForActionExecutor();
+            _syncCtx.Pump();
+            try
+            {
+                treasureRoom.DoNormalRewards().GetAwaiter().GetResult();
+                _syncCtx.Pump();
+            }
+            catch (Exception ex) { LogException("Treasure rewards", ex); }
+            var rolled = RunManager.Instance.TreasureRoomRelicSynchronizer.CurrentRelics;
+            _rewardScreen = rolled is { Count: > 0 }
+                ? new List<RewardEntry> { new(0, null, rolled[0]) }
+                : null;
+        }
+        if (_rewardScreen is { Count: > 0 }) return RewardScreenState(player);
+        _rewardScreen = null;
+        try
+        {
+            treasureRoom.DoExtraRewardsIfNeeded().GetAwaiter().GetResult();
+            _syncCtx.Pump();
+        }
+        catch (Exception ex) { LogException("Treasure extra rewards", ex); }
+        ForceToMap();
+        return MapSelectState();
+    }
+
+    #endregion
+
     private Dictionary<string, object?> TreasureState(TreasureRoom treasureRoom)
     {
+        if (Referee.InteractiveRewards) return InteractiveTreasureState(treasureRoom);
+
         // Treasure rooms give relics via TreasureRoomRelicSynchronizer
         Log("Treasure room — collecting rewards");
 
@@ -5602,7 +6140,8 @@ public class RunSimulator
     /// selection / reward / bundle that the client must resolve before the
     /// suspended event-option task can make further progress.</summary>
     private bool AnySelectionPending() =>
-        _cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null;
+        _cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null
+        || _pendingSphere != null || _customScreen != null;
 
     /// <summary>
     /// Pump the sync context until a freshly-launched handler <paramref name="task"/>
@@ -5806,7 +6345,7 @@ public class RunSimulator
             clone.FinalizeUpgradeInternal();
 
             var stats = new Dictionary<string, object?>();
-            try { foreach (var dv in clone.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+            try { foreach (var dv in clone.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
             // Compare keywords before/after upgrade
             var oldKws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToHashSet() ?? new();
@@ -5823,7 +6362,7 @@ public class RunSimulator
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
         }
-        catch { return null; }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
     }
 
     /// <summary>
@@ -5900,7 +6439,7 @@ public class RunSimulator
             ["relics"] = player.Relics?.Select(r =>
             {
                 var vars = new Dictionary<string, object?>();
-                try { foreach (var dv in r.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in r.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 return new Dictionary<string, object?>
                 {
                     // Entry id alongside the display name: the parity harness
@@ -5945,7 +6484,7 @@ public class RunSimulator
             {
                 if (p == null) return null;
                 var pvars = new Dictionary<string, object?>();
-                try { foreach (var dv in p.DynamicVars.Values) pvars[dv.Name] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in p.DynamicVars.Values) pvars[dv.Name] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -5972,7 +6511,7 @@ public class RunSimulator
             ["deck"] = player.Deck?.Cards?.Where(c => c != null).Select(c =>
             {
                 var dstats = new Dictionary<string, object?>();
-                try { foreach (var dv in c.DynamicVars.Values) dstats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in c.DynamicVars.Values) dstats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 var dkws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
                 return new Dictionary<string, object?>
                 {
@@ -6024,7 +6563,7 @@ public class RunSimulator
                 };
             }
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         return ctx;
     }
@@ -6214,10 +6753,13 @@ public class RunSimulator
         // matching the Rust impl in combat_loop::start_player_turn so card
         // identities + RNG stay in lockstep (sts2-rs-isooo, q6bix
         // PILE_COUNT: ENTROPY).
-        PatchPowerAfterPlayerTurnStart(
-            "MegaCrit.Sts2.Core.Models.Powers.EntropyPower",
-            nameof(YieldPatches.EntropyAfterPlayerTurnStartPrefix),
-            "EntropyPower.AfterPlayerTurnStart");
+        // Referee.InteractiveTurnStartPicks: the game's own hook runs and its
+        // pick surfaces through DoEndTurn's pending-selection path.
+        if (!Referee.InteractiveTurnStartPicks)
+            PatchPowerAfterPlayerTurnStart(
+                "MegaCrit.Sts2.Core.Models.Powers.EntropyPower",
+                nameof(YieldPatches.EntropyAfterPlayerTurnStartPrefix),
+                "EntropyPower.AfterPlayerTurnStart");
 
         // Per-read RNG tracer (sts2-rs-adsld / shuffle-op cascade diagnosis).
         // Gated on the STS2_TRACE_RNG env var — the Harmony patch is only
@@ -6374,6 +6916,18 @@ public class RunSimulator
     /// </summary>
     private static UnlockState BuildUnlockState(bool playedSave)
     {
+        // Diagnostics (GH #1286): STS2_LOCKED_EPOCHS=A,B leaves those epochs
+        // unrevealed, to test whether a recorded run's content differences are
+        // the player's unlocks. Never in referee mode.
+        var locked = Environment.GetEnvironmentVariable("STS2_LOCKED_EPOCHS");
+        if (!playedSave && !Referee.Mode && !string.IsNullOrWhiteSpace(locked))
+        {
+            var drop = locked.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+            foreach (var id in drop.Where(d => !EpochModel.AllEpochIds.Contains(d)))
+                Console.Error.WriteLine($"[WARN] STS2_LOCKED_EPOCHS: unknown epoch {id}; known: {string.Join(",", EpochModel.AllEpochIds)}");
+            return new UnlockState(EpochModel.AllEpochIds.Where(e => !drop.Contains(e)),
+                ModelDb.AllEncounters.Select(e => e.Id), 999999999);
+        }
         if (!playedSave)
             return UnlockState.all;
 
@@ -7258,7 +7812,7 @@ public class RunSimulator
                 stack?.GetType().GetMethod("Clear")?.Invoke(stack, null);
             }
         }
-        catch (Exception ex) { Console.Error.WriteLine($"[WARN] ClearCardSelector: {ex.Message}"); }
+        catch (Exception ex) { HostFaults.Swallowed(ex); Console.Error.WriteLine($"[WARN] ClearCardSelector: {ex.Message}"); }
     }
 
 
@@ -7471,6 +8025,155 @@ public class RunSimulator
         }
     }
 
+    /// <summary>
+    /// The minigame as the game plays it: the player chooses each divination.
+    /// Replaces PlayMinigame's `ShowScreen; await completion; CompleteMinigame`
+    /// with a parked decision. The clicks themselves run on the game thread in
+    /// <see cref="DoCrystalSphereClick"/>; this task only waits for the last
+    /// one and then hands out the rewards, exactly where the original does.
+    /// </summary>
+    internal async Task ParkCrystalSphere(MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame game)
+    {
+        if (CrystalSphereOwnerField!.GetValue(game) is not MegaCrit.Sts2.Core.Entities.Players.Player owner)
+        {
+            Console.Error.WriteLine(
+                "[WARN] CrystalSphere: _owner did not resolve to a Player - minigame left unplayed");
+            return;
+        }
+        if (!MegaCrit.Sts2.Core.Context.LocalContext.IsMe(owner)) return;
+        if (game.DivinationCount > 0)
+        {
+            var tcs = new TaskCompletionSource();
+            _pendingSphere = game;
+            _pendingSphereTcs = tcs;
+            Console.Error.WriteLine($"[SIM] Crystal Sphere pending: {game.DivinationCount} divinations");
+            await tcs.Task;
+        }
+        if (CrystalSphereCompleteMinigame!.Invoke(game, null) is Task t) await t;
+    }
+
+    /// <summary>
+    /// What the Crystal Sphere screen shows: which cells are still fogged, and
+    /// under each cleared cell the part of the item drawn there. Every item is
+    /// drawn at its position beneath the fog (NCrystalSphereScreen.cs:346-351),
+    /// so a cleared cell shows that piece of its texture; the texture names
+    /// the kind, never the concrete relic, card or potion. Fogged cells say
+    /// nothing.
+    /// </summary>
+    private Dictionary<string, object?> CrystalSphereState(Player player, MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame game)
+    {
+        var size = game.GridSize;
+        var cells = new List<Dictionary<string, object?>>();
+        for (int y = 0; y < size.Y; y++)
+        {
+            for (int x = 0; x < size.X; x++)
+            {
+                var cell = game.cells[x, y];
+                var entry = new Dictionary<string, object?>
+                {
+                    ["x"] = x,
+                    ["y"] = y,
+                    ["hidden"] = cell.IsHidden,
+                };
+                if (!cell.IsHidden && cell.Item != null)
+                {
+                    entry["item"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = CrystalSphereItemKind(cell.Item),
+                        ["part_x"] = x - cell.Item.Position.X,
+                        ["part_y"] = y - cell.Item.Position.Y,
+                        ["width"] = cell.Item.Size.X,
+                        ["height"] = cell.Item.Size.Y,
+                    };
+                }
+                cells.Add(entry);
+            }
+        }
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "crystal_sphere",
+            ["context"] = RunContext(),
+            ["divinations_left"] = game.DivinationCount,
+            ["grid"] = new Dictionary<string, object?> { ["width"] = size.X, ["height"] = size.Y },
+            ["cells"] = cells,
+            ["player"] = PlayerSummary(player),
+        };
+    }
+
+    // The texture is what the player tells items apart by; its file name is
+    // the kind (crystal_sphere_relic, crystal_sphere_rare, ...).
+    private static string CrystalSphereItemKind(
+        MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereItem item)
+    {
+        try
+        {
+            var path = item.GetType()
+                .GetProperty("TexturePath", System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
+                ?.GetValue(item) as string;
+            if (!string.IsNullOrEmpty(path))
+                return System.IO.Path.GetFileNameWithoutExtension(path);
+        }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
+        return item.GetType().Name;
+    }
+
+    private Dictionary<string, object?> DoCrystalSphereClick(Dictionary<string, object?>? args)
+    {
+        var game = _pendingSphere;
+        if (game == null || _pendingSphereTcs == null)
+            return Error("No pending Crystal Sphere");
+        if (args == null || !args.ContainsKey("x") || !args.ContainsKey("y"))
+            return Error("crystal_sphere_click requires 'x' and 'y'");
+        int x = Convert.ToInt32(args["x"]), y = Convert.ToInt32(args["y"]);
+        var size = game.GridSize;
+        if (x < 0 || y < 0 || x >= size.X || y >= size.Y)
+            return Error($"crystal_sphere_click: [{x},{y}] is off the grid");
+        // Only fogged cells take a click (NCrystalSphereCell.cs:102).
+        if (!game.cells[x, y].IsHidden)
+            return Error($"crystal_sphere_click: [{x},{y}] is already clear");
+        var tool = args.TryGetValue("tool", out var toolObj) ? Convert.ToString(toolObj) : "big";
+        if (tool != "big" && tool != "small")
+            return Error($"crystal_sphere_click: unknown tool '{tool}'");
+
+        game.SetTool(tool == "big"
+            ? MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame.CrystalSphereToolType.Big
+            : MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame.CrystalSphereToolType.Small);
+        try
+        {
+            game.CellClicked(game.cells[x, y]).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) { LogException("Crystal Sphere click", ex); }
+        _syncCtx.Pump();
+        WaitForActionExecutor();
+        if (game.DivinationCount > 0)
+            return DetectDecisionPoint();
+
+        // Last divination: release the parked option task so it hands out the
+        // rewards, and drive it until it finishes or parks on a selection.
+        var tcs = _pendingSphereTcs;
+        _pendingSphere = null;
+        _pendingSphereTcs = null;
+        tcs.TrySetResult();
+        _syncCtx.Pump();
+        WaitForActionExecutor();
+        if (_pendingEventOptionTask != null)
+        {
+            WaitUntilOptionTaskSettles(_pendingEventOptionTask, "crystal sphere continuation");
+            if (!AnySelectionPending())
+            {
+                WaitForTask(_pendingEventOptionTask, 5000, "crystal sphere continuation");
+                _pendingEventOptionTask = null;
+                SyncEventOptionInFlight();
+                WaitForActionExecutor();
+                _syncCtx.Pump();
+                WaitForActionExecutor();
+            }
+        }
+        return DetectDecisionPoint();
+    }
+
     internal static async Task PlayCrystalSphereHeadless(
         MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame game)
     {
@@ -7671,7 +8374,16 @@ public class RunSimulator
                 harmony.Patch(method!, new HarmonyMethod(noOp));
                 patched++;
             }
-            harmony.Patch(doubleDown!, new HarmonyMethod(doubleDownTaskPrefix));
+            // Referee mode plays DoubleDown as the game does: the confirm popup's
+            // Yes is RunManager.Abandon(), so taking the option ends the run as a
+            // loss (NAbandonRunConfirmPopup.cs:158). Cancelling changes nothing,
+            // which is the same as not taking it. The default host keeps the
+            // historical no-op; see the note above.
+            var abandonPrefix = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.DoubleDownAbandonsPrefix),
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+            harmony.Patch(doubleDown!, new HarmonyMethod(
+                Referee.DoubleDownAbandons && abandonPrefix != null ? abandonPrefix : doubleDownTaskPrefix));
             patched++;
 
             harmony.Patch(getLayout, new HarmonyMethod(layoutPrefix));
@@ -7727,6 +8439,19 @@ public class RunSimulator
             {
                 var sync = MegaCrit.Sts2.Core.Runs.RunManager.Instance?.RewardsSetSynchronizer;
                 if (sync == null) return;
+
+                // GH #1296: the screen is the player's.
+                var sim = LocPatches._bundleSimRef;
+                if (Referee.InteractiveRewards && sim != null && set.Rewards.Count > 0)
+                {
+                    if (Environment.CurrentManagedThreadId != sim._hostThreadId)
+                    {
+                        await sim.PlayCustomRewardScreen(set, sync);
+                        return;
+                    }
+                    Console.Error.WriteLine(
+                        "[WARN] reward screen offered on the host thread; taken in list order");
+                }
 
                 // `.ToList()` is defensive only, and deliberately not justified by
                 // `LinkedRewardSet`: its `RemoveReward` mutates its OWN `_rewards`
@@ -8032,7 +8757,7 @@ public class RunSimulator
             {
                 if (a is MegaCrit.Sts2.Core.Models.AbstractModel m)
                 {
-                    try { return m.Id.Entry; } catch { return null; }
+                    try { return m.Id.Entry; } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
                 }
             }
             return null;
@@ -8051,7 +8776,7 @@ public class RunSimulator
                 Cancelable = prefs.Cancelable;
                 CaptureChoice(__args, __originalMethod);
             }
-            catch { /* capture-only: never break the game's selection flow */ }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); /* capture-only: never break the game's selection flow */ }
         }
 
         public static void CaptureNoPrefsPrefix(
@@ -8071,7 +8796,7 @@ public class RunSimulator
                     : false;
                 CaptureChoice(__args, __originalMethod);
             }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
     }
 
@@ -8236,16 +8961,23 @@ public class RunSimulator
 
         // Pending card reward from events (GetSelectedCardReward blocks until resolved)
         public List<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult>? PendingRewardCards { get; private set; }
+        // The alternatives the blocked reward offers. CardReward.OnSelect builds
+        // its list once and passes it on every turn of its loop; the screen
+        // drops a used Reroll (Populate → RefreshOptions with CanReroll false),
+        // so an alternative already pressed on this list is not offered again.
+        public List<CardRewardAlternative>? PendingRewardAlternatives { get; private set; }
+        private IReadOnlyList<CardRewardAlternative>? _lastAlternatives;
+        private readonly HashSet<CardRewardAlternative> _usedAlternatives = new();
+        private CardRewardAlternative? _rewardAlternative;
         private ManualResetEventSlim? _rewardWait;
         private int _rewardChoice = -1;
 
         // v0.107.1: ICardSelector.GetSelectedCardReward now returns
         // CardRewardSelection { CardModel? card; CardRewardAlternative? alternative; }
         // instead of CardModel?. The consumer (CardReward.cs) reads `alternative`
-        // first, then `card`; both null == skip (num resolves to null). We mirror
-        // the old card-or-skip behavior by wrapping the selected card; choosing a
-        // CardRewardAlternative is a new 0.107.1 surface left as a follow-up (the
-        // headless resolves rewards by card index only).
+        // first, then `card`; both null == skip (num resolves to null). A card
+        // pick wraps the card; card_reward_alternative hands back the button
+        // pressed (ResolveAlternative).
         public MegaCrit.Sts2.Core.TestSupport.CardRewardSelection GetSelectedCardReward(
             IReadOnlyList<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult> options,
             IReadOnlyList<CardRewardAlternative> alternatives)
@@ -8255,6 +8987,10 @@ public class RunSimulator
             // Store pending and block until main loop resolves
             var wait = new ManualResetEventSlim(false);
             _rewardChoice = -1;
+            _rewardAlternative = null;
+            if (!ReferenceEquals(alternatives, _lastAlternatives)) _usedAlternatives.Clear();
+            _lastAlternatives = alternatives;
+            PendingRewardAlternatives = alternatives.Where(a => !_usedAlternatives.Contains(a)).ToList();
             PendingRewardCards = options.ToList();
             _rewardWait = wait;
 
@@ -8262,14 +8998,21 @@ public class RunSimulator
             wait.Wait(TimeSpan.FromSeconds(300)); // Wait up to 5 min
 
             var choice = _rewardChoice;
+            var alternative = _rewardAlternative;
             // Resolve/SkipReward already cleared the pending state; only the
             // timeout path still holds it.
             if (ReferenceEquals(_rewardWait, wait))
             {
                 PendingRewardCards = null;
+                PendingRewardAlternatives = null;
                 _rewardWait = null;
             }
 
+            if (alternative != null)
+            {
+                _usedAlternatives.Add(alternative);
+                return new MegaCrit.Sts2.Core.TestSupport.CardRewardSelection { alternative = alternative };
+            }
             if (choice >= 0 && choice < options.Count)
                 return new MegaCrit.Sts2.Core.TestSupport.CardRewardSelection { card = options[choice].Card };
             return default;  // Skip (both fields null)
@@ -8281,6 +9024,12 @@ public class RunSimulator
 
         public void SkipReward() => Release(-1);
 
+        public void ResolveAlternative(CardRewardAlternative alternative)
+        {
+            _rewardAlternative = alternative;
+            Release(-1);
+        }
+
         // Clears the pending state on the resolving (main) thread before waking
         // the blocked one. It used to be cleared by the woken thread, so a
         // re-detect right after the pick could still see the resolved reward as
@@ -8291,6 +9040,7 @@ public class RunSimulator
             var wait = _rewardWait;
             _rewardChoice = choice;
             PendingRewardCards = null;
+            PendingRewardAlternatives = null;
             _rewardWait = null;
             wait?.Set();
         }
@@ -8520,7 +9270,10 @@ public class RunSimulator
             MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereMinigame __instance,
             ref Task __result)
         {
-            __result = RunSimulator.PlayCrystalSphereHeadless(__instance);
+            var sim = LocPatches._bundleSimRef;
+            __result = Referee.InteractiveSphere && sim != null
+                ? sim.ParkCrystalSphere(__instance)
+                : RunSimulator.PlayCrystalSphereHeadless(__instance);
             return false;
         }
 
@@ -8531,6 +9284,14 @@ public class RunSimulator
         /// </summary>
         public static bool CompletedTaskPrefix(ref Task __result)
         {
+            __result = Task.CompletedTask;
+            return false;
+        }
+
+        /// <summary>Trial.DoubleDown with the abandon-run confirm accepted.</summary>
+        public static bool DoubleDownAbandonsPrefix(ref Task __result)
+        {
+            RunSimulator.RunAbandoned = true;
             __result = Task.CompletedTask;
             return false;
         }
@@ -8663,7 +9424,7 @@ public class RunSimulator
                 power.SetAmount(power.Amount + power.DynamicVars.Damage.IntValue);
             }
             catch (Exception ex)
-            {
+            { HostFaults.Swallowed(ex);
                 Console.Error.WriteLine($"[WARN] RollingBoulder AfterPlayerTurnStart safe: {ex.Message}");
             }
         }
@@ -8722,7 +9483,7 @@ public class RunSimulator
                 }
             }
             catch (Exception ex)
-            {
+            { HostFaults.Swallowed(ex);
                 Console.Error.WriteLine($"[WARN] Entropy AfterPlayerTurnStart safe: {ex.Message}");
             }
         }
@@ -8761,7 +9522,7 @@ public class RunSimulator
                         if (data != null)
                             tables[name] = new LocTable(name, data);
                     }
-                    catch { }
+                    catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 }
                 Console.Error.WriteLine($"[INFO] Loaded {tables.Count} localization tables from {locDir}");
             }
@@ -8789,12 +9550,12 @@ public class RunSimulator
             // Set Language
             var langProp = typeof(LocManager).GetProperty("Language",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            try { langProp?.SetValue(instance, "eng"); } catch { }
+            try { langProp?.SetValue(instance, "eng"); } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
             // Set CultureInfo
             var cultureProp = typeof(LocManager).GetProperty("CultureInfo",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            try { cultureProp?.SetValue(instance, System.Globalization.CultureInfo.InvariantCulture); } catch { }
+            try { cultureProp?.SetValue(instance, System.Globalization.CultureInfo.InvariantCulture); } catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
             // Initialize _smartFormatter — the game uses `new SmartFormatter()`
             try
@@ -8869,7 +9630,7 @@ public class RunSimulator
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
                 engTablesField?.SetValue(instance, tables);
             }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
             Console.Error.WriteLine("[INFO] LocManager initialized with stub tables");
 
@@ -9072,6 +9833,7 @@ public class RunSimulator
     /// </remarks>
     private static void LogException(string context, Exception ex)
     {
+        HostFaults.Record("log:" + context, ex);
         var inner = ex;
         while (inner.InnerException != null) inner = inner.InnerException;
         Log($"{context}: {inner.GetType().Name}: {inner.Message}");
@@ -9289,7 +10051,7 @@ public class RunSimulator
                 bossNode["name"] = _loc.Monster(monsterKey);
             }
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         // A10 DoubleBoss: a second boss node sits directly above the act boss
         // and fights a DIFFERENT encounter (NBossMapPoint._Ready picks
@@ -9350,7 +10112,7 @@ public class RunSimulator
                 }
             }
         }
-        catch { }
+        catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
 
         return new Dictionary<string, object?>
         {
@@ -9478,7 +10240,7 @@ internal static class ThreadProbe
             if (_lines >= MaxLines) return;
             _lines++;
             try { File.AppendAllText(_path!, line + "\n"); }
-            catch { }
+            catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
         }
     }
 }
@@ -9521,6 +10283,19 @@ internal static class GameApi
         if (entry is MerchantCardRemovalEntry removal)
             return removal.OnTryPurchaseWrapper(room.GetLocalInventory());
         return entry.OnTryPurchaseWrapper(room.GetLocalInventory());
+#endif
+    }
+
+    /// <summary>Buy from an inventory no merchant room owns (the Fake
+    /// Merchant's): its slots call the entry with their own inventory
+    /// (<c>NMerchantSlot.cs:350</c>); v0.113.0 renamed the call
+    /// <c>OnTryPurchaseUnsynchronized</c>.</summary>
+    internal static Task<bool> PurchaseFrom(MerchantEntry entry, MerchantInventory inventory)
+    {
+#if GAME_V0113
+        return entry.OnTryPurchaseUnsynchronized(inventory);
+#else
+        return entry.OnTryPurchaseWrapper(inventory);
 #endif
     }
 

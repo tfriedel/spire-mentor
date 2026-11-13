@@ -49,10 +49,19 @@ class Program
             return null;
         };
 
+        // Referee mode (STS2_REFEREE=1): keyed RNG, installed before any game
+        // code can draw. See RefereeRng.
+        if (Referee.Mode)
+            RefereeRng.Install();
+
+        // GH #1283: count every error the game swallows (all modes).
+        HostFaults.InstallGameHooks();
+
         var sim = new RunSimulator();
         WriteLine(new Dictionary<string, object?>
         {
             ["type"] = "ready",
+            ["referee"] = Referee.Mode,
             ["version"] = "0.2.0",
             // The game build this oracle links against (GH #789); the Python
             // client checks it against the version it asked for.
@@ -74,15 +83,67 @@ class Program
             catch (JsonException ex)
             {
                 result = new Dictionary<string, object?> { ["type"] = "error", ["message"] = $"Invalid JSON: {ex.Message}" };
+                if (Referee.Mode) result["code"] = "bad_request";
             }
             catch (Exception ex)
             {
                 result = new Dictionary<string, object?> { ["type"] = "error", ["message"] = $"{ex.GetType().Name}: {ex.Message}" };
+                if (Referee.Mode) result["code"] = "internal";
+            }
+
+            if (Referee.Mode && RefereeRng.Audit() is string fault)
+            {
+                WriteLine(new Dictionary<string, object?> { ["type"] = "referee_fault", ["message"] = fault });
+                Environment.Exit(3);
+            }
+
+            // GH #1283: a run that went through a swallowed error, a
+            // force-finished event or a world error is void, not scored.
+            if (Referee.Mode && HostFaults.TakePending() is string swallowed)
+            {
+                Console.Error.WriteLine($"[REFEREE] host fault: {swallowed}");
+                WriteLine(new Dictionary<string, object?>
+                {
+                    ["type"] = "referee_fault",
+                    ["message"] = Referee.Diagnostics ? $"host fault: {swallowed}" : "host fault",
+                });
+                Environment.Exit(3);
             }
 
             if (result != null)
             {
-                WriteLine(result);
+                if (Referee.Mode)
+                {
+                    // The map screen shows the whole act; the map decision
+                    // alone lists only the reachable nodes.
+                    result.TryGetValue("decision", out var kind);
+                    if (kind as string == "map_select")
+                    {
+                        var map = sim.GetFullMap();
+                        if (map.TryGetValue("type", out var mapType) && mapType as string == "map")
+                            result["map"] = map;
+                    }
+                    // Card playability and potion usability are game rules.
+                    if (kind as string == "combat_play")
+                    {
+                        var combatLegal = sim.LegalActions();
+                        if (combatLegal.TryGetValue("type", out var legalType) && legalType as string == "ok")
+                            result[RefereeView.CombatLegalKey] = combatLegal;
+                    }
+                    // GH #1282: the potion belt is clickable on these screens too.
+                    else if (kind is string screen && RefereeView.PotionScreens.Contains(screen))
+                    {
+                        var belt = sim.PotionBelt();
+                        if (belt.TryGetValue("type", out var beltType) && beltType as string == "ok")
+                            result[RefereeView.PotionBeltKey] = belt;
+                    }
+                    Console.Out.WriteLine(RefereeView.Render(result, JsonOpts));
+                    Console.Out.Flush();
+                }
+                else
+                {
+                    WriteLine(result);
+                }
                 if (result.TryGetValue("type", out var resultTypeObj) &&
                     string.Equals(resultTypeObj as string, "quit_result", StringComparison.Ordinal))
                 {
@@ -95,6 +156,57 @@ class Program
     static Dictionary<string, object?>? HandleCommand(RunSimulator sim, JsonElement cmd)
     {
         var cmdType = cmd.GetProperty("cmd").GetString() ?? "";
+        if (Referee.Mode)
+        {
+            // Everything else can read or set hidden state (set_draw_order,
+            // rng_probe, dump_*, load_save, ...).
+            if (cmdType.StartsWith("referee_", StringComparison.Ordinal) && !Referee.Diagnostics)
+                return new Dictionary<string, object?> { ["type"] = "error", ["code"] = "not_available", ["message"] = $"'{cmdType}' needs STS2_REFEREE_DIAG=1" };
+            if (cmdType == "referee_project")
+            {
+                // Diagnostic: the view of a payload the caller supplies. It
+                // touches no game state, so it cannot reveal any. It leaves
+                // the legal-action list of the real observation alone unless
+                // the caller asks for `record` (tests of the legality check).
+                var payload = System.Text.Json.Nodes.JsonNode.Parse(cmd.GetProperty("payload").GetRawText())
+                    as System.Text.Json.Nodes.JsonObject;
+                bool record = cmd.TryGetProperty("record", out var rec) && rec.ValueKind == JsonValueKind.True;
+                return new Dictionary<string, object?>
+                {
+                    ["type"] = "referee_projection",
+                    ["view"] = payload == null ? null : RefereeView.Render(payload, JsonOpts, record),
+                };
+            }
+            if (cmdType == "host_faults" && !Referee.Diagnostics)
+                return new Dictionary<string, object?> { ["type"] = "error", ["code"] = "not_available", ["message"] = "'host_faults' needs STS2_REFEREE_DIAG=1" };
+            if (cmdType is not ("start_run" or "action" or "quit" or "referee_stats" or "referee_selftest" or "host_faults"))
+                return new Dictionary<string, object?> { ["type"] = "error", ["code"] = "not_available", ["message"] = $"'{cmdType}' is not available in referee mode" };
+            if (cmdType == "action")
+            {
+                // Only an action listed in the last observation reaches the game.
+                var name = cmd.TryGetProperty("action", out var an) ? an.GetString() ?? "" : "";
+                var given = cmd.TryGetProperty("args", out var ga) && ga.ValueKind == JsonValueKind.Object
+                    ? System.Text.Json.Nodes.JsonNode.Parse(ga.GetRawText()) as System.Text.Json.Nodes.JsonObject
+                    : null;
+                if (!RefereeView.IsLegal(name, given))
+                    return new Dictionary<string, object?> { ["type"] = "error", ["code"] = "illegal_action", ["message"] = $"not a legal action: {name}" };
+            }
+            if (cmdType == "referee_stats")
+            {
+                var stats = RefereeRng.Stats();
+                stats["unclassified_fields"] = RefereeView.UnclassifiedFields();
+                return stats;
+            }
+            if (cmdType is "start_run" or "referee_selftest")
+            {
+                var keyHex = cmd.TryGetProperty("rng_key", out var rk) ? rk.GetString() : null;
+                if (keyHex == null || keyHex.Length != 64)
+                    return new Dictionary<string, object?> { ["type"] = "error", ["code"] = "bad_request", ["message"] = $"referee mode needs {cmdType}.rng_key (64 hex chars)" };
+                RefereeRng.Arm(Convert.FromHexString(keyHex));
+            }
+            if (cmdType == "referee_selftest")
+                return RefereeRng.SelfTest(cmd.TryGetProperty("samples", out var sm) ? sm.GetInt32() : 100000);
+        }
         switch (cmdType)
         {
             case "start_run":
@@ -106,10 +218,11 @@ class Program
                     cmd.TryGetProperty("played_save", out var ps) && ps.GetBoolean(),
                     // "overgrowth" | "underdocks" | "roll". Omit for the historical
                     // default (GetDefaultList => Overgrowth). See RunSimulator.
-                    cmd.TryGetProperty("act1", out var a1) ? a1.GetString() : null,
+                    cmd.TryGetProperty("act1", out var a1) ? a1.GetString() : (Referee.Mode ? "roll" : null),
                     // GH #1069: surface a `potion_swap` decision when a potion
                     // reward finds a full belt, instead of dropping it.
-                    cmd.TryGetProperty("interactive_potion_swap", out var ips) && ips.GetBoolean()
+                    // Referee runs always surface it: a silent drop is not the game.
+                    Referee.Mode || (cmd.TryGetProperty("interactive_potion_swap", out var ips) && ips.GetBoolean())
                 );
 
             case "roll_acts":
@@ -249,6 +362,9 @@ class Program
                 var outputPath = cmd.TryGetProperty("path", out var op) ? op.GetString() : null;
                 return sim.SaveCheckpoint(outputPath);
             }
+
+            case "host_faults":
+                return HostFaults.Census();
 
             case "quit":
             {
