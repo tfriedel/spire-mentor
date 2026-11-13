@@ -348,6 +348,15 @@ def test_every_non_combat_selection_prompt_has_a_surface() -> None:
     rather than discovered one live run at a time: a NEW prompt fails this
     test instead of silently going leftmost.
     """
+    from pathlib import Path
+
+    import pytest
+
+    pycli = Path(__file__).resolve().parents[1]
+    missing = [d for d in _LOC_DIRS if not (pycli / d).is_dir()]
+    if missing:
+        # The public export vendors only the baseline `localization_eng`.
+        pytest.skip(f"vendored localization absent: {missing}")
     shipped = _loc_selection_prompts()
     assert shipped, "the localization files must be readable for this audit"
     for key in _NON_COMBAT_PROMPTS:
