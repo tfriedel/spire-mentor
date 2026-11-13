@@ -951,3 +951,47 @@ class TestEventVarsForwarding:
     def test_absent_vars_forward_as_none(self) -> None:
         out = to_bridge_event(_event_state([{"index": 0, "title": "Leave"}]), "Ironclad")
         assert out["options"][0]["vars"] is None
+
+
+def test_a_mirrored_pick_targets_the_dlls_living_enemy(monkeypatch) -> None:
+    """The mirror's search numbers enemies by encounter slot, corpses kept in
+    place; the DLL's ``play_card`` numbers the living only.
+
+    Live diff #1287, Decimillipede: the front segment dead in slot 0, the
+    search aimed at slot 1 (the middle segment) and the DLL, reading 1 among
+    the living, hit the back segment. The engine twin keeps the slot.
+    """
+    import random as _random
+    from types import SimpleNamespace
+
+    import headless_eval as he
+    from sts2_hint.recommender import RecommendConfig
+
+    class _Mirror:
+        def reconcile(self, wire):
+            pass
+
+        def search(self, cfg):
+            return {}
+
+    monkeypatch.setattr(he.adapter, "translate", lambda *a, **k: {"deck": {"hand": []}})
+    monkeypatch.setattr(
+        he, "tags_from_result", lambda r, h: [SimpleNamespace(stable_idx=0, target_index=2)]
+    )
+    monkeypatch.setattr(
+        he,
+        "_mirror_encounter",
+        lambda m: [{"is_dead": True}, {"is_dead": False}, {"is_dead": False}],
+    )
+    state = {
+        "decision": "combat_play",
+        "hand": [{"index": 0, "can_play": True}],
+        "enemies": [{"name": "Middle", "hp": 10}, {"name": "Back", "hp": 22}],
+    }
+    cfg = RecommendConfig(sims=1, depth=1, seed=0)
+    cmd, extra, engine = he.pick_combat_action_headless(
+        state, cfg, _random.Random(0), mirror=_Mirror()
+    )
+    assert extra is None
+    assert cmd == {"action": "play_card", "args": {"card_index": 0, "target_index": 1}}
+    assert engine == {"action": "play", "card_index": 0, "target_index": 2}

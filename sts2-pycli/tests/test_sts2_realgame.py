@@ -525,6 +525,56 @@ def test_combat_play_round_trip(fake_server: FakeServer, rg: RealGame) -> None:
     assert result["decision"] == "map_select"
 
 
+def test_finished_event_proceeds_without_surfacing(fake_server: FakeServer, rg: RealGame) -> None:
+    """GH #1287: an event page whose only buttons leave the finished event
+    (``is_proceed``) is clicked through, as the host walks to the map by
+    itself once ``IsFinished``."""
+    event = _state("event.json")
+    finished = {
+        **event,
+        "options": [{**event["options"][0], "label": "Proceed", "is_proceed": True}],
+    }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rg.start)
+        fake_server.wait_for_connection()
+        fake_server.send_json_line(finished)
+
+        sent = fake_server.recv_line()
+        assert sent["action"] == "choose"
+        assert sent["index"] == 0
+
+        fake_server.send_json_line(_state("map_select.json"))
+        result = future.result(timeout=5)
+
+    assert result["decision"] == "map_select"
+
+
+def test_event_with_a_choice_surfaces(fake_server: FakeServer, rg: RealGame) -> None:
+    event = _state("event.json")
+    event = {**event, "options": [{**o, "is_proceed": False} for o in event["options"]]}
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rg.start)
+        fake_server.wait_for_connection()
+        fake_server.send_json_line(event)
+        result = future.result(timeout=5)
+
+    assert result["decision"] == "event_choice"
+
+
+def test_snapshot_notifications_are_skipped(fake_server: FakeServer, rg: RealGame) -> None:
+    """GH #1287: the snapshot lane's fire-and-forget messages carry no decision."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rg.start)
+        fake_server.wait_for_connection()
+        fake_server.send_json_line({"type": "snapshot_saved", "snapshot_id": "1-0", "seq": 0})
+        fake_server.send_json_line(_state("map_select.json"))
+        result = future.result(timeout=5)
+
+    assert result["decision"] == "map_select"
+
+
 def test_treasure_auto_resolves_without_surfacing(fake_server: FakeServer, rg: RealGame) -> None:
     """A treasure message must never reach the caller as a decision -- it
     is auto-answered with choose index 0 and the loop continues straight
@@ -1022,3 +1072,96 @@ def test_card_select_and_card_reward_action_translation(
         result = future.result(timeout=5)
 
     assert result["decision"] == "map_select"
+
+
+def test_potions_are_numbered_like_the_host_and_used_by_belt_slot() -> None:
+    """GH #1287: the host numbers potions by position among the filled slots
+    (`Player.Potions` skips empty ones); the bridge addresses belt slots."""
+    rg = RealGame()
+    summary = rg._player_summary(
+        {
+            "potions": [
+                {"slot": 0, "empty": True},
+                {"slot": 1, "name": "Blood Potion", "target_type": "AnyPlayer"},
+            ]
+        }
+    )
+    assert [p["index"] for p in summary["potions"]] == [0]
+    assert rg._potion_slot(0) == 1
+
+
+def test_a_skipped_card_reward_is_not_reopened(fake_server: FakeServer, rg: RealGame) -> None:
+    """GH #1287: after a skip the reward stays on the rewards screen and the
+    mod asks about the screen again; RealGame leaves instead of reopening it."""
+    screen = _state("reward_screen_with_card.json")
+    only_card = {
+        **screen,
+        "options": [o for o in screen["options"] if o["id"] in ("CardReward", "proceed")],
+    }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rg.start)
+        fake_server.wait_for_connection()
+        fake_server.send_json_line(_state("card_reward.json"))
+        assert future.result(timeout=5)["decision"] == "card_reward"
+
+        future = pool.submit(rg.skip_card_reward)
+        assert fake_server.recv_line()["action"] == "skip"
+        fake_server.send_json_line(only_card)
+        sent = fake_server.recv_line()
+        assert sent["index"] == next(
+            o["index"] for o in only_card["options"] if o["id"] == "proceed"
+        )
+        fake_server.send_json_line(_state("map_select.json"))
+        assert future.result(timeout=5)["decision"] == "map_select"
+
+
+@pytest.mark.parametrize("copies", [1, 2])
+def test_a_lone_ancient_node_is_entered_without_surfacing(
+    fake_server: FakeServer, rg: RealGame, copies: int
+) -> None:
+    """GH #1287: headless enters the act-start Ancient by itself; the game
+    offers it as the only map node, sometimes listed twice."""
+    ancient = {
+        **_state("map_select.json"),
+        "nodes": [{"index": i, "type": "Ancient", "row": 0, "col": 3} for i in range(copies)],
+    }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rg.start)
+        fake_server.wait_for_connection()
+        fake_server.send_json_line(ancient)
+        sent = fake_server.recv_line()
+        assert sent["action"] == "choose"
+        assert sent["index"] == 0
+        fake_server.send_json_line(_state("event.json"))
+        assert future.result(timeout=5)["decision"] == "event_choice"
+
+
+def test_shop_stock_reports_a_used_removal_as_gone() -> None:
+    """GH #1287: the stock row of a removal already bought this visit stays,
+    unstocked and without an option; the host then sends no removal cost."""
+    rg = RealGame("127.0.0.1", 1)  # never connects: translation only
+    msg = {
+        "type": "shop",
+        "options": [{"index": 0, "action": "leave_shop"}],
+        "stock": [
+            {"kind": "buy_card", "label": "ANGER", "price": 50, "stocked": True, "option": 1},
+            {"kind": "remove_card", "label": "remove_card", "price": 75, "stocked": False},
+        ],
+        "run_state": {"gold": 124},
+    }
+    shop = rg._translate_shop_stock(msg)
+    assert shop["card_removal_cost"] is None
+    assert rg.remove_card()["type"] == "error"
+    msg["stock"][1].update(stocked=True, option=2)
+    assert rg._translate_shop_stock(msg)["card_removal_cost"] == 75
+
+
+def test_an_x_cost_card_costs_zero_as_the_host_says() -> None:
+    """GH #1287: the bridge's ``effective_cost`` of an X card is the energy."""
+    from sts2_realgame import _card_cost
+
+    assert _card_cost({"cost": 0, "costs_x": True, "effective_cost": 3}) == 0
+    assert _card_cost({"cost": 2, "effective_cost": 1}) == 1
+    assert _card_cost({"cost": 2}) == 2

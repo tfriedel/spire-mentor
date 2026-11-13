@@ -331,7 +331,8 @@ and a fresh re-send; the disabled button is never clicked.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `options` | array | Index 0 is always `{index:0, id:"leave_shop", action:"leave_shop", ...}`; remaining entries are `{index, id:<action>, action:<action>, label, description, enabled, price, item?}` where `<action>` is `buy_card`\|`buy_relic`\|`buy_potion`\|`remove_card`\|`buy_item`\|`blitz_choice`. `item` (new, optional) is the full Card/Relic/Potion object for that slot when resolvable. |
+| `options` | array | Index 0 is always `{index:0, id:"leave_shop", action:"leave_shop", ...}`; remaining entries are `{index, id:<action>, action:<action>, label, description, enabled, price, item?}` where `<action>` is `buy_card`\|`buy_relic`\|`buy_potion`\|`remove_card`\|`buy_item`\|`blitz_choice`. `item` (new, optional) is the full Card/Relic/Potion object for that slot when resolvable. `on_sale` (bool, `buy_card` only, new 2026-11-12) is `MerchantCardEntry.IsOnSale`; `price` is already the discounted one. |
+| `stock` | array | **New 2026-11-12 (GH #1287).** Every merchant slot in shopfront order (`NMerchantInventory.GetAllSlots`), sold out or not: `{kind, label, price, stocked, affordable, on_sale?, item?, option?}`. `option` is the `options` index that buys the slot, present only when it can be bought now. The headless host lists the whole stock, so a client mirroring it addresses slots by this list. |
 | `player_gold` | int | **New.** Also available via `run_state.gold`, duplicated here for convenience. |
 | `purge_cost` | int | **New, optional.** Present iff a card-removal slot is stocked; its current price. |
 | `blitz_choices_remaining` | int | **New (v0.113.0 Blitz), optional.** Present iff this is the Blitz merchant: how many more wares the player may take (`MerchantInventory.BlitzChoicesRemaining`). Its wares are `action:"blitz_choice"`, `price` 0, label `blitz:<kind>`, `item` = `{blitz_kind, cursed, rare, title, description}` (`blitz_kind` = the game's `BlitzMerchantEntryType`; `cursed` = the ware also adds a random Curse). Choosing one opens its own follow-up screen (a card reward, a deck pick, a relic). |
@@ -340,7 +341,7 @@ and a fresh re-send; the disabled button is never clicked.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `options` | array | `{index, id:"event_choice", action:"event_choice", label, description, enabled, event_id, text_key, relic_id}` per option. `text_key` is the option's loc-key prefix (`EventOption.TextKey`, e.g. `"NEOW.pages.INITIAL.options.WINGED_BOOTS"`; its tail is the option's enum id). `relic_id` is `EventOption.Relic?.Id.Entry` for relic-granting options, `""` otherwise. |
+| `options` | array | `{index, id:"event_choice", action:"event_choice", label, description, enabled, event_id, text_key, relic_id, will_kill_player, is_proceed}` per option. `text_key` is the option's loc-key prefix (`EventOption.TextKey`, e.g. `"NEOW.pages.INITIAL.options.WINGED_BOOTS"`; its tail is the option's enum id). `relic_id` is `EventOption.Relic?.Id.Entry` for relic-granting options, `""` otherwise. `is_proceed` (bool, new 2026-11-12) is `EventOption.IsProceed`: the button that leaves a finished event (absent from older mods). |
 
 A `choose` whose `index` is out of range, or names an option that has become
 locked by the time the reply arrives, gets `error:"invalid_index"` and a

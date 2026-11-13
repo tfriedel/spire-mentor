@@ -236,6 +236,7 @@ class RealGame:
             reconnect_delay=reconnect_delay,
         )
         self.step = 0
+        self.last_raw: dict[str, Any] | None = None
 
         self._connected = False
         self._terminal_decision: dict[str, Any] | None = None
@@ -257,6 +258,10 @@ class RealGame:
         # option index per `discard_slot` (None = decline).
         self._interactive_potion_swap = False
         self._swap_options: dict[int | None, int] = {}
+        # Belt slot of each held potion, in host numbering (GH #1287).
+        self._potion_slots: list[int | None] = []
+        # Card rewards skipped on the current rewards screen (GH #1287).
+        self._skipped_card_rewards = 0
 
     # ── Connection lifecycle ────────────────────────────────────────────────
 
@@ -288,6 +293,7 @@ class RealGame:
         ascension: int | None = None,
         lang: str = "en",
         interactive_potion_swap: bool = False,
+        require_new_run: bool = False,
     ) -> dict[str, Any]:
         """Start (or attach to) a run and return the first decision.
 
@@ -317,6 +323,10 @@ class RealGame:
                 action: ``discard_slot`` None declines, k discards that held
                 potion and claims the reward). Off, it is left on the reward
                 screen, which is what the engines do with the swap off.
+            require_new_run: Raise instead of attaching when the mod is not
+                waiting for a ``start_run`` (a run is already in progress, or
+                ``client_run_config`` is off). A caller that compares the run
+                with another world needs the seed it asked for (GH #1287).
         """
         self._interactive_potion_swap = interactive_potion_swap
         if lang != "en":
@@ -329,7 +339,13 @@ class RealGame:
 
         self.connect()
         msg = self.client.receive_state()
+        while msg.get("type") in _NOTIFICATION_TYPES:
+            msg = self.client.receive_state()
 
+        if require_new_run and msg.get("type") != "run_config":
+            raise RuntimeError(
+                f"RealGame.start(): the mod is not waiting for a new run (got {msg.get('type')!r})"
+            )
         if msg.get("type") == "run_config":
             seed_int = _coerce_int_seed(seed)
             char_id = character.upper()
@@ -430,6 +446,9 @@ class RealGame:
         return self._send({"action": "choose", "index": card_index})
 
     def skip_card_reward(self) -> dict[str, Any]:
+        # The skipped reward stays on the rewards screen, and the mod asks
+        # about that screen again: remember it, or it is reopened forever.
+        self._skipped_card_rewards += 1
         return self._send({"action": "skip"})
 
     def buy_card(self, card_index: int) -> dict[str, Any]:
@@ -461,14 +480,24 @@ class RealGame:
     def skip_select(self) -> dict[str, Any]:
         return self._send({"action": "skip"})
 
+    def _potion_slot(self, potion_index: int) -> int:
+        """Belt slot of the host-numbered potion (position among held potions)."""
+        if 0 <= potion_index < len(self._potion_slots):
+            slot = self._potion_slots[potion_index]
+            if slot is not None:
+                return int(slot)
+        return potion_index
+
     def use_potion(self, potion_index: int, target_index: int | None = None) -> dict[str, Any]:
-        action: dict[str, Any] = {"action": "potion", "slot": potion_index}
+        action: dict[str, Any] = {"action": "potion", "slot": self._potion_slot(potion_index)}
         if target_index is not None:
             action["target_index"] = target_index
         return self._send(action)
 
     def discard_potion(self, potion_index: int) -> dict[str, Any]:
-        return self._send({"action": "potion", "slot": potion_index, "discard": True})
+        return self._send(
+            {"action": "potion", "slot": self._potion_slot(potion_index), "discard": True}
+        )
 
     def leave_room(self) -> dict[str, Any]:
         if self._last_decision_type == "shop":
@@ -501,6 +530,9 @@ class RealGame:
         bridge_indices: list[int] = self._shop_map.get(kind) or []
         if index < 0 or index >= len(bridge_indices):
             return {"type": "error", "message": f"invalid {kind[:-1]}_index {index}"}
+        if bridge_indices[index] is None:
+            # A sold-out or unaffordable slot from the full `stock` list.
+            return {"type": "error", "message": f"{kind[:-1]} {index} cannot be bought now"}
         return self._send({"action": "choose", "index": bridge_indices[index]})
 
     def _send(self, bridge_action: dict[str, Any]) -> dict[str, Any]:
@@ -518,8 +550,10 @@ class RealGame:
         docstring."""
         while True:
             mtype = msg.get("type")
+            #: The bridge message behind the latest decision, for diagnostics.
+            self.last_raw = msg
 
-            if mtype == "pong":
+            if mtype == "pong" or mtype in _NOTIFICATION_TYPES:
                 msg = self.client.receive_state()
                 continue
 
@@ -541,6 +575,14 @@ class RealGame:
                 msg = self._auto_treasure(msg)
                 continue
 
+            if mtype == "event" and _only_proceed(msg.get("options") or []):
+                # A finished event: headless walks to the map by itself
+                # (RunSimulator.EventChoiceState, `localEvent.IsFinished`),
+                # the game waits for its Proceed button. Click it.
+                self.client.send_action({"action": "choose", "index": msg["options"][0]["index"]})
+                msg = self.client.receive_state()
+                continue
+
             if mtype == "reward_screen":
                 swap = self._translate_potion_swap(msg) if self._interactive_potion_swap else None
                 if swap is not None:
@@ -559,8 +601,17 @@ class RealGame:
                 return {"type": "error", "message": f"unhandled bridge message type: {mtype!r}"}
 
             decision = getattr(self, method_name)(msg)
+            if _only_ancient_node(decision):
+                # Headless enters the act-start Ancient by itself
+                # (RunSimulator.DetectPostCombatState, "Auto-entering
+                # act-start Ancient node"); the game puts it on the map as
+                # the only node. Take it (GH #1287).
+                node = decision["choices"][0]
+                return self.select_map_node(node.get("col"), node.get("row"))
             if decision.get("type") == "decision":
                 self._last_decision_type = decision.get("decision")
+                if decision.get("decision") != "card_reward":
+                    self._skipped_card_rewards = 0
             return decision
 
     def _handle_terminal(self, msg: dict[str, Any]) -> dict[str, Any]:
@@ -616,7 +667,18 @@ class RealGame:
         button choice to :func:`reward_screen_choice` (shared with the
         realgame drivers so every backend collects rewards identically).
         """
-        chosen = reward_screen_choice(msg.get("options") or [])
+        options = msg.get("options") or []
+        chosen = reward_screen_choice(options)
+        cards = [o.get("index") for o in options if o.get("id") == "CardReward"]
+        if chosen in cards and self._skipped_card_rewards:
+            # A skipped card reward is still listed; open the next one, or
+            # leave the screen as a player who skipped does.
+            rest = cards[self._skipped_card_rewards :]
+            chosen = (
+                rest[0]
+                if rest
+                else next((o.get("index") for o in options if o.get("action") == "proceed"), None)
+            )
         if chosen is None:
             logger.error("reward_screen had no actionable option: %s", msg)
             chosen = 0
@@ -744,6 +806,8 @@ class RealGame:
         }
 
     def _translate_shop(self, msg: dict[str, Any]) -> dict[str, Any]:
+        if msg.get("stock"):
+            return self._translate_shop_stock(msg)
         options = msg.get("options") or []
         cards: list[dict[str, Any]] = []
         relics: list[dict[str, Any]] = []
@@ -767,13 +831,14 @@ class RealGame:
                         "index": len(cards),
                         "name": item.get("name") or o.get("label"),
                         "type": item.get("type") or "?",
-                        "card_cost": item.get("effective_cost", item.get("cost", 0)),
+                        "card_cost": _card_cost(item, 0),
                         "description": item.get("description"),
                         "stats": None,
                         "after_upgrade": None,
                         "cost": o.get("price"),
                         "is_stocked": o.get("enabled", True),
-                        "on_sale": False,
+                        # Sent since mod 2026-11-12 (GH #1287); older mods: False.
+                        "on_sale": bool(o.get("on_sale", False)),
                     }
                 )
             elif action == "buy_relic":
@@ -799,6 +864,76 @@ class RealGame:
             "relics": relics,
             "potions": potions,
             "card_removal_cost": msg.get("purge_cost"),
+            "player": self._player_summary(msg.get("run_state") or {}),
+        }
+
+    def _translate_shop_stock(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """The shop from the mod's full ``stock`` rows (mod 2026-11-12, GH #1287).
+
+        The host lists every slot, sold out or not, and its buy actions index
+        those lists. ``options`` only holds what can be bought now, so it
+        cannot be indexed the same way. Each ``stock`` row names the option
+        that buys it (``option``); a slot without one cannot be bought, and
+        buying it is refused here as the host refuses it.
+        """
+        cards: list[dict[str, Any]] = []
+        relics: list[dict[str, Any]] = []
+        potions: list[dict[str, Any]] = []
+        shop_map: dict[str, Any] = {
+            "cards": [],
+            "relics": [],
+            "potions": [],
+            "leave": 0,
+            "remove_card": None,
+        }
+        removal_cost: int | None = None
+        for row in msg.get("stock") or []:
+            kind = row.get("kind")
+            item = row.get("item") or {}
+            option = row.get("option")
+            stocked = bool(row.get("stocked", True))
+            if kind == "buy_card":
+                shop_map["cards"].append(option)
+                cards.append(
+                    {
+                        "index": len(cards),
+                        "id": row.get("label"),
+                        "name": item.get("name") or row.get("label"),
+                        "type": item.get("type") or "?",
+                        "card_cost": _card_cost(item, 0),
+                        "description": item.get("description"),
+                        "stats": None,
+                        "after_upgrade": None,
+                        "cost": row.get("price"),
+                        "is_stocked": stocked,
+                        "on_sale": bool(row.get("on_sale", False)),
+                    }
+                )
+            elif kind == "buy_relic":
+                shop_map["relics"].append(option)
+                relic_dict = _relic_offer_dict(item, len(relics))
+                relic_dict["cost"] = row.get("price")
+                relic_dict["is_stocked"] = stocked
+                relics.append(relic_dict)
+            elif kind == "buy_potion":
+                shop_map["potions"].append(option)
+                potion_dict = _potion_offer_dict(item, len(potions))
+                potion_dict["cost"] = row.get("price")
+                potion_dict["is_stocked"] = stocked
+                potions.append(potion_dict)
+            elif kind == "remove_card":
+                shop_map["remove_card"] = option
+                # Used up this visit: the host then reports no removal.
+                removal_cost = row.get("price") if stocked else None
+        self._shop_map = shop_map
+        return {
+            "type": "decision",
+            "decision": "shop",
+            "context": self._context(msg, room_type="Shop"),
+            "cards": cards,
+            "relics": relics,
+            "potions": potions,
+            "card_removal_cost": removal_cost,
             "player": self._player_summary(msg.get("run_state") or {}),
         }
 
@@ -907,7 +1042,7 @@ class RealGame:
                     "index": c.get("index"),
                     "id": c.get("id"),
                     "name": c.get("name"),
-                    "cost": c.get("effective_cost", c.get("cost")),
+                    "cost": _card_cost(c),
                     "type": c.get("type"),
                     "rarity": c.get("rarity"),
                     "description": c.get("description"),
@@ -934,7 +1069,7 @@ class RealGame:
                     "index": c.get("index"),
                     "id": c.get("id"),
                     "name": c.get("name"),
-                    "cost": c.get("effective_cost", c.get("cost")),
+                    "cost": _card_cost(c),
                     "type": c.get("type"),
                     "upgraded": bool(c.get("upgrade_level")) or bool(c.get("upgraded")),
                     "stats": None,
@@ -960,7 +1095,7 @@ class RealGame:
                     "cards": [
                         {
                             "name": c.get("name"),
-                            "cost": c.get("effective_cost", c.get("cost")),
+                            "cost": _card_cost(c),
                             "type": c.get("type"),
                             "description": c.get("description"),
                             "stats": None,
@@ -1012,6 +1147,11 @@ class RealGame:
         character_id = run_state.get("character")
         name = _character_title(character_id)
         master_deck = run_state.get("master_deck") or []
+        held = [p for p in (run_state.get("potions") or []) if not p.get("empty")]
+        # The host numbers potions by position among the filled slots
+        # (`Player.Potions` skips empty ones); the bridge addresses belt
+        # slots. Remember which slot each position is, for use/discard.
+        self._potion_slots = [p.get("slot") for p in held]
         return {
             "name": name,
             "hp": run_state.get("hp", 0),
@@ -1021,14 +1161,13 @@ class RealGame:
             "relics": [_relic_summary_dict(r) for r in (run_state.get("relics") or [])],
             "potions": [
                 {
-                    "index": p.get("slot"),
+                    "index": i,
                     "name": p.get("name"),
                     "description": p.get("description"),
                     "vars": None,
                     "target_type": p.get("target_type"),
                 }
-                for p in (run_state.get("potions") or [])
-                if not p.get("empty")
+                for i, p in enumerate(held)
             ],
             "deck_size": len(master_deck),
             "deck": [_deck_card_dict(c) for c in master_deck],
@@ -1159,7 +1298,7 @@ def _deck_card_dict(card: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": f"CARD.{raw_id}" if raw_id else None,
         "name": card.get("name"),
-        "cost": card.get("effective_cost", card.get("cost")),
+        "cost": _card_cost(card),
         "type": card.get("type"),
         "upgraded": bool(card.get("upgrade_level")) or bool(card.get("upgraded")),
         "description": card.get("description"),
@@ -1187,6 +1326,47 @@ _TRANSLATE_METHOD: dict[str, str] = {
     "card_select": "_translate_card_select",
     "card_bundle": "_translate_bundle_select",
 }
+
+
+def _card_cost(card: dict[str, Any], default: Any = None) -> Any:
+    """A card's energy cost as the host states it.
+
+    ``effective_cost`` is what playing the card costs now, which for an X-cost
+    card is the player's energy (Multi-Cast offered at 3, Heavenly Drill at
+    6); the host, like the card itself, says 0 (``cost``) for those.
+    """
+    if card.get("costs_x"):
+        return card.get("cost", default)
+    return card.get("effective_cost", card.get("cost", default))
+
+
+def _only_ancient_node(decision: dict[str, Any]) -> bool:
+    """A map choice whose only node is the act-start Ancient.
+
+    The game can list that node more than once (act 3 of Ironclad seed 1000
+    offered ``(3, 0)`` twice), so nodes count by coordinates.
+    """
+    choices = decision.get("choices") or []
+    nodes = {(c.get("col"), c.get("row")) for c in choices}
+    return (
+        decision.get("decision") == "map_select"
+        and len(nodes) == 1
+        and str(choices[0].get("type")).lower() == "ancient"
+    )
+
+
+def _only_proceed(options: list[dict[str, Any]]) -> bool:
+    """True when every option leaves a finished event (``is_proceed``, mod 2026-11-12)."""
+    return bool(options) and all(o.get("is_proceed") for o in options)
+
+
+#: Fire-and-forget mod messages that carry no decision: the snapshot lane
+#: (PROTOCOL.md "Run snapshots"), the turn-undo broadcast and the coach's
+#: fight recap. The mod sends them to every client, so a driver that stops on
+#: an unknown type stops at the first save (GH #1287).
+_NOTIFICATION_TYPES = frozenset(
+    {"snapshot_saved", "snapshots", "snapshot_restored", "combat_undone", "combat_ended"}
+)
 
 
 # Headless action verb -> RealGame method, for RealGame.act()/send(). Every

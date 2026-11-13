@@ -487,13 +487,39 @@ public class SimCombatHandler : IRoomHandler, IHandler
         }
     }
 
-    /// <summary>Second settle phase shared by card plays and potion uses.</summary>
-    private static Task<bool> WaitForResolutionAsync(GameAction action, Player player, CancellationToken ct) =>
-        PollUntilAsync(() =>
+    /// <summary>
+    /// Second settle phase shared by card plays and potion uses.
+    ///
+    /// A selection the play opens (Survivor's discard) is answered on
+    /// <see cref="SimCardSelector"/>'s own request, and the play finishes only
+    /// after that answer. Returning while it was open let the turn loop
+    /// serialize the next <c>combat_action</c> board right away -- queued at
+    /// the gate behind the <c>card_select</c>, so the agent received it after
+    /// answering, still showing the card in the play pile and the hand not yet
+    /// discarded from (GH #1287, Silent seed 1000). So wait the selection out,
+    /// then wait for the play itself to finish.
+    /// </summary>
+    private static async Task<bool> WaitForResolutionAsync(GameAction action, Player player, CancellationToken ct)
+    {
+        bool settled = await PollUntilAsync(() =>
             IsActionQuiescent(action) ||
             SimCardSelector.SelectionOpen ||
             !IsPlayerInPlayPhase(player) ||
             !CombatManager.Instance.IsInProgress, ResolutionSettleMs, ct);
+        while (settled && SimCardSelector.SelectionOpen && CombatManager.Instance.IsInProgress)
+        {
+            // Uncapped: the agent (or a player) may take as long as it likes.
+            while (SimCardSelector.SelectionOpen && CombatManager.Instance.IsInProgress)
+                await Task.Delay(FrameSettleMs, ct);
+            settled = await PollUntilAsync(() =>
+                action.State == GameActionState.Finished ||
+                action.State == GameActionState.Canceled ||
+                SimCardSelector.SelectionOpen ||
+                !IsPlayerInPlayPhase(player) ||
+                !CombatManager.Instance.IsInProgress, ResolutionSettleMs, ct);
+        }
+        return settled;
+    }
 
     /// <summary>Polls <paramref name="condition"/> once per frame; false if it never held within <paramref name="maxMs"/>.</summary>
     private static async Task<bool> PollUntilAsync(Func<bool> condition, int maxMs, CancellationToken ct)

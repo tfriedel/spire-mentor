@@ -2940,19 +2940,44 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    /// <summary>
+    /// The shop's card removal while it can still be bought, else null. Used
+    /// once it has been bought, or from the start when a hook forbids it
+    /// (NMerchantCardRemoval.FillSlot: Hook.ShouldAllowMerchantCardRemoval,
+    /// the Hoarder modifier) -- both happen in the game's shop UI, which
+    /// headless does not run.
+    /// </summary>
+    private static MerchantCardRemovalEntry? UsableCardRemoval(MerchantRoom room, Player player)
+    {
+        var removal = GameApi.LocalInventory(room).CardRemovalEntry;
+        if (removal == null) return null;
+        if (!removal.Used && !MegaCrit.Sts2.Core.Hooks.Hook.ShouldAllowMerchantCardRemoval(player.RunState, player))
+            removal.SetUsed();
+        return removal.Used ? null : removal;
+    }
+
     private Dictionary<string, object?> DoRemoveCard(Player player)
     {
         if (_runState?.CurrentRoom is not MerchantRoom merchantRoom)
             return Error("Not in a shop");
 
-        var removal = GameApi.LocalInventory(merchantRoom).CardRemovalEntry;
+        var removal = UsableCardRemoval(merchantRoom, player);
         if (removal == null) return Error("No card removal available");
         if (player.Gold < removal.Cost) return Error("Not enough gold");
 
         try
         {
-            // Run on background thread so card selection can pause (same pattern as event options)
-            var task = RunOnPool(() => GameApi.Purchase(removal, merchantRoom));
+            // Run on background thread so card selection can pause (same pattern as event options).
+            // v0.111.0 and older mark the service used only from the shop UI
+            // (MerchantCardRemovalEntry.OnTryPurchase -> NRun...Inventory.OnCardRemovalUsed
+            // -> NMerchantCardRemoval.SetUsed); headless has no UI, so a shop
+            // offered the removal again and again (GH #1287, Silent seed 1000).
+            // v0.113.0's OnTryPurchaseInternal sets it itself; SetUsed is idempotent.
+            var task = RunOnPool(async () =>
+            {
+                if (await GameApi.Purchase(removal, merchantRoom))
+                    removal.SetUsed();
+            });
             // Wait until the task settles (completes or parks at a selection) rather
             // than on a fixed 1 s budget — see WaitUntilOptionTaskSettles for why a
             // short timeout here drops a still-in-flight task and races its writes.
@@ -5574,7 +5599,7 @@ public class RunSimulator
             return dict;
         }).ToList();
 
-        var removal = GameApi.LocalInventory(merchantRoom).CardRemovalEntry;
+        var removal = UsableCardRemoval(merchantRoom, player);
 
         return new Dictionary<string, object?>
         {

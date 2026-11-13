@@ -95,3 +95,19 @@ class TestShopRemove:
             # Should return to shop with deck_size - 1
             if state.get("decision") == "shop":
                 assert state["player"]["deck_size"] == deck_before - 1
+
+    def test_the_removal_service_is_sold_once_per_shop(self, game):
+        """The game marks the service used from its shop UI
+        (NMerchantCardRemoval.SetUsed); headless has no UI and sold it again
+        (GH #1287, Silent seed 1000 on the live game)."""
+        state = game.start(seed="sr2")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+        assert state["card_removal_cost"] is not None
+        state = game.act("remove_card")
+        assert state["decision"] == "card_select"
+        state = game.act("select_cards", indices="0")
+        assert state["decision"] == "shop"
+        assert state["card_removal_cost"] is None
+        assert game.act("remove_card").get("type") == "error"

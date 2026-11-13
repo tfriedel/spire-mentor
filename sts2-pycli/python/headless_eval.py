@@ -59,6 +59,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import sts2_client
 import sts2_rs
 from combat_mirror import (
     CombatMirror,
@@ -740,6 +741,10 @@ def pick_combat_action_headless(
     """
     hand = state.get("hand") or []
     run_cfg = cfg if sims is None else RecommendConfig(**{**cfg.__dict__, "sims": sims})
+    # The mirror's search targets by encounter SLOT, corpses kept in place;
+    # the DLL numbers living enemies only. None: the search ran on the wire
+    # state, which lists the living first, so the two agree.
+    slots: list[dict[str, Any]] | None = None
 
     try:
         if mirror is not None:
@@ -752,6 +757,7 @@ def pick_combat_action_headless(
             )
             mirror.reconcile(wire)
             tags = tags_from_result(mirror.search(run_cfg), wire["deck"]["hand"])
+            slots = _mirror_encounter(mirror)
         else:
             tags = recommend_all(state, run_cfg)
     except MirrorDivergence:
@@ -791,6 +797,9 @@ def pick_combat_action_headless(
     def _allowed(cmd: dict[str, Any]) -> bool:
         return not banned or json.dumps(cmd, sort_keys=True) not in banned
 
+    def _dll_target(target: int) -> int:
+        return target if slots is None else _shadow_target_to_dll(slots, int(target))
+
     by_index = {int(c.get("index", i)): c for i, c in enumerate(hand)}
     for tag in tags:  # best-first; skip plays the game itself vetoes
         si = tag.stable_idx
@@ -800,7 +809,7 @@ def pick_combat_action_headless(
             slot = POTION_STABLE_IDX_BASE - si
             args = {"potion_index": slot}
             if tag.target_index is not None:
-                args["target_index"] = tag.target_index
+                args["target_index"] = _dll_target(tag.target_index)
             cmd = {"action": "use_potion", "args": args}
             if not _allowed(cmd):
                 continue
@@ -816,7 +825,7 @@ def pick_combat_action_headless(
             continue
         args = {"card_index": si}
         if tag.target_index is not None:
-            args["target_index"] = tag.target_index
+            args["target_index"] = _dll_target(tag.target_index)
         cmd = {"action": "play_card", "args": args}
         if not _allowed(cmd):
             continue
@@ -1019,6 +1028,11 @@ def _shadow_act_args(command: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return verb, args
 
 
+def _mirror_encounter(mirror: CombatMirror) -> list[dict[str, Any]]:
+    """The mirror's encounter in its own slot order (corpses kept in place)."""
+    return sts2_rs.state_to_dict(mirror.state).get("encounter") or []
+
+
 def _shadow_target_to_dll(encounter: list[dict[str, Any]], native_target: int) -> int:
     """Map a native-search ``target_index`` to the DLL's alive-enemy frame.
 
@@ -1217,7 +1231,19 @@ def play_one_headless_session(
     shadow: bool = False,
     trace_path: Path | None = None,
     forward_stderr: bool = False,
+    ascension: int = 0,
+    game: Any = None,
 ) -> RunOutcome:
+    """Play one run on the C# host with the live decision stack.
+
+    Args:
+        ascension: Ascension level the run starts at.
+        game: A ``sts2_client.Game``-shaped world to play instead of a fresh
+            host process. ``live_game_diff.LockstepGame`` passes itself here
+            to play the host and the real game in lockstep (GH #1287). It
+            must expose ``start``, ``send``, ``get_map``, ``proc`` and
+            ``world_errors`` like ``Game``.
+    """
     start = time.monotonic()
     step = 0
     fallback_count = 0
@@ -1268,10 +1294,11 @@ def play_one_headless_session(
         policy=policy_from_env(),
         label=f"headless-{character}-{seed}",
     )
-    game = Game(forward_stderr=forward_stderr)
+    if game is None:
+        game = Game(forward_stderr=forward_stderr)
     world_errors: dict[str, Any] = {"count": 0, "sample": []}
     try:
-        state = game.start(character, seed=str(seed), played_save=played_save)
+        state = game.start(character, seed=str(seed), ascension=ascension, played_save=played_save)
         if shadow:
             shadow_backend = RustGame(target_convention="csharp")
             shadow_backend.start(character=character, seed=str(seed), ascension=0)
@@ -1324,6 +1351,15 @@ def play_one_headless_session(
                 )
                 break
             decision = state.get("decision") or state.get("type")
+            # The host's wire does not name its build; the bridge's envelope
+            # does. Without it the combat search rebuilds the fight as the
+            # default build and rejects a v0.111.0 run seed (GH #1287).
+            if state.get("type") == "decision":
+                state.setdefault("game_version", sts2_client.GAME_VERSION)
+                # A mid-combat card_select carries its fight nested; the
+                # mirror rebuilds from that dict.
+                if isinstance(state.get("combat"), dict):
+                    state["combat"].setdefault("game_version", sts2_client.GAME_VERSION)
             if state.get("type") == "error":
                 # Errors carry no decision; nudge forward like the random
                 # driver. First attribute the rejection: ban the command that
@@ -1715,7 +1751,7 @@ def play_one_headless_session(
         policy="ppo",
         seed=seed,
         character=character,
-        ascension=0,
+        ascension=ascension,
         result=result,
         won=won,
         floor=floor,

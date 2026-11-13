@@ -452,7 +452,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
             ct.ThrowIfCancellationRequested();
             attempts++;
 
-            ShopChoice choice = await ChooseShopOption(PurchasableSlots(room), ct);
+            ShopChoice choice = await ChooseShopOption(room, PurchasableSlots(room), ct);
             if (choice.Leave)
             {
                 stoppedEarly = true;
@@ -511,7 +511,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
     /// Option 0 leaves; option i (1..n) buys purchasable[i-1]. With nothing
     /// purchasable there is no real choice, so it leaves without asking.
     /// </summary>
-    private static async Task<ShopChoice> ChooseShopOption(List<NMerchantSlot> purchasable, CancellationToken ct)
+    private static async Task<ShopChoice> ChooseShopOption(NMerchantRoom room, List<NMerchantSlot> purchasable, CancellationToken ct)
     {
         if (purchasable.Count == 0)
         {
@@ -531,6 +531,19 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
         };
         options.AddRange(purchasable.Select((slot, i) => ShopOption(slot, i + 1)));
         int? purgeCost = SafePurgeCost(purchasable);
+        // Every slot in shopfront order, sold out or not, each buyable one
+        // naming the option that buys it. A client that mirrors the headless
+        // host (which lists the whole stock) addresses slots by this order.
+        List<Dictionary<string, object>> stock = room.Inventory.GetAllSlots()
+            .Select(slot =>
+            {
+                Dictionary<string, object> row = ShopStockRow(slot);
+                int at = purchasable.IndexOf(slot);
+                if (at >= 0)
+                    row["option"] = at + 1;
+                return row;
+            })
+            .ToList();
 
         int index = await SimAgentChoice.AskAsync(
             (_, player) =>
@@ -540,6 +553,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
                     [NonCombatBridgeProtocol.TypeField] = NonCombatBridgeProtocol.ShopState,
                     ["options"] = options,
                     ["player_gold"] = player?.Gold ?? 0,
+                    ["stock"] = stock,
                 };
                 if (purgeCost.HasValue)
                 {
@@ -565,6 +579,12 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
             ["enabled"] = slot.Entry.IsStocked && slot.Entry.EnoughGold,
             ["price"] = slot.Entry.Cost,
         };
+        // The merchant's one discounted card (MerchantCardEntry.IsOnSale);
+        // `price` is already the sale price.
+        if (slot.Entry is MerchantCardEntry saleCard)
+        {
+            option["on_sale"] = saleCard.IsOnSale;
+        }
         Dictionary<string, object?>? detail = ShopEntryDetail(slot);
         if (detail != null)
         {
@@ -588,6 +608,8 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
             ["stocked"] = slot.Entry.IsStocked,
             ["affordable"] = slot.Entry.EnoughGold,
         };
+        if (slot.Entry is MerchantCardEntry saleCard)
+            row["on_sale"] = saleCard.IsOnSale;
         Dictionary<string, object?>? detail = ShopEntryDetail(slot);
         if (detail != null)
             row["item"] = detail;
@@ -1148,7 +1170,8 @@ public class SimEventRoomHandler : IRoomHandler, IHandler
     /// loc-key prefix; its tail is the enum id the run policy was trained on
     /// (e.g. Neow's options). <c>relic_id</c> marks relic-granting options.
     /// <c>will_kill_player</c> is the game's own lethality verdict, where
-    /// null means "could not be computed", never "safe".
+    /// null means "could not be computed", never "safe". <c>is_proceed</c>
+    /// marks the button that leaves a finished event.
     /// </summary>
     internal static List<Dictionary<string, object?>> EventOptions(List<NEventOptionButton> options) =>
         options.Select((button, i) => new Dictionary<string, object?>
@@ -1163,6 +1186,10 @@ public class SimEventRoomHandler : IRoomHandler, IHandler
             ["text_key"] = button.Option.TextKey ?? "",
             ["relic_id"] = button.Option.Relic?.Id.Entry ?? "",
             ["will_kill_player"] = SafeWillKillPlayer(button),
+            // The event is over and this button leaves the room
+            // (EventOption.IsProceed). The headless host walks to the map by
+            // itself at that point, so a client mirroring it clicks these.
+            ["is_proceed"] = button.Option.IsProceed,
         }).ToList();
 }
 

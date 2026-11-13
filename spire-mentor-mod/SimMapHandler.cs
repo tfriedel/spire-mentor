@@ -25,6 +25,7 @@ public class SimMapHandler : IScreenHandler, IHandler
 {
     private const string RunNodePath = "/root/Game/RootSceneContainer/Run";
     private static readonly TimeSpan PointEnableWait = TimeSpan.FromSeconds(10);
+    private const int NodeAppearWaitMs = 3000;
 
     /// <summary>Completed by <see cref="OnRoomEntered"/> while a map click is in flight.</summary>
     private TaskCompletionSource<bool>? _roomEntered;
@@ -46,7 +47,15 @@ public class SimMapHandler : IScreenHandler, IHandler
         NMapScreen map = runNode.GlobalUi.MapScreen;
 
         RunState? runState = RunManager.Instance.DebugOnlyGetState();
-        List<NMapPoint> available = runState != null ? AvailableNodes(map, runState) : new List<NMapPoint>();
+        // The new act's nodes can lag the screen by a few frames.
+        List<NMapPoint> available = new List<NMapPoint>();
+        for (int waitedMs = 0; runState != null; waitedMs += 16)
+        {
+            available = AvailableNodes(map, runState);
+            if (available.Count > 0 || waitedMs >= NodeAppearWaitMs)
+                break;
+            await Task.Delay(16, ct);
+        }
         if (available.Count == 0)
         {
             Logger.Log("[SimMap] No reachable map nodes; nothing to choose");
@@ -96,10 +105,20 @@ public class SimMapHandler : IScreenHandler, IHandler
     /// The map points the player can travel to next: row 0 before the first
     /// move, otherwise the children of the last visited point. Shared with
     /// advisor mode so both lanes offer the same set.
+    ///
+    /// Only nodes of the act being played: right after an act change the
+    /// previous act's start/boss nodes are still in the tree
+    /// (NMapScreen.RemoveAllMapPointsAndPaths frees them deferred), so its
+    /// Ancient showed up next to the new one. Picking the stale one waited
+    /// for a point that never enables and ended the run (GH #1287, Silent
+    /// seed 1000 act 2; Ironclad act 3 was offered (3,0) twice).
     /// </summary>
     internal static List<NMapPoint> AvailableNodes(Node mapScreen, RunState runState)
     {
-        List<NMapPoint> points = UiHelper.FindAll<NMapPoint>(mapScreen);
+        List<NMapPoint> points = UiHelper.FindAll<NMapPoint>(mapScreen)
+            .Where(p => GodotObject.IsInstanceValid(p) && !p.IsQueuedForDeletion()
+                && p.Point != null && ReferenceEquals(runState.Map.GetPoint(p.Point.coord), p.Point))
+            .ToList();
         if (runState.VisitedMapCoords.Count == 0)
         {
             return points.Where(p => p.Point.coord.row == 0).ToList();
