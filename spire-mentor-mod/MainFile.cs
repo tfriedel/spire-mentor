@@ -30,7 +30,7 @@ public static class MainFile
     // and refuses to stage when they differ; tests/run_all.sh checks it too).
     // It drifted once: beta.4 to beta.6 shipped saying "beta.3" in the toolbar,
     // F1 help, bug reports and every envelope's mod_version.
-    public const string ModVersion = "0.11.1";
+    public const string ModVersion = "0.11.2";
 
     private static Harmony? _patcher;
     private static SimAutoSlayer? _autoSlayer;
