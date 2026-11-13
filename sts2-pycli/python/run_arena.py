@@ -327,9 +327,7 @@ def main(argv: list[str] | None = None) -> None:
     # every historical report measured. To measure act difficulty, run two
     # fixed-act arms and `compare` them — do NOT compare a fixed arm against
     # `roll` (see `_act1_composition`).
-    p_sweep.add_argument(
-        "--act1", default="roll", choices=["overgrowth", "underdocks", "roll"]
-    )
+    p_sweep.add_argument("--act1", default="roll", choices=["overgrowth", "underdocks", "roll"])
     p_sweep.add_argument("--sims", type=int, default=None, help="debug sims override")
     p_sweep.add_argument("--boss-sims", type=int, default=None)
     p_sweep.add_argument("--jobs", type=int, default=0)

@@ -42,7 +42,10 @@ def _shop(*wares: dict[str, Any], remaining: int | None = 3) -> dict[str, Any]:
 
 
 def test_a_standard_shop_is_not_blitz() -> None:
-    state = {"type": "shop", "options": [{"index": 0, "action": "leave_shop"}, {"index": 1, "action": "buy_card"}]}
+    state = {
+        "type": "shop",
+        "options": [{"index": 0, "action": "leave_shop"}, {"index": 1, "action": "buy_card"}],
+    }
     assert not rp.is_blitz_shop(state)
 
 
