@@ -68,9 +68,17 @@ internal static class Referee
 /// game's own generator, so a client that sees every outcome still cannot
 /// predict the next one.
 ///
-/// Why: the game seeds each stream from a 32-bit value (RunRngSet.cs:107) and
-/// expands it with Xoshiro256** (MegaRandom.cs), which is linear. Both make
-/// the stream recoverable from observed draws.
+/// Why: the game seeds each stream from a hash of the public seed string
+/// (32-bit in v0.107.1, RunRngSet.cs:107; 64-bit from v0.111.0) and expands it
+/// with Xoshiro256** (MegaRandom.cs), which is linear. Both make the stream
+/// recoverable from observed draws.
+///
+/// Builds: v0.107.1 keys streams by Rng.Seed and patches FastForwardCounter.
+/// From v0.111.0 the seed is only a constructor argument, so the Rng(ulong)
+/// postfix records it as the stream label, the counter is the private
+/// _counter, and NextUnsignedLong joins the patched draws (v0.113.0's
+/// UnstableShuffle seeds a child Rng from it, which is then keyed too). An Rng
+/// restored from a save has no seed and faults on its first draw.
 ///
 /// How: draw n of a stream is <c>HMAC-SHA256(streamKey, n)</c> with
 /// <c>streamKey = HMAC-SHA256(episodeKey, stream seed)</c>. The stream seed is
@@ -86,20 +94,13 @@ internal static class Referee
 /// </summary>
 internal static class RefereeRng
 {
-#if GAME_V0111
-    // v0.111.0 changed the Rng shape (ulong seeds, no Seed / Counter
-    // properties). Referee mode is not ported to it yet.
-    public static void Install() =>
-        throw new NotSupportedException("referee mode is not ported to v0.111.0");
-    public static void Arm(byte[] episodeKey) => Install();
-    public static string? Audit() => null;
-    public static Dictionary<string, object?> Stats() => new();
-    public static Dictionary<string, object?> SelfTest(int samples) => new();
-#else
     private sealed class Stream
     {
         public byte[]? Key;
         public ulong S0, S1, S2, S3;
+        // The seed the stream was built from: a public label, never secret.
+        // Null for a stream rebuilt from a save, which has no seed (v0.111+).
+        public ulong? Label;
     }
 
     private static readonly object Gate = new();
@@ -109,8 +110,15 @@ internal static class RefereeRng
     private static bool _installed;
     private static long _draws;
 
+#if GAME_V0111
+    // v0.111.0 dropped the Seed and Counter properties; the counter is a
+    // private field and the seed is only a constructor argument.
+    private static readonly AccessTools.FieldRef<Rng, int> CounterRef =
+        AccessTools.FieldRefAccess<Rng, int>("_counter");
+#else
     private static readonly AccessTools.FieldRef<Rng, int> CounterRef =
         AccessTools.FieldRefAccess<Rng, int>("<Counter>k__BackingField");
+#endif
     private static readonly AccessTools.FieldRef<Rng, MegaRandom> RandomRef =
         AccessTools.FieldRefAccess<Rng, MegaRandom>("_random");
     private static readonly AccessTools.FieldRef<MegaRandom, ulong> S0Ref =
@@ -123,6 +131,14 @@ internal static class RefereeRng
         AccessTools.FieldRefAccess<MegaRandom, ulong>("_s3");
 
     private static bool Armed => _episodeKey != null;
+
+#if GAME_V0113
+    // ListExtensions.UnstableShuffle<T>(List<T>, Rng), found next to Rng.
+    private static readonly Lazy<System.Reflection.MethodInfo> UnstableShuffle = new(() =>
+        typeof(Rng).Assembly.GetType(typeof(Rng).Namespace!.Replace(".Random", ".Extensions") + ".ListExtensions")
+            ?.GetMethod("UnstableShuffle")
+        ?? throw new MissingMethodException("ListExtensions", "UnstableShuffle"));
+#endif
 
     /// <summary>Installs the patches. Call before any game code runs.</summary>
     public static void Install()
@@ -148,14 +164,32 @@ internal static class RefereeRng
             harmony.Patch(target, prefix: new HarmonyMethod(self.GetMethod(patch, AccessTools.all)));
         }
 
+#if GAME_V0111
+        // Every seeded Rng constructor chains into Rng(ulong). Rng(Serializable
+        // Rng) restores a saved state and has no seed: its stream gets no label,
+        // so a draw from it faults (referee mode never loads a save).
+        var ctor = rng.GetConstructor(new[] { typeof(ulong) })
+            ?? throw new MissingMethodException(rng.FullName, ".ctor(ulong)");
+        harmony.Patch(ctor, postfix: new HarmonyMethod(self.GetMethod(nameof(SeedCtorPostfix), AccessTools.all)));
+        var saved = Array.Find(rng.GetConstructors(), c =>
+                c.GetParameters() is [var only] && only.ParameterType.Name == "SerializableRng")
+            ?? throw new MissingMethodException(rng.FullName, ".ctor(SerializableRng)");
+        harmony.Patch(saved, postfix: new HarmonyMethod(self.GetMethod(nameof(CtorPostfix), AccessTools.all)));
+#else
         // Every Rng constructor chains into this one.
         var ctor = rng.GetConstructor(new[] { typeof(uint), typeof(int) })
             ?? throw new MissingMethodException(rng.FullName, ".ctor(uint, int)");
-        harmony.Patch(ctor, postfix: new HarmonyMethod(self.GetMethod(nameof(CtorPostfix), AccessTools.all)));
+        harmony.Patch(ctor, postfix: new HarmonyMethod(self.GetMethod(nameof(SeedCtorPostfix), AccessTools.all)));
+#endif
 
         // The complete set of Rng methods that touch the generator. Everything
         // else on Rng (NextItem, Shuffle, the Gaussians, ...) calls these.
+#if GAME_V0111
+        Prefix("NextUnsignedLong", Type.EmptyTypes, nameof(NextULong0Prefix));
+        Prefix("NextUnsignedLong", new[] { typeof(ulong), typeof(ulong) }, nameof(NextULong2Prefix));
+#else
         Prefix("FastForwardCounter", new[] { typeof(int) }, nameof(FastForwardPrefix));
+#endif
         Prefix("NextBool", Type.EmptyTypes, nameof(NextBoolPrefix));
         Prefix("NextInt", new[] { typeof(int) }, nameof(NextInt1Prefix));
         Prefix("NextInt", new[] { typeof(int), typeof(int) }, nameof(NextInt2Prefix));
@@ -215,7 +249,7 @@ internal static class RefereeRng
                 if (S0Ref(mega) != stream.S0 || S1Ref(mega) != stream.S1 ||
                     S2Ref(mega) != stream.S2 || S3Ref(mega) != stream.S3)
                 {
-                    return $"rng escape: stream seed={rng.Seed} counter={rng.Counter} drew from the game generator";
+                    return $"rng escape: stream seed={stream.Label} counter={CounterRef(rng)} drew from the game generator";
                 }
             }
             return null;
@@ -257,14 +291,19 @@ internal static class RefereeRng
             bools[rng.NextBool() ? 1 : 0]++;
             floats[Math.Min(9, (int)(rng.NextFloat(1f) * 10f))]++;
             var deck = new List<int> { 0, 1, 2, 3, 4 };
+#if GAME_V0113
+            // v0.113.0 moved Shuffle to ListExtensions (via a child Rng).
+            UnstableShuffle.Value.MakeGenericMethod(typeof(int)).Invoke(null, new object[] { deck, rng });
+#else
             rng.Shuffle(deck);
+#endif
             firstAfterShuffle[deck[0]]++;
         }
         return new Dictionary<string, object?>
         {
             ["type"] = "referee_selftest",
             ["samples"] = samples,
-            ["counter"] = rng.Counter,
+            ["counter"] = CounterRef(rng),
             ["next_int_10"] = ints,
             ["next_bool"] = bools,
             ["next_float_decile"] = floats,
@@ -295,16 +334,18 @@ internal static class RefereeRng
     }
 
     /// <summary>
-    /// Advances the stream's counter and returns the keyed draw as a double in
-    /// [0, 1), built exactly like MegaRandom.NextDouble (53 bits).
+    /// Advances the stream's counter and returns the keyed 64 raw bits.
     /// </summary>
-    private static double Draw(Rng rng)
+    private static ulong DrawRaw(Rng rng)
     {
         var stream = Track(rng);
         byte[] key;
         lock (Gate)
         {
-            key = stream.Key ??= DeriveStreamKey(rng.Seed);
+            if (stream.Label is not ulong label)
+                throw new InvalidOperationException(
+                    "referee: a draw from an Rng restored from a save (no seed to key it)");
+            key = stream.Key ??= DeriveStreamKey(label);
             _draws++;
         }
         int counter = ++CounterRef(rng);
@@ -313,14 +354,25 @@ internal static class RefereeRng
         BitConverter.TryWriteBytes(message, (long)counter);
         Span<byte> mac = stackalloc byte[32];
         HMACSHA256.HashData(key, message, mac);
-        ulong raw = BitConverter.ToUInt64(mac);
-        return (double)(raw >> 11) * 1.1102230246251565E-16;
+        return BitConverter.ToUInt64(mac);
     }
 
-    private static byte[] DeriveStreamKey(uint seed)
+    /// <summary>
+    /// The keyed draw as a double in [0, 1), built exactly like
+    /// MegaRandom.NextDouble (53 bits).
+    /// </summary>
+    private static double Draw(Rng rng) => (double)(DrawRaw(rng) >> 11) * 1.1102230246251565E-16;
+
+    private static byte[] DeriveStreamKey(ulong seed)
     {
-        Span<byte> label = stackalloc byte[4];
+#if GAME_V0111
+        Span<byte> label = stackalloc byte[8];
         BitConverter.TryWriteBytes(label, seed);
+#else
+        // v0.107.1 seeds are 32-bit; keep their 4-byte label.
+        Span<byte> label = stackalloc byte[4];
+        BitConverter.TryWriteBytes(label, (uint)seed);
+#endif
         return HMACSHA256.HashData(_episodeKey!, label);
     }
 
@@ -334,6 +386,35 @@ internal static class RefereeRng
 
     private static void CtorPostfix(Rng __instance) => Track(__instance);
 
+#if GAME_V0111
+    private static void SeedCtorPostfix(Rng __instance, ulong seed)
+#else
+    private static void SeedCtorPostfix(Rng __instance, uint seed)
+#endif
+    {
+        var stream = Track(__instance);
+        lock (Gate) stream.Label = seed;
+    }
+
+#if GAME_V0111
+    private static bool NextULong0Prefix(Rng __instance, ref ulong __result)
+    {
+        if (!Armed) return true;
+        // MegaRandom.NextULong: the raw 64 bits.
+        __result = DrawRaw(__instance);
+        return false;
+    }
+
+    private static bool NextULong2Prefix(Rng __instance, ref ulong __result, ulong minInclusive, ulong maxExclusive)
+    {
+        if (!Armed) return true;
+        if (minInclusive >= maxExclusive)
+            throw new ArgumentOutOfRangeException(nameof(minInclusive), "Minimum must be lower than maximum.");
+        double span = maxExclusive - minInclusive;
+        __result = minInclusive + (ulong)(Draw(__instance) * span);
+        return false;
+    }
+#else
     private static bool FastForwardPrefix(Rng __instance, int targetCount)
     {
         if (!Armed) return true;
@@ -343,6 +424,8 @@ internal static class RefereeRng
         CounterRef(__instance) = targetCount;
         return false;
     }
+
+#endif
 
     private static bool NextBoolPrefix(Rng __instance, ref bool __result)
     {
@@ -405,5 +488,4 @@ internal static class RefereeRng
         __result = Draw(__instance) * (max - min) + min;
         return false;
     }
-#endif
 }

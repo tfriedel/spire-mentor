@@ -20,22 +20,10 @@ KEY = "11" * 32
 OTHER_KEY = "22" * 32
 
 
-def _skip_unported_referee() -> None:
-    # RefereeRng throws NotSupportedException from v0.111.0 on (its Rng
-    # changed shape), so a referee host dies at start there. Port it, then
-    # drop this.
-    if sts2_client.GAME_VERSION != "v0.107.1":
-        pytest.skip(
-            f"referee mode is not ported to {sts2_client.GAME_VERSION} (RefereeRng.Install)"
-        )
-
-
 class Host:
     """A raw headless process, for commands the spike driver does not send."""
 
     def __init__(self, *, referee: bool, diag: bool = True):
-        if referee:
-            _skip_unported_referee()
         env = os.environ.copy()
         env.pop("STS2_REFEREE", None)
         env.pop("STS2_REFEREE_DIAG", None)
@@ -76,7 +64,6 @@ class Host:
 
 
 def _play(key: str, **kw):
-    _skip_unported_referee()
     return referee_spike.play(character="Ironclad", ascension=10, label="T0", key_hex=key, **kw)
 
 
@@ -146,7 +133,10 @@ def test_keyed_draws_are_uniform_through_the_games_own_rng_api():
         got = host.send(cmd="referee_selftest", rng_key=KEY, samples=samples)
     assert got["type"] == "referee_selftest"
     # One counter step per draw: int + bool + float + the shuffle's own draws.
-    assert got["counter"] >= samples * 7
+    # From v0.113.0 the shuffle draws once (a child Rng's seed) and runs its
+    # four swaps on that child stream.
+    per_sample = 4 if sts2_client.GAME_VERSION == "v0.113.0" else 7
+    assert got["counter"] >= samples * per_sample
     # Critical values at p = 0.001. The key is fixed, so this cannot flake.
     for name, critical in [
         ("next_int_10", 27.88),
@@ -466,8 +456,10 @@ def test_crystal_sphere_clicks_are_listed_for_fogged_cells_only(monkeypatch):
 
 # Potions whose popup offers Use outside combat (PotionUsage.AnyTime).
 ANY_TIME_POTIONS = {"FRUIT_JUICE", "BLOOD_POTION", "ENTROPIC_BREW", "FOUL_POTION"}
-# A run whose path offers both a potion reward and a chest under KEY.
-REWARD_LABEL = "REWARD6"
+# A run whose path offers both a potion reward and a chest under KEY. Content
+# differs between game builds, so each build has its own.
+REWARD_LABELS = {"v0.107.1": "REWARD6", "v0.111.0": "REWARD0", "v0.113.0": "REWARD1"}
+REWARD_LABEL = REWARD_LABELS.get(sts2_client.GAME_VERSION, "REWARD6")
 
 
 def _next_screen_action(state: dict, rnd) -> dict:
@@ -499,10 +491,16 @@ def _held(state: dict) -> tuple[list[str], list[str]]:
 
 
 def test_relic_and_potion_rewards_can_be_skipped_and_the_run_goes_on():
+    skipped, stats = _skip_a_relic_and_a_potion(REWARD_LABEL)
+    assert set(skipped) == {"relic", "potion"}, skipped
+    assert stats["unclassified_fields"] == []
+
+
+def _skip_a_relic_and_a_potion(label: str) -> tuple[dict[str, str], dict]:
     skipped: dict[str, str] = {}
     with Host(referee=True) as host:
-        state = _referee_run(host, REWARD_LABEL)
-        rnd = referee_spike.random.Random(REWARD_LABEL)
+        state = _referee_run(host, label)
+        rnd = referee_spike.random.Random(label)
         for _ in range(3000):
             if state["decision"] == "game_over" or len(skipped) == 2:
                 break
@@ -542,8 +540,7 @@ def test_relic_and_potion_rewards_can_be_skipped_and_the_run_goes_on():
             assert _held(after) == (relics, potions) and after["player"]["gold"] == gold
             state = after
         stats = host.send(cmd="referee_stats")
-    assert set(skipped) == {"relic", "potion"}, skipped
-    assert stats["unclassified_fields"] == []
+    return skipped, stats
 
 
 def test_the_potion_belt_is_usable_outside_combat_where_the_game_allows_it():
@@ -658,7 +655,6 @@ FORCED_SITE = "ForceToMap"
 
 def test_a_swallowed_error_ends_a_referee_episode(monkeypatch):
     monkeypatch.setenv("STS2_HOST_FAULT_INJECT", FORCED_SITE)
-    _skip_unported_referee()
     # A0: the run must win its first fight to reach the map at all.
     run = referee_spike.play(character="Ironclad", ascension=0, label="FAULT0", key_hex=KEY)
     # Void, not lost: the run stops at the first swallow with referee_fault.
