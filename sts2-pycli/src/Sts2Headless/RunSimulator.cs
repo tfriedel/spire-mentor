@@ -262,6 +262,21 @@ internal class LocLookup
     public string Event(string entry) => Bilingual("events", entry + ".title");
     public string Act(string entry) => Bilingual("acts", entry + ".title");
 
+    /// <summary>
+    /// The text the game shows for <paramref name="text"/>: its template filled
+    /// with the variables the model added (`LocString.GetFormattedText`), BBCode
+    /// stripped. Use it for a model's own `Title` rather than building a key
+    /// from its id: potion and relic powers take their name from the origin
+    /// model (`TemporaryDexterityPower.Title`), Decimillipede segments from
+    /// `DECIMILLIPEDE_SEGMENT.name` (GH #1324). A template that does not format
+    /// falls back to the raw entry.
+    /// </summary>
+    public string Text(LocString text)
+    {
+        try { return StripBBCode(text.GetFormattedText()); }
+        catch (Exception) { return Bilingual(text.LocTable, text.LocEntryKey); }
+    }
+
     /// <summary>Resolve a full loc key like "TABLE.KEY.SUB" by searching all tables.</summary>
     public string BilingualFromKey(string locKey)
     {
@@ -4589,7 +4604,7 @@ public class RunSimulator
                 // Enemy powers
                 var ePowers = e.Powers?.Select(pw => new Dictionary<string, object?>
                 {
-                    ["name"] = _loc.Power(pw.Id.Entry),
+                    ["name"] = _loc.Text(pw.Title),
                     // Canonical power id (PowerModel.Id.Entry, e.g. "MANGLE_POWER"),
                     // the same value the canonical/wire shape emits as "kind". The
                     // hint adapter reconstructs the power from this id unambiguously
@@ -4619,7 +4634,7 @@ public class RunSimulator
                 var enemyDict = new Dictionary<string, object?>
                 {
                     ["index"] = i,
-                    ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
+                    ["name"] = e.Monster != null ? _loc.Text(e.Monster.Title) : _loc.Monster("UNKNOWN"),
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
                     ["block"] = e.Block,
@@ -4654,7 +4669,7 @@ public class RunSimulator
                 var dIntents = SerializeIntents(e, playerCreatures);
                 var dPowers = e.Powers?.Select(pw => new Dictionary<string, object?>
                 {
-                    ["name"] = _loc.Power(pw.Id.Entry),
+                    ["name"] = _loc.Text(pw.Title),
                     ["id"] = pw.Id.Entry,
                     ["amount"] = pw.Amount,
                     ["display_amount"] = pw.DisplayAmount,
@@ -4666,7 +4681,7 @@ public class RunSimulator
                 }).ToList();
                 var corpseDict = new Dictionary<string, object?>
                 {
-                    ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
+                    ["name"] = e.Monster != null ? _loc.Text(e.Monster.Title) : _loc.Monster("UNKNOWN"),
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
                     ["block"] = e.Block,
@@ -4694,7 +4709,7 @@ public class RunSimulator
         // Player powers/buffs
         var playerPowers = player.Creature?.Powers?.Select(pw => new Dictionary<string, object?>
         {
-            ["name"] = _loc.Power(pw.Id.Entry),
+            ["name"] = _loc.Text(pw.Title),
             // Canonical power id; see the enemy-power note above (lets the hint
             // adapter reconstruct the power from the id, not the ambiguous title).
             ["id"] = pw.Id.Entry,
@@ -4838,7 +4853,7 @@ public class RunSimulator
             {
                 result["osty"] = new Dictionary<string, object?>
                 {
-                    ["name"] = _loc.Monster(osty.Monster?.Id.Entry ?? "OSTY"),
+                    ["name"] = osty.Monster != null ? _loc.Text(osty.Monster.Title) : _loc.Monster("OSTY"),
                     ["hp"] = osty.CurrentHp,
                     ["max_hp"] = osty.MaxHp,
                     ["block"] = osty.Block,
@@ -5262,7 +5277,7 @@ public class RunSimulator
                 string? title = null;
                 if (opt.Title != null)
                 {
-                    var t = _loc.Bilingual(opt.Title.LocTable, opt.Title.LocEntryKey);
+                    var t = _loc.Text(opt.Title);
                     // Check if we actually found a translation (not just the key echoed back)
                     if (t != opt.Title.LocEntryKey)
                         title = t;
@@ -5292,7 +5307,7 @@ public class RunSimulator
                 string? optDesc = null;
                 if (opt.Description != null && !string.IsNullOrEmpty(opt.Description.LocEntryKey))
                 {
-                    var d = _loc.Bilingual(opt.Description.LocTable, opt.Description.LocEntryKey);
+                    var d = _loc.Text(opt.Description);
                     if (d != opt.Description.LocEntryKey)
                         optDesc = d;
                 }
@@ -5412,7 +5427,7 @@ public class RunSimulator
         string? eventDesc = null;
         if (localEvent.Description != null)
         {
-            var d = _loc.Bilingual(localEvent.Description.LocTable, localEvent.Description.LocEntryKey);
+            var d = _loc.Text(localEvent.Description);
             if (d != localEvent.Description.LocEntryKey)
                 eventDesc = d;
         }
@@ -9725,10 +9740,23 @@ public class RunSimulator
 
     internal static class LocPatches
     {
+        private static readonly System.Reflection.FieldInfo? TranslationsField =
+            typeof(LocTable).GetField("_translations",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        /// <summary>
+        /// The table's own entry, or the key when the table has none (the game
+        /// throws a LocException there, `LocTable.GetRawText`). Until GH #1324
+        /// this returned the key for EVERY entry, so `LocString.GetFormattedText`
+        /// never saw a template: text the game builds itself (an event option
+        /// that names the potion it costs) reached the agent as a bare key.
+        /// </summary>
         public static bool GetRawTextPrefix(LocTable __instance, string key, ref string __result)
         {
-            // Return key as fallback "translation"
-            __result = key;
+            __result = TranslationsField?.GetValue(__instance) is Dictionary<string, string> t
+                && t.TryGetValue(key, out var text)
+                ? text
+                : key;
             return false;
         }
 
