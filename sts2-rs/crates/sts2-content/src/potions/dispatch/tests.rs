@@ -1484,10 +1484,11 @@ fn install_is_idempotent() {
     ensure_installed();
     let b = potion_effects::registered_count();
     assert_eq!(a, b);
-    // The 63 v0.107.1 potions plus the v0.111.0-only Ambergris (GH #792).
+    // The 63 v0.107.1 potions, the v0.111.0-only Ambergris (GH #792) and the
+    // three v0.113.0 Fool potions.
     assert_eq!(
         a,
-        PotionKind::ALL.len() + PotionKind::V0111_ONLY.len(),
+        PotionKind::ALL.len() + PotionKind::V0111_ONLY.len() + PotionKind::V0113_ONLY.len(),
         "expected every potion of every build registered"
     );
     assert_eq!(

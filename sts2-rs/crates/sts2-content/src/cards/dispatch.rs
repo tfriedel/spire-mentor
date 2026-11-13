@@ -54,6 +54,7 @@ pub fn install_default_registry() {
     super::curse::install_pool();
     super::necrobinder::install_pool(); // rebuilt from scratch (C#-first)
     super::regent::install_pool();
+    super::fool::install_pool();
 
     // Bead `sts2-rs-6ynt.3.4`: populate the engine-side EXHAUST keyword
     // registry so `combat_loop::play_card` routes EXHAUST-keyworded cards

@@ -1248,6 +1248,239 @@ pub enum CardId {
     /// `floor(Gold / 20)` times (`/ 10` upgraded). After MindBlast in
     /// `ColorlessCardPool`.
     MyShinies,
+    // ── v0.113.0 The Fool (`FoolCardPool` in decomp order, then the Fool
+    // tokens in `TokenCardPool` order, then Sadness). Not in [`CardId::all`].
+    // `XCard` / `X_CARD` disambiguates a card from its same-named `XPower`.
+    /// v0.113.0 Fool Uncommon Power (`Cards/AllIsWell.cs`), cost 1.
+    AllIsWellCard,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/Anguish.cs`), cost 1.
+    Anguish,
+    /// v0.113.0 Fool Uncommon Power (`Cards/Archery.cs`), cost 1.
+    ArcheryCard,
+    /// v0.113.0 Fool Common Attack (`Cards/ArrowStab.cs`), cost 1.
+    ArrowStab,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/BlossomShot.cs`), cost 2.
+    BlossomShot,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/BlotOutTheSky.cs`), cost 1.
+    BlotOutTheSky,
+    /// v0.113.0 Fool Rare Skill (`Cards/Bounce.cs`), cost 1.
+    Bounce,
+    /// v0.113.0 Fool Common Attack (`Cards/BowSmack.cs`), cost 1.
+    BowSmack,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Brace.cs`), cost X.
+    Brace,
+    /// v0.113.0 Fool Rare Skill (`Cards/BrightenUp.cs`), cost 1.
+    BrightenUp,
+    /// v0.113.0 Fool Common Skill (`Cards/ChoBarbs.cs`), cost 1.
+    ChoBarbsCard,
+    /// v0.113.0 Fool Rare Skill (`Cards/ChoChorus.cs`), cost 3.
+    ChoChorus,
+    /// v0.113.0 Fool Common Skill (`Cards/ChoFirm.cs`), cost 1.
+    ChoFirm,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/ChoKi.cs`), cost 1.
+    ChoKi,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/ChoLimbs.cs`), cost 2.
+    ChoLimbs,
+    /// v0.113.0 Fool Common Skill (`Cards/ChoReady.cs`), cost 1.
+    ChoReady,
+    /// v0.113.0 Fool Rare Attack (`Cards/Coda.cs`), cost 6.
+    Coda,
+    /// v0.113.0 Fool Uncommon Power (`Cards/Compost.cs`), cost 0.
+    CompostCard,
+    /// v0.113.0 Fool Rare Power (`Cards/CoveringFire.cs`), cost 1.
+    CoveringFireCard,
+    /// v0.113.0 Fool Common Skill (`Cards/DeepStretch.cs`), cost 1.
+    DeepStretch,
+    /// v0.113.0 Fool Basic Skill (`Cards/DefendFool.cs`), cost 1.
+    DefendFool,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/DislikeYou.cs`), cost 1.
+    DislikeYouCard,
+    /// v0.113.0 Fool Ancient Attack (`Cards/DivineShot.cs`), cost 0.
+    DivineShot,
+    /// v0.113.0 Fool Rare Power (`Cards/Ecstasy.cs`), cost 2.
+    EcstasyCard,
+    /// v0.113.0 Fool Rare Skill (`Cards/Encore.cs`), cost 0.
+    EncoreCard,
+    /// v0.113.0 Fool Rare Power (`Cards/Ennui.cs`), cost 1.
+    EnnuiCard,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Enrapture.cs`), cost 1.
+    Enrapture,
+    /// v0.113.0 Fool Rare Skill (`Cards/Ensemble.cs`), cost 3.
+    EnsembleCard,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/EpicRetrieval.cs`), cost 2.
+    EpicRetrieval,
+    /// v0.113.0 Fool Rare Power (`Cards/ExplosiveArrows.cs`), cost 1.
+    ExplosiveArrowsCard,
+    /// v0.113.0 Fool Rare Skill (`Cards/Florescence.cs`), cost 0.
+    Florescence,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Growth.cs`), cost 1.
+    Growth,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/HarmonicShield.cs`), cost 1.
+    HarmonicShield,
+    /// v0.113.0 Fool Common Attack (`Cards/HeavyShot.cs`), cost 2.
+    HeavyShot,
+    /// v0.113.0 Fool Uncommon Power (`Cards/HiddenRoots.cs`), cost 1.
+    HiddenRootsCard,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/HobblingShot.cs`), cost 1.
+    HobblingShot,
+    /// v0.113.0 Fool Rare Power (`Cards/Honing.cs`), cost 3.
+    HoningCard,
+    /// v0.113.0 Fool Common Skill (`Cards/Jest.cs`), cost 2.
+    Jest,
+    /// v0.113.0 Fool Common Skill (`Cards/KiChant.cs`), cost 1.
+    KiChant,
+    /// v0.113.0 Fool Common Attack (`Cards/KiHop.cs`), cost 1.
+    KiHop,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/KiRest.cs`), cost 2.
+    KiRest,
+    /// v0.113.0 Fool Rare Skill (`Cards/KiVerse.cs`), cost 1.
+    KiVerseCard,
+    /// v0.113.0 Fool Common Attack (`Cards/KiWhip.cs`), cost 1.
+    KiWhip,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/LockedIn.cs`), cost 1.
+    LockedIn,
+    /// v0.113.0 Fool Basic Attack (`Cards/FoolishShot.cs`), cost 1.
+    FoolishShot,
+    /// v0.113.0 Fool Ancient Power (`Cards/LostLute.cs`), cost 3.
+    LostLuteCard,
+    /// v0.113.0 Fool Rare Power (`Cards/Lullaby.cs`), cost 0.
+    LullabyCard,
+    /// v0.113.0 Fool Rare Attack (`Cards/MelodicShot.cs`), cost 1.
+    MelodicShot,
+    /// v0.113.0 Fool Uncommon Power (`Cards/Motif.cs`), cost 2.
+    MotifCard,
+    /// v0.113.0 Fool Common Attack (`Cards/MourningBlow.cs`), cost 0.
+    MourningBlow,
+    /// v0.113.0 Fool Rare Power (`Cards/MythicForm.cs`), cost 3.
+    MythicFormCard,
+    /// v0.113.0 Fool Rare Attack (`Cards/Nail.cs`), cost 2.
+    Nail,
+    /// v0.113.0 Fool Common Skill (`Cards/Nock.cs`), cost 0.
+    Nock,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/PunchOfJoy.cs`), cost 2.
+    PunchOfJoy,
+    /// v0.113.0 Fool Common Attack (`Cards/QuickShot.cs`), cost 0.
+    QuickShot,
+    /// v0.113.0 Fool Rare Skill (`Cards/Quietus.cs`), cost 1.
+    QuietusCard,
+    /// v0.113.0 Fool Rare Power (`Cards/Quiver.cs`), cost 1.
+    Quiver,
+    /// v0.113.0 Fool Common Attack (`Cards/RainShot.cs`), cost 1.
+    RainShot,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/RapidShot.cs`), cost 1.
+    RapidShot,
+    /// v0.113.0 Fool Common Skill (`Cards/Recall.cs`), cost 1.
+    Recall,
+    /// v0.113.0 Fool Rare Attack (`Cards/RepeatShot.cs`), cost X.
+    RepeatShot,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/RhythmStrike.cs`), cost 0.
+    RhythmStrike,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Rummage.cs`), cost 1.
+    Rummage,
+    /// v0.113.0 Fool Rare Skill (`Cards/SelfDeprecate.cs`), cost 1.
+    SelfDeprecate,
+    /// v0.113.0 Fool Uncommon Power (`Cards/SerratedArrows.cs`), cost 1.
+    SerratedArrowsCard,
+    /// v0.113.0 Fool Rare Skill (`Cards/ShowOff.cs`), cost 1.
+    ShowOffCard,
+    /// v0.113.0 Fool Rare Power (`Cards/Simpleton.cs`), cost 2.
+    SimpletonCard,
+    /// v0.113.0 Fool Rare Attack (`Cards/SkyShot.cs`), cost 1.
+    SkyShot,
+    /// v0.113.0 Fool Uncommon Power (`Cards/SongPath.cs`), cost 1.
+    SongPathCard,
+    /// v0.113.0 Fool Common Attack (`Cards/SorrowfulStrike.cs`), cost 1.
+    SorrowfulStrike,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/SteadyCadence.cs`), cost 1.
+    SteadyCadence,
+    /// v0.113.0 Fool Basic Attack (`Cards/StrikeFool.cs`), cost 1.
+    StrikeFool,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/Timber.cs`), cost 3.
+    Timber,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/TrickShot.cs`), cost 1.
+    TrickShot,
+    /// v0.113.0 Fool Uncommon Power (`Cards/Tune.cs`), cost 2.
+    TuneCard,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Uproot.cs`), cost 1.
+    Uproot,
+    /// v0.113.0 Fool Uncommon Power (`Cards/ViolentChord.cs`), cost 1.
+    ViolentChordCard,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Vitriol.cs`), cost 0.
+    Vitriol,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/WahBlast.cs`), cost 2.
+    WahBlast,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/WahCho.cs`), cost 0.
+    WahCho,
+    /// v0.113.0 Fool Rare Attack (`Cards/WahChoKi.cs`), cost 1.
+    WahChoKi,
+    /// v0.113.0 Fool Common Attack (`Cards/WahHammer.cs`), cost 1.
+    WahHammer,
+    /// v0.113.0 Fool Uncommon Attack (`Cards/WahKi.cs`), cost 1.
+    WahKi,
+    /// v0.113.0 Fool Rare Attack (`Cards/WahSymphony.cs`), cost 2.
+    WahSymphony,
+    /// v0.113.0 Fool Common Attack (`Cards/WahSweep.cs`), cost 1.
+    WahSweep,
+    /// v0.113.0 Fool Common Attack (`Cards/WahTouch.cs`), cost 1.
+    WahTouch,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/WhistlingArrows.cs`), cost 0.
+    WhistlingArrows,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Wrest.cs`), cost 0.
+    Wrest,
+    /// v0.113.0 Fool Rare Power (`Cards/Yah.cs`), cost 1.
+    YahCard,
+    /// v0.113.0 Fool Uncommon Skill (`Cards/Yoga.cs`), cost 1.
+    Yoga,
+    /// v0.113.0 Fool token Token Skill (`Cards/Death.cs`), cost 0.
+    Death,
+    /// v0.113.0 Fool token Token Skill (`Cards/Joy.cs`), cost 0.
+    Joy,
+    /// v0.113.0 Fool token Token Skill (`Cards/Judgement.cs`), cost 0.
+    Judgement,
+    /// v0.113.0 Fool token Token Attack (`Cards/Justice.cs`), cost 0.
+    Justice,
+    /// v0.113.0 Fool token Token Skill (`Cards/Strength.cs`), cost 0.
+    StrengthCard,
+    /// v0.113.0 Fool token Token Skill (`Cards/Temperance.cs`), cost 0.
+    Temperance,
+    /// v0.113.0 Fool token Token Attack (`Cards/TheChariot.cs`), cost 0.
+    TheChariot,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheDevil.cs`), cost 0.
+    TheDevil,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheFool.cs`), cost 0.
+    TheFool,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheLovers.cs`), cost 0.
+    TheLovers,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheEmperor.cs`), cost 0.
+    TheEmperor,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheEmpress.cs`), cost 0.
+    TheEmpress,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheHangedMan.cs`), cost 0.
+    TheHangedMan,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheHermit.cs`), cost 0.
+    TheHermit,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheHierophant.cs`), cost 0.
+    TheHierophant,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheHighPriestess.cs`), cost 0.
+    TheHighPriestess,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheMagician.cs`), cost 0.
+    TheMagician,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheMoon.cs`), cost 0.
+    TheMoon,
+    /// v0.113.0 Fool token Token Attack (`Cards/TheShot.cs`), cost 1.
+    TheShot,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheStar.cs`), cost 0.
+    TheStar,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheSun.cs`), cost 0.
+    TheSun,
+    /// v0.113.0 Fool token Token Attack (`Cards/TheTower.cs`), cost 0.
+    TheTower,
+    /// v0.113.0 Fool token Token Skill (`Cards/TheWorld.cs`), cost 0.
+    TheWorld,
+    /// v0.113.0 Fool token Token Skill (`Cards/WheelOfFortune.cs`), cost 0.
+    WheelOfFortune,
+    /// v0.113.0 Fool status Status Status (`Cards/Sadness.cs`), cost unplayable.
+    Sadness,
 }
 
 impl CardId {
@@ -1858,6 +2091,121 @@ impl CardId {
             Self::MightyWeapon => "MIGHTY_WEAPON",
             Self::MightyShield => "MIGHTY_SHIELD",
             Self::MyShinies => "MY_SHINIES",
+            Self::AllIsWellCard => "ALL_IS_WELL_CARD",
+            Self::Anguish => "ANGUISH",
+            Self::ArcheryCard => "ARCHERY_CARD",
+            Self::ArrowStab => "ARROW_STAB",
+            Self::BlossomShot => "BLOSSOM_SHOT",
+            Self::BlotOutTheSky => "BLOT_OUT_THE_SKY",
+            Self::Bounce => "BOUNCE",
+            Self::BowSmack => "BOW_SMACK",
+            Self::Brace => "BRACE",
+            Self::BrightenUp => "BRIGHTEN_UP",
+            Self::ChoBarbsCard => "CHO_BARBS_CARD",
+            Self::ChoChorus => "CHO_CHORUS",
+            Self::ChoFirm => "CHO_FIRM",
+            Self::ChoKi => "CHO_KI",
+            Self::ChoLimbs => "CHO_LIMBS",
+            Self::ChoReady => "CHO_READY",
+            Self::Coda => "CODA",
+            Self::CompostCard => "COMPOST_CARD",
+            Self::CoveringFireCard => "COVERING_FIRE_CARD",
+            Self::DeepStretch => "DEEP_STRETCH",
+            Self::DefendFool => "DEFEND_FOOL",
+            Self::DislikeYouCard => "DISLIKE_YOU_CARD",
+            Self::DivineShot => "DIVINE_SHOT",
+            Self::EcstasyCard => "ECSTASY_CARD",
+            Self::EncoreCard => "ENCORE_CARD",
+            Self::EnnuiCard => "ENNUI_CARD",
+            Self::Enrapture => "ENRAPTURE",
+            Self::EnsembleCard => "ENSEMBLE_CARD",
+            Self::EpicRetrieval => "EPIC_RETRIEVAL",
+            Self::ExplosiveArrowsCard => "EXPLOSIVE_ARROWS_CARD",
+            Self::Florescence => "FLORESCENCE",
+            Self::Growth => "GROWTH",
+            Self::HarmonicShield => "HARMONIC_SHIELD",
+            Self::HeavyShot => "HEAVY_SHOT",
+            Self::HiddenRootsCard => "HIDDEN_ROOTS_CARD",
+            Self::HobblingShot => "HOBBLING_SHOT",
+            Self::HoningCard => "HONING_CARD",
+            Self::Jest => "JEST",
+            Self::KiChant => "KI_CHANT",
+            Self::KiHop => "KI_HOP",
+            Self::KiRest => "KI_REST",
+            Self::KiVerseCard => "KI_VERSE_CARD",
+            Self::KiWhip => "KI_WHIP",
+            Self::LockedIn => "LOCKED_IN",
+            Self::FoolishShot => "FOOLISH_SHOT",
+            Self::LostLuteCard => "LOST_LUTE_CARD",
+            Self::LullabyCard => "LULLABY_CARD",
+            Self::MelodicShot => "MELODIC_SHOT",
+            Self::MotifCard => "MOTIF_CARD",
+            Self::MourningBlow => "MOURNING_BLOW",
+            Self::MythicFormCard => "MYTHIC_FORM_CARD",
+            Self::Nail => "NAIL",
+            Self::Nock => "NOCK",
+            Self::PunchOfJoy => "PUNCH_OF_JOY",
+            Self::QuickShot => "QUICK_SHOT",
+            Self::QuietusCard => "QUIETUS_CARD",
+            Self::Quiver => "QUIVER",
+            Self::RainShot => "RAIN_SHOT",
+            Self::RapidShot => "RAPID_SHOT",
+            Self::Recall => "RECALL",
+            Self::RepeatShot => "REPEAT_SHOT",
+            Self::RhythmStrike => "RHYTHM_STRIKE",
+            Self::Rummage => "RUMMAGE",
+            Self::SelfDeprecate => "SELF_DEPRECATE",
+            Self::SerratedArrowsCard => "SERRATED_ARROWS_CARD",
+            Self::ShowOffCard => "SHOW_OFF_CARD",
+            Self::SimpletonCard => "SIMPLETON_CARD",
+            Self::SkyShot => "SKY_SHOT",
+            Self::SongPathCard => "SONG_PATH_CARD",
+            Self::SorrowfulStrike => "SORROWFUL_STRIKE",
+            Self::SteadyCadence => "STEADY_CADENCE",
+            Self::StrikeFool => "STRIKE_FOOL",
+            Self::Timber => "TIMBER",
+            Self::TrickShot => "TRICK_SHOT",
+            Self::TuneCard => "TUNE_CARD",
+            Self::Uproot => "UPROOT",
+            Self::ViolentChordCard => "VIOLENT_CHORD_CARD",
+            Self::Vitriol => "VITRIOL",
+            Self::WahBlast => "WAH_BLAST",
+            Self::WahCho => "WAH_CHO",
+            Self::WahChoKi => "WAH_CHO_KI",
+            Self::WahHammer => "WAH_HAMMER",
+            Self::WahKi => "WAH_KI",
+            Self::WahSymphony => "WAH_SYMPHONY",
+            Self::WahSweep => "WAH_SWEEP",
+            Self::WahTouch => "WAH_TOUCH",
+            Self::WhistlingArrows => "WHISTLING_ARROWS",
+            Self::Wrest => "WREST",
+            Self::YahCard => "YAH_CARD",
+            Self::Yoga => "YOGA",
+            Self::Death => "DEATH",
+            Self::Joy => "JOY",
+            Self::Judgement => "JUDGEMENT",
+            Self::Justice => "JUSTICE",
+            Self::StrengthCard => "STRENGTH_CARD",
+            Self::Temperance => "TEMPERANCE",
+            Self::TheChariot => "THE_CHARIOT",
+            Self::TheDevil => "THE_DEVIL",
+            Self::TheFool => "THE_FOOL",
+            Self::TheLovers => "THE_LOVERS",
+            Self::TheEmperor => "THE_EMPEROR",
+            Self::TheEmpress => "THE_EMPRESS",
+            Self::TheHangedMan => "THE_HANGED_MAN",
+            Self::TheHermit => "THE_HERMIT",
+            Self::TheHierophant => "THE_HIEROPHANT",
+            Self::TheHighPriestess => "THE_HIGH_PRIESTESS",
+            Self::TheMagician => "THE_MAGICIAN",
+            Self::TheMoon => "THE_MOON",
+            Self::TheShot => "THE_SHOT",
+            Self::TheStar => "THE_STAR",
+            Self::TheSun => "THE_SUN",
+            Self::TheTower => "THE_TOWER",
+            Self::TheWorld => "THE_WORLD",
+            Self::WheelOfFortune => "WHEEL_OF_FORTUNE",
+            Self::Sadness => "SADNESS",
         }
     }
 
@@ -2472,11 +2820,126 @@ impl CardId {
     ];
 
     /// Cards that exist only from game build v0.113.0 on.
-    pub const V0113_ONLY: [CardId; 4] = [
+    pub const V0113_ONLY: [CardId; 119] = [
         Self::DingyDagger,
         Self::MightyWeapon,
         Self::MightyShield,
         Self::MyShinies,
+        Self::AllIsWellCard,
+        Self::Anguish,
+        Self::ArcheryCard,
+        Self::ArrowStab,
+        Self::BlossomShot,
+        Self::BlotOutTheSky,
+        Self::Bounce,
+        Self::BowSmack,
+        Self::Brace,
+        Self::BrightenUp,
+        Self::ChoBarbsCard,
+        Self::ChoChorus,
+        Self::ChoFirm,
+        Self::ChoKi,
+        Self::ChoLimbs,
+        Self::ChoReady,
+        Self::Coda,
+        Self::CompostCard,
+        Self::CoveringFireCard,
+        Self::DeepStretch,
+        Self::DefendFool,
+        Self::DislikeYouCard,
+        Self::DivineShot,
+        Self::EcstasyCard,
+        Self::EncoreCard,
+        Self::EnnuiCard,
+        Self::Enrapture,
+        Self::EnsembleCard,
+        Self::EpicRetrieval,
+        Self::ExplosiveArrowsCard,
+        Self::Florescence,
+        Self::Growth,
+        Self::HarmonicShield,
+        Self::HeavyShot,
+        Self::HiddenRootsCard,
+        Self::HobblingShot,
+        Self::HoningCard,
+        Self::Jest,
+        Self::KiChant,
+        Self::KiHop,
+        Self::KiRest,
+        Self::KiVerseCard,
+        Self::KiWhip,
+        Self::LockedIn,
+        Self::FoolishShot,
+        Self::LostLuteCard,
+        Self::LullabyCard,
+        Self::MelodicShot,
+        Self::MotifCard,
+        Self::MourningBlow,
+        Self::MythicFormCard,
+        Self::Nail,
+        Self::Nock,
+        Self::PunchOfJoy,
+        Self::QuickShot,
+        Self::QuietusCard,
+        Self::Quiver,
+        Self::RainShot,
+        Self::RapidShot,
+        Self::Recall,
+        Self::RepeatShot,
+        Self::RhythmStrike,
+        Self::Rummage,
+        Self::SelfDeprecate,
+        Self::SerratedArrowsCard,
+        Self::ShowOffCard,
+        Self::SimpletonCard,
+        Self::SkyShot,
+        Self::SongPathCard,
+        Self::SorrowfulStrike,
+        Self::SteadyCadence,
+        Self::StrikeFool,
+        Self::Timber,
+        Self::TrickShot,
+        Self::TuneCard,
+        Self::Uproot,
+        Self::ViolentChordCard,
+        Self::Vitriol,
+        Self::WahBlast,
+        Self::WahCho,
+        Self::WahChoKi,
+        Self::WahHammer,
+        Self::WahKi,
+        Self::WahSymphony,
+        Self::WahSweep,
+        Self::WahTouch,
+        Self::WhistlingArrows,
+        Self::Wrest,
+        Self::YahCard,
+        Self::Yoga,
+        Self::Death,
+        Self::Joy,
+        Self::Judgement,
+        Self::Justice,
+        Self::StrengthCard,
+        Self::Temperance,
+        Self::TheChariot,
+        Self::TheDevil,
+        Self::TheFool,
+        Self::TheLovers,
+        Self::TheEmperor,
+        Self::TheEmpress,
+        Self::TheHangedMan,
+        Self::TheHermit,
+        Self::TheHierophant,
+        Self::TheHighPriestess,
+        Self::TheMagician,
+        Self::TheMoon,
+        Self::TheShot,
+        Self::TheStar,
+        Self::TheSun,
+        Self::TheTower,
+        Self::TheWorld,
+        Self::WheelOfFortune,
+        Self::Sadness,
     ];
 
     /// The build a card first exists in.
@@ -2502,9 +2965,125 @@ impl CardId {
             | Self::TheBall
             | Self::Tutor
             | Self::UnderworldCard => crate::GameVersion::V0_111_0,
-            Self::DingyDagger | Self::MightyWeapon | Self::MightyShield | Self::MyShinies => {
-                crate::GameVersion::V0_113_0
-            }
+            Self::DingyDagger
+            | Self::MightyWeapon
+            | Self::MightyShield
+            | Self::MyShinies
+            | Self::AllIsWellCard
+            | Self::Anguish
+            | Self::ArcheryCard
+            | Self::ArrowStab
+            | Self::BlossomShot
+            | Self::BlotOutTheSky
+            | Self::Bounce
+            | Self::BowSmack
+            | Self::Brace
+            | Self::BrightenUp
+            | Self::ChoBarbsCard
+            | Self::ChoChorus
+            | Self::ChoFirm
+            | Self::ChoKi
+            | Self::ChoLimbs
+            | Self::ChoReady
+            | Self::Coda
+            | Self::CompostCard
+            | Self::CoveringFireCard
+            | Self::DeepStretch
+            | Self::DefendFool
+            | Self::DislikeYouCard
+            | Self::DivineShot
+            | Self::EcstasyCard
+            | Self::EncoreCard
+            | Self::EnnuiCard
+            | Self::Enrapture
+            | Self::EnsembleCard
+            | Self::EpicRetrieval
+            | Self::ExplosiveArrowsCard
+            | Self::Florescence
+            | Self::Growth
+            | Self::HarmonicShield
+            | Self::HeavyShot
+            | Self::HiddenRootsCard
+            | Self::HobblingShot
+            | Self::HoningCard
+            | Self::Jest
+            | Self::KiChant
+            | Self::KiHop
+            | Self::KiRest
+            | Self::KiVerseCard
+            | Self::KiWhip
+            | Self::LockedIn
+            | Self::FoolishShot
+            | Self::LostLuteCard
+            | Self::LullabyCard
+            | Self::MelodicShot
+            | Self::MotifCard
+            | Self::MourningBlow
+            | Self::MythicFormCard
+            | Self::Nail
+            | Self::Nock
+            | Self::PunchOfJoy
+            | Self::QuickShot
+            | Self::QuietusCard
+            | Self::Quiver
+            | Self::RainShot
+            | Self::RapidShot
+            | Self::Recall
+            | Self::RepeatShot
+            | Self::RhythmStrike
+            | Self::Rummage
+            | Self::SelfDeprecate
+            | Self::SerratedArrowsCard
+            | Self::ShowOffCard
+            | Self::SimpletonCard
+            | Self::SkyShot
+            | Self::SongPathCard
+            | Self::SorrowfulStrike
+            | Self::SteadyCadence
+            | Self::StrikeFool
+            | Self::Timber
+            | Self::TrickShot
+            | Self::TuneCard
+            | Self::Uproot
+            | Self::ViolentChordCard
+            | Self::Vitriol
+            | Self::WahBlast
+            | Self::WahCho
+            | Self::WahChoKi
+            | Self::WahHammer
+            | Self::WahKi
+            | Self::WahSymphony
+            | Self::WahSweep
+            | Self::WahTouch
+            | Self::WhistlingArrows
+            | Self::Wrest
+            | Self::YahCard
+            | Self::Yoga
+            | Self::Death
+            | Self::Joy
+            | Self::Judgement
+            | Self::Justice
+            | Self::StrengthCard
+            | Self::Temperance
+            | Self::TheChariot
+            | Self::TheDevil
+            | Self::TheFool
+            | Self::TheLovers
+            | Self::TheEmperor
+            | Self::TheEmpress
+            | Self::TheHangedMan
+            | Self::TheHermit
+            | Self::TheHierophant
+            | Self::TheHighPriestess
+            | Self::TheMagician
+            | Self::TheMoon
+            | Self::TheShot
+            | Self::TheStar
+            | Self::TheSun
+            | Self::TheTower
+            | Self::TheWorld
+            | Self::WheelOfFortune
+            | Self::Sadness => crate::GameVersion::V0_113_0,
             _ => crate::GameVersion::V0_107_1,
         }
     }

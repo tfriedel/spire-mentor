@@ -80,9 +80,10 @@ pub fn character_from_str(s: &str) -> Result<CharacterId, String> {
         "Defect" | "defect" => Ok(CharacterId::Defect),
         "Regent" | "regent" => Ok(CharacterId::Regent),
         "Necrobinder" | "necrobinder" => Ok(CharacterId::Necrobinder),
+        "Fool" | "fool" => Ok(CharacterId::Fool),
         other => Err(format!(
             "unknown character {other:?} — expected one of \
-             Ironclad/Silent/Defect/Regent/Necrobinder"
+             Ironclad/Silent/Defect/Regent/Necrobinder/Fool"
         )),
     }
 }
@@ -96,6 +97,7 @@ pub const fn character_str(c: CharacterId) -> &'static str {
         CharacterId::Defect => "Defect",
         CharacterId::Regent => "Regent",
         CharacterId::Necrobinder => "Necrobinder",
+        CharacterId::Fool => "Fool",
     }
 }
 
@@ -282,6 +284,7 @@ mod tests {
             CharacterId::Defect,
             CharacterId::Regent,
             CharacterId::Necrobinder,
+            CharacterId::Fool,
         ] {
             assert_eq!(character_from_str(character_str(c)), Ok(c));
             assert_eq!(character_from_str(&character_str(c).to_lowercase()), Ok(c));

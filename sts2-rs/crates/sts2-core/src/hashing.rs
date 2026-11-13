@@ -1024,6 +1024,12 @@ fn hash_player_tail<E: HashEncoding, H: Hasher>(
     // powers like Unmovable / CrimsonMantle / Inferno).
     E::player_powers(p, state, h);
 
+    // v0.113.0 The Fool: arrows / impaled lists / melody tallies. Folded only
+    // when present, so every pre-Fool hash keeps its byte stream.
+    if let Some(f) = p.fool.as_deref() {
+        crate::fool::hash_into(f, h);
+    }
+
     // Defect orb belt. Bead `sts2-rs-jyd15`: the orb belt
     // (Lightning/Frost/Dark passive + evoke payloads) is observable
     // per-player combat state, but was absent from the hash — two states

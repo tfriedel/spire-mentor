@@ -13,6 +13,7 @@
 //! verifies that every entry in a slice has a corresponding `CardId`
 //! that resolves back through `resolve_card_name`.
 
+use super::fool::specs as fs;
 use super::status_specs_generated as st;
 use super::types::CardSpec;
 
@@ -617,6 +618,123 @@ pub const V0111_ONLY_SPECS: &[fn() -> CardSpec] = &[
     crate::cards::colorless::my_shinies::spec,
     crate::cards::colorless::mighty_weapon::spec,
     crate::cards::colorless::mighty_shield::spec,
+    // v0.113.0 The Fool (`crate::cards::fool`): every Fool card, so the
+    // id-keyed lookups resolve. Pool membership is `fool::FOOL_POOL_V0113`.
+    fs::all_is_well,
+    fs::anguish,
+    fs::archery,
+    fs::arrow_stab,
+    fs::blossom_shot,
+    fs::blot_out_the_sky,
+    fs::bounce,
+    fs::bow_smack,
+    fs::brace,
+    fs::brighten_up,
+    fs::cho_barbs,
+    fs::cho_chorus,
+    fs::cho_firm,
+    fs::cho_ki,
+    fs::cho_limbs,
+    fs::cho_ready,
+    fs::coda,
+    fs::compost,
+    fs::covering_fire,
+    fs::deep_stretch,
+    fs::defend_fool,
+    fs::dislike_you,
+    fs::divine_shot,
+    fs::ecstasy,
+    fs::encore,
+    fs::ennui,
+    fs::enrapture,
+    fs::ensemble,
+    fs::epic_retrieval,
+    fs::explosive_arrows,
+    fs::florescence,
+    fs::growth,
+    fs::harmonic_shield,
+    fs::heavy_shot,
+    fs::hidden_roots,
+    fs::hobbling_shot,
+    fs::honing,
+    fs::jest,
+    fs::ki_chant,
+    fs::ki_hop,
+    fs::ki_rest,
+    fs::ki_verse,
+    fs::ki_whip,
+    fs::locked_in,
+    fs::foolish_shot,
+    fs::lost_lute,
+    fs::lullaby,
+    fs::melodic_shot,
+    fs::motif,
+    fs::mourning_blow,
+    fs::mythic_form,
+    fs::nail,
+    fs::nock,
+    fs::punch_of_joy,
+    fs::quick_shot,
+    fs::quietus,
+    fs::quiver,
+    fs::rain_shot,
+    fs::rapid_shot,
+    fs::recall,
+    fs::repeat_shot,
+    fs::rhythm_strike,
+    fs::rummage,
+    fs::self_deprecate,
+    fs::serrated_arrows,
+    fs::show_off,
+    fs::simpleton,
+    fs::sky_shot,
+    fs::song_path,
+    fs::sorrowful_strike,
+    fs::steady_cadence,
+    fs::strike_fool,
+    fs::timber,
+    fs::trick_shot,
+    fs::tune,
+    fs::uproot,
+    fs::violent_chord,
+    fs::vitriol,
+    fs::wah_blast,
+    fs::wah_cho,
+    fs::wah_cho_ki,
+    fs::wah_hammer,
+    fs::wah_ki,
+    fs::wah_symphony,
+    fs::wah_sweep,
+    fs::wah_touch,
+    fs::whistling_arrows,
+    fs::wrest,
+    fs::yah,
+    fs::yoga,
+    fs::death,
+    fs::joy,
+    fs::judgement,
+    fs::justice,
+    fs::strength,
+    fs::temperance,
+    fs::the_chariot,
+    fs::the_devil,
+    fs::the_fool,
+    fs::the_lovers,
+    fs::the_emperor,
+    fs::the_empress,
+    fs::the_hanged_man,
+    fs::the_hermit,
+    fs::the_hierophant,
+    fs::the_high_priestess,
+    fs::the_magician,
+    fs::the_moon,
+    fs::the_shot,
+    fs::the_star,
+    fs::the_sun,
+    fs::the_tower,
+    fs::the_world,
+    fs::wheel_of_fortune,
+    fs::sadness,
 ];
 
 /// Auto-listed status card factories (75 entries).
@@ -744,6 +862,7 @@ pub fn specs_for_character(character: CharacterId) -> &'static [fn() -> super::t
         CharacterId::Defect => DEFECT_SPECS,
         CharacterId::Regent => REGENT_SPECS,
         CharacterId::Necrobinder => NECROBINDER_SPECS,
+        CharacterId::Fool => super::fool_pool::FOOL_SPECS,
     };
     if crate::unlocks::any_locked() {
         return unlocked_specs(character as u8, all);
@@ -888,6 +1007,7 @@ pub fn basic_strike_defend_cards(character: CharacterId) -> Option<[CardId; 2]> 
         CharacterId::Defect => Some([CardId::StrikeDefect, CardId::DefendDefect]),
         CharacterId::Regent => Some([CardId::StrikeRegent, CardId::DefendRegent]),
         CharacterId::Necrobinder => Some([CardId::StrikeNecrobinder, CardId::DefendNecrobinder]),
+        CharacterId::Fool => super::fool_pool::basic_strike_defend(),
     }
 }
 
@@ -1262,6 +1382,7 @@ const fn character_pool_entry(character: CharacterId) -> &'static str {
         CharacterId::Regent => "REGENT_CARD_POOL",
         CharacterId::Necrobinder => "NECROBINDER_CARD_POOL",
         CharacterId::Defect => "DEFECT_CARD_POOL",
+        CharacterId::Fool => "FOOL_CARD_POOL",
     }
 }
 
@@ -1314,9 +1435,13 @@ pub fn roll_kaleidoscope_card_rewards(
     for _ in 0..CARDS {
         // Fresh non-owner pool list each reward (C# rebuilds + reshuffles per
         // iteration of its `for i in 0..Cards` loop).
+        // v0.113.0: The Fool's pool joins `CharacterCardPools`.
+        let fool =
+            (rs.game_version >= sts2_core::GameVersion::V0_113_0).then_some(CharacterId::Fool);
         let mut pools: Vec<CharacterId> = POOL_CHARACTERS
             .iter()
             .copied()
+            .chain(fool)
             .filter(|c| *c != owner)
             .collect();
         let version = rs.game_version;
@@ -2008,6 +2133,13 @@ pub fn is_multiplayer_only(id: CardId) -> bool {
             | CardId::TheBall
             | CardId::Tutor
             | CardId::UnderworldCard
+            // v0.113.0 Fool MP-only cards.
+            | CardId::CompostCard
+            | CardId::CoveringFireCard
+            | CardId::Enrapture
+            | CardId::EnsembleCard
+            | CardId::SelfDeprecate
+            | CardId::Yoga
     )
 }
 
@@ -2407,6 +2539,11 @@ pub fn character_for_card_id(card_id: CardId) -> Option<CharacterId> {
                 return Some(c);
             }
         }
+    }
+    // v0.113.0 `FoolCardPool` (its 90 cards; the Fool tokens sit in
+    // `TokenCardPool`). Fool ids exist in no earlier build's state.
+    if super::fool::FOOL_POOL_V0113.contains(&card_id) {
+        return Some(CharacterId::Fool);
     }
     v0111_card_character(card_id)
 }
@@ -4489,6 +4626,29 @@ mod tests {
         assert!(!pool.contains(&CardId::Injury));
         assert!(pool.contains(&CardId::Guilty));
         assert!(!pool.contains(&CardId::Prolong));
+    }
+
+    /// v0.113.0 `FoolCardPool` lists The Fool's 90 cards, so a Fool card's
+    /// `original.Pool` is the Fool pool: a run-side transform rolls another
+    /// Fool card, even for a different character's deck
+    /// (`CardFactory.GetDefaultTransformationOptions`).
+    #[test]
+    fn fool_cards_resolve_to_the_fool_pool() {
+        for &id in &super::super::fool::FOOL_POOL_V0113 {
+            assert_eq!(character_for_card_id(id), Some(CharacterId::Fool), "{id:?}");
+        }
+        // Fool tokens sit in TokenCardPool, not FoolCardPool.
+        assert_eq!(character_for_card_id(CardId::TheTower), None);
+        let pool = transform_replacement_pool(
+            CharacterId::Ironclad,
+            CardId::TrickShot,
+            sts2_core::GameVersion::V0_113_0,
+        );
+        assert!(!pool.is_empty());
+        for &id in &pool {
+            assert!(super::super::fool::FOOL_POOL_V0113.contains(&id), "{id:?}");
+        }
+        assert!(!pool.contains(&CardId::TrickShot));
     }
 
     #[test]

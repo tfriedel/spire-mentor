@@ -2230,7 +2230,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--coverage-character",
         default="Ironclad",
-        choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
+        choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder", "Fool"],
         help=(
             "Which character's coverage pack to sweep with --coverage. "
             "'Ironclad' (default) is the full IC+colorless+relic+potion+"
@@ -2257,7 +2257,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--sweep-character",
         default="Ironclad",
-        choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
+        choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder", "Fool"],
         help=(
             "Which character's card pool drives the v2 (--sweep v2) random-seed "
             "axes (upgraded / arenas / fuzz). Default 'Ironclad' reproduces the "

@@ -432,11 +432,14 @@ def _registry_power_names() -> frozenset[str]:
         if list_names is None:
             return frozenset()
         # Every build's powers ("power" is v0.107.1's alone, an embedding
-        # vocabulary that must not grow); older engines lack the kind.
-        try:
-            return frozenset(list_names("power_all"))
-        except ValueError:
-            return frozenset(list_names("power"))
+        # vocabulary that must not grow; "power_all" leaves out v0.113.0's,
+        # the e2e vocab's universe); older engines lack the kinds.
+        for kind in ("power_any", "power_all"):
+            try:
+                return frozenset(list_names(kind))
+            except ValueError:
+                continue
+        return frozenset(list_names("power"))
     except Exception:
         return frozenset()
 

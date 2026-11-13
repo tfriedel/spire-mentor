@@ -884,8 +884,17 @@ fn colorful_philosophers_generate_options(
     state: &RunState,
     spec: &EventSpec,
 ) -> Vec<EventOptionInfo> {
-    let mut pools: Vec<usize> = (0..COLORFUL_PHILOSOPHERS_POOLS.len())
-        .filter(|&i| COLORFUL_PHILOSOPHERS_POOLS[i] != state.character_id)
+    // v0.113.0 `CardPoolColorOrder` inserts the Fool pool after Regent; its
+    // option is the LAST spec entry (index 5) so older builds keep 0..5.
+    let order: &[usize] = if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        &[0, 1, 2, 5, 3, 4]
+    } else {
+        &[0, 1, 2, 3, 4]
+    };
+    let mut pools: Vec<usize> = order
+        .iter()
+        .copied()
+        .filter(|&i| COLORFUL_PHILOSOPHER_POOL_OF_OPTION[i] != state.character_id)
         .collect();
     let mut rng = event_rng(state, COLORFUL_PHILOSOPHERS_STREAM);
     let keep = pools.len().min(3);
@@ -948,6 +957,21 @@ fn colorful_philosophers_defect(state: &mut RunState) -> EventOutcome {
     colorful_philosophers_offer(state, sts2_core::potions::CharacterId::Defect)
 }
 
+fn colorful_philosophers_fool(state: &mut RunState) -> EventOutcome {
+    colorful_philosophers_offer(state, sts2_core::potions::CharacterId::Fool)
+}
+
+/// The pool each [`PHILOSOPHER_OPTIONS`] entry offers, by spec index: the
+/// v0.107.1 [`COLORFUL_PHILOSOPHERS_POOLS`] order, then The Fool (v0.113.0+).
+const COLORFUL_PHILOSOPHER_POOL_OF_OPTION: [sts2_core::potions::CharacterId; 6] = [
+    COLORFUL_PHILOSOPHERS_POOLS[0],
+    COLORFUL_PHILOSOPHERS_POOLS[1],
+    COLORFUL_PHILOSOPHERS_POOLS[2],
+    COLORFUL_PHILOSOPHERS_POOLS[3],
+    COLORFUL_PHILOSOPHERS_POOLS[4],
+    sts2_core::potions::CharacterId::Fool,
+];
+
 /// One option per pool, in [`COLORFUL_PHILOSOPHERS_POOLS`] order (the
 /// presenter indexes this list by that order). Loc keys are
 /// `"COLORFUL_PHILOSOPHERS.pages.INITIAL.options." + EnergyColorName.ToUpperInvariant()`.
@@ -1001,6 +1025,17 @@ const PHILOSOPHER_OPTIONS: &[EventOptionSpec] = &[
         vars_fn: None,
         title_vars_fn: None,
         handler: colorful_philosophers_defect,
+    },
+    // v0.113.0 only (see `colorful_philosophers_generate_options`).
+    EventOptionSpec {
+        option_id: "fool",
+        loc_key: "COLORFUL_PHILOSOPHERS.pages.INITIAL.options.FOOL",
+        default_label: "Fool Philosopher",
+        default_description: "Common, Uncommon and Rare Fool card rewards.",
+        default_vars: &[("Cards", EventVarSpec::Int(3))],
+        vars_fn: None,
+        title_vars_fn: None,
+        handler: colorful_philosophers_fool,
     },
 ];
 
@@ -2744,7 +2779,16 @@ mod tests {
                 EventId::ColorfulPhilosophers,
                 "ColorfulPhilosophers",
                 // One option per colour; three of them are presented (GH #817).
-                &["necrobinder", "ironclad", "regent", "silent", "defect"],
+                // "fool" is offered only at v0.113.0+ (see
+                // `colorful_philosophers_offers_fool_only_from_v0113`).
+                &[
+                    "necrobinder",
+                    "ironclad",
+                    "regent",
+                    "silent",
+                    "defect",
+                    "fool",
+                ],
             ),
             (
                 &COLOSSAL_FLOWER,
@@ -3352,6 +3396,31 @@ mod colorful_philosophers_tests {
                     )
                 );
             }
+        }
+    }
+
+    /// v0.113.0 `CardPoolColorOrder` inserts the Fool pool after Regent: five
+    /// other pools, then removals at `NextInt(5)` and `NextInt(4)` down to
+    /// three. Before v0.113.0 "fool" never appears.
+    #[test]
+    fn colorful_philosophers_offers_fool_only_from_v0113() {
+        for seed in 0..40 {
+            let mut rs = rs_for(CharacterId::Silent, seed);
+            rs.game_version = sts2_core::GameVersion::V0_113_0;
+            let mut others = vec!["necrobinder", "ironclad", "regent", "fool", "defect"];
+            let mut rng = rs.rng.named("COLORFUL_PHILOSOPHERS");
+            while others.len() > 3 {
+                let n = others.len() as i32;
+                others.remove(rng.next_int_exclusive(0, n) as usize);
+            }
+            let opts = (COLORFUL_PHILOSOPHERS.generate_options)(&rs, &COLORFUL_PHILOSOPHERS);
+            let ids: Vec<&str> = opts.iter().map(|o| o.option_id).collect();
+            assert_eq!(ids, others, "seed {seed}");
+        }
+        for seed in 0..40 {
+            let rs = rs_for(CharacterId::Silent, seed);
+            let opts = (COLORFUL_PHILOSOPHERS.generate_options)(&rs, &COLORFUL_PHILOSOPHERS);
+            assert!(opts.iter().all(|o| o.option_id != "fool"));
         }
     }
 

@@ -824,7 +824,8 @@ fn ovicopter_lay_eggs_effect(state: &mut CombatState, _owner: CreatureUid) {
 /// Bead `sts2-rs-z4jsg`: ToughEgg HATCH_MOVE body. C# `ToughEgg.cs::
 /// HatchMove` → `Hatch()`:
 ///   1. `PowerCmd.Remove<HatchPower>(Owner)` + remove every remaining
-///      non-Minion power (`Powers.Where(p => !(p is MinionPower))`) —
+///      non-Minion power (`Powers.Where(p => !(p is MinionPower))`; v0.113.0
+///      also keeps `ImpaledPower`) —
 ///      a hatching egg sheds player-applied debuffs (Vulnerable, …) but
 ///      keeps its Minion tag.
 ///   2. Re-roll HP: `RunRng.Niche.NextInt(HatchlingMinHp=19,
@@ -850,7 +851,13 @@ fn tough_egg_hatch_effect(state: &mut CombatState, owner: CreatureUid) {
                     state
                         .powers
                         .iter()
-                        .find(|p| p.id == pu.0 && p.kind != PowerKind::Minion)
+                        // v0.113.0 also keeps `ImpaledPower` (the arrows stay
+                        // lodged); it cannot exist on an earlier build.
+                        .find(|p| {
+                            p.id == pu.0
+                                && p.kind != PowerKind::Minion
+                                && p.kind != PowerKind::Impaled
+                        })
                         .map(|p| p.id)
                 })
                 .collect()
@@ -4416,6 +4423,33 @@ mod tests {
             .find(|c| c.id == egg.0)
             .expect("egg alive")
             .max_hp
+    }
+
+    /// v0.113.0 `ToughEgg.HatchMove` sheds every power except Minion and
+    /// `ImpaledPower`.
+    #[test]
+    fn tough_egg_hatch_keeps_impaled() {
+        let mut state = CombatState {
+            game_version: sts2_core::GameVersion::V0_113_0,
+            run_rng: sts2_core::run_rng_set::RunRngSet::new(7),
+            ..CombatState::default()
+        };
+        let egg = state.spawn_enemy(MonsterKind::ToughEgg);
+        state.set_creature_ai(egg, create_tough_egg_ai());
+        apply_power_to_creature(&mut state, egg, PowerKind::Impaled, 1);
+        apply_power_to_creature(&mut state, egg, PowerKind::Vulnerable, 2);
+        tough_egg_hatch_effect(&mut state, egg);
+        let kinds: Vec<PowerKind> = state
+            .creatures
+            .iter()
+            .find(|c| c.id == egg.0)
+            .expect("egg alive")
+            .powers
+            .iter()
+            .filter_map(|pu| state.powers.iter().find(|p| p.id == pu.0).map(|p| p.kind))
+            .collect();
+        assert!(kinds.contains(&PowerKind::Impaled), "{kinds:?}");
+        assert!(!kinds.contains(&PowerKind::Vulnerable), "{kinds:?}");
     }
 
     /// v0.107.1 `ToughEgg.cs:172`: `NextInt(HatchlingMinHp, HatchlingMaxHp)`

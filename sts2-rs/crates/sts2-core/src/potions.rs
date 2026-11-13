@@ -37,6 +37,10 @@ pub enum CharacterId {
     Defect,
     Regent,
     Necrobinder,
+    /// The Fool — v0.113.0-only (`Models.Characters/Fool.cs`). Every
+    /// Fool-specific path is gated on `GameVersion >= V0_113_0`; earlier
+    /// builds never construct this variant.
+    Fool,
 }
 
 /// Potion rarity bucket. Mirrors
@@ -155,6 +159,16 @@ pub enum PotionKind {
     /// v0.111.0 Event potion (`Potions/Ambergris.cs`): heal 50% max HP,
     /// plus an extra turn in combat. Procured by NeowsSacrifice.
     Ambergris,
+    // ── v0.113.0-only: The Fool's potion pool (`Fool4Epoch.Potions`
+    // order). Not in [`PotionKind::ALL`]; see [`PotionKind::V0113_ONLY`].
+    /// v0.113.0 Fool Common (`Potions/PrecisionPotion.cs`): gain 21 Aim.
+    PrecisionPotion,
+    /// v0.113.0 Fool Uncommon (`Potions/BottledSong.cs`): one free-this-turn
+    /// Wah, Cho and Ki melody card each.
+    BottledSong,
+    /// v0.113.0 Fool Rare (`Potions/CrystallineEuphoria.cs`): 3 Joy, then
+    /// fill the hand with Sadness.
+    CrystallineEuphoria,
 }
 
 impl PotionKind {
@@ -228,6 +242,9 @@ impl PotionKind {
             PotionKind::GlowwaterPotion => "GLOWWATER_POTION",
             PotionKind::PotionShapedRock => "POTION_SHAPED_ROCK",
             PotionKind::Ambergris => "AMBERGRIS",
+            PotionKind::PrecisionPotion => "PRECISION_POTION",
+            PotionKind::BottledSong => "BOTTLED_SONG",
+            PotionKind::CrystallineEuphoria => "CRYSTALLINE_EUPHORIA",
         }
     }
 
@@ -260,6 +277,10 @@ impl PotionKind {
             PotionKind::PotionOfDoom | PotionKind::BoneBrew | PotionKind::PotOfGhouls => {
                 Some(CharacterId::Necrobinder)
             }
+            // The Fool (v0.113.0, `FoolPotionPool`)
+            PotionKind::PrecisionPotion
+            | PotionKind::BottledSong
+            | PotionKind::CrystallineEuphoria => Some(CharacterId::Fool),
             _ => None,
         }
     }
@@ -373,6 +394,14 @@ impl PotionKind {
 
     /// Potions that exist only in game build v0.111.0 (GH #792).
     pub const V0111_ONLY: [PotionKind; 1] = [PotionKind::Ambergris];
+
+    /// Potions that exist only from game build v0.113.0 on: The Fool's pool,
+    /// in `Fool4Epoch.Potions` order (`FoolPotionPool.GenerateAllPotions`).
+    pub const V0113_ONLY: [PotionKind; 3] = [
+        PotionKind::PrecisionPotion,
+        PotionKind::BottledSong,
+        PotionKind::CrystallineEuphoria,
+    ];
 }
 
 /// Player-facing potion-slot index. Mirrors the existing `Option<u8>`

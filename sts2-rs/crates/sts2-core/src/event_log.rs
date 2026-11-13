@@ -157,6 +157,7 @@ pub const fn character_entry(character: Option<CharacterId>) -> &'static str {
         Some(CharacterId::Defect) => "DEFECT",
         Some(CharacterId::Regent) => "REGENT",
         Some(CharacterId::Necrobinder) => "NECROBINDER",
+        Some(CharacterId::Fool) => "FOOL",
         None => "PLAYER",
     }
 }

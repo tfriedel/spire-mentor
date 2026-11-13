@@ -44,6 +44,8 @@ _V0113_EVENT_PREFIXES = (
     "THERMAE_NONUPEIPE.",
     "WATERFALL_OF_OBVIOUS_SECRETS.",
     "WUPPY_IN_TROUBLE.",
+    # an older event's option that only v0.113.0 adds (The Fool's pool)
+    "COLORFUL_PHILOSOPHERS.pages.INITIAL.options.FOOL",
 )
 
 #: ``(loc_key, field)`` pairs whose localized template takes ``{VarName}``

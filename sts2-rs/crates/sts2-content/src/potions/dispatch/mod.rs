@@ -32,6 +32,7 @@ pub mod fairy_in_a_bottle;
 pub mod fire_potion;
 pub mod flex_potion;
 pub mod focus_potion;
+pub mod fool_potions;
 pub mod fortifier;
 pub mod foul_potion;
 pub mod fruit_juice;
@@ -82,7 +83,7 @@ pub(crate) use helpers::KINGS_COURAGE_FORGE_AMOUNT;
 /// Install every potion on-drink handler into the global registry.
 /// (`register_many` overwrites existing entries with the same value.)
 pub fn install_default_registry() {
-    let entries: [(PotionKind, PotionEffectFn); 64] = [
+    let entries: [(PotionKind, PotionEffectFn); 67] = [
         (
             PotionKind::AttackPotion,
             attack_potion::drink_attack_potion as PotionEffectFn,
@@ -339,6 +340,19 @@ pub fn install_default_registry() {
         (
             PotionKind::Ambergris,
             ambergris::drink_ambergris as PotionEffectFn,
+        ),
+        // v0.113.0 Fool potions; unreachable on an earlier build.
+        (
+            PotionKind::PrecisionPotion,
+            fool_potions::drink_precision_potion as PotionEffectFn,
+        ),
+        (
+            PotionKind::BottledSong,
+            fool_potions::drink_bottled_song as PotionEffectFn,
+        ),
+        (
+            PotionKind::CrystallineEuphoria,
+            fool_potions::drink_crystalline_euphoria as PotionEffectFn,
         ),
     ];
     potion_effects::register_many(&entries);

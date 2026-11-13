@@ -309,6 +309,7 @@ pub fn build_scenario_state_with_run_rng(
         "Defect" => sts2_core::CharacterId::Defect,
         "Regent" => sts2_core::CharacterId::Regent,
         "Necrobinder" => sts2_core::CharacterId::Necrobinder,
+        "Fool" => sts2_core::CharacterId::Fool,
         other => {
             return Err(format!(
                 "build_scenario_state: unknown character {other:?} (expected one of \
@@ -488,6 +489,7 @@ pub fn build_scenario_state_with_run_rng(
         powered_hits_at_card_play_start: 0,
         attack_command_suppressed_this_play: false,
         vigor_latch_card: None,
+        fool: None,
         generated_cards_this_combat: 0,
         skills_played_this_turn: 0,
         card_plays_started_this_turn: 0,
@@ -685,6 +687,19 @@ pub fn build_scenario_state_with_run_rng(
     let mut player = player;
     player.current_hp = player_hp_final;
 
+    // MawBank (`MawBank.AfterRoomEntered`, run-side like Pantograph above)
+    // pays 12 gold on entering the combat room while nothing has been bought,
+    // so C# starts the fight 12 gold richer. Gold is combat-observable
+    // (MyShinies hit count, Thievery, SealOfGold).
+    let maw_bank_gold = if relics_vec
+        .iter()
+        .any(|r| r.kind == sts2_core::RelicKind::MawBank)
+    {
+        sts2_content::relics::event_reward::MAW_BANK_GOLD
+    } else {
+        0
+    };
+
     let mut state = CoreCombatState {
         phase: CombatPhase::Setup,
         round: 0,
@@ -736,7 +751,7 @@ pub fn build_scenario_state_with_run_rng(
         // dies, and SealOfGold spends 5. At `gold: 0` both paths no-opped, so
         // the harness reported the engine missing a power it computes
         // correctly (GH #544, found by the Underdocks encounter sweep).
-        gold: sts2_core::characters::character_starter(character_id).gold,
+        gold: sts2_core::characters::character_starter(character_id).gold + maw_bank_gold,
         is_over: false,
         player_won: false,
         ascension,
@@ -746,6 +761,7 @@ pub fn build_scenario_state_with_run_rng(
         is_elite,
         is_boss,
         act_index: 1,
+        total_floor: 0,
         active_attack: None,
         energy_wasted: 0,
         cards_drawn: 0,
@@ -777,6 +793,10 @@ pub fn build_scenario_state_with_run_rng(
     // installed (only the card registry was) — see the
     // `relics::dispatch::install_default_registry()` call above. No
     // explicit `init_player_creature` is needed; `start_combat` does it.
+    // The recorded floor is C#'s `RunState.TotalFloor` (TheTower reads it).
+    state.total_floor = encounter_floor
+        .and_then(|f| u16::try_from(f.max(0)).ok())
+        .unwrap_or(0);
     start_combat(&mut state);
     start_player_turn(&mut state);
     Ok(state)
@@ -838,6 +858,67 @@ mod tests {
             None,
             None,
         )
+    }
+
+    /// MawBank pays 12 gold in `AfterRoomEntered` (MawBank.cs), which C#
+    /// fires on entering the combat room, so the player starts the fight on
+    /// starter gold + 12. MyShinies reads that gold as its hit count
+    /// (v0.113.0 fuzz seed 548: C# 5 hits at 111 gold, Rust 4 at 99).
+    #[test]
+    fn maw_bank_pays_its_room_entry_gold_into_the_scenario() {
+        let deck = vec!["STRIKE_IRONCLAD".to_string(); 5];
+        let build_with = |relics: &[String]| {
+            super::build_scenario_state(
+                1,
+                "Ironclad",
+                &deck,
+                70,
+                80,
+                relics,
+                &[],
+                "SHRINKER_BEETLE_WEAK",
+                0,
+                None,
+                None,
+            )
+            .expect("builds")
+            .gold
+        };
+        let base = build_with(&[]);
+        assert_eq!(build_with(&["MAW_BANK".to_string()]), base + 12);
+    }
+
+    /// The recorded fight's floor is C#'s `RunState.TotalFloor`, which the
+    /// v0.113.0 TheTower card reads (`CombatState::total_floor`).
+    #[test]
+    fn encounter_floor_sets_total_floor() {
+        let deck = vec!["STRIKE_IRONCLAD".to_string(); 5];
+        let floor_of = |floor: Option<i64>| {
+            super::build_scenario_state_with_run_rng(
+                sts2_core::GameVersion::V0_113_0,
+                1,
+                "Ironclad",
+                &deck,
+                70,
+                80,
+                &[],
+                &[],
+                "NIBBITS_WEAK",
+                10,
+                None,
+                None,
+                None,
+                Some(super::RunRngInit {
+                    run_seed: 7,
+                    counters: &[],
+                    encounter_floor: floor,
+                }),
+            )
+            .expect("scenario builds")
+            .total_floor
+        };
+        assert_eq!(floor_of(Some(9)), 9);
+        assert_eq!(floor_of(None), 0);
     }
 
     /// GH #918: a recorded fight that passes its floor rolls Decimillipede's

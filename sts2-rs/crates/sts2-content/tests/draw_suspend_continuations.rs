@@ -1173,6 +1173,63 @@ fn auto_play_loop_waits_for_its_exhaust_draw_v0107() {
     auto_play_loop_waits_for_its_exhaust_draw(V107);
 }
 
+/// v0.113.0: Havoc auto-plays MourningBlow and exhausts it; Dark Embrace's
+/// draw reshuffles the discard into Stratagem's grid, parking the auto-play
+/// tail after its result-pile move. MourningBlow's `TransformIntoAfterPlay`
+/// (`MourningBlow.cs`, `OnPlayWrapper` `CardCmd.Transform`) still turns it
+/// into Sadness once the tail resumes.
+#[test]
+fn auto_played_mourning_blow_becomes_sadness_after_a_parked_exhaust_draw_v0113() {
+    let (mut state, _enemy) = fresh(GameVersion::V0_113_0);
+    add_player_power(&mut state, 50, PowerKind::Stratagem, 1);
+    add_player_power(&mut state, 51, PowerKind::DarkEmbrace, 1);
+    for _ in 0..3 {
+        let uid = new_card(&mut state, CardId::StrikeIronclad);
+        state.player.discard.push(uid);
+    }
+    let blow = push_draw(&mut state, CardId::MourningBlow);
+    let havoc = push_hand(&mut state, CardId::Havoc);
+    let _ = sts2_core::combat_loop::play_card(&mut state, havoc, None);
+
+    let pc = state.pending_choice.as_ref().expect("Stratagem grid opens");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    resolve(&mut state, 0);
+    assert!(state.pending_choice.is_none());
+    assert!(state.pending_autoplay_resume.is_none());
+    assert!(
+        !state.player.exhaust.contains(&blow),
+        "MourningBlow transformed"
+    );
+    let exhausted: Vec<CardId> = state
+        .player
+        .exhaust
+        .iter()
+        .map(|u| state.cards[u.get() as usize - 1].card_id)
+        .collect();
+    assert!(exhausted.contains(&CardId::Sadness), "{exhausted:?}");
+}
+
+/// A MourningBlow still held on Play when a choice closes (the deferred
+/// flush) takes the same result tail as an immediate play: its
+/// `GetResultLocationForCardPlay` is Hand (`MourningBlow.cs`), and
+/// `OnPlayWrapper` transforms it into Sadness before the move.
+#[test]
+fn deferred_flush_routes_mourning_blow_to_hand_as_sadness_v0113() {
+    let (mut state, _enemy) = fresh(GameVersion::V0_113_0);
+    let blow = new_card(&mut state, CardId::MourningBlow);
+    state.player.play.push(blow);
+    sts2_core::combat_loop::flush_played_cards_after_choice(&mut state);
+    assert!(state.player.play.is_empty());
+    assert!(state.player.discard.is_empty(), "Hand, not Discard");
+    let hand: Vec<CardId> = state
+        .player
+        .hand
+        .iter()
+        .map(|u| state.cards[u.get() as usize - 1].card_id)
+        .collect();
+    assert_eq!(hand, vec![CardId::Sadness]);
+}
+
 // ── Fiend Fire's attack waits for its exhausts' suspended draw ───────────
 
 /// Fiend Fire exhausts two Strikes; the first exhaust's Dark Embrace draw

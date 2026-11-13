@@ -1288,7 +1288,8 @@ pub(crate) fn resume_before_hand_draw_relics(
     resume_after_relic_hand_draw_select(state, draw_count, side_fired)
 }
 
-/// The Bolas / ThrummingHatchet copies that return to hand at this turn
+/// The Bolas / ThrummingHatchet (and v0.113.0 Bounce, `Bounce.cs`
+/// `BeforeHandDraw`, the same body) copies that return to hand at this turn
 /// start: those in a non-hand pile whose `ReturnIfPlayedRound` stamp is
 /// `prev_turn` (see [`resume_after_relic_hand_draw_select`]).
 fn bolas_hatchet_returning(
@@ -1320,7 +1321,7 @@ fn bolas_hatchet_returning(
             state.cards.get(idx).is_some_and(|card| {
                 matches!(
                     card.card_id,
-                    cards::CardId::Bolas | cards::CardId::ThrummingHatchet
+                    cards::CardId::Bolas | cards::CardId::ThrummingHatchet | cards::CardId::Bounce
                 ) && card.combat_var(VarKey::ReturnIfPlayedRound) == prev_turn
             })
         })
@@ -1387,6 +1388,7 @@ pub(crate) fn resume_after_relic_hand_draw_select(
     if prev_turn >= 1 {
         if state.cards.holds_id(cards::CardId::Bolas)
             || state.cards.holds_id(cards::CardId::ThrummingHatchet)
+            || state.cards.holds_id(cards::CardId::Bounce)
         {
             for uid in bolas_hatchet_returning(state, prev_turn) {
                 state.move_card_to_hand(uid);
@@ -2096,6 +2098,11 @@ fn run_after_player_turn_start_cluster(
                         }
                     }
                 }
+            }
+            // v0.113.0 `EcstasyPower.AfterPlayerTurnStart`.
+            crate::PowerKind::Ecstasy => {
+                let amount = state.powers.get_by_id(uid.0).map_or(0, |p| p.amount);
+                crate::fool::ecstasy_after_player_turn_start(state, amount);
             }
             k if hooks::is_folded_after_player_turn_start_kind(k) => {
                 if let Some(effects) =
@@ -2902,8 +2909,71 @@ pub(crate) fn run_auto_post_play(state: &mut CombatState) -> StepResult {
     if state.pending_end_turn_resume.is_some() {
         return StepResult::PendingChoice;
     }
+    if let Some(stop) = run_simpleton_auto_post_play(state) {
+        return stop;
+    }
 
     end_player_turn_phase_one_after_auto_post_play_stampede(state)
+}
+
+/// v0.113.0 `SimpletonPower.AfterAutoPostPlayPhaseEntered`: auto-play `Amount`
+/// cards from the cheapest cost group in hand. Runs after Stampede (both are
+/// power listeners; a player holding both is not ordered by application).
+/// `Some` when the batch ended combat or suspended on a select.
+fn run_simpleton_auto_post_play(state: &mut CombatState) -> Option<StepResult> {
+    if state.game_version < crate::GameVersion::V0_113_0 || state.is_over {
+        return None;
+    }
+    let count = state.player_power_amount(crate::PowerKind::Simpleton);
+    if count <= 0 {
+        return None;
+    }
+    crate::hooks::auto_play_simpleton_from_hand(state, count.unsigned_abs());
+    stop_after_auto_post_play_batch(state)
+}
+
+/// The post-batch checks of an AutoPostPlay auto-play batch: combat end (a
+/// lethal auto-play ends combat inside AutoPostPlay), then a suspended select.
+fn stop_after_auto_post_play_batch(state: &mut CombatState) -> Option<StepResult> {
+    match check_combat_end(state) {
+        StepResult::Advanced => {}
+        end => {
+            state.pending_end_turn_resume = None;
+            return Some(end);
+        }
+    }
+    state
+        .pending_end_turn_resume
+        .is_some()
+        .then_some(StepResult::PendingChoice)
+}
+
+/// Resume the end-turn chain suspended mid-Simpleton batch: the parked play's
+/// `CheckForEmptyHand`, the `remaining` iterations, then the rest of phase one
+/// and the chain.
+pub(crate) fn resume_end_turn_after_simpleton(
+    state: &mut CombatState,
+    remaining: u32,
+) -> StepResult {
+    if !state.is_over && state.pending_choice.is_none() {
+        check_for_empty_hand(state);
+    }
+    if remaining > 0 {
+        crate::hooks::auto_play_simpleton_from_hand(state, remaining);
+        if let Some(stop) = stop_after_auto_post_play_batch(state) {
+            return stop;
+        }
+    }
+    finish_end_turn_after_auto_post_play(state)
+}
+
+fn finish_end_turn_after_auto_post_play(state: &mut CombatState) -> StepResult {
+    let phase_one = end_player_turn_phase_one_after_auto_post_play_stampede(state);
+    // A teammate's stage stops at its end (`crate::coop::SeatRun`).
+    if !matches!(phase_one, StepResult::Advanced) || state.coop.seat_run.is_some() {
+        return phase_one;
+    }
+    run_rest_of_end_turn_chain(state)
 }
 
 /// The rest of [`end_player_turn_phase_one`] once `StampedePower`'s
@@ -3283,12 +3353,10 @@ pub(crate) fn resume_end_turn_after_auto_post_play(
             return StepResult::PendingChoice;
         }
     }
-    let phase_one = end_player_turn_phase_one_after_auto_post_play_stampede(state);
-    // A teammate's stage stops at its end (`crate::coop::SeatRun`).
-    if !matches!(phase_one, StepResult::Advanced) || state.coop.seat_run.is_some() {
-        return phase_one;
+    if let Some(stop) = run_simpleton_auto_post_play(state) {
+        return stop;
     }
-    run_rest_of_end_turn_chain(state)
+    finish_end_turn_after_auto_post_play(state)
 }
 
 /// The `end_turn_dispatch` steps that follow phase one. Shared by both
@@ -5779,6 +5847,10 @@ fn perform_intent(
                 .and_then(|c| c.ai.as_ref().map(|ai| ai.current_move().effect));
             if let Some(effect) = effect_fn {
                 effect(state, enemy_uid);
+            }
+            // v0.113.0 `CreatureCmd.Escape` dislodges every arrow first.
+            if state.player.fool.is_some() {
+                crate::fool::on_creature_escape(state, enemy_uid);
             }
             if let Some(c) = state
                 .creatures
@@ -9161,12 +9233,14 @@ fn play_card_resolved(state: &mut CombatState, hand_index: u8, target: Option<u8
     // C# `VigorPower.BeforeAttack` latches the Vigor live when this Attack's
     // command starts (see [`hooks::latch_vigor_at_play_start`]).
     hooks::latch_vigor_at_play_start(state, card_uid);
+    crate::fool::latch_stretch_at_play_start(state, card_uid);
 
     // C# `History.CardPlayStartedEntry` — recorded before `OnPlay` runs, so
     // ShouldPlay listeners (Ringing/Sloth) see this play while its effect's
     // auto-plays resolve.
     state.player.card_plays_started_this_turn =
         state.player.card_plays_started_this_turn.saturating_add(1);
+    crate::fool::note_play_started(state, card_uid);
 
     // ── Card effect dispatch ─────────────────────────────────────────────
     // Bead sts2-rs-ov4 (P6-1): replaced the per-CardId `match` arm with a
@@ -9609,6 +9683,45 @@ fn feral_claims_result_location(
     redirect
 }
 
+/// A card whose own `GetResultLocationForCardPlay` turns a Discard result
+/// into Hand: `ParticleWall` (both builds), and from v0.113.0 `MourningBlow`
+/// and a `TrickShot` that saw an arrow at play start (`TrickShot.cs`
+/// `ArrowCmd.PlayerHasAnyArrows`, read before `OnPlay`; the card handler
+/// records it in [`VarKey::Generic`], set only while the card resolves).
+fn discard_result_goes_to_hand(card: &cards::Card) -> bool {
+    match card.card_id {
+        cards::CardId::ParticleWall | cards::CardId::MourningBlow => true,
+        cards::CardId::TrickShot => card.combat_var(VarKey::Generic) != 0,
+        _ => false,
+    }
+}
+
+/// The result-location tail of a v0.113.0 card play once the card left Play:
+/// `TrickShot` drops its play-start arrow flag, and `MourningBlow` becomes the
+/// `Sadness` its `OnPlay` set as `TransformIntoAfterPlay` (`MourningBlow.cs`,
+/// `CardModel.OnPlayWrapper` `CardCmd.Transform` after `AfterCardPlayed`). C#
+/// transforms the card on Play just before the result move; transforming it
+/// in its result pile lands the same card in the same place. A dupe has left
+/// combat and a combat ending refuses the transform, as `CardCmd.Transform`
+/// does.
+fn after_result_location(state: &mut CombatState, uid: crate::CardUid) {
+    let idx = uid.0.get() as usize - 1;
+    let Some(card) = state.cards.get(idx) else {
+        return;
+    };
+    match card.card_id {
+        cards::CardId::TrickShot => state.cards[idx].combat_vars.zero(VarKey::Generic),
+        cards::CardId::MourningBlow if !state.player.play.contains(&uid) => {
+            if let Some(sadness) =
+                crate::build_card_for_version(cards::CardId::Sadness, false, state.game_version)
+            {
+                let _ = crate::card_effects::transform_card_in_place(state, uid, sadness);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn finish_card_play(state: &mut CombatState, fin: CardPlayFinish) -> StepResult {
     let outer = std::mem::replace(&mut state.coop.card_target, fin.card_target);
     let result = finish_card_play_tail(state, fin);
@@ -9712,6 +9825,7 @@ fn replay_after_on_play(
         let idx = card.card_type.index();
         state.player.cards_played_this_turn[idx] =
             state.player.cards_played_this_turn[idx].saturating_add(1);
+        crate::fool::note_play_finished(state, card_uid);
     }
     if card_is_ethereal_at_play(state, card) {
         note_ethereal_card_played(state);
@@ -10023,6 +10137,7 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
                     let idx = card.card_type.index();
                     state.player.cards_played_this_turn[idx] =
                         state.player.cards_played_this_turn[idx].saturating_add(1);
+                    crate::fool::note_play_finished(state, card_uid);
                 }
                 // Combat-long ETHEREAL-played tally (feeds Necrobinder PullFromBelow's
                 // CalculatedVar hit count). Bumped after the body resolves, so a card
@@ -10191,6 +10306,7 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
         // Strike under Sloth(3) blocks the Bash that Stampede auto-plays).
         state.player.card_plays_started_this_turn =
             state.player.card_plays_started_this_turn.saturating_add(1);
+        crate::fool::note_play_started(state, card_uid);
         // Stomp's shave is a `BeforeCardPlayed` hook — pre-body, once per
         // replay iteration (see the initial-play site above).
         if before_hooks_live && card.card_type == crate::cards::CardType::Attack {
@@ -10199,6 +10315,7 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
         // Each replay is its own `AttackCommand`, so it re-latches a Vigor
         // the previous iteration left behind.
         hooks::latch_vigor_at_play_start(state, card_uid);
+        crate::fool::latch_stretch_at_play_start(state, card_uid);
         let _ = crate::card_effects::dispatch_for_card(state, card_uid, card.card_id, target_uid);
         if state.combat_log.card_play_faulted {
             return finish_faulted_card_play(state, card_uid);
@@ -10296,6 +10413,7 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
             // same as the `extra_plays` loop above.
             state.player.card_plays_started_this_turn =
                 state.player.card_plays_started_this_turn.saturating_add(1);
+            crate::fool::note_play_started(state, card_uid);
             // Bead `sts2-rs-stomp`: Stomp's shave is a `BeforeCardPlayed`
             // hook — pre-body, once per Echo replay (see the initial-play
             // site above).
@@ -10522,7 +10640,7 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
         // `played_card_is_dupe` branch above (removed from combat), matching C#'s
         // `IsDupe -> PileType.None` resolving before the override
         // (`CardModel.cs:2071-2083`), so it never reaches here.
-        let is_particle_wall = card.card_id == cards::CardId::ParticleWall;
+        let is_particle_wall = discard_result_goes_to_hand(&state.cards[card_idx]);
         if is_shining_strike {
             if let Some(pos) = state.player.play.iter().position(|&u| u == card_uid) {
                 state.player.play.remove(pos);
@@ -10567,6 +10685,7 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
             );
         }
     }
+    after_result_location(state, card_uid);
     // C# `EnergyCost.AfterCardPlayedCleanup()` (`CardModel.cs:2007`) runs for
     // every play once the card has left Play, whatever its result pile; a card
     // still held in Play across an open choice is cleaned up by
@@ -10725,6 +10844,7 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
                     state.player.discard.insert(0, uid);
                 }
             }
+            after_result_location(state, uid);
             continue;
         }
         // Co-op (GH #1017): a Ball whose play left a choice open still goes to
@@ -10735,16 +10855,32 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
             flushed_is_dupe,
             crate::card_effects::card_exhausts_inst(&card) || corruption_exhausts_skill,
         ) {
+            after_result_location(state, uid);
             continue;
         }
         if flushed_is_dupe && !corruption_exhausts_skill {
             if let Some(pos) = state.player.play.iter().position(|&u| u == uid) {
                 state.player.play.remove(pos);
             }
+            after_result_location(state, uid);
             continue;
         }
         if crate::card_effects::card_exhausts_inst(&card) || corruption_exhausts_skill {
             let _ = exhaust_from_play(state, uid, None, card.card_id, card.tags, card.card_type);
+            after_result_location(state, uid);
+            continue;
+        }
+        // v0.113.0 MourningBlow / TrickShot: their own
+        // `GetResultLocationForCardPlay` is Hand, as on the immediate path
+        // (`discard_result_goes_to_hand`); the result tail then turns
+        // MourningBlow into Sadness and clears TrickShot's flag.
+        if matches!(
+            card.card_id,
+            cards::CardId::MourningBlow | cards::CardId::TrickShot
+        ) && discard_result_goes_to_hand(&card)
+        {
+            state.move_card_to_hand(uid);
+            after_result_location(state, uid);
             continue;
         }
         let is_attack_or_skill = matches!(
@@ -10785,6 +10921,7 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
         } else {
             let _ = cards::move_card(&mut state.player, uid, PileKind::Play, PileKind::Discard);
         }
+        after_result_location(state, uid);
     }
 }
 
@@ -10853,6 +10990,7 @@ pub fn auto_play_card_from_draw_top(state: &mut CombatState, force_exhaust: bool
             force_exhaust,
         },
         batch: false,
+        upgrade: false,
     };
     if collect_from_draw_top(state, &mut collect) {
         state.pending_collect_resume = Some(collect);
@@ -11229,6 +11367,18 @@ pub fn auto_play_specific_card_from_exhaust_at_target(
 /// `count > 1`, where the per-card-loop-with-reshuffle shape would wrongly
 /// replay discarded cards. Bead `sts2-rs-q6bix` (F-F).
 pub fn auto_play_n_from_draw_top(state: &mut CombatState, count: i32, force_exhaust: bool) {
+    auto_play_n_from_draw_top_with(state, count, force_exhaust, false);
+}
+
+/// [`auto_play_n_from_draw_top`] with C#'s `cardModification` delegate set to
+/// `CardCmd.Upgrade` when `upgrade` (v0.113.0 TheDevil+): each card is
+/// upgraded as it is taken from the draw pile, before it moves to Play.
+pub fn auto_play_n_from_draw_top_with(
+    state: &mut CombatState,
+    count: i32,
+    force_exhaust: bool,
+    upgrade: bool,
+) {
     // `IsOverOrEnding` early return, as in [`auto_play_card_from_draw_top`]
     // (Ironclad seed 6661 v0.107.1: Hidden Gem's 3rd Cascade play after the
     // 2nd won reshuffled the discard, +9 on the next combat's shuffle).
@@ -11244,6 +11394,7 @@ pub fn auto_play_n_from_draw_top(state: &mut CombatState, count: i32, force_exha
             force_exhaust,
         },
         batch: true,
+        upgrade,
     };
     if collect_from_draw_top(state, &mut collect) {
         state.pending_collect_resume = Some(collect);
@@ -11309,6 +11460,9 @@ fn collect_from_draw_top(
         // stays deterministic) and clears the popped card's pin. The card
         // goes on Play above any currently-resolving card (Havoc itself).
         let top_uid = cards::pop_top_card(&mut state.player, &mut state.run_rng.shuffle);
+        if collect.upgrade {
+            let _ = crate::card_effects::upgrade_card_uid(state, top_uid);
+        }
         state.player.play.push(top_uid);
         // Mark this card as a batch-pending play: it now sits on the Play pile
         // (phase 1) but its own play has NOT started, so the Nostalgia
@@ -11508,7 +11662,7 @@ fn chains_note_bound_card_played(state: &mut CombatState, card: &crate::cards::C
 /// seeds 3931/5571: a Ringing/Bound-blocked Cascade/Stampede auto-play
 /// actually resolved in Rust).
 pub fn player_should_play_blocked(state: &CombatState, card: &crate::cards::Card) -> bool {
-    if hooks::relic_should_play_blocked(state) {
+    if hooks::relic_should_play_blocked(state) || crate::fool::encore_blocks(state) {
         return true;
     }
     if matches!(
@@ -11742,6 +11896,9 @@ fn auto_play_tally_finished(
     let idx = card_type.index();
     state.player.cards_played_this_turn[idx] =
         state.player.cards_played_this_turn[idx].saturating_add(1);
+    if let Some(uid) = crate::CardUid::new(card_idx as u32 + 1) {
+        crate::fool::note_play_finished(state, uid);
+    }
     // `CardPlayFinishedEntry.WasEthereal` reads the live `Keywords`
     // (CardPlayFinishedEntry.cs:45) and is recorded for auto-plays too, so a
     // Hexed / EtherealThisCombat auto-played card counts (PullFromBelow,
@@ -12053,11 +12210,13 @@ fn resolve_auto_played_card_inner(
     // route through `MoveToResultPileWithoutPlaying`, issue no AttackCommand and
     // never reach `after_card_played`, so a latch taken there would stick.
     hooks::latch_vigor_at_play_start(state, top_uid);
+    crate::fool::latch_stretch_at_play_start(state, top_uid);
 
     // C# `History.CardPlayStartedEntry` — the auto-play passed ShouldPlay
     // and is now a started play for later Ringing/Sloth checks this turn.
     state.player.card_plays_started_this_turn =
         state.player.card_plays_started_this_turn.saturating_add(1);
+    crate::fool::note_play_started(state, top_uid);
 
     // Bead `sts2-rs-8ett`: an auto-played card (Havoc/Cascade/DistilledChaos/
     // KnifeTrap/Catastrophe/IAmInvincible…) is a first-in-series card play in
@@ -13066,7 +13225,9 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
             // same as the hand-play `extra_plays` loop.
             state.player.card_plays_started_this_turn =
                 state.player.card_plays_started_this_turn.saturating_add(1);
+            crate::fool::note_play_started(state, top_uid);
             hooks::latch_vigor_at_play_start(state, top_uid);
+            crate::fool::latch_stretch_at_play_start(state, top_uid);
             let _ = crate::card_effects::dispatch_for_auto_played_card(
                 state,
                 top_uid,
@@ -13245,7 +13406,7 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
                 // ShiningStrike branch — pin top-of-draw. Bead `sts2-rs-09x5n`.
                 cards::pin_top(&mut state.player, top_uid);
             }
-        } else if top_card_id == cards::CardId::ParticleWall {
+        } else if discard_result_goes_to_hand(&state.cards[top_idx]) {
             // C# `ParticleWall.GetResultPileTypeForCardPlay` (ParticleWall.cs:
             // 31-39, both builds) turns a Discard result into Hand, and
             // `OnPlayWrapper` asks it for auto-plays too — before the
@@ -13357,6 +13518,9 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
             }
         }
     }
+    // Also on a resume at `AfterResultPile`: the tail parked right after the
+    // result-pile move, before this step ran.
+    after_result_location(state, top_uid);
     // A pick the routing above never spent (the card left Play some other
     // way) is dropped.
     let _ = crate::coop::hand_over_played_card(state, top_uid, true, false);
@@ -17296,7 +17460,7 @@ mod tests {
         use crate::cards::CardId::{Anger, DefendIronclad, IAmInvincible, StrikeIronclad};
         let ids = [IAmInvincible, StrikeIronclad, Anger, DefendIronclad];
         let mut leaked = std::collections::BTreeSet::new();
-        let mut by_outcome: [Option<CombatState>; 2] = [None, None];
+        let mut by_outcome: Vec<Option<CombatState>> = vec![None, None];
         for seed in 0..64i32 {
             let mut bare = belief_draw_end_turn_state(&ids);
             bare.run_rng.shuffle = crate::dotnet_rng::Rng::new(seed);

@@ -29,6 +29,7 @@ use sts2_core::{PowerKind, RelicKind};
 pub mod common;
 pub mod dispatch;
 pub mod event_reward;
+pub mod fool;
 pub mod grab_bag;
 pub mod ironclad;
 pub mod neow_relics;

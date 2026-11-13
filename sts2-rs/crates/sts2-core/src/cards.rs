@@ -571,25 +571,36 @@ pub enum CardTag {
     OstyAttack = 3,
     /// Shiv-family tag (e.g. Silent's generated `Shiv`).
     Shiv = 4,
+    /// v0.113.0 Fool melody note `Wah` (`CardTag.Wah`, read by `MelodyCmd`).
+    Wah = 5,
+    /// v0.113.0 Fool melody note `Cho` (`CardTag.Cho`).
+    Cho = 6,
+    /// v0.113.0 Fool melody note `Ki` (`CardTag.Ki`).
+    Ki = 7,
+    /// v0.113.0 Fool arrow-shooting card (`CardTag.Shoot`).
+    Shoot = 8,
 }
 
 impl CardTag {
     /// Bit position used by [`CardTags`] for this tag.
     #[inline]
     #[must_use]
-    pub const fn bit(self) -> u8 {
-        1u8 << (self as u8)
+    pub const fn bit(self) -> u16 {
+        1u16 << (self as u8)
     }
+
+    /// The three melody notes, in `CardTag` order (Wah, Cho, Ki).
+    pub const MELODY: [CardTag; 3] = [CardTag::Wah, CardTag::Cho, CardTag::Ki];
 }
 
 /// Bit-packed set of [`CardTag`]s. Mirrors Python's
 /// `CardInstance.tags: frozenset[CardTag]`.
 ///
-/// Five variants today fit in a `u8`; widen to `u16` when the Python pin
-/// grows the `CardTag` enum past 8 entries.
+/// A `u16`: v0.113.0's four Fool tags (Wah / Cho / Ki / Shoot) took the
+/// enum past 8 variants.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct CardTags(pub u8);
+pub struct CardTags(pub u16);
 
 impl CardTags {
     /// Empty set.
@@ -623,6 +634,14 @@ impl CardTags {
         self.0 == 0
     }
 
+    /// `true` if the set holds any melody note tag (`Wah`/`Cho`/`Ki`) —
+    /// C# `MelodyCmd.IsMelodyCard`. Only Fool cards (v0.113.0+) carry them.
+    #[inline]
+    #[must_use]
+    pub const fn has_melody(self) -> bool {
+        self.contains(CardTag::Wah) || self.contains(CardTag::Cho) || self.contains(CardTag::Ki)
+    }
+
     /// Iterate over the contained tags in [`CardTag`] discriminant order.
     /// Allocates a small fixed-size buffer; intended for tests / debug.
     #[must_use]
@@ -634,6 +653,10 @@ impl CardTags {
             CardTag::Minion,
             CardTag::OstyAttack,
             CardTag::Shiv,
+            CardTag::Wah,
+            CardTag::Cho,
+            CardTag::Ki,
+            CardTag::Shoot,
         ] {
             if self.contains(tag) {
                 out.push(tag);
@@ -1261,6 +1284,8 @@ impl Card {
             CardId::DemonicShield
             | CardId::Entrench
             | CardId::Fisticuffs
+            // v0.113.0 `HarmonicShield`: a `CalculatedBlockVar` (5 x melodies).
+            | CardId::HarmonicShield
             | CardId::Mimic
             | CardId::Mirage
             | CardId::Sacrifice
@@ -1654,7 +1679,7 @@ impl CardId {
 /// The card ids [`CardStore`] tracks presence of (J02), one bit each. Every
 /// one gates an O(cards) sweep that acts only on cards with that id: the
 /// Stomp / Pinpoint discounts and their turn-start restores, Melancholy's
-/// on-death discount, the Bolas / ThrummingHatchet return-to-hand scan, and
+/// on-death discount, the Bolas / ThrummingHatchet / Bounce return-to-hand scan, and
 /// Banshee's Cry's Ethereal-play discount.
 const fn card_gate_bit(id: CardId) -> u8 {
     match id {
@@ -1664,15 +1689,32 @@ const fn card_gate_bit(id: CardId) -> u8 {
         CardId::Bolas => 1 << 3,
         CardId::ThrummingHatchet => 1 << 4,
         CardId::BansheesCry => 1 << 5,
+        // v0.113.0 Fool: returns to hand like Bolas (`Bounce.cs`).
+        CardId::Bounce => 1 << 6,
         _ => 0,
     }
 }
 
-/// The OR of [`card_gate_bit`] over `cards`.
+/// The gate bit for "this card carries `CardTag::Shoot`" (v0.113.0 Fool):
+/// [`crate::fool::shoot_slot_pending`] asks whether any arena card does on
+/// every play start and every arrow getter, in every v0.113 fight. Disjoint
+/// from every [`card_gate_bit`] id bit.
+const SHOOT_TAG_GATE_BIT: u8 = 1 << 7;
+
+/// Every gate bit `card` sets: its id bit plus the Shoot-tag bit.
+#[inline]
+const fn card_gate_bits(card: &Card) -> u8 {
+    card_gate_bit(card.card_id)
+        | if card.tags.contains(CardTag::Shoot) {
+            SHOOT_TAG_GATE_BIT
+        } else {
+            0
+        }
+}
+
+/// The OR of [`card_gate_bits`] over `cards`.
 fn card_gate_bits_of(cards: &[Card]) -> u8 {
-    cards
-        .iter()
-        .fold(0, |acc, c| acc | card_gate_bit(c.card_id))
+    cards.iter().fold(0, |acc, c| acc | card_gate_bits(c))
 }
 
 /// Vector-backed arena over [`Card`]. Indexed by [`CardUid`] in pile
@@ -1756,7 +1798,7 @@ impl CardStore {
     /// Append a card (the next arena row).
     #[inline]
     pub fn push(&mut self, card: Card) {
-        self.gate_bits |= card_gate_bit(card.card_id);
+        self.gate_bits |= card_gate_bits(&card);
         self.cards.push(card);
     }
 
@@ -1790,6 +1832,25 @@ impl CardStore {
             held,
             self.cards.iter().any(|c| c.card_id == id),
             "CardStore gate bit for {id:?} disagrees with the arena scan"
+        );
+        held
+    }
+
+    /// True iff some arena card carries `CardTag::Shoot`, answered by one bit
+    /// test.
+    ///
+    /// # Panics
+    /// In debug builds, if the stored bit disagrees with an arena scan (a
+    /// `tags` write bypassed the store).
+    #[inline]
+    #[must_use]
+    pub fn holds_shoot_tag(&self) -> bool {
+        let held = self.gate_bits & SHOOT_TAG_GATE_BIT != 0;
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            held,
+            self.cards.iter().any(|c| c.tags.contains(CardTag::Shoot)),
+            "CardStore Shoot-tag gate bit disagrees with the arena scan"
         );
         held
     }
@@ -5050,6 +5111,11 @@ mod tests {
         assert_eq!(CardTag::Shiv as u8, 4);
         assert_eq!(CardTag::Strike.bit(), 0b0_0001);
         assert_eq!(CardTag::Shiv.bit(), 0b1_0000);
+        // v0.113.0 Fool tags past bit 7 need the u16 set.
+        assert_eq!(CardTag::Shoot as u8, 8);
+        assert_eq!(CardTag::Shoot.bit(), 0b1_0000_0000);
+        let all = CardTags::one(CardTag::Strike).with(CardTag::Shoot);
+        assert!(all.contains(CardTag::Shoot) && !all.contains(CardTag::Ki));
     }
 
     // -----------------------------------------------------------------
@@ -6872,12 +6938,13 @@ mod tests {
     // J02: CardStore gate-id presence bits
     // -----------------------------------------------------------------
 
-    const GATE_IDS: [CardId; 5] = [
+    const GATE_IDS: [CardId; 6] = [
         CardId::Stomp,
         CardId::Pinpoint,
         CardId::Melancholy,
         CardId::Bolas,
         CardId::ThrummingHatchet,
+        CardId::Bounce,
     ];
 
     /// `holds_id` answers the arena scan for every gate id.
@@ -6934,6 +7001,40 @@ mod tests {
         assert!(store.is_empty());
         #[cfg(debug_assertions)]
         store.debug_assert_gate_bits();
+    }
+
+    /// v0.113.0: `holds_shoot_tag` (the Fool's lazy first-arrow-slot gate)
+    /// tracks "some arena card carries `CardTag::Shoot`" through every
+    /// structural write, without a scan.
+    #[test]
+    fn card_store_tracks_a_shoot_tagged_card() {
+        let shoot = |n: u32| Card {
+            uid: uid(n),
+            tags: CardTags::one(CardTag::Shoot),
+            ..Card::pod_defaults()
+        };
+        let mut store = store_with_ids(&[CardId::StrikeIronclad]);
+        assert!(!store.holds_shoot_tag());
+        store.push(shoot(2));
+        assert!(store.holds_shoot_tag());
+        store.truncate(1);
+        assert!(!store.holds_shoot_tag());
+        store.extend([shoot(2)]);
+        assert!(store.holds_shoot_tag());
+        assert!(CardStore::from(vec![shoot(1)]).holds_shoot_tag());
+        store.clear();
+        assert!(!store.holds_shoot_tag());
+    }
+
+    /// A tag rewrite through `&mut [Card]` that adds Shoot is caught by the
+    /// debug cross-check, like a `card_id` rewrite.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "disagrees with the arena scan")]
+    fn card_store_holds_shoot_tag_cross_checks_the_scan_in_debug() {
+        let mut store = store_with_ids(&[CardId::StrikeIronclad]);
+        store[0].tags = CardTags::one(CardTag::Shoot);
+        let _ = store.holds_shoot_tag();
     }
 
     /// The bits are derived: equality and the printed form are the old

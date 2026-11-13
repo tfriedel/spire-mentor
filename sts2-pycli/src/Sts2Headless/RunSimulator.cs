@@ -6915,6 +6915,9 @@ public class RunSimulator
             "defect" => Player.CreateForNewRun<Defect>(unlockState, 1uL),
             "regent" => Player.CreateForNewRun<Regent>(unlockState, 1uL),
             "necrobinder" => Player.CreateForNewRun<Necrobinder>(unlockState, 1uL),
+#if GAME_V0113
+            "fool" => Player.CreateForNewRun<Fool>(unlockState, 1uL),
+#endif
             _ => null
         };
     }

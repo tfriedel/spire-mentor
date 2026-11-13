@@ -104,7 +104,13 @@ def test_builds_after_v0111_keep_its_card_set():
     # split on `>= V0_111_0`). Its colorless pool adds MY_SHINIES right after
     # MIND_BLAST (Rust `specs_in` / `COLORLESS_V0113`), and its sweepable set
     # adds only the v0.113.0-only cards (CardId::V0113_ONLY).
-    from card_inventory import has_v0111_cards, sweepable_cards, v0113_only_cards
+    from card_inventory import (
+        UNSWEEPABLE_RARITIES,
+        engine_cards,
+        has_v0111_cards,
+        sweepable_cards,
+        v0113_only_cards,
+    )
 
     assert not has_v0111_cards("v0.107.1")
     assert has_v0111_cards("v0.111.0") and has_v0111_cards("v0.113.0")
@@ -119,5 +125,10 @@ def test_builds_after_v0111_keep_its_card_set():
         *v0111_colorless[at:],
     ]
     assert "MY_SHINIES" not in v0111_colorless
-    assert sweepable_cards("v0.113.0") == sweepable_cards("v0.111.0") | v0113_only_cards()
+    # The Fool's tokens (tarot, Joy, TheShot) and Sadness are v0.113.0-only
+    # but, like every token / status, not sweepable.
+    rarity = engine_cards()
+    v0113_sweepable = {c for c in v0113_only_cards() if rarity[c] not in UNSWEEPABLE_RARITIES}
+    assert v0113_sweepable < v0113_only_cards()
+    assert sweepable_cards("v0.113.0") == sweepable_cards("v0.111.0") | v0113_sweepable
     assert not sweepable_cards("v0.111.0") & v0113_only_cards()

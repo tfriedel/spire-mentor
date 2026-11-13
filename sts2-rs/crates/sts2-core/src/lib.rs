@@ -64,6 +64,8 @@ pub mod card_mechanics;
 // Phase 1 (bead sts2-rs-qai): 47 hook signatures + ListenerKind + HookId.
 // Phase 2 dispatcher (bead sts2-rs-73b) wires iter_power_listeners +
 // iter_relic_listeners through the per-hook match table.
+/// v0.113.0 The Fool: arrows, Impaled, Aim latch, melody tracking.
+pub mod fool;
 pub mod hooks;
 
 // Phase 0 (bead sts2-rs-ose): parity-trace serialization. Output shape
@@ -2115,6 +2117,11 @@ pub struct PlayerCombatState {
     /// `sts2-rs-vigor-cmd`.
     pub vigor_latch_card: Option<CardUid>,
 
+    /// v0.113.0 The Fool's arrows / melody / Aim-latch state
+    /// ([`crate::fool`]). `None` until a Fool mechanic first runs, so
+    /// earlier builds and Fool-free combats are unchanged.
+    pub fool: Option<Box<crate::fool::FoolState>>,
+
     /// Per-combat count of cards materialised into the player's hand via
     /// the "generated card" path ([`crate::card_effects::spawn_card_into_hand`]
     /// — colorless-modifier generation, `CollisionCourse` Debris,
@@ -2796,6 +2803,17 @@ pub enum PostChoiceEffect {
     /// the exhaust and the Strength (ToastyMittens.cs:35-50), so both ride
     /// the pick.
     ExhaustDrawCardGainStrength { skip_innate: bool, strength: i32 },
+    /// v0.113.0 TheHermit (`TheHermit.cs`): a `DiscardFromHand` pick that is
+    /// a Curse goes through `CardCmd.Exhaust` instead of `CardCmd.Discard`,
+    /// then `count` cards are drawn. Read by [`resolve_discard_from_hand`],
+    /// which routes the pick through
+    /// [`card_effects::discard_or_exhaust_curses_then_draw`].
+    CurseExhaustThenDraw(i32),
+    /// v0.113.0 KiChant (`KiChant.cs`): after an `AddFromDrawByType` pick
+    /// from the draw pile's top cards, every OTHER option still in the draw
+    /// pile goes through `CardCmd.Discard`. Read by the `AddFromDrawByType`
+    /// resolver.
+    DiscardUnpickedFromDraw,
 }
 
 /// A potion's `Hook.AfterPotionUsed` dispatch deferred because the potion's
@@ -3017,6 +3035,14 @@ pub enum DrawThen {
     Neurosurge,
     /// Overclock.cs: a Burn into the discard pile after the draw.
     Overclock,
+    /// v0.113.0 Rummage.cs (Fool): one generated Sadness into the hand
+    /// after the draw.
+    FoolSadness,
+    /// v0.113.0 Encore.cs (Fool): Apply<EncorePower>(1) after the draw.
+    FoolEncore,
+    /// v0.113.0 TheSun.cs (Fool tarot): GainEnergy(2, 3 when the flag says
+    /// upgraded) and a Soot into the discard pile after the draw.
+    FoolTheSun(bool),
     /// Stoke.cs:28-33: generate this many cards into the hand after the
     /// exhausts' draws.
     Stoke(u8),
@@ -3434,6 +3460,9 @@ pub struct PendingCollectResume {
     /// Mark collected cards batch-pending (Cascade / Distilled Chaos), as
     /// [`combat_loop::auto_play_n_from_draw_top`] does; Havoc doesn't.
     pub batch: bool,
+    /// `CardCmd.Upgrade` each card as it is collected (v0.113.0 TheDevil+'s
+    /// `cardModification` delegate).
+    pub upgrade: bool,
 }
 
 /// Where the turn-start tail resumes once the select holding it is answered;
@@ -3618,6 +3647,13 @@ pub enum EndTurnResume {
     AutoPostPlay {
         /// Stampede-batch iterations not yet played.
         stampede_remaining: u32,
+    },
+    /// Suspended INSIDE `AutoPostPlay`, mid-`SimpletonPower` batch (v0.113.0):
+    /// `remaining` iterations are owed, then everything that follows the
+    /// AutoPostPlay power hooks, as for [`Self::AutoPostPlay`].
+    AutoPostPlaySimpleton {
+        /// Simpleton-batch iterations not yet played.
+        remaining: u32,
     },
     /// Suspended after the `BeforeTurnEnd` dispatch: only the phase-one tail
     /// (Chains clear, orb passives, phase advance) and the rest of the chain
@@ -5145,6 +5181,11 @@ pub struct CombatState {
     /// [`crate::hooks::modify_max_energy`]. Bead `sts2-rs-mi67e`.
     pub act_index: u8,
 
+    /// C# `RunState.TotalFloor` snapshotted at combat setup
+    /// ([`crate::runstate::RunState::csharp_total_floor`]); `0` outside a
+    /// run. Read by v0.113.0 TheTower (`2 (+1) x TotalFloor` damage).
+    pub total_floor: u16,
+
     /// Cumulative count of unspent energy at end-of-turn, summed across
     /// every player turn in this combat. Bead `sts2-rs-ob7h` (Wave 2 of
     /// `docs/plans/2026-05-17-mcts-leaf-eval-and-search-improvements.md`
@@ -5284,6 +5325,7 @@ impl Default for CombatState {
             is_elite: false,
             is_boss: false,
             act_index: 1,
+            total_floor: 0,
             active_attack: None,
             energy_wasted: 0,
             cards_drawn: 0,
@@ -11540,6 +11582,9 @@ fn resume_suspended_end_turn(state: &mut CombatState) -> Option<StepResult> {
         EndTurnResume::AutoPostPlay { stampede_remaining } => Some(
             crate::combat_loop::resume_end_turn_after_auto_post_play(state, stampede_remaining),
         ),
+        EndTurnResume::AutoPostPlaySimpleton { remaining } => Some(
+            crate::combat_loop::resume_end_turn_after_simpleton(state, remaining),
+        ),
         EndTurnResume::AfterBeforeTurnEnd => Some(
             crate::combat_loop::resume_end_turn_after_before_turn_end(state),
         ),
@@ -11809,6 +11854,25 @@ fn resolve_choice_atomic(
                 ChoiceKind::UpgradeInHand => resolve_upgrade_in_hand(state, &pc, selection),
                 ChoiceKind::AddFromDrawByType => {
                     resolve_add_from_draw_by_type(state, &pc, selection);
+                    if pc.post_effect == Some(PostChoiceEffect::DiscardUnpickedFromDraw) {
+                        // `topCards.Except(picked)`: draw-pile order, not the
+                        // (Rarity, Id)-sorted grid order.
+                        let unpicked: SmallVec<[CardUid; 8]> = pc
+                            .options
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| !selection.contains(&(*i as u8)))
+                            .filter_map(|(_, o)| o.card_uid)
+                            .collect();
+                        let rest: SmallVec<[CardUid; 8]> = state
+                            .player
+                            .draw
+                            .iter()
+                            .copied()
+                            .filter(|u| unpicked.contains(u))
+                            .collect();
+                        crate::card_effects::discard_draw_cards_with_hooks(state, &rest);
+                    }
                 }
                 ChoiceKind::AddFromDiscardFree => {
                     resolve_add_from_discard_free(state, &pc, selection);
@@ -13574,6 +13638,10 @@ fn resolve_discard_from_hand(state: &mut CombatState, pc: &PendingChoice, select
                 .and_then(|o| o.card_uid)
         })
         .collect();
+    if let Some(PostChoiceEffect::CurseExhaustThenDraw(draw)) = pc.post_effect {
+        crate::card_effects::discard_or_exhaust_curses_then_draw(state, &uids, draw);
+        return;
+    }
     // The follow-up (HiddenDaggers' Shivs) waits behind every Sly auto-play,
     // including a Sly select the player answers first (GH #1131).
     let _ = crate::card_effects::discard_hand_cards_then(
@@ -16176,7 +16244,7 @@ pub(crate) fn push_card_play_actions_with(
     // GH #742: mirror the `play_card` relic `ShouldPlay` gate (C#
     // `VelvetChoker.ShouldPlay`, six card plays per turn). Card-independent,
     // so it blocks every card once reached.
-    let relic_blocks = hooks::relic_should_play_blocked(state);
+    let relic_blocks = hooks::relic_should_play_blocked(state) || crate::fool::encore_blocks(state);
 
     // Perf 2026-07-04: reserve the emission upper bound up front so the
     // SmallVec never regrows mid-loop (a full hand of Enemy-target cards ×

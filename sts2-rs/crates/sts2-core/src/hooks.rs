@@ -286,6 +286,11 @@ impl ValueProps {
     /// `ValueProp.SKIP_HURT_ANIM = 16`.
     pub const SKIP_HURT_ANIM: Self = Self(16);
 
+    /// v0.113.0 `ValueProp.FromArrow = 0x20` (`ValueProps/ValueProp.cs`): the
+    /// damage comes from a Fool arrow shot (`AttackCommand.FromArrow()`). Aim,
+    /// Honing, Quietus and Dislike You key on it.
+    pub const FROM_ARROW: Self = Self(0x20);
+
     /// Combine two flag sets (set union).
     #[inline]
     #[must_use]
@@ -1611,6 +1616,20 @@ pub fn apply_effect(state: &mut CombatState, effect: Effect) {
                                 .powers
                                 .push(crate::PowerUid(new_id));
                         }
+                        // v0.113.0 `TemporaryThornsPower.AfterPowerAmountChanged`
+                        // mirrors a negative change too; `ModifyAmount` fires it
+                        // before `ShouldRemoveDueToAmount`.
+                        if kind == PowerKind::ChoBarbs {
+                            apply_effect(
+                                state,
+                                Effect::ApplyPower {
+                                    target,
+                                    kind: PowerKind::Thorns,
+                                    amount,
+                                    applier,
+                                },
+                            );
+                        }
                         if let Some(pid) = remove_pid {
                             state.powers.retain(|p| p.id != pid);
                             state.player.powers.retain(|u| u.0 != pid);
@@ -2025,6 +2044,59 @@ pub(crate) fn auto_play_random_attacks_from_hand(state: &mut CombatState, count:
     }
 }
 
+/// v0.113.0 `SimpletonPower.AfterAutoPostPlayPhaseEntered`: `count`
+/// iterations, each re-reading the hand. A play that parks a select suspends
+/// the batch with the remainder, like the Stampede batch above.
+pub(crate) fn auto_play_simpleton_from_hand(state: &mut CombatState, count: u32) {
+    for n in 0..count {
+        auto_play_cheapest_from_hand(state);
+        if state.pending_autoplay_resume.is_some() {
+            state.pending_end_turn_resume = Some(crate::EndTurnResume::AutoPostPlaySimpleton {
+                remaining: count - n - 1,
+            });
+            return;
+        }
+    }
+}
+
+/// One `SimpletonPower` iteration: group the hand's cards without
+/// Unplayable by `EnergyCost.GetResolved()` (X costs key as 999999999), take
+/// the cheapest group (hand order), and `CombatCardSelection.NextItem` it.
+fn auto_play_cheapest_from_hand(state: &mut CombatState) {
+    const X_COST_KEY: i32 = 999_999_999;
+    let mods_present = modify_card_cost_listeners_present(state);
+    let mut best = i32::MAX;
+    let mut group: SmallVec<[CardUid; 8]> = SmallVec::new();
+    for &uid in &state.player.hand {
+        let Some(card) = state.cards.get(uid.0.get() as usize - 1) else {
+            continue;
+        };
+        if crate::card_effects::card_unplayable(card.card_id) {
+            continue;
+        }
+        let key = if card.is_x_cost() {
+            X_COST_KEY
+        } else {
+            effective_card_cost_inst_with_mask(state, card, uid, mods_present).max(0)
+        };
+        if key < best {
+            best = key;
+            group.clear();
+        }
+        if key == best {
+            group.push(uid);
+        }
+    }
+    if group.is_empty() {
+        return;
+    }
+    let pick = state
+        .run_rng
+        .combat_card_selection
+        .next_int_exclusive(0, group.len() as i32) as usize;
+    auto_play_hand_card(state, group[pick]);
+}
+
 /// Auto-play one random playable Attack from the player's hand.
 ///
 /// C# `StampedePower.AfterAutoPostPlayPhaseEntered` (StampedePower.cs:24-31,
@@ -2072,6 +2144,13 @@ fn auto_play_random_attack_from_hand(state: &mut CombatState) {
         .run_rng
         .shuffle_or_card_selection(version)
         .next_int_exclusive(0, playable.len() as i32) as usize];
+    auto_play_hand_card(state, chosen);
+}
+
+/// The shared `CardCmd.AutoPlay(card, null)` tail of the AutoPostPlay hand
+/// auto-plays (Stampede, Simpleton): a card already picked from hand is moved
+/// to Play and resolved as a FREE auto-play.
+fn auto_play_hand_card(state: &mut CombatState, chosen: CardUid) {
     // C# `CardCmd.AutoPlay` returns at once when `IsOverOrEnding` (CardCmd.cs,
     // both builds): the pick above is still drawn, but a Stampede batch whose
     // earlier attack won the fight leaves the card in hand, unplayed and
@@ -3631,6 +3710,30 @@ fn power_modify_damage_additive(
                 0
             }
         }
+        PowerKind::Aim => {
+            // v0.113.0 `AimPower.ModifyDamageAdditive`: the owner's powered
+            // `FromArrow` attacks gain `Amount` (HeavyShot doubles it,
+            // `HeavyShot.ModifyAimAmount`). The command latch is
+            // `fool::begin_arrow_attack`; FromArrow only appears inside one.
+            // The damage's card source is the resolving card (the source
+            // `damage::apply_damage` threads), so the latched-command guard
+            // and HeavyShot's `cardSource is HeavyShot` both read it.
+            if owner == Some(ctx.dealer)
+                && ctx.props.is_powered()
+                && ctx.props.contains(ValueProps::FROM_ARROW)
+                && !crate::fool::aim_blocked_for_source(state)
+            {
+                if crate::card_effects::originating_card_id(state)
+                    == Some(crate::cards::CardId::HeavyShot)
+                {
+                    power.amount.saturating_mul(2)
+                } else {
+                    power.amount
+                }
+            } else {
+                0
+            }
+        }
         PowerKind::Calcify => {
             // C# `CalcifyPower.ModifyDamageAdditive`
             // (../sts2-wiki/decompiled/v0.103.2/MegaCrit.Sts2.Core.Models.Powers/CalcifyPower.cs):
@@ -3675,7 +3778,12 @@ fn power_modify_damage_additive(
             if owner != Some(CreatureRef::Player) || !ctx.props.is_powered() || !card_dealer {
                 return 0;
             }
-            let auto_play = state.combat_log.resolving_auto_play;
+            // v0.113.0 tests an auto-play's `Resources.EnergyValue` (decomp
+            // OneForAllPower.cs:39), which is what Rust's `energy_spent`
+            // holds for an auto-play, so only v0.111.0 waves auto-plays
+            // through (Defect fuzz seed 623, Mayhem -> 2-cost FlakCannon).
+            let auto_play = state.combat_log.resolving_auto_play
+                && state.game_version < crate::GameVersion::V0_113_0;
             match crate::card_effects::resolving_card_inst(state) {
                 Some(card) if !card.is_x_cost() && (auto_play || card.energy_spent == 0) => {
                     power.amount
@@ -3823,6 +3931,60 @@ fn power_modify_damage_multiplicative(
     ctx: &DamageCtx,
 ) -> DamageMul {
     match power.kind {
+        // v0.113.0 Fool multipliers (decomp `Models.Powers/*Power.cs`).
+        PowerKind::Honing | PowerKind::Quietus => {
+            // Honing: x(1 + A/100); Quietus: xA — the owner's powered
+            // `FromArrow` attacks.
+            if owner == Some(ctx.dealer)
+                && ctx.props.is_powered()
+                && ctx.props.contains(ValueProps::FROM_ARROW)
+            {
+                if power.kind == PowerKind::Honing {
+                    DamageMul::new(100 + i64::from(power.amount), 100)
+                } else {
+                    DamageMul::new(i64::from(power.amount), 1)
+                }
+            } else {
+                DamageMul::ONE
+            }
+        }
+        PowerKind::SerratedArrows => {
+            // x(1 + A/100) on powered damage from the owner or its pets to
+            // an impaled target.
+            let dealer_uid = ctx.dealer.to_creature_uid(state);
+            let from_owner = owner == Some(ctx.dealer)
+                || (owner == Some(CreatureRef::Player)
+                    && dealer_uid.is_some()
+                    && dealer_uid == state.player.pet_uid);
+            let impaled = ctx
+                .target
+                .to_creature_uid(state)
+                .is_some_and(|t| crate::fool::creature_is_impaled(state, t));
+            if ctx.props.is_powered() && from_owner && impaled {
+                DamageMul::new(100 + i64::from(power.amount), 100)
+            } else {
+                DamageMul::ONE
+            }
+        }
+        PowerKind::DislikeYou => {
+            // x(1 + A/100) on received powered `FromArrow` damage.
+            if owner == Some(ctx.target)
+                && ctx.props.is_powered()
+                && ctx.props.contains(ValueProps::FROM_ARROW)
+            {
+                DamageMul::new(100 + i64::from(power.amount), 100)
+            } else {
+                DamageMul::ONE
+            }
+        }
+        PowerKind::ConductorsBaton => {
+            // x0.75 on received powered damage.
+            if owner == Some(ctx.target) && ctx.props.is_powered() {
+                DamageMul::new(3, 4)
+            } else {
+                DamageMul::ONE
+            }
+        }
         PowerKind::Vulnerable => {
             // C#/Python `VulnerablePower.ModifyDamageMultiplicative`:
             // base 1.5, then each additive contributor stacks onto
@@ -4697,6 +4859,9 @@ fn power_modify_block_additive(
                 0
             }
         }
+        PowerKind::Stretch => {
+            crate::fool::stretch_block_bonus(state, power.amount, ctx.props, ctx.card_source)
+        }
         PowerKind::Fasten => {
             // q6bix F-N: `FastenPower.ModifyBlockAdditive`
             // (`FastenPower.cs`) folds `+amount` block onto block
@@ -5433,6 +5598,10 @@ pub fn modify_hand_draw(state: &CombatState, listener: ListenerRef, _ctx: &HandD
         PowerKind::Demesne if owner_of_listener(state, listener) == Some(CreatureRef::Player) => {
             power.amount
         }
+        // v0.113.0 `EnnuiPower.ModifyHandDraw`: `count + Amount`.
+        PowerKind::Ennui if owner_of_listener(state, listener) == Some(CreatureRef::Player) => {
+            power.amount
+        }
         // C# `MindRotPower.ModifyHandDraw` (MindRotPower.cs:16-23):
         // `Math.Max(0, count - Amount)` for the owning player — draw
         // `amount` FEWER cards. In the additive-fold model this contributes
@@ -5712,6 +5881,17 @@ pub fn modify_card_play_count(
             }
             1
         }
+        PowerKind::KiVerse => {
+            // v0.113.0 `KiVersePower.ModifyCardPlayCount`: the owner's
+            // Wah/Cho/Ki cards play once more while it lasts.
+            if power.amount <= 0 || !ctx.card_tags.has_melody() {
+                return 0;
+            }
+            if owner_of_listener(state, listener) != Some(ctx.owner) {
+                return 0;
+            }
+            1
+        }
         PowerKind::Burst => {
             // C# `BurstPower.ModifyCardPlayCount` (BurstPower.cs:17-28):
             // owner-gated, Skill-only → the next N Skills play twice. Same
@@ -5802,6 +5982,23 @@ pub fn after_modifying_card_play_count(
             // (DuplicationPower.cs:25-28): `PowerCmd.Decrement(this)`.
             // Decrements after every card play it boosted; removes at 0.
             if power.amount <= 0 {
+                return None;
+            }
+            let mut effects = SmallVec::new();
+            if power.amount <= 1 {
+                effects.push(Effect::RemovePower { listener });
+            } else {
+                effects.push(Effect::DecrementPowerAmount {
+                    listener,
+                    delta: -1,
+                });
+            }
+            Some(effects)
+        }
+        PowerKind::KiVerse => {
+            // v0.113.0 `KiVersePower.AfterModifyingCardPlayCount`:
+            // `PowerCmd.Decrement(this)` after each melody play it boosted.
+            if power.amount <= 0 || !ctx.card_tags.has_melody() {
                 return None;
             }
             let mut effects = SmallVec::new();
@@ -5944,6 +6141,17 @@ pub fn modify_card_cost(
             } else {
                 None
             }
+        }
+        // v0.113.0 `FreeCardPower.TryModifyEnergyCostInCombatLate`: any card
+        // the owner holds in Hand or Play costs 0 (the Free* pile rule above).
+        PowerKind::FreeCard => {
+            let in_hand_or_play = ctx.card_uid.is_none_or(|uid| {
+                matches!(
+                    crate::card_effects::find_card_pile(state, uid),
+                    None | Some(crate::card_effects::PileKind::Hand)
+                )
+            });
+            (power.amount > 0 && in_hand_or_play).then_some(CardCostMod::Override(0))
         }
         PowerKind::Tangled => {
             // C# `TangledPower.TryModifyEnergyCostInCombat`
@@ -6644,6 +6852,64 @@ pub fn after_turn_end(
     };
     let power = state.powers.get_by_id(uid.0)?;
     match power.kind {
+        // v0.113.0 Fool one-turn powers: removed when the owner's side turn
+        // ends (`participants.Contains(Owner)`).
+        PowerKind::Quietus | PowerKind::Encore | PowerKind::KiVerse | PowerKind::ShowOff => {
+            let owner = owner_of_listener(state, listener)?;
+            if creature_ref_side(owner) != ctx.side {
+                return None;
+            }
+            let mut effects = SmallVec::new();
+            effects.push(Effect::RemovePower { listener });
+            Some(effects)
+        }
+        // `ChoBarbsPower : TemporaryThornsPower`: when the OTHER side's turn
+        // ends, remove itself and take its Amount back off Thorns.
+        PowerKind::ChoBarbs => {
+            let owner = owner_of_listener(state, listener)?;
+            if creature_ref_side(owner) == ctx.side {
+                return None;
+            }
+            let mut effects = SmallVec::new();
+            effects.push(Effect::RemovePower { listener });
+            if power.amount != 0 {
+                effects.push(Effect::ApplyPower {
+                    target: owner,
+                    kind: PowerKind::Thorns,
+                    amount: -power.amount,
+                    applier: None,
+                });
+            }
+            Some(effects)
+        }
+        // `DislikeYouPower.AfterSideTurnEnd`: removed when the PLAYER side's
+        // turn ends, whoever holds it.
+        PowerKind::DislikeYou => {
+            if ctx.side != Side::Player {
+                return None;
+            }
+            let mut effects = SmallVec::new();
+            effects.push(Effect::RemovePower { listener });
+            Some(effects)
+        }
+        // `TunePower.AfterSideTurnEnd`: a Ki played this (player) turn grants
+        // FreeCard(Amount).
+        PowerKind::Tune => {
+            if ctx.side == Side::Enemy
+                || !crate::fool::played_this_turn(state, crate::cards::CardTag::Ki)
+            {
+                return None;
+            }
+            let owner = owner_of_listener(state, listener)?;
+            let mut effects = SmallVec::new();
+            effects.push(Effect::ApplyPower {
+                target: owner,
+                kind: PowerKind::FreeCard,
+                amount: power.amount,
+                applier: owner.to_creature_uid(state),
+            });
+            Some(effects)
+        }
         PowerKind::Rebound => {
             // C# `ReboundPower.AfterSideTurnEnd` (`ReboundPower.cs:40-46`):
             // `if (participants.Contains(Owner)) await PowerCmd.Remove(this);`.
@@ -8628,6 +8894,33 @@ pub fn after_side_turn_start(
     };
     let power = state.powers.get_by_id(uid.0)?;
     match power.kind {
+        // v0.113.0 Fool: ArcheryPower / HiddenRootsPower grant Aim / Stretch
+        // on the owner's side turn start; ConductorsBatonPower removes itself.
+        PowerKind::Archery | PowerKind::HiddenRoots | PowerKind::ConductorsBaton => {
+            let owner = owner_of_listener(state, listener)?;
+            if creature_ref_side(owner) != ctx.side {
+                return None;
+            }
+            let mut effects = SmallVec::new();
+            if power.kind == PowerKind::ConductorsBaton {
+                effects.push(Effect::RemovePower { listener });
+                return Some(effects);
+            }
+            if power.amount == 0 {
+                return None;
+            }
+            effects.push(Effect::ApplyPower {
+                target: owner,
+                kind: if power.kind == PowerKind::Archery {
+                    PowerKind::Aim
+                } else {
+                    PowerKind::Stretch
+                },
+                amount: power.amount,
+                applier: owner.to_creature_uid(state),
+            });
+            Some(effects)
+        }
         PowerKind::Poison => {
             // Python guard: `if side != owner.side: return`. The owner's
             // side is derived from CreatureRef variant (Player/Ally → Player;
@@ -9558,6 +9851,19 @@ pub fn after_death(
     };
     let power = state.powers.get_by_id(uid.0)?;
     match power.kind {
+        // v0.113.0 `CompostPower.AfterDeath`: a creature of the other side died
+        // -> each living player teammate gains Amount energy. Compost is only
+        // ever a player power, so "other side" is the enemy side.
+        PowerKind::Compost
+            if state.game_version >= crate::GameVersion::V0_113_0
+                && ctx.dead_side == Side::Enemy =>
+        {
+            let mut effects = SmallVec::new();
+            effects.push(Effect::GainEnergy {
+                amount: power.amount,
+            });
+            Some(effects)
+        }
         PowerKind::CrabRage => {
             // C# `CrabRagePower.AfterDeath`
             // (MegaCrit.Sts2.Core.Models.Powers/CrabRagePower.cs):
@@ -9822,6 +10128,9 @@ fn dispatch_after_death_player_powers_seated(state: &mut CombatState, ctx: &Afte
         .filter(|l| !matches!(l, ListenerRef::Power(uid) if enemy_powers.contains(uid)))
         .collect();
     dispatch_after_death_listeners(state, &listeners, ctx);
+    if ctx.dead_side == Side::Enemy && state.powers.present_kinds().contains(PowerKind::ShowOff) {
+        crate::fool::show_off_after_death(state);
+    }
 }
 
 /// The player's cards' `AfterDeath` (C# `CardModel.AfterDeath`), after the
@@ -10478,6 +10787,8 @@ const MODIFY_DAMAGE_ADDITIVE_KINDS: crate::PowerKindSet = crate::PowerKindSet::f
     PowerKind::Tainted,
     // v0.111.0-only (GH #794).
     PowerKind::OneForAll,
+    // v0.113.0-only (The Fool).
+    PowerKind::Aim,
 ]);
 
 dispatch_fold_hook!(
@@ -10530,6 +10841,12 @@ const MODIFY_DAMAGE_MULTIPLICATIVE_KINDS: crate::PowerKindSet = crate::PowerKind
     PowerKind::Cruelty,
     PowerKind::Debilitate,
     PowerKind::Doom,
+    // v0.113.0-only (The Fool).
+    PowerKind::Honing,
+    PowerKind::Quietus,
+    PowerKind::SerratedArrows,
+    PowerKind::DislikeYou,
+    PowerKind::ConductorsBaton,
 ]);
 
 /// The kinds [`modify_damage_multiplicative`]'s power `match` has an arm for;
@@ -12416,6 +12733,9 @@ pub fn modify_damage_parts(state: &CombatState, ctx: &DamageCtx) -> DamageParts 
         || matches!(ctx.dealer, CreatureRef::Enemy(uid) if state.player.pet_uid == Some(uid));
     let mut enchant_mul = DamageMul::ONE;
     let mut enchant_additive = 0_i32;
+    // A card's own `ModifyDamageMultiplicative` (not an enchantment's): it
+    // multiplies the whole `base + additive`, so it rides `mul` only.
+    let mut card_mul = DamageMul::ONE;
     if dealt_by_player_or_osty {
         if let Some(card) = crate::card_effects::resolving_card_inst(state) {
             {
@@ -12431,6 +12751,16 @@ pub fn modify_damage_parts(state: &CombatState, ctx: &DamageCtx) -> DamageParts 
                     crate::enchantment_hooks::enchant_damage_multiplicative_x100(card, powered);
                 if x100 != 100 {
                     enchant_mul = enchant_mul.compose(DamageMul::new(i64::from(x100), 100));
+                }
+            }
+            // v0.113.0 `WahHammer.ModifyDamageMultiplicative`: its own damage
+            // is doubled against a target that has `ImpaledPower` — a plain
+            // listener in `Hook.ModifyDamage`, after every additive.
+            if card.card_id == crate::cards::CardId::WahHammer {
+                if let CreatureRef::Enemy(target) = ctx.target {
+                    if crate::fool::creature_is_impaled(state, target) {
+                        card_mul = DamageMul::new(2, 1);
+                    }
                 }
             }
         }
@@ -12450,7 +12780,10 @@ pub fn modify_damage_parts(state: &CombatState, ctx: &DamageCtx) -> DamageParts 
     // Compose the played card's enchantment multiplier (Favored/Instinct/Corrupted)
     // into the same single-floor fold. `enchant_mul` is ONE (no-op) unless a
     // player/Osty card source carries a multiplicative enchantment.
-    let mul = power_mul.compose(relic_mul).compose(enchant_mul);
+    let mul = power_mul
+        .compose(relic_mul)
+        .compose(enchant_mul)
+        .compose(card_mul);
 
     DamageParts {
         additive,
@@ -12986,6 +13319,7 @@ fn modify_block_parts(state: &CombatState, base_block: i32, ctx: &BlockCtx) -> (
 const MODIFY_BLOCK_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(&[
     PowerKind::Dexterity,
     PowerKind::Fasten,
+    PowerKind::Stretch,
     PowerKind::Frail,
     PowerKind::Unmovable,
     PowerKind::NoBlock,
@@ -13001,6 +13335,7 @@ const MODIFY_BLOCK_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(
 const MODIFY_BLOCK_UNPOWERED_ARMS: crate::PowerKindSet = MODIFY_BLOCK_KINDS.without(&[
     PowerKind::Dexterity,
     PowerKind::Fasten,
+    PowerKind::Stretch,
     PowerKind::Frail,
     PowerKind::NoBlock,
 ]);
@@ -13607,6 +13942,7 @@ dispatch_void_hook!(
 /// [`MODIFY_DAMAGE_ADDITIVE_KINDS`] on drift safety. (sts2-rs-05mjm / #51)
 const MODIFY_HAND_DRAW_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(&[
     PowerKind::Clarity,
+    PowerKind::Ennui,
     PowerKind::Demesne,
     PowerKind::MindRot,
     PowerKind::Tyranny,
@@ -13879,7 +14215,7 @@ pub fn dispatch_modify_card_cost(state: &CombatState, ctx: &CardCostCtx) -> i32 
         .present_kinds()
         .intersects(&MODIFY_CARD_COST_KINDS)
     {
-        return ctx.base_cost.max(0) + relic_add;
+        return card_self_cost(state, ctx.card_id, ctx.base_cost.max(0) + relic_add);
     }
 
     let mut add_acc: i32 = ctx.base_cost;
@@ -13910,7 +14246,34 @@ pub fn dispatch_modify_card_cost(state: &CombatState, ctx: &CardCostCtx) -> i32 
     // (`CombatState.IterateHookListeners`), and every additive power floors at
     // 0 on its own (CuriousPower), so the relic `+1` lands on the floored power
     // sum. Every `Override` is a `...Late` hook, applied after both.
-    override_min.unwrap_or(add_acc.max(0) + relic_add).max(0)
+    override_min
+        .unwrap_or_else(|| card_self_cost(state, ctx.card_id, add_acc.max(0) + relic_add))
+        .max(0)
+}
+
+/// A card's own `TryModifyEnergyCostInCombat` (v0.113.0), applied after the
+/// powers and relics of the early pass (C# `IterateHookListeners` visits the
+/// cards last) and before every `...Late` override:
+/// - `Coda`: `max(0, cost - 2 x MelodiesThisTurn)`;
+/// - `ChoLimbs`: `max(0, cost - 2)` once Wah or Ki was played this turn.
+///
+/// Both skip a running cost of 0 or less. Every other card is untouched.
+#[inline]
+fn card_self_cost(state: &CombatState, card_id: Option<CardId>, cost: i32) -> i32 {
+    let reduction = match card_id {
+        Some(CardId::Coda) => 2 * crate::fool::melodies_this_turn(state),
+        Some(CardId::ChoLimbs)
+            if crate::fool::played_this_turn(state, crate::cards::CardTag::Wah)
+                || crate::fool::played_this_turn(state, crate::cards::CardTag::Ki) =>
+        {
+            2
+        }
+        _ => return cost,
+    };
+    if cost <= 0 || reduction == 0 {
+        return cost;
+    }
+    (cost - reduction).max(0)
 }
 
 /// The relic half of the early `TryModifyEnergyCostInCombat` pass: C#
@@ -13945,6 +14308,7 @@ const MODIFY_CARD_COST_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_ki
     PowerKind::FreeAttack,
     PowerKind::FreeSkill,
     PowerKind::FreePower,
+    PowerKind::FreeCard,
     PowerKind::Tangled,
     PowerKind::BorrowedTime,
     PowerKind::Veilpiercer,
@@ -14060,8 +14424,9 @@ pub fn effective_card_cost_inst_with_mask(
     // itself is hoisted to the caller (`mods_present`) so per-hand loops
     // pay it once per enumeration.
     if !mods_present {
-        return base_cost.max(0)
+        let early = base_cost.max(0)
             + relic_card_cost_add(state, Some(card.card_type), base_cost, || card.is_x_cost());
+        return card_self_cost(state, Some(card.card_id), early);
     }
     let ctx = CardCostCtx {
         owner: CreatureRef::Player,
@@ -14106,6 +14471,7 @@ dispatch_fold_hook!(
 /// play. See [`MODIFY_DAMAGE_ADDITIVE_KINDS`] on drift safety.
 const MODIFY_CARD_PLAY_COUNT_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(&[
     PowerKind::Burst,
+    PowerKind::KiVerse,
     PowerKind::Duplication,
     PowerKind::OneTwoPunch,
     PowerKind::SignalBoost,
@@ -14332,6 +14698,7 @@ const BEFORE_CARD_PLAYED_POWERS_KINDS: crate::PowerKindSet = crate::PowerKindSet
     PowerKind::FreeAttack,
     PowerKind::FreeSkill,
     PowerKind::FreePower,
+    PowerKind::FreeCard,
 ]);
 
 /// Power-side `before_card_played` REACTIVE bodies (mutating). The hooks-bus
@@ -14670,6 +15037,9 @@ fn dispatch_before_card_played_powers_body(
         });
     let mut free_spent = false;
     let mut free_removed = false;
+    // v0.113.0 `FreeCardPower.BeforeCardPlayed`: any owned card play spends
+    // one stack, independently of the typed Free* powers.
+    let mut free_card_spent = card_uid.is_none();
     // A replay whose play-start cost was Veilpiercer's 0 for an Ethereal card,
     // with no Veilpiercer left now (an earlier iteration spent the last
     // charge): the live cost is the card's real one (GH #1150).
@@ -14727,6 +15097,19 @@ fn dispatch_before_card_played_powers_body(
                         c.powers.retain(|u| u.0 != uid.0);
                     }
                     veilpiercer_removed = true;
+                } else if let Some(p) = state.powers.get_mut_by_id(uid.0) {
+                    p.amount -= 1;
+                }
+            }
+            PowerKind::FreeCard if !free_card_spent => {
+                free_card_spent = true;
+                if amount <= 1 {
+                    state.powers.retain(|p| p.id != uid.0);
+                    state.player.powers.retain(|u| u.0 != uid.0);
+                    for c in &mut state.creatures {
+                        c.powers.retain(|u| u.0 != uid.0);
+                    }
+                    free_removed = true;
                 } else if let Some(p) = state.powers.get_mut_by_id(uid.0) {
                     p.amount -= 1;
                 }
@@ -15117,6 +15500,9 @@ fn dispatch_before_hand_draw_arms(state: &mut CombatState, only: u16) -> u16 {
     let mut spectrum_total: i32 = 0;
     let mut creative_ai_total: i32 = 0;
     let mut hello_world_total: i32 = 0;
+    let mut mythic_total: i32 = 0;
+    let mut mythic_upgraded: i32 = 0;
+    let mut ennui_sadness: i32 = 0;
     let mut foregone_uids: SmallVec<[PowerUid; 2]> = SmallVec::new();
     // Nightmare is IsInstanced (one entry per cast) and carries its
     // selected-card uid in `counter` + clone-count in `amount`, so it can't be
@@ -15220,6 +15606,16 @@ fn dispatch_before_hand_draw_arms(state: &mut CombatState, only: u16) -> u16 {
                         note(BeforeHandDrawArm::Nightmare(nightmare_jobs.len()));
                         nightmare_jobs.push((uid, card_uid, power.amount));
                     }
+                    // v0.113.0 Fool.
+                    PowerKind::Ennui => {
+                        note(BeforeHandDrawArm::Ennui);
+                        ennui_sadness = ennui_sadness.saturating_add(power.counter);
+                    }
+                    PowerKind::MythicForm => {
+                        note(BeforeHandDrawArm::MythicForm);
+                        mythic_total = mythic_total.saturating_add(power.amount);
+                        mythic_upgraded = mythic_upgraded.saturating_add(power.counter);
+                    }
                     _ => {}
                 }
             }
@@ -15228,6 +15624,10 @@ fn dispatch_before_hand_draw_arms(state: &mut CombatState, only: u16) -> u16 {
 
     for (i, &arm) in order.iter().enumerate() {
         match arm {
+            BeforeHandDrawArm::Ennui => crate::fool::ennui_before_hand_draw(state, ennui_sadness),
+            BeforeHandDrawArm::MythicForm => {
+                crate::fool::mythic_form_before_hand_draw(state, mythic_total, mythic_upgraded);
+            }
             // SpectrumShift (C# `SpectrumShiftPower.BeforeHandDraw`,
             // SpectrumShiftPower.cs): for the owning player, generate `Amount`
             // DISTINCT colorless cards (`GetDistinctForCombat(ColorlessPool, Amount,
@@ -15509,6 +15909,8 @@ enum BeforeHandDrawArm {
     CreativeAi,
     ForegoneConclusion,
     Nightmare(usize),
+    Ennui,
+    MythicForm,
 }
 
 impl BeforeHandDrawArm {
@@ -15524,6 +15926,8 @@ impl BeforeHandDrawArm {
             Self::CreativeAi => 1 << 5,
             Self::ForegoneConclusion => 1 << 6,
             Self::Nightmare(_) => 1 << 7,
+            Self::Ennui => 1 << 8,
+            Self::MythicForm => 1 << 9,
         }
     }
 }
@@ -15887,6 +16291,12 @@ const AFTER_CARD_PLAYED_ORDERED_ENEMY_HIT_KINDS: crate::PowerKindSet =
         PowerKind::Calamity,
         PowerKind::Juggling,
         PowerKind::BlackHole,
+        // v0.113.0 Fool (`fool::after_card_played_power`).
+        PowerKind::SongPath,
+        PowerKind::ViolentChord,
+        PowerKind::Lullaby,
+        PowerKind::Motif,
+        PowerKind::LostLute,
     ]);
 
 /// C# `SkittishPower.AfterAttack`
@@ -16042,6 +16452,10 @@ pub fn dispatch_after_card_played_ordered_enemy_hits(state: &mut CombatState, ct
             None => continue,
         };
         match kind {
+            k if crate::fool::AFTER_CARD_PLAYED_KINDS.contains(&k) => {
+                let amount = state.powers.get_by_id(uid.0).map_or(0, |p| p.amount);
+                crate::fool::after_card_played_power(state, k, amount, ctx.card_tags);
+            }
             // `BlackHolePower.AfterCardPlayed` (BlackHolePower.cs:21-27): the
             // stars this play spent in `SpendResources` deal the AoE now, in
             // the player's power order — a Calamity applied earlier adds its
@@ -16743,6 +17157,9 @@ fn dispatch_after_card_played_player_powers(
     // The latched card finished without spending Vigor (PactsEnd issued no
     // command, or the Vigor is gone): release the latch and its start amount
     // so the next attack latches afresh.
+    if state.player.fool.is_some() {
+        crate::fool::release_stretch(state, ctx.card_uid);
+    }
     if vigor_latched_here && state.player.vigor_latch_card.is_some() {
         state.player.vigor_latch_card = None;
         for uid in player_power_uids.iter().copied() {
@@ -18180,6 +18597,16 @@ fn tick_flutter_and_maybe_stun(state: &mut CombatState, creature_uid: CreatureUi
 /// `PowerKind::` over the [`after_turn_end`] fn body when arms change.
 /// [`AFTER_TURN_END_ARMS`], derived from it, gates the power walk.
 const AFTER_TURN_END_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(&[
+    // v0.113.0-only (The Fool).
+    PowerKind::Quietus,
+    PowerKind::Encore,
+    PowerKind::KiVerse,
+    PowerKind::ShowOff,
+    PowerKind::DislikeYou,
+    PowerKind::ChoBarbs,
+    PowerKind::Tune,
+    PowerKind::FreeCard,
+    PowerKind::Thorns,
     // v0.111.0 only: player-side Doom kills here (the arm returns `None`
     // before v0.111.0, so listing it only widens the walk's gate).
     PowerKind::Doom,
@@ -18260,8 +18687,13 @@ const AFTER_TURN_END_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kind
 /// Dexterity, Focus and Strength, which the arms only apply or read. Gates
 /// [`dispatch_after_turn_end`]'s power walk (relics return `None` up front, so
 /// there is no relic walk).
-const AFTER_TURN_END_ARMS: crate::PowerKindSet =
-    AFTER_TURN_END_KINDS.without(&[PowerKind::Dexterity, PowerKind::Focus, PowerKind::Strength]);
+const AFTER_TURN_END_ARMS: crate::PowerKindSet = AFTER_TURN_END_KINDS.without(&[
+    PowerKind::Dexterity,
+    PowerKind::Focus,
+    PowerKind::Strength,
+    PowerKind::FreeCard,
+    PowerKind::Thorns,
+]);
 
 /// `true` for an `AfterSideTurnEndLate` listener (DisintegrationPower.cs:19),
 /// which [`dispatch_after_turn_end_late`] runs instead of the main walk.
@@ -19040,6 +19472,12 @@ fn collect_after_side_turn_start_owned(
 /// [`AFTER_SIDE_TURN_START_ARMS`] is derived from it. See
 /// [`MODIFY_DAMAGE_ADDITIVE_KINDS`] on drift safety.
 const AFTER_SIDE_TURN_START_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(&[
+    // v0.113.0-only (The Fool).
+    PowerKind::Archery,
+    PowerKind::HiddenRoots,
+    PowerKind::ConductorsBaton,
+    PowerKind::Aim,
+    PowerKind::Stretch,
     PowerKind::Accelerant,
     PowerKind::BiasedCognition,
     PowerKind::Blur,
@@ -19075,6 +19513,8 @@ const AFTER_SIDE_TURN_START_KINDS: crate::PowerKindSet = crate::PowerKindSet::fr
 /// [`AFTER_SIDE_TURN_START_KINDS`] minus the kinds the arms only apply or read
 /// (Strength from DemonForm, Vigor from PrepTime, Doom, Accelerant, …).
 const AFTER_SIDE_TURN_START_ARMS: crate::PowerKindSet = AFTER_SIDE_TURN_START_KINDS.without(&[
+    PowerKind::Aim,
+    PowerKind::Stretch,
     PowerKind::Accelerant,
     PowerKind::Dexterity,
     PowerKind::Doom,
@@ -32509,6 +32949,7 @@ mod power_kind_mask_drift {
         PowerKind::all()
             .iter()
             .chain(PowerKind::V0111_ONLY.iter())
+            .chain(PowerKind::V0113_ONLY.iter())
             .copied()
             .find(|k| format!("{k:?}") == ident)
             .unwrap_or_else(|| panic!("`PowerKind::{ident}` is not a known variant"))

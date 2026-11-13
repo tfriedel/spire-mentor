@@ -1893,6 +1893,19 @@ mod tests {
     }
 
     #[test]
+    fn power_all_skips_v0113_only_and_power_any_keeps_them() {
+        // `power_all` feeds the e2e vocab (trained on v0.111.0): the
+        // v0.113.0-only powers map to UNK there, like v0.113.0 cards/events.
+        // `power_any` is every build's, for checking a carried id.
+        let all = list_registry_names_impl("power_all").unwrap();
+        let any = list_registry_names_impl("power_any").unwrap();
+        assert!(!all.iter().any(|s| s == "AIM"));
+        assert!(any.iter().any(|s| s == "AIM"));
+        assert!(any.iter().any(|s| s == "ONE_FOR_ALL"));
+        assert!(all.iter().all(|s| any.contains(s)));
+    }
+
+    #[test]
     fn list_registry_names_known_entries() {
         // Spot-check one canonical name per registry.
         let relics = list_registry_names_impl("relic").unwrap();

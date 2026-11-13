@@ -215,6 +215,7 @@ fn char_token(c: CharacterId) -> &'static str {
         CharacterId::Defect => "defect",
         CharacterId::Regent => "regent",
         CharacterId::Necrobinder => "necrobinder",
+        CharacterId::Fool => "fool",
     }
 }
 

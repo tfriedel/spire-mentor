@@ -63,3 +63,21 @@ fn a_bad_act_is_a_schema_error() {
         assert!(state_from_json(&v).is_err());
     }
 }
+
+/// v0.113.0 TheTower reads `RunState.TotalFloor`: it rides the wire as
+/// `total_floor`, absent at 0.
+#[test]
+fn total_floor_round_trips() {
+    let st = state_from_json(&fixture()).expect("builds");
+    assert_eq!(st.total_floor, 0);
+    assert!(combat_state_to_value(&st)
+        .expect("emits")
+        .get("total_floor")
+        .is_none());
+    let mut v = fixture();
+    v["total_floor"] = serde_json::json!(23);
+    let st = state_from_json(&v).expect("builds");
+    assert_eq!(st.total_floor, 23);
+    let back = state_from_json(&combat_state_to_value(&st).expect("emits")).expect("re-parses");
+    assert_eq!(back.total_floor, 23);
+}

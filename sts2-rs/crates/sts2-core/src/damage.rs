@@ -1337,6 +1337,10 @@ fn finish_hit_tail_body(state: &mut CombatState, tail: &HitTail) {
     // enemy-target dispatch skips the player-target lanes' kinds in its
     // liveness test (J06).
     hooks::dispatch_after_damage_received_enemy_target(state, &ctx, hp_loss);
+    // v0.113.0 `ImpaledPower.AfterDamageReceived` (the player's arrows).
+    if state.player.fool.is_some() {
+        crate::fool::on_damage_received(state, target, dealer, props);
+    }
 
     // GH #806: HardenedShell's `AfterDamageReceived` tally runs after the
     // given-side hooks above, as in C# (`Hook.AfterDamageGiven` precedes
@@ -1471,6 +1475,10 @@ fn kill_dying_enemy_after_death(
         // `fire_for_owner` zeroes the triggering power, so the combat-end
         // `fire_pending` sweep never double-fires it. Enemy deaths only.
         if owner == target && dead_side == crate::Side::Enemy {
+            // v0.113.0 `ImpaledPower.AfterDeath`: the arrows come back.
+            if state.player.fool.is_some() {
+                crate::fool::on_creature_death(state, target);
+            }
             fired = crate::enemy_death_effects::fire_for_owner(state, target);
             own_power_fired = true;
         }

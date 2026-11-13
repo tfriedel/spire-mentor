@@ -203,6 +203,16 @@ const NECROBINDER_UNCOMMON: &[RelicId] = &[RelicId::BookRepairKnife, RelicId::Fu
 const NECROBINDER_RARE: &[RelicId] = &[RelicId::BigHat, RelicId::Bookmark, RelicId::IvoryTile];
 const NECROBINDER_SHOP: &[RelicId] = &[RelicId::UndyingSigil];
 
+// The Fool (v0.113.0, `FoolRelicPool.cs`, alphabetical; SongBow is Starter).
+const FOOL_COMMON: &[RelicId] = &[RelicId::ExerciseMat];
+const FOOL_UNCOMMON: &[RelicId] = &[RelicId::Ocarina, RelicId::WhittlingKnife];
+const FOOL_RARE: &[RelicId] = &[
+    RelicId::ConductorsBaton,
+    RelicId::Fertilizer,
+    RelicId::Twine,
+];
+const FOOL_SHOP: &[RelicId] = &[RelicId::BizarreLamp];
+
 /// The four `[Common, Uncommon, Rare, Shop]` slices for `character`'s own
 /// relic pool. C# maps unimplemented/random characters onto
 /// `IroncladRelicPool`, so we do too.
@@ -223,6 +233,7 @@ fn character_buckets(character: CharacterId) -> [&'static [RelicId]; 4] {
             NECROBINDER_RARE,
             NECROBINDER_SHOP,
         ],
+        CharacterId::Fool => [FOOL_COMMON, FOOL_UNCOMMON, FOOL_RARE, FOOL_SHOP],
     }
 }
 

@@ -55,6 +55,8 @@ pub fn starter_deck_for(character: CharacterId) -> Vec<CardSpec> {
         // previously fell back to the Ironclad deck, diverging every Defect
         // run at the first event).
         CharacterId::Defect => defect::defect_starter_deck(),
+        // The Fool (v0.113.0): `Fool.StartingDeck`.
+        CharacterId::Fool => crate::cards::fool_pool::starter_deck(),
     }
 }
 

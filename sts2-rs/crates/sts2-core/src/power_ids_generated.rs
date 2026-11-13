@@ -659,6 +659,70 @@ pub enum PowerKind {
     /// the owner's, not the owner's pet's) powered attacks apply Doom equal to
     /// the damage times `Amount`; removed at the end of the enemy turn.
     Underworld,
+    // ── v0.113.0-only: The Fool (`Models.Powers`). Not in [`PowerKind::all`];
+    // see [`PowerKind::V0113_ONLY`] / [`PowerKind::all_for`].
+    /// v0.113.0 `AimPower`: Counter buff, +`Amount` to the owner's powered `FromArrow` attacks; consumed by the first such attack command (Vigor-like).
+    Aim,
+    /// v0.113.0 `AllIsWellPower`: gain `Amount` block whenever the owner generates a Sadness.
+    AllIsWell,
+    /// v0.113.0 `ArcheryPower`: gain `Amount` Aim at each owner side turn start.
+    Archery,
+    /// v0.113.0 `ChoBarbsPower : TemporaryThornsPower`: +`Amount` Thorns until the owner's next turn.
+    ChoBarbs,
+    /// v0.113.0 `CompostPower` (MP-only Compost card): teammates gain energy when an enemy dies.
+    Compost,
+    /// v0.113.0 `ConductorsBatonPower` (ConductorsBaton relic): take x0.75 powered-attack damage until the owner's next turn start. Single.
+    ConductorsBaton,
+    /// v0.113.0 `CoveringFirePower` (MP-only): teammates gain block when the owner shoots an arrow.
+    CoveringFire,
+    /// v0.113.0 `DislikeYouPower`: Debuff, target takes +`Amount`% from powered arrow attacks; removed at player turn end.
+    DislikeYou,
+    /// v0.113.0 `EcstasyPower`: player turn start, transform up to `Amount` Sadness in hand into Joy.
+    Ecstasy,
+    /// v0.113.0 `EncorePower`: Debuff, only `Amount` more cards may be played this turn.
+    Encore,
+    /// v0.113.0 `EnnuiPower`: +`Amount` hand draw; before hand draw add `Cards` Sadness.
+    Ennui,
+    /// v0.113.0 `EnsemblePower` (MP-only): cards cost 0 while active, decremented when a teammate plays.
+    Ensemble,
+    /// v0.113.0 `ExplosiveArrowsPower`: when the owner's arrow impales, deal `Amount` to all enemies.
+    ExplosiveArrows,
+    /// v0.113.0 `FreeCardPower`: the owner's next `Amount` card(s) in hand/play cost 0 (applied by TunePower).
+    FreeCard,
+    /// v0.113.0 `HiddenRootsPower`: gain `Amount` Stretch at each owner side turn start.
+    HiddenRoots,
+    /// v0.113.0 `HoningPower`: the owner's powered arrow attacks deal +`Amount`%.
+    Honing,
+    /// v0.113.0 `ImpaledPower`: InstancedPerApplier arrow tracker on an enemy (hit counter 3; dislodges an arrow every 3 powered hits from the applier).
+    Impaled,
+    /// v0.113.0 `KiVersePower`: the owner's next melody (Wah/Cho/Ki) card plays an extra time.
+    KiVerse,
+    /// v0.113.0 `LostLutePower`: first Wah/Cho/Ki of the turn autoplays `Amount` cards from the draw pile per new note.
+    LostLute,
+    /// v0.113.0 `LullabyPower`: once per turn after Wah, Cho and Ki were all played, gain `Amount` block.
+    Lullaby,
+    /// v0.113.0 `MotifPower`: first Wah/Cho/Ki of the turn draws `Amount` cards per new note.
+    Motif,
+    /// v0.113.0 `MythicFormPower`: before hand draw add `Amount` random tarot cards.
+    MythicForm,
+    /// v0.113.0 `QuietusPower`: the next powered arrow attack deals x`Amount` and its arrow is destroyed after impaling.
+    Quietus,
+    /// v0.113.0 `SerratedArrowsPower`: +`Amount`% powered damage against Impaled targets.
+    SerratedArrows,
+    /// v0.113.0 `ShowOffPower`: Instanced; on a fatal enemy kill raise the ShowOff card's Aim.
+    ShowOff,
+    /// v0.113.0 `SimpletonPower`: post-play phase autoplays the cheapest playable card(s) in hand.
+    Simpleton,
+    /// v0.113.0 `SongPathPower`: first Cho each turn gains `Amount` block.
+    SongPath,
+    /// v0.113.0 `StretchPower`: Counter buff, +`Amount` block to the next block-gaining card play; then consumed.
+    Stretch,
+    /// v0.113.0 `TunePower`: player turn end, if a Ki was played this turn gain `Amount` FreeCard.
+    Tune,
+    /// v0.113.0 `ViolentChordPower`: first Wah each turn deals `Amount` to all enemies.
+    ViolentChord,
+    /// v0.113.0 `YahPower`: once per turn when the owner's arrow is dislodged gain `Amount` energy.
+    Yah,
 }
 
 impl PowerKind {
@@ -949,6 +1013,37 @@ impl PowerKind {
             Self::OneForAll => "ONE_FOR_ALL",
             Self::Soulbound => "SOULBOUND",
             Self::Underworld => "UNDERWORLD",
+            Self::Aim => "AIM",
+            Self::AllIsWell => "ALL_IS_WELL",
+            Self::Archery => "ARCHERY",
+            Self::ChoBarbs => "CHO_BARBS",
+            Self::Compost => "COMPOST",
+            Self::ConductorsBaton => "CONDUCTORS_BATON",
+            Self::CoveringFire => "COVERING_FIRE",
+            Self::DislikeYou => "DISLIKE_YOU",
+            Self::Ecstasy => "ECSTASY",
+            Self::Encore => "ENCORE",
+            Self::Ennui => "ENNUI",
+            Self::Ensemble => "ENSEMBLE",
+            Self::ExplosiveArrows => "EXPLOSIVE_ARROWS",
+            Self::FreeCard => "FREE_CARD",
+            Self::HiddenRoots => "HIDDEN_ROOTS",
+            Self::Honing => "HONING",
+            Self::Impaled => "IMPALED",
+            Self::KiVerse => "KI_VERSE",
+            Self::LostLute => "LOST_LUTE",
+            Self::Lullaby => "LULLABY",
+            Self::Motif => "MOTIF",
+            Self::MythicForm => "MYTHIC_FORM",
+            Self::Quietus => "QUIETUS",
+            Self::SerratedArrows => "SERRATED_ARROWS",
+            Self::ShowOff => "SHOW_OFF",
+            Self::Simpleton => "SIMPLETON",
+            Self::SongPath => "SONG_PATH",
+            Self::Stretch => "STRETCH",
+            Self::Tune => "TUNE",
+            Self::ViolentChord => "VIOLENT_CHORD",
+            Self::Yah => "YAH",
         }
     }
 
@@ -1246,6 +1341,42 @@ impl PowerKind {
         Self::Underworld,
     ];
 
+    /// Powers that exist only from game build v0.113.0 on: The Fool's
+    /// (`Models.Powers`, alphabetical like the decomp directory).
+    pub const V0113_ONLY: [PowerKind; 31] = [
+        Self::Aim,
+        Self::AllIsWell,
+        Self::Archery,
+        Self::ChoBarbs,
+        Self::Compost,
+        Self::ConductorsBaton,
+        Self::CoveringFire,
+        Self::DislikeYou,
+        Self::Ecstasy,
+        Self::Encore,
+        Self::Ennui,
+        Self::Ensemble,
+        Self::ExplosiveArrows,
+        Self::FreeCard,
+        Self::HiddenRoots,
+        Self::Honing,
+        Self::Impaled,
+        Self::KiVerse,
+        Self::LostLute,
+        Self::Lullaby,
+        Self::Motif,
+        Self::MythicForm,
+        Self::Quietus,
+        Self::SerratedArrows,
+        Self::ShowOff,
+        Self::Simpleton,
+        Self::SongPath,
+        Self::Stretch,
+        Self::Tune,
+        Self::ViolentChord,
+        Self::Yah,
+    ];
+
     /// Powers that v0.111.0 deleted (GH #794): `DiamondDiademPower` went with
     /// the DiamondDiadem relic rework and `OutbreakPower` with the Outbreak
     /// card rework (decomp `v0.107.1/.../Powers/DiamondDiademPower.cs`,
@@ -1266,6 +1397,37 @@ impl PowerKind {
             | Self::OneForAll
             | Self::Soulbound
             | Self::Underworld => crate::GameVersion::V0_111_0,
+            Self::Aim
+            | Self::AllIsWell
+            | Self::Archery
+            | Self::ChoBarbs
+            | Self::Compost
+            | Self::ConductorsBaton
+            | Self::CoveringFire
+            | Self::DislikeYou
+            | Self::Ecstasy
+            | Self::Encore
+            | Self::Ennui
+            | Self::Ensemble
+            | Self::ExplosiveArrows
+            | Self::FreeCard
+            | Self::HiddenRoots
+            | Self::Honing
+            | Self::Impaled
+            | Self::KiVerse
+            | Self::LostLute
+            | Self::Lullaby
+            | Self::Motif
+            | Self::MythicForm
+            | Self::Quietus
+            | Self::SerratedArrows
+            | Self::ShowOff
+            | Self::Simpleton
+            | Self::SongPath
+            | Self::Stretch
+            | Self::Tune
+            | Self::ViolentChord
+            | Self::Yah => crate::GameVersion::V0_113_0,
             _ => crate::GameVersion::V0_107_1,
         }
     }
@@ -1292,6 +1454,9 @@ impl PowerKind {
             .collect();
         if version >= crate::GameVersion::V0_111_0 {
             v.extend_from_slice(&Self::V0111_ONLY);
+        }
+        if version >= crate::GameVersion::V0_113_0 {
+            v.extend_from_slice(&Self::V0113_ONLY);
         }
         v
     }

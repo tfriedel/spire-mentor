@@ -303,6 +303,13 @@ pub struct ParsedState {
     pub act_index: u8,
     /// `$.is_boss`: a boss room; false when absent.
     pub is_boss: bool,
+    /// `$.total_floor`: C# `RunState.TotalFloor`; 0 when absent. v0.113.0
+    /// TheTower reads it.
+    pub total_floor: u16,
+    /// `$.fool_state`: the v0.113.0 Fool mechanics state, encoded by
+    /// [`crate::fool_state`]; `None` when absent. Decoded only after the
+    /// piles and roster exist, since its refs are pile/roster positions.
+    pub fool_state: Option<Vec<i64>>,
 }
 
 /// One co-op teammate on the wire (`$.allies[i]`).
@@ -1122,6 +1129,24 @@ pub fn parse_state_dict<V: WireValue>(d: &V) -> WireResult<ParsedState> {
             .ok_or_else(|| schema_err("$.act_index", "must be a 1-based u8"))?,
         None => 1,
     };
+    let total_floor = match extract_optional(d, "total_floor") {
+        Some(_) => u16::try_from(extract_i64(d, "$", "total_floor")?)
+            .map_err(|_| schema_err("$.total_floor", "must fit in u16"))?,
+        None => 0,
+    };
+    let fool_state = match extract_optional(d, "fool_state") {
+        Some(v) => Some(
+            v.as_array()
+                .ok_or_else(|| schema_err("$.fool_state", "must be a list of ints"))?
+                .iter()
+                .map(|w| {
+                    w.as_i64()
+                        .ok_or_else(|| schema_err("$.fool_state", "must be a list of ints"))
+                })
+                .collect::<Result<Vec<i64>, _>>()?,
+        ),
+        None => None,
+    };
     let is_boss = match extract_optional(d, "is_boss") {
         Some(_) => extract_bool(d, "$", "is_boss")?,
         None => false,
@@ -1169,6 +1194,8 @@ pub fn parse_state_dict<V: WireValue>(d: &V) -> WireResult<ParsedState> {
         coop_seat_index,
         act_index,
         is_boss,
+        total_floor,
+        fool_state,
     })
 }
 
@@ -2495,6 +2522,7 @@ pub fn power_kind_from_python_name(s: &str) -> Option<PowerKind> {
     PowerKind::all()
         .iter()
         .chain(PowerKind::V0111_ONLY.iter())
+        .chain(PowerKind::V0113_ONLY.iter())
         .copied()
         .find(|k| k.python_name() == s)
 }
@@ -2534,6 +2562,7 @@ pub fn potion_kind_from_python_name(s: &str) -> Option<PotionKind> {
     PotionKind::ALL
         .iter()
         .chain(PotionKind::V0111_ONLY.iter())
+        .chain(PotionKind::V0113_ONLY.iter())
         .copied()
         .find(|k| k.python_name() == s)
 }
@@ -2567,7 +2596,10 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
     let mut set: BTreeSet<&'static str> = BTreeSet::new();
     match kind {
         "relic" => {
-            for k in RELIC_KINDS {
+            // The sorted position is a combat-ctx embedding row, so the
+            // v0.113.0-only Fool relics stay out (as "power" keeps the
+            // v0.107.1 universe).
+            for k in RELIC_KINDS.iter().filter(|k| !k.is_v0113_only()) {
                 set.insert(k.python_name());
             }
         }
@@ -2584,11 +2616,23 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
             }
         }
         "power_all" => {
+            // v0.107.1 + v0.111.0 powers: the e2e vocab's universe (its
+            // policy is trained on v0.111.0), so the v0.113.0-only powers map
+            // to UNK there, as v0.113.0-only cards and events do.
+            for k in PowerKind::all().iter().chain(&PowerKind::V0111_ONLY) {
+                set.insert(k.python_name());
+            }
+        }
+        "power_any" => {
             // Every build's powers, for checking a carried id: the adapters
             // dropped a power missing from "power" off the board (v0.111.0's
             // OneForAll went, and every 0-cost Attack it buffs hit for less
             // than the game's).
-            for k in PowerKind::all().iter().chain(&PowerKind::V0111_ONLY) {
+            for k in PowerKind::all()
+                .iter()
+                .chain(&PowerKind::V0111_ONLY)
+                .chain(&PowerKind::V0113_ONLY)
+            {
                 set.insert(k.python_name());
             }
         }
@@ -2599,7 +2643,7 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
         }
         other => {
             return Err(format!(
-                "unknown registry kind `{other}` (expected one of: relic, relic_id, card, monster, power, power_all, potion, orb, event, boss, enchantment)"
+                "unknown registry kind `{other}` (expected one of: relic, relic_id, card, monster, power, power_all, power_any, potion, orb, event, boss, enchantment)"
             ));
         }
     }
@@ -3709,6 +3753,7 @@ pub fn state_from_dict_impl(parsed: &ParsedState) -> WireResult<CoreCombatState>
         game_version: parsed.game_version,
         is_elite: parsed.is_elite,
         act_index: parsed.act_index,
+        total_floor: parsed.total_floor,
         is_boss: parsed.is_boss,
         allies: parsed
             .allies
@@ -5003,6 +5048,11 @@ pub fn state_from_dict_impl(parsed: &ParsedState) -> WireResult<CoreCombatState>
     state.coop.full = parsed.coop_full && !state.coop.stash.is_empty();
     state.coop.seat_index = parsed.coop_seat_index;
     apply_seat_histories(&mut state, parsed);
+    if let Some(words) = parsed.fool_state.as_deref() {
+        let f =
+            crate::fool_state::decode(&state, words).map_err(|e| schema_err("$.fool_state", &e))?;
+        state.player.fool = Some(Box::new(f));
+    }
 
     Ok(state)
 }

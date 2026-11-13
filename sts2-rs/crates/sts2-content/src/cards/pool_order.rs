@@ -44,6 +44,8 @@ pub fn generate_all_cards(pool: Pool, version: GameVersion) -> &'static [CardId]
         (Pool::Character(CharacterId::Necrobinder), true) => g::NECROBINDER_V0111,
         (Pool::Character(CharacterId::Regent), false) => g::REGENT_V0107,
         (Pool::Character(CharacterId::Regent), true) => g::REGENT_V0111,
+        // The Fool exists only from v0.113.0 (`FoolCardPool.cs`).
+        (Pool::Character(CharacterId::Fool), _) => super::fool_pool::generate_all_cards(),
         (Pool::Colorless, false) => g::COLORLESS_V0107,
         (Pool::Colorless, true) if version >= GameVersion::V0_113_0 => &COLORLESS_V0113,
         (Pool::Colorless, true) => g::COLORLESS_V0111,

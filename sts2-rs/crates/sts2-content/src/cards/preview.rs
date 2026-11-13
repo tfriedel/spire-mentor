@@ -288,7 +288,10 @@ pub fn calculated_value(
             None => raw.max(0),
         },
         ValueKind::Block => sts2_core::hooks::modify_block(
-            state,
+            // A face preview has no `cardPlay`: Stretch answers it unspent.
+            sts2_core::fool::stretch_preview_state(state, card.uid)
+                .as_ref()
+                .unwrap_or(state),
             raw,
             &sts2_core::hooks::BlockCtx {
                 target: CreatureRef::Player,

@@ -459,6 +459,33 @@ fn entropy_transforms_the_ball_off_the_colorless_pool_v0111() {
     );
 }
 
+/// v0.113.0: MyShinies sits in `ColorlessCardPool` (ColorlessCardPool.cs:63),
+/// so Entropy transforms a hand MyShinies off the colorless pool, not the
+/// player's (Regent fuzz seed 235, `THE_OBSCURA_NORMAL`: C# rolled FINESSE
+/// where Rust rolled the Regent CRESCENT_SPEAR).
+#[test]
+fn entropy_transforms_my_shinies_off_the_colorless_pool_regent_v0113() {
+    use super::helpers::{colorless_combat_generatable_ids_in, transform_card_to_random_for_hook};
+    let (mut state, _euid) = fresh_state(CardId::MyShinies, 10, 0);
+    state.game_version = sts2_core::GameVersion::V0_113_0;
+    state.player.character = Some(sts2_core::potions::CharacterId::Regent);
+    let uid = sts2_core::CardUid(NonZeroU32::new(1).expect("nz"));
+    state.player.play.clear();
+    state.player.hand.push(uid);
+    let new_uid = transform_card_to_random_for_hook(&mut state, uid).expect("transforms");
+    let new_id = state
+        .cards
+        .iter()
+        .find(|c| c.uid == new_uid)
+        .unwrap()
+        .card_id;
+    assert_ne!(new_id, CardId::MyShinies);
+    assert!(
+        colorless_combat_generatable_ids_in(sts2_core::GameVersion::V0_113_0).contains(&new_id),
+        "MyShinies must transform into a colorless card, got {new_id:?}",
+    );
+}
+
 /// v0.113.0: MyShinies (Rare) sits in `ColorlessCardPool`
 /// (ColorlessCardPool.cs:63), so `CardFactory.GetDefaultTransformationOptions`
 /// uses `original.Pool` = the colorless pool. Its spec lives outside
@@ -482,6 +509,32 @@ fn entropy_transforms_my_shinies_off_the_colorless_pool_v0113() {
     assert!(
         colorless_combat_generatable_ids_in(sts2_core::GameVersion::V0_113_0).contains(&new_id),
         "MyShinies must transform into a colorless card, got {new_id:?}",
+    );
+}
+
+/// v0.113.0: a Fool card's `original.Pool` is `FoolCardPool`, so Entropy on
+/// a Fool card in an Ironclad hand rolls another Fool card, not an Ironclad
+/// one (`CardFactory.GetDefaultTransformationOptions`).
+#[test]
+fn entropy_transforms_a_fool_card_off_the_fool_pool_v0113() {
+    use super::helpers::transform_card_to_random_for_hook;
+    let (mut state, _euid) = fresh_state(CardId::TrickShot, 10, 0);
+    state.game_version = sts2_core::GameVersion::V0_113_0;
+    state.player.character = Some(sts2_core::potions::CharacterId::Ironclad);
+    let uid = sts2_core::CardUid(NonZeroU32::new(1).expect("nz"));
+    state.player.play.clear();
+    state.player.hand.push(uid);
+    let new_uid = transform_card_to_random_for_hook(&mut state, uid).expect("transforms");
+    let new_id = state
+        .cards
+        .iter()
+        .find(|c| c.uid == new_uid)
+        .unwrap()
+        .card_id;
+    assert_ne!(new_id, CardId::TrickShot);
+    assert!(
+        crate::cards::fool::FOOL_POOL_V0113.contains(&new_id),
+        "a Fool card must transform into a Fool card, got {new_id:?}",
     );
 }
 

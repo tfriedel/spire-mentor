@@ -62,14 +62,19 @@ pub fn tags_for_card_id(id: CardId) -> CardTags {
         | I::SolarStrike
         | I::ShiningStrike
         | I::SeekerStrike
-        | I::UltimateStrike => CardTags::one(CardTag::Strike),
+        | I::UltimateStrike
+        // v0.113.0 Fool (`CanonicalTags = { Strike }`).
+        | I::StrikeFool
+        | I::RhythmStrike
+        | I::SorrowfulStrike => CardTags::one(CardTag::Strike),
         // Defend-tag cards
         I::DefendIronclad
         | I::DefendSilent
         | I::DefendDefect
         | I::DefendRegent
         | I::DefendNecrobinder
-        | I::UltimateDefend => CardTags::one(CardTag::Defend),
+        | I::UltimateDefend
+        | I::DefendFool => CardTags::one(CardTag::Defend),
         // Shiv-tag cards
         I::Shiv => CardTags::one(CardTag::Shiv),
         // Minion-tag cards
@@ -93,6 +98,34 @@ pub fn tags_for_card_id(id: CardId) -> CardTags {
         | I::Unleash
         | I::Poke
         | I::Protector => CardTags::one(CardTag::OstyAttack),
+        // v0.113.0 Fool melody notes and Shoot (`CanonicalTags`; KiWhip's Ki
+        // comes from its `override Tags`, `KiWhip.cs`).
+        I::WahBlast | I::WahHammer | I::WahSymphony | I::WahSweep | I::WahTouch => {
+            CardTags::one(CardTag::Wah)
+        }
+        I::ChoBarbsCard | I::ChoChorus | I::ChoFirm | I::ChoLimbs | I::ChoReady => {
+            CardTags::one(CardTag::Cho)
+        }
+        I::KiChant | I::KiHop | I::KiRest | I::KiVerseCard | I::KiWhip => CardTags::one(CardTag::Ki),
+        I::WahCho => CardTags::one(CardTag::Wah).with(CardTag::Cho),
+        I::WahKi => CardTags::one(CardTag::Wah).with(CardTag::Ki),
+        I::ChoKi => CardTags::one(CardTag::Cho).with(CardTag::Ki),
+        I::WahChoKi => CardTags::one(CardTag::Wah)
+            .with(CardTag::Cho)
+            .with(CardTag::Ki),
+        I::BlossomShot
+        | I::DivineShot
+        | I::HeavyShot
+        | I::HobblingShot
+        | I::FoolishShot
+        | I::MelodicShot
+        | I::QuickShot
+        | I::RainShot
+        | I::RapidShot
+        | I::RepeatShot
+        | I::SkyShot
+        | I::TrickShot
+        | I::TheShot => CardTags::one(CardTag::Shoot),
         _ => CardTags::NONE,
     }
 }

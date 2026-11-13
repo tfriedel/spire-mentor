@@ -86,6 +86,14 @@ pub const fn character_starter(character: CharacterId) -> CharacterStarter {
             starter_relic: RelicId::DivineRight,
             heal_after_combat: 0,
         },
+        // The Fool (v0.113.0): C# `Fool.cs` StartingHp => 77,
+        // StartingGold => 99, StartingRelics => SongBow.
+        CharacterId::Fool => CharacterStarter {
+            hp: 77,
+            gold: 99,
+            starter_relic: RelicId::SongBow,
+            heal_after_combat: 0,
+        },
     }
 }
 
@@ -133,6 +141,16 @@ mod tests {
         let s = character_starter(CharacterId::Regent);
         assert_eq!(s.hp, 75);
         assert_eq!(s.starter_relic, RelicId::DivineRight);
+        assert_eq!(s.heal_after_combat, 0);
+    }
+
+    #[test]
+    fn fool_starter_matches_csharp() {
+        // C# Fool.cs: StartingHp => 77, StartingGold => 99, SongBow.
+        let s = character_starter(CharacterId::Fool);
+        assert_eq!(s.hp, 77);
+        assert_eq!(s.gold, 99);
+        assert_eq!(s.starter_relic, RelicId::SongBow);
         assert_eq!(s.heal_after_combat, 0);
     }
 

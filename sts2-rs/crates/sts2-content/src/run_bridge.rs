@@ -478,6 +478,7 @@ pub fn enter_combat_from_roster_in_slots(
     state.relics.extend(relics);
 
     state.act_index = rs.act_index;
+    state.total_floor = u16::try_from(rs.csharp_total_floor().max(0)).unwrap_or(u16::MAX);
 
     spawn_roster(&mut state, roster);
     // Slot model before anything can summon (see the doc comment). Inert for

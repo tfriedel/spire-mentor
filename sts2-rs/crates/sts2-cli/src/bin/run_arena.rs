@@ -83,6 +83,7 @@ fn character_class_name(c: sts2_core::potions::CharacterId) -> &'static str {
         CharacterId::Defect => "Defect",
         CharacterId::Regent => "Regent",
         CharacterId::Necrobinder => "Necrobinder",
+        CharacterId::Fool => "Fool",
     }
 }
 

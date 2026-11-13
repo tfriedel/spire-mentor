@@ -104,6 +104,13 @@ pub(crate) fn play_jackpot(state: &mut CombatState, target: Option<CreatureUid>)
                 .filter(|s| s.cost == 0)
                 .collect()
         }
+        // v0.113.0 The Fool: the `FilterForCombat`-filtered Fool pool
+        // (`FoolCardPool.GenerateAllCards` order), then `cost == 0`.
+        Some(c @ CharacterId::Fool) => super::helpers::fight_pool(state, c)
+            .iter()
+            .copied()
+            .filter(|s| s.cost == 0)
+            .collect(),
         _ => return EffectResult::Resolved,
     };
     // v0.111.0 (GH #793): Sidestep holds Scare's Silent slot (decomp

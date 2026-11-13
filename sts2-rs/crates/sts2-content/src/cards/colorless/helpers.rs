@@ -133,18 +133,15 @@ pub(crate) fn move_card_from_draw_to_hand_by_type(
     state: &mut CombatState,
     kind: sts2_core::cards::CardType,
 ) {
-    let mut candidates: SmallVec<[sts2_core::CardUid; 16]> = state
-        .player
-        .draw
-        .iter()
-        .copied()
-        // C# filters `c.Type == kind`; the Quest cards are `CardType.Quest`
-        // (`Dowsing.cs:45`), so Secret Technique never fetches them.
-        .filter(|uid| state.cards[uid.0.get() as usize - 1].card_type == kind)
-        .collect();
-    // Mirror C# `FromCombatPile`'s `OrderBy(Rarity).ThenBy(Id)` Draw-pile
-    // sort (stable, no `upgraded` key). Harmless for the 0/1-candidate arms.
-    candidates.sort_by(|a, b| {
+    // C# filters `c.Type == kind`; the Quest cards are `CardType.Quest`
+    // (`Dowsing.cs:45`), so Secret Technique never fetches them.
+    move_card_from_draw_to_hand_where(state, |c| c.card_type == kind);
+}
+
+/// C# `FromCombatPile`'s `OrderBy(Rarity).ThenBy(x)` Draw-pile grid sort
+/// (stable, no `upgraded` key).
+pub(crate) fn sort_draw_select(state: &CombatState, uids: &mut [sts2_core::CardUid]) {
+    uids.sort_by(|a, b| {
         let ca = &state.cards[a.0.get() as usize - 1];
         let cb = &state.cards[b.0.get() as usize - 1];
         crate::cards::spec_index::card_rarity_rank_csharp_in(ca.card_id, state.game_version)
@@ -156,6 +153,23 @@ pub(crate) fn move_card_from_draw_to_hand_by_type(
                 sts2_core::cards::draw_select_tiebreak(&state.cards, *a, *b, state.game_version)
             })
     });
+}
+
+/// [`move_card_from_draw_to_hand_by_type`] with an arbitrary `filter`
+/// (C# `FromCombatPile(Draw, filter)` then `CardPileCmd.Add(.., Hand)`):
+/// v0.113.0 `LockedIn` fetches a `CardTag.Shoot` card.
+pub(crate) fn move_card_from_draw_to_hand_where(
+    state: &mut CombatState,
+    filter: impl Fn(&sts2_core::cards::Card) -> bool,
+) {
+    let mut candidates: SmallVec<[sts2_core::CardUid; 16]> = state
+        .player
+        .draw
+        .iter()
+        .copied()
+        .filter(|uid| filter(&state.cards[uid.0.get() as usize - 1]))
+        .collect();
+    sort_draw_select(state, &mut candidates);
     match candidates.as_slice() {
         [] => {}
         [uid] => {
@@ -481,7 +495,8 @@ pub(crate) fn combat_generatable_pool(
     // (~1.1% of instructions on the 2026-07-03 realistic-deck callgrind).
     // Memoize per character; the borrow is `'static`, so callers filter /
     // copy from the cached slice without reconstruction.
-    static POOLS: [OnceLock<SmallVec<[CardSpec; 96]>>; 5] = [
+    static POOLS: [OnceLock<SmallVec<[CardSpec; 96]>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
@@ -494,6 +509,7 @@ pub(crate) fn combat_generatable_pool(
         CharacterId::Defect => &POOLS[2],
         CharacterId::Necrobinder => &POOLS[3],
         CharacterId::Regent => &POOLS[4],
+        CharacterId::Fool => &POOLS[5],
     };
     slot.get_or_init(|| build_combat_generatable_pool(character))
 }
@@ -600,7 +616,8 @@ pub(crate) fn combat_generatable_pool_in(
         }
         return leaked;
     }
-    static POOLS: [OnceLock<Vec<CardSpec>>; 5] = [
+    static POOLS: [OnceLock<Vec<CardSpec>>; 6] = [
+        OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
         OnceLock::new(),
@@ -613,6 +630,7 @@ pub(crate) fn combat_generatable_pool_in(
         CharacterId::Defect => &POOLS[2],
         CharacterId::Necrobinder => &POOLS[3],
         CharacterId::Regent => &POOLS[4],
+        CharacterId::Fool => &POOLS[5],
     };
     slot.get_or_init(|| build(character, version))
 }
@@ -749,6 +767,20 @@ fn build_combat_generatable_pool(
                     s.id,
                     CardId::RoyaltiesCard | CardId::HammerTime | CardId::Largesse
                 )
+            })
+            .collect(),
+        // The Fool (v0.113.0): `FoolCardPool` filtered by C# `FilterForCombat`
+        // (drop Basic / Ancient / Event and `CanBeGeneratedInCombat => false`);
+        // the MultiplayerOnly cards fall to the post-filter below.
+        CharacterId::Fool => crate::cards::fool_pool::FOOL_SPECS
+            .iter()
+            .map(|f| f())
+            .filter(|s| {
+                use crate::cards::types::CardRarity;
+                !matches!(
+                    s.rarity,
+                    CardRarity::Basic | CardRarity::Ancient | CardRarity::Event
+                ) && card_can_be_generated_in_combat(s.id)
             })
             .collect(),
     };
@@ -1167,6 +1199,9 @@ pub(crate) fn card_can_be_generated_in_combat(id: CardId) -> bool {
             | CardId::HandOfGreed
             | CardId::HiddenGem
             | CardId::MindRot
+            // v0.113.0 Fool: MythicForm and the Sadness status.
+            | CardId::MythicFormCard
+            | CardId::Sadness
             | CardId::NeowsFury
             | CardId::NotYet
             | CardId::RoyaltiesCard
@@ -1261,6 +1296,19 @@ pub(crate) fn distinct_cross_character_attack_ids(
         for f in slice {
             let s = f();
             if eligible(&s) {
+                pool.push(s.id);
+            }
+        }
+    }
+    // v0.113.0: `ModelDb.AllCharacters` gains The Fool LAST, and with every
+    // character unlocked its pool joins `CharacterCardPools`.
+    if !coop
+        && own != Some(CharacterId::Fool)
+        && state.game_version >= sts2_core::GameVersion::V0_113_0
+    {
+        for f in crate::cards::fool_pool::FOOL_SPECS {
+            let s = f();
+            if eligible(&s) && !crate::cards::spec_index::is_multiplayer_only(s.id) {
                 pool.push(s.id);
             }
         }

@@ -457,15 +457,22 @@ fn base_states() -> Vec<(String, CombatState)> {
     // GH #795: v0.111.0 copies, so the handlers gated on the game build
     // (Pendulum, PollinousCore, Regalite, ...) act in the battery too and
     // every handler's guard is checked in both builds.
-    let v0111: Vec<_> = out
+    // v0.113.0 copies likewise reach the Fool relics, which act only there.
+    let later: Vec<_> = out
         .iter()
-        .map(|(label, state)| {
-            let mut state = state.clone();
-            state.game_version = sts2_core::GameVersion::V0_111_0;
-            (format!("{label} v0.111.0"), state)
+        .flat_map(|(label, state)| {
+            [
+                (sts2_core::GameVersion::V0_111_0, "v0.111.0"),
+                (sts2_core::GameVersion::V0_113_0, "v0.113.0"),
+            ]
+            .map(|(version, name)| {
+                let mut state = state.clone();
+                state.game_version = version;
+                (format!("{label} {name}"), state)
+            })
         })
         .collect();
-    out.extend(v0111);
+    out.extend(later);
     out
 }
 

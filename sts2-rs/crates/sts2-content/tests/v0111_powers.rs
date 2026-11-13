@@ -1039,6 +1039,44 @@ fn one_for_all_adds_to_auto_played_card_v0111() {
     );
 }
 
+/// v0.113.0 `OneForAllPower.ModifyDamageAdditive` checks an auto-play's
+/// `Resources.EnergyValue` instead of skipping the energy test, so Havoc's
+/// auto-played 1-cost Strike no longer gets the bonus (Defect fuzz seed 623:
+/// Mayhem auto-played a 2-cost FlakCannon, C# 8 per hit, Rust 12).
+#[test]
+fn one_for_all_skips_auto_played_card_with_energy_value_v0113() {
+    let (mut state, enemy) = fresh(GameVersion::V0_113_0);
+    let p = player_uid(&state);
+    give(&mut state, p, PowerKind::OneForAll, 3);
+    let havoc = add_to_hand(&mut state, CardId::Havoc);
+    let strike = add_to_hand(&mut state, CardId::StrikeIronclad);
+    state.player.hand.retain(|u| *u != strike);
+    state.player.draw.insert(0, strike);
+    let idx = state
+        .player
+        .hand
+        .iter()
+        .position(|u| *u == havoc)
+        .expect("havoc in hand");
+    let before = hp(&state, enemy);
+    let _ = sts2_core::apply(
+        &mut state,
+        Action::PlayCard {
+            hand_index: u8::try_from(idx).expect("fits"),
+            target: None,
+        },
+    );
+    assert!(
+        state.player.exhaust.contains(&strike),
+        "Havoc auto-played the Strike"
+    );
+    assert_eq!(
+        before - hp(&state, enemy),
+        6,
+        "no bonus for a 1-cost auto-play"
+    );
+}
+
 // ── Temporary Dexterity / Focus subclasses (new) ──────────────────────────
 
 /// `FadePower : TemporaryDexterityPower`: the owner's turn end removes it and

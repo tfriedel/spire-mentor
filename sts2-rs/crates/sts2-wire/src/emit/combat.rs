@@ -70,6 +70,7 @@ const fn class_str_from_character(c: Option<CharacterId>) -> &'static str {
         Some(CharacterId::Defect) => "defect",
         Some(CharacterId::Necrobinder) => "necrobinder",
         Some(CharacterId::Regent) => "regent",
+        Some(CharacterId::Fool) => "fool",
     }
 }
 
@@ -770,6 +771,12 @@ pub fn combat_state_to_value(state: &CombatState) -> Result<Value, EmitError> {
     }
     if state.is_boss {
         set(&mut d, "is_boss", true);
+    }
+    if state.total_floor != 0 {
+        set(&mut d, "total_floor", i32::from(state.total_floor));
+    }
+    if let Some(f) = state.player.fool.as_deref() {
+        set(&mut d, "fool_state", crate::fool_state::encode(state, f));
     }
     // Wire schema uses `turn`, which mirrors `round` in this Rust port
     // (Python sim splits them; the wire field name predates the merge).
@@ -1726,8 +1733,11 @@ pub fn card_block_preview(state: &CombatState) -> Vec<Option<i32>> {
             .map_or(0, |c| c.base_block);
         if base > 0 {
             let staged = staged_for_play(state, *card_uid);
+            // A face preview has no `cardPlay`: Stretch answers it unspent.
+            let stretched = sts2_core::fool::stretch_preview_state(&staged, *card_uid);
             out.push(Some(sts2_core::card_effects::modify_player_block_move(
-                &staged, base,
+                stretched.as_ref().unwrap_or(&staged),
+                base,
             )));
         } else {
             out.push(None);

@@ -1740,7 +1740,7 @@ fn listener_lava_rock_rewards(
 
 /// `MawBank.GOLD` — gold granted per room enter until the latch fires.
 /// Python `MawBank.GOLD = 12` (`shop_event.py:2408`).
-const MAW_BANK_GOLD: i32 = 12;
+pub const MAW_BANK_GOLD: i32 = 12;
 
 /// `relic_counters[MawBank]` value written by
 /// [`listener_maw_bank_on_item_purchased`] once the player completes

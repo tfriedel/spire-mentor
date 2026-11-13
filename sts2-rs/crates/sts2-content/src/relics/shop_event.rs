@@ -2697,6 +2697,10 @@ fn listener_prismatic_gem(
         return EffectResult::NotImplemented;
     }
     let mut pools: Vec<CharacterId> = ALL_CHARACTERS.to_vec();
+    // v0.113.0: The Fool joins `ModelDb.AllCharacters`, last.
+    if rs.game_version >= sts2_core::GameVersion::V0_113_0 {
+        pools.push(CharacterId::Fool);
+    }
     own.retain(|c| !pools.contains(c));
     pools.extend(own);
     opts.character_ids = pools;

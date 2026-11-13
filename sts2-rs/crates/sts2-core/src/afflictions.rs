@@ -245,7 +245,11 @@ pub fn classify(kind: PowerKind) -> AfflictionClass {
         // v0.111.0 `HyperbeamFocusDownPower : TemporaryFocusPower` with
         // `IsPositive => false`, so `Type => Debuff` (decomp
         // HyperbeamFocusDownPower.cs:7, TemporaryFocusPower.cs:20-30).
-        | PowerKind::HyperbeamFocusDown => AfflictionClass::debuff_perm(),
+        | PowerKind::HyperbeamFocusDown
+        // v0.113.0 Fool: `DislikeYouPower` / `EncorePower` are `Type => Debuff`
+        // (removed by their own turn-end hooks, not by decay).
+        | PowerKind::DislikeYou
+        | PowerKind::Encore => AfflictionClass::debuff_perm(),
 
         // ---------- Core pipeline buffs (permanent / stat) ----------
         PowerKind::Strength

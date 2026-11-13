@@ -2742,6 +2742,7 @@ mod tests {
                 CharacterId::Defect => assert_eq!(expected_relic, RelicId::CrackedCore),
                 CharacterId::Necrobinder => assert_eq!(expected_relic, RelicId::BoundPhylactery),
                 CharacterId::Regent => assert_eq!(expected_relic, RelicId::DivineRight),
+                CharacterId::Fool => assert_eq!(expected_relic, RelicId::SongBow),
             }
         }
     }

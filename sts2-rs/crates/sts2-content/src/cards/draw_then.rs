@@ -35,6 +35,13 @@ pub fn run(state: &mut CombatState, tail: DrawThen) {
         DrawThen::Overclock => {
             let _ = spawn_burn(state, sts2_core::card_effects::PileKind::Discard);
         }
+        DrawThen::FoolTheSun(upgraded) => super::fool::tarot::the_sun_tail(state, upgraded),
+        DrawThen::FoolEncore => {
+            super::fool::helpers::apply_to_player(state, PowerKind::Encore, 1);
+        }
+        DrawThen::FoolSadness => {
+            super::fool::helpers::generate_into_hand(state, sts2_core::cards::CardId::Sadness, 1);
+        }
         DrawThen::Stoke(_)
         | DrawThen::StokePlus(_)
         | DrawThen::FiendFire(_)

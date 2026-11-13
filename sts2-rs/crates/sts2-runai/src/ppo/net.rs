@@ -478,6 +478,10 @@ fn champion_entry(character: CharacterId) -> (&'static str, &'static str) {
         CharacterId::Regent => ("ppo_fullrun_regent_deckmut_it150_v0111vocab.onnx", ""),
         CharacterId::Silent => ("ppo_fullrun_silent_cont_it300_v0111vocab.onnx", ""),
         // END GENERATED CHAMPIONS
+        // The Fool (v0.113.0) has no champion: the advisor answers its runs
+        // with "coming soon". The name resolves to no file, so
+        // `onnx_model_path_for` returns `None`.
+        CharacterId::Fool => ("no_fool_champion.onnx", ""),
     }
 }
 

@@ -1334,6 +1334,20 @@ mod tests {
                 }
             }
         }
+        // An option a pre-v0.113.0 event gains in v0.113.0 (Colorful
+        // Philosophers' Fool) has its row in the v0.113.0 file only.
+        let v0113: serde_json::Map<String, serde_json::Value> = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/game/v0.113.0/localization_eng/events.json"
+            ))
+            .expect("v0.113.0 events.json"),
+        )
+        .expect("events.json parses");
+        missing.retain(|k| {
+            !v0113.contains_key(&format!("{k}.title"))
+                && !v0113.contains_key(&format!("{k}.description"))
+        });
         missing.sort();
         missing.dedup();
         assert!(

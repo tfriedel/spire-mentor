@@ -972,6 +972,7 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
             base_block: None,
             keywords: Some(CardKeywords::NONE),
         }),
-        _ => None,
+        // v0.113.0 Fool cards: `crate::cards::fool::specs::upgrade_delta`.
+        _ => super::fool::specs::upgrade_delta(card_id),
     }
 }

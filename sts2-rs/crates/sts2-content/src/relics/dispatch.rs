@@ -58,6 +58,8 @@ pub fn install_default_registry() {
         crate::relics::event_reward::install_pool();
         // W9 (sts2-rs-4rwv4): Neow-pool Ancient relics not in the Python sim.
         crate::relics::neow_relics::install_pool();
+        // v0.113.0 Fool relics.
+        crate::relics::fool::install_pool();
         // Every relic hook channel is now fully populated and never mutated
         // again in production: publish each channel's immutable `&'static`
         // read view so dispatch is a cheap `OnceLock::get` instead of an

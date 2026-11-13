@@ -732,6 +732,9 @@ pub fn gain_block_player_with_props(state: &mut CombatState, base: i32, props: V
         card_source,
     };
     let final_block = hooks::modify_block(state, base, &ctx);
+    if state.player.fool.is_some() {
+        crate::fool::note_stretch_block(state, props, card_source);
+    }
     // C# `FastenPower.AfterModifyingBlockAmount` (`FastenPower.cs:39`) flashes
     // unconditionally — it carries no target/props of its own, so (mirroring
     // the established `AfterModifying*` precedent: `Effect::FlashPower`'s doc,
@@ -1278,10 +1281,29 @@ pub fn apply_signed_power_to_creature_allow_dead(
     }
 }
 
-/// A temporary-Strength debuff's Strength leg, run by
-/// [`apply_power_to_creature_inner`] with the post-fold amount — see
-/// [`apply_temporary_strength_debuff`].
+/// A temporary power's internally-applied leg (C# `ITemporaryPower`), run
+/// by [`apply_power_to_creature_inner`] with the post-fold amount: BEFORE a
+/// fresh instance lands (`BeforeApplied`, inside `PowerCmd.Apply` ahead of
+/// `ApplyInternal`) and AFTER a stack changes (`AfterPowerAmountChanged`).
+/// Temporary-Strength debuffs pass theirs in (see
+/// [`apply_temporary_strength_debuff`]); [`intrinsic_temporary_leg`] supplies
+/// the ones a kind always carries.
 type TemporaryStrengthLeg = fn(&mut CombatState, CreatureUid, i32);
+
+/// The leg `kind` carries on every apply surface: v0.113.0
+/// `ChoBarbsPower : TemporaryThornsPower` grants the same amount of Thorns.
+fn intrinsic_temporary_leg(kind: PowerKind) -> Option<TemporaryStrengthLeg> {
+    match kind {
+        PowerKind::ChoBarbs => Some(temporary_thorns_leg),
+        _ => None,
+    }
+}
+
+/// `TemporaryThornsPower.BeforeApplied` / `.AfterPowerAmountChanged`:
+/// `PowerCmd.Apply<ThornsPower>(owner, amount, ..., silent: true)`.
+fn temporary_thorns_leg(state: &mut CombatState, target_uid: CreatureUid, amount: i32) {
+    apply_power_to_creature(state, target_uid, PowerKind::Thorns, amount);
+}
 
 fn apply_power_to_creature_inner(
     state: &mut CombatState,
@@ -1295,6 +1317,7 @@ fn apply_power_to_creature_inner(
     if amount < 0 {
         return;
     }
+    let strength_leg = strength_leg.or_else(|| intrinsic_temporary_leg(kind));
     // C# `PowerCmd.Apply` no-ops once the combat `IsEnding`
     // (PowerCmd.cs:69-72 / :103-106 v0.107.1, :73 / :107 v0.111.0) while
     // `PowerCmd.Remove` is unguarded — a mid-move power swap on the killing
@@ -2024,6 +2047,10 @@ fn fire_after_power_applied(
     kind: PowerKind,
     delta: i32,
 ) {
+    // v0.113.0 `LullabyPower.AfterApplied`.
+    if kind == PowerKind::Lullaby && state.player.creature_uid == Some(target_uid) {
+        crate::fool::lullaby_after_applied(state);
+    }
     let target_ref = if state.player.creature_uid.map(|u| u.0) == Some(target_uid.0) {
         hooks::CreatureRef::Player
     } else {
@@ -2058,6 +2085,10 @@ fn fire_after_power_applied_with(
     delta: i32,
     applier: Option<CreatureUid>,
 ) {
+    // v0.113.0 `LullabyPower.AfterApplied`.
+    if kind == PowerKind::Lullaby && state.player.creature_uid == Some(target_uid) {
+        crate::fool::lullaby_after_applied(state);
+    }
     let target_ref = if state.player.creature_uid.map(|u| u.0) == Some(target_uid.0) {
         hooks::CreatureRef::Player
     } else {
@@ -2155,11 +2186,13 @@ fn apply_power_to_creature_with_applier_inner(
     // (loadout Necrobinder 1073/1078/1092/1114/1122/1035/1109).
     let allow_dead =
         allow_dead && corpses_can_receive_powers(state) && !removed_mid_damage(state, target_uid);
-    let Some(creature_idx) = state
-        .creatures
-        .iter()
-        .position(|c| c.id == target_uid.0 && (allow_dead || c.current_hp > 0))
-    else {
+    let creature_at = |state: &CombatState| {
+        state
+            .creatures
+            .iter()
+            .position(|c| c.id == target_uid.0 && (allow_dead || c.current_hp > 0))
+    };
+    let Some(mut creature_idx) = creature_at(state) else {
         return;
     };
 
@@ -2188,6 +2221,18 @@ fn apply_power_to_creature_with_applier_inner(
     let amount = crate::coop::scale_enemy_power(state, target_uid, kind, amount);
     if amount <= 0 {
         return;
+    }
+    // A temporary power's leg: before a fresh instance lands, after a stack
+    // (see `apply_power_to_creature_inner`).
+    let leg = intrinsic_temporary_leg(kind);
+    if let Some(leg) = leg {
+        if existing_power_uid_unioned(state, creature_idx, target_uid, kind).is_none() {
+            leg(state, target_uid, amount);
+            match creature_at(state) {
+                Some(i) => creature_idx = i,
+                None => return,
+            }
+        }
     }
 
     // Event log (C# `PowerReceivedEntry`) — recorded exactly where C# records
@@ -2268,6 +2313,9 @@ fn apply_power_to_creature_with_applier_inner(
             for c in &mut state.creatures {
                 c.powers.retain(|u| u.0 != pid);
             }
+        }
+        if let Some(leg) = leg {
+            leg(state, target_uid, amount);
         }
         return;
     }
@@ -2722,6 +2770,58 @@ pub fn discard_and_draw_with_hooks(
     draw_count: i32,
 ) -> i32 {
     discard_and_draw_then(state, uids, draw_count, None)
+}
+
+/// `CardCmd.Discard` of draw-pile cards (v0.113.0 KiChant): each card still
+/// in the draw pile moves to the discard pile and fires
+/// `Hook.AfterCardDiscarded`. Only a HAND card is collected for the Sly
+/// auto-play (`CardCmd.DiscardAndDraw`, CardCmd.cs:186-196), so none plays.
+/// Nothing happens once the combat is ending.
+pub fn discard_draw_cards_with_hooks(state: &mut CombatState, uids: &[CardUid]) {
+    if state.is_over || crate::combat_loop::combat_is_ending(state) {
+        return;
+    }
+    for &uid in uids {
+        let Some(pos) = state.player.draw.iter().position(|&u| u == uid) else {
+            continue;
+        };
+        state.player.draw.remove(pos);
+        crate::cards::unpin(&mut state.player, uid);
+        state.player.discard.push(uid);
+        let idx = uid.0.get() as usize - 1;
+        let (card_id, card_tags, card_type) = state.cards.get(idx).map_or_else(
+            || (None, crate::cards::CardTags::NONE, None),
+            |c| (Some(c.card_id), c.tags, Some(c.card_type)),
+        );
+        let hook_ctx = crate::hooks::CardCtx {
+            card_id,
+            card_uid: Some(uid),
+            card_tags,
+            card_type,
+        };
+        crate::hooks::dispatch_after_card_discarded(state, &hook_ctx);
+    }
+}
+
+/// v0.113.0 TheHermit (`TheHermit.cs`): each of `uids` still in hand goes
+/// through `CardCmd.Exhaust` when it is a Curse, else `CardCmd.Discard`
+/// (Sly auto-play included); then `CardPileCmd.Draw(draw)`. The draw waits
+/// behind every Sly auto-play, as the discard choice's follow-up does.
+pub fn discard_or_exhaust_curses_then_draw(state: &mut CombatState, uids: &[CardUid], draw: i32) {
+    let mut discards: smallvec::SmallVec<[CardUid; 4]> = smallvec::SmallVec::new();
+    for &uid in uids {
+        let is_curse = state
+            .cards
+            .get(uid.0.get() as usize - 1)
+            .is_some_and(|c| c.card_type == crate::cards::CardType::Curse);
+        if is_curse {
+            let _ = exhaust_card_uid(state, uid);
+        } else {
+            discards.push(uid);
+        }
+    }
+    let then = crate::LoopThen::Effect(crate::PostChoiceEffect::DrawCards(draw));
+    let _ = discard_hand_cards_then(state, &discards, Some(then));
 }
 
 /// [`discard_hand_cards_with_hooks`] for a card whose `OnPlay` goes on after
@@ -3317,7 +3417,29 @@ pub(crate) fn fire_card_generated_for_combat_powers(
             crate::PowerKind::TrashToTreasure => {
                 fire_trash_to_treasure_orbs_on_status_generation(state, uid, added_by_player);
             }
+            // `AllIsWellPower.AfterCardGeneratedForCombat`: a Sadness the
+            // owner generated → Amount block.
+            crate::PowerKind::AllIsWell
+                if added_by_player
+                    && crate::fool::card_id_of(state, uid) == Some(CardId::Sadness) =>
+            {
+                let amount = state.player_power_amount(crate::PowerKind::AllIsWell);
+                if amount > 0 {
+                    gain_block_player_unpowered(state, amount);
+                }
+            }
             _ => {}
+        }
+    }
+    // Relics follow the powers (`IterateHookListeners`). v0.113.0
+    // `Fertilizer.AfterCardGeneratedForCombat`: a Sadness the owner generated
+    // → +1 Strength.
+    if added_by_player
+        && crate::fool::card_id_of(state, uid) == Some(CardId::Sadness)
+        && crate::relic_effects::helpers::player_owns_relic(state, crate::RelicKind::Fertilizer)
+    {
+        if let Some(p) = state.player.creature_uid {
+            apply_power_to_creature_cardless(state, p, crate::PowerKind::Strength, 1);
         }
     }
     fire_rocketpunch_free_on_status_generation(state, uid, added_by_player);
@@ -3326,19 +3448,21 @@ pub(crate) fn fire_card_generated_for_combat_powers(
 }
 
 /// The player-power `AfterCardGeneratedForCombat` listeners (Smokestack,
-/// Arsenal, PillarOfCreation, TrashToTreasure) the player holds, each once,
+/// Arsenal, PillarOfCreation, TrashToTreasure, AllIsWell) the player holds, each once,
 /// in the order the powers sit on the player.
 fn generation_power_listener_order(
     state: &CombatState,
-) -> smallvec::SmallVec<[crate::PowerKind; 4]> {
+) -> smallvec::SmallVec<[crate::PowerKind; 5]> {
     use crate::PowerKind;
-    const KINDS: [PowerKind; 4] = [
+    const KINDS: [PowerKind; 5] = [
         PowerKind::Smokestack,
         PowerKind::Arsenal,
         PowerKind::PillarOfCreation,
         PowerKind::TrashToTreasure,
+        // v0.113.0 Fool: block per Sadness the owner generates.
+        PowerKind::AllIsWell,
     ];
-    let mut out: smallvec::SmallVec<[PowerKind; 4]> = smallvec::SmallVec::new();
+    let mut out: smallvec::SmallVec<[PowerKind; 5]> = smallvec::SmallVec::new();
     // Perf: no live listener kind anywhere ⇒ nothing to order.
     let present = state.powers.present_kinds();
     if !KINDS.iter().any(|k| present.contains(*k)) {
@@ -5439,6 +5563,8 @@ pub fn card_is_any_ally(id: crate::cards::CardId) -> bool {
             | CardId::ImitationLearningCard
             | CardId::SoulboundCard
             | CardId::Tutor
+            // v0.113.0 Fool MP card (`Enrapture.cs`): Vigor + Stretch to an ally.
+            | CardId::Enrapture
     )
 }
 

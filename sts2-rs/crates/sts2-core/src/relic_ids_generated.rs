@@ -646,6 +646,24 @@ pub enum RelicId {
     Wuppy,
     /// v0.113.0 event relic (`Byrdine.cs`) — Byrdpip evolution (AddsPet).
     Byrdine,
+    /// v0.113.0 Fool starter (`SongBow.cs`): 6 Aim at combat start.
+    SongBow,
+    /// v0.113.0 upgraded Fool starter via TouchOfOrobas (`Storyteller.cs`): 12 Aim at combat start, +3 Aim each turn end. EventRelicPool.
+    Storyteller,
+    /// v0.113.0 Fool shop (`BizarreLamp.cs`): turn 1, add Joy and Sadness to hand.
+    BizarreLamp,
+    /// v0.113.0 Fool rare (`ConductorsBaton.cs`): after 3 melodies in a turn gain ConductorsBatonPower.
+    ConductorsBaton,
+    /// v0.113.0 Fool common (`ExerciseMat.cs`): turn 1, gain 6 Stretch.
+    ExerciseMat,
+    /// v0.113.0 Fool rare (`Fertilizer.cs`): +1 Strength whenever you generate a Sadness.
+    Fertilizer,
+    /// v0.113.0 Fool uncommon (`Ocarina.cs`): turn 1, add a random melody card to hand.
+    Ocarina,
+    /// v0.113.0 Fool rare (`Twine.cs`): gain 4 block when your arrow is dislodged.
+    Twine,
+    /// v0.113.0 Fool uncommon (`WhittlingKnife.cs`): gain 5 Aim on shuffle.
+    WhittlingKnife,
 }
 
 impl RelicId {
@@ -960,6 +978,15 @@ impl RelicId {
             Self::BathRobes => "BATH_ROBES",
             Self::Wuppy => "WUPPY",
             Self::Byrdine => "BYRDINE",
+            Self::SongBow => "SONG_BOW",
+            Self::Storyteller => "STORYTELLER",
+            Self::BizarreLamp => "BIZARRE_LAMP",
+            Self::ConductorsBaton => "CONDUCTORS_BATON",
+            Self::ExerciseMat => "EXERCISE_MAT",
+            Self::Fertilizer => "FERTILIZER",
+            Self::Ocarina => "OCARINA",
+            Self::Twine => "TWINE",
+            Self::WhittlingKnife => "WHITTLING_KNIFE",
         }
     }
 
@@ -1272,7 +1299,7 @@ impl RelicId {
     pub const V0111_ONLY: [RelicId; 2] = [Self::DowsingRod, Self::NeowsSacrifice];
 
     /// Relics that exist only from game build v0.113.0 on.
-    pub const V0113_ONLY: [RelicId; 8] = [
+    pub const V0113_ONLY: [RelicId; 17] = [
         Self::ObsidianVice,
         Self::Thumbscrew,
         Self::TormentousCollar,
@@ -1281,6 +1308,29 @@ impl RelicId {
         Self::BathRobes,
         Self::Wuppy,
         Self::Byrdine,
+        Self::SongBow,
+        Self::Storyteller,
+        Self::BizarreLamp,
+        Self::ConductorsBaton,
+        Self::ExerciseMat,
+        Self::Fertilizer,
+        Self::Ocarina,
+        Self::Twine,
+        Self::WhittlingKnife,
+    ];
+
+    /// The Fool's character relic pool, in `FoolRelicPool.GenerateAllRelics`
+    /// order (decomp `Models.RelicPools/FoolRelicPool.cs`). Storyteller is an
+    /// event relic (TouchOfOrobas' SongBow upgrade) and is not listed.
+    pub const FOOL_POOL: [RelicId; 8] = [
+        Self::BizarreLamp,
+        Self::ConductorsBaton,
+        Self::ExerciseMat,
+        Self::Fertilizer,
+        Self::Ocarina,
+        Self::SongBow,
+        Self::Twine,
+        Self::WhittlingKnife,
     ];
 
     /// The build a relic first exists in.
@@ -1295,7 +1345,16 @@ impl RelicId {
             | Self::BathTowel
             | Self::BathRobes
             | Self::Wuppy
-            | Self::Byrdine => crate::GameVersion::V0_113_0,
+            | Self::Byrdine
+            | Self::SongBow
+            | Self::Storyteller
+            | Self::BizarreLamp
+            | Self::ConductorsBaton
+            | Self::ExerciseMat
+            | Self::Fertilizer
+            | Self::Ocarina
+            | Self::Twine
+            | Self::WhittlingKnife => crate::GameVersion::V0_113_0,
             _ => crate::GameVersion::V0_107_1,
         }
     }

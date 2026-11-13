@@ -4600,9 +4600,12 @@ impl RunState {
     /// other character C# falls back to the player's own.
     #[must_use]
     pub fn sea_glass_character(&self) -> crate::potions::CharacterId {
-        use crate::potions::CharacterId::{Defect, Ironclad, Necrobinder, Regent, Silent};
+        use crate::potions::CharacterId::{Defect, Fool, Ironclad, Necrobinder, Regent, Silent};
+        // v0.113.0: The Fool joins `UnlockState.Characters`, last.
+        let fool = (self.game_version >= crate::GameVersion::V0_113_0).then_some(Fool);
         let others: Vec<_> = [Ironclad, Silent, Regent, Necrobinder, Defect]
             .into_iter()
+            .chain(fool)
             .filter(|c| *c != self.character_id)
             .collect();
         if others.is_empty() {

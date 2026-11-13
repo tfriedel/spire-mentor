@@ -254,6 +254,35 @@ pub const fn spec_for(kind: PotionKind) -> PotionSpec {
         // `TargetType => AnyPlayer` (decomp Ambergris.cs:20-24). Event
         // rarity keeps it out of every random potion pool.
         PotionKind::Ambergris => spec(kind, "AMBERGRIS", E, AT, AP, None, true),
+        // v0.113.0 Fool (`PrecisionPotion.cs` / `BottledSong.cs` /
+        // `CrystallineEuphoria.cs`): CombatOnly, AnyPlayer.
+        PotionKind::PrecisionPotion => spec(
+            kind,
+            "PRECISION_POTION",
+            C,
+            CO,
+            AP,
+            Some(CharacterId::Fool),
+            false,
+        ),
+        PotionKind::BottledSong => spec(
+            kind,
+            "BOTTLED_SONG",
+            U,
+            CO,
+            AP,
+            Some(CharacterId::Fool),
+            false,
+        ),
+        PotionKind::CrystallineEuphoria => spec(
+            kind,
+            "CRYSTALLINE_EUPHORIA",
+            R,
+            CO,
+            AP,
+            Some(CharacterId::Fool),
+            false,
+        ),
         // `PotionKind` is `#[non_exhaustive]` to allow downstream pin
         // bumps to add variants without breaking SemVer. Every variant
         // shipped at pin `01c094d` is handled above; a future variant
@@ -353,6 +382,8 @@ const fn character_pool_order(character: CharacterId) -> &'static [PotionKind] {
             PotionKind::CosmicConcoction,
             PotionKind::KingsCourage,
         ],
+        // The Fool (v0.113.0): `Fool4Epoch.Potions`.
+        CharacterId::Fool => &PotionKind::V0113_ONLY,
     }
 }
 

@@ -91,7 +91,7 @@ fn wlp_belief_state(seed: i32) -> (CombatState, CardUid) {
 #[test]
 #[serial_test::serial(global_registry)]
 fn a_turn_end_choice_after_the_rider_does_not_depend_on_the_hidden_top() {
-    let mut at_choice: [Option<CombatState>; 2] = [None, None];
+    let mut at_choice: Vec<Option<CombatState>> = vec![None, None];
     for seed in 0..64i32 {
         let (mut state, iai) = wlp_belief_state(seed);
         assert_eq!(
