@@ -215,7 +215,7 @@ class UnsupportedCharacterError(ValueError):
 
     def __init__(self, raw: str) -> None:
         self.raw = raw
-        name = _UNSUPPORTED_CHARACTER_NAMES.get(raw, raw.replace("_", " ").title())
+        name = _UNSUPPORTED_CHARACTER_NAMES[raw]
         super().__init__(
             f"{name} support is coming soon to Spire Mentor. Until then there is no advice "
             f"for runs with this character (supported: {', '.join(CHARACTER_ID_TO_DISPLAY.values())})."
@@ -227,23 +227,22 @@ _UNSUPPORTED_CHARACTER_NAMES = {"FOOL": "The Fool"}
 
 
 def check_supported_characters(msg: dict[str, Any]) -> None:
-    """Refuse a board whose own character or any ally's is unknown.
+    """Refuse a board whose own character or any ally's is one the engine
+    knows it cannot simulate (`_UNSUPPORTED_CHARACTER_NAMES`).
 
-    Absent / blank ids pass: no run yet, or a producer that does not send the
-    field (the adapter infers the character from card ids then).
+    Only that named set is refused. Any other id outside
+    ``CHARACTER_ID_TO_DISPLAY`` (a modded or renamed character) passes, as
+    do absent / blank ids: the adapter then infers the character from card
+    ids, as it did before the gate existed.
 
     Raises:
-        UnsupportedCharacterError: the first unknown character id.
+        UnsupportedCharacterError: the first known-unsupported character id.
     """
     run_state = msg.get("run_state")
     ids = [run_state.get("character") if isinstance(run_state, dict) else None]
     ids += [a.get("character") for a in (msg.get("allies") or []) if isinstance(a, dict)]
     for cid in ids:
-        if (
-            isinstance(cid, str)
-            and cid.strip()
-            and cid.strip().upper() not in CHARACTER_ID_TO_DISPLAY
-        ):
+        if isinstance(cid, str) and cid.strip().upper() in _UNSUPPORTED_CHARACTER_NAMES:
             raise UnsupportedCharacterError(cid.strip().upper())
 
 

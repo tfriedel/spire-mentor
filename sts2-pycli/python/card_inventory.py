@@ -129,13 +129,21 @@ def v0111_only_cards() -> frozenset[str]:
     return frozenset(names[v] for v in re.findall(r"Self::(\w+)", m.group(1)))
 
 
+def has_v0111_cards(game_version: str) -> bool:
+    """Whether `game_version` (``"v0.111.0"``-style) has v0.111.0's card set,
+    i.e. is v0.111.0 or later."""
+    parts = tuple(int(x) for x in game_version.lstrip("v").split("."))
+    return parts >= (0, 111, 0)
+
+
 def sweepable_cards(game_version: str = "v0.107.1") -> set[str]:
     """Card ids the coverage sweep's card axis is expected to cover.
 
     `game_version` picks the build: v0.107.1 (the default) leaves out the
-    v0.111.0-only cards, v0.111.0 leaves out the cards it removed.
+    v0.111.0-only cards; v0.111.0 and later leave out the cards v0.111.0
+    removed (Rust gates the same split on ``>= V0_111_0``).
     """
-    if game_version == "v0.111.0":
+    if has_v0111_cards(game_version):
         excluded = V0111_REMOVED_CARDS
     else:
         excluded = v0111_only_cards()

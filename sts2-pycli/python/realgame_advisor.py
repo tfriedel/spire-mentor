@@ -2025,11 +2025,12 @@ def mark_beta_build(advice: dict[str, Any], game_version: str | None) -> dict[st
 
     The engine runs the beta on the previous build's rules wherever it has not
     ported the beta's changes yet, so the ranking can be off; the player
-    should know. Refusals carry no ranking and stay as they are.
+    should know. Refusals and advisor errors (``hand_back``) carry no ranking
+    and stay as they are.
     """
     if game_version not in BETA_GAME_VERSIONS:
         return advice
-    if "unsupported_game_version" in advice or "unsupported_character" in advice:
+    if any(k in advice for k in ("unsupported_game_version", "unsupported_character", "hand_back")):
         return advice
     out = dict(advice)
     label = f"Beta {game_version}: approximate advice"

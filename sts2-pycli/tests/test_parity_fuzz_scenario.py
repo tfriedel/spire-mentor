@@ -97,3 +97,17 @@ def test_generate_v2_full_pools() -> None:
     assert upgraded_seen, "25% upgrade rate must show in 300 seeds"
     assert len(encounters) > 20, "fuzz must reach beyond act1"
     assert len(relics_seen) > 30, "fuzz must actually vary relics now"
+
+
+def test_builds_after_v0111_keep_its_card_set():
+    # v0.113.0 has no card waves yet: it must get v0.111.0's lists, not
+    # v0.107.1's (Rust gates the split on `>= V0_111_0`).
+    from card_inventory import has_v0111_cards, sweepable_cards
+
+    assert not has_v0111_cards("v0.107.1")
+    assert has_v0111_cards("v0.111.0") and has_v0111_cards("v0.113.0")
+    assert class_cards_for_build("Ironclad", "v0.113.0") == class_cards_for_build(
+        "Ironclad", "v0.111.0"
+    )
+    assert colorless_cards_for_build("v0.113.0") == colorless_cards_for_build("v0.111.0")
+    assert sweepable_cards("v0.113.0") == sweepable_cards("v0.111.0")

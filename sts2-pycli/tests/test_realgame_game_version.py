@@ -449,6 +449,15 @@ class TestUnsupportedCharacter:
         advice = self._refused(msg, fake_search)
         assert advice["unsupported_character"] == "FOOL"
 
+    def test_an_unmapped_character_falls_back_to_card_inference(self) -> None:
+        # A modded / renamed id is not a known-unsupported one: the gate lets
+        # it through so the adapter infers the character from cards, as it
+        # did before the gate existed. Only the named set is refused.
+        msg = _request(game_version="v0.111.0")
+        msg["allies"] = [{"hp": 50, "max_hp": 60, "character": "SOME_MOD_HERO", "hand": []}]
+        msg["run_state"] = {**(msg.get("run_state") or {}), "character": "OTHER_MOD"}
+        ra.check_supported_characters(msg)  # must not raise
+
     def test_a_known_character_still_searches(self, fake_search: list[dict[str, Any]]) -> None:
         client, args, log, wlog = _handler_deps()
         ra._handle_advice_request(
@@ -476,6 +485,10 @@ class TestBetaBuildLabel:
         advice = {"note": "search"}
         for build in ("v0.107.1", "v0.111.0"):
             assert ra.mark_beta_build(advice, build) is advice
+
+    def test_advisor_errors_are_not_labelled(self) -> None:
+        err = {"note": "advisor error: boom", "hand_back": "the advisor hit an error"}
+        assert ra.mark_beta_build(err, "v0.113.0") is err
 
     def test_refusals_are_not_labelled(self) -> None:
         refusal = {"note": "The Fool support is coming soon", "unsupported_character": "FOOL"}

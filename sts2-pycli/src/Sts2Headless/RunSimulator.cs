@@ -9498,9 +9498,6 @@ internal static class GameApi
 #endif
     }
 
-    /// <summary>The awaitable proceed-from-rewards. v0.113.0 made
-    /// <c>ProceedFromTerminalRewardsScreen</c> fire-and-forget and added the
-    /// <c>…Async</c> twin (<c>Runs/RunManager.cs:1541-1549</c>).</summary>
     /// <summary>Buy a merchant entry the way the shop UI does. v0.113.0
     /// routes purchases through <c>MerchantSynchronizer.PurchaseLocalEntry</c>
     /// (<c>Nodes.Screens.Shops/NMerchantSlot.cs:402</c>), which takes the
@@ -9511,6 +9508,14 @@ internal static class GameApi
 #if GAME_V0113
         return RunManager.Instance.MerchantSynchronizer.PurchaseLocalEntry(entry);
 #else
+        // v0.111.0 and older: card removal declares its OWN 3-arg wrapper
+        // (MerchantCardRemovalEntry.cs:35) that skips the base wrapper's
+        // restock/Courier/ClearAfterPurchase branch and, on v0.111.0, checks
+        // RunManager.IsInProgress. Through a MerchantEntry-typed reference C#
+        // binds the base one, so dispatch on the runtime type the way the
+        // shop UI's statically-typed call does.
+        if (entry is MerchantCardRemovalEntry removal)
+            return removal.OnTryPurchaseWrapper(room.GetLocalInventory());
         return entry.OnTryPurchaseWrapper(room.GetLocalInventory());
 #endif
     }
@@ -9547,18 +9552,51 @@ internal static class GameApi
 #endif
     }
 
-    /// <summary>Back a player out of "ready to end turn". v0.113.0 renamed it
-    /// <c>TryUndoReadyToEndTurn</c> and made it a no-op when the player cannot
-    /// un-end the turn (Void Form, Pael's Eye, dead; <c>Combat/CombatManager.cs:1000</c>).</summary>
+    /// <summary>Back a player out of "ready to end turn", unconditionally, as
+    /// v0.111.0's <c>UndoReadyToEndTurn</c> does. The stuck-EndTurn recovery
+    /// re-issues <c>PlayerCmd.EndTurn</c> right after this, so the ready state
+    /// MUST be gone. v0.113.0 renamed it <c>TryUndoReadyToEndTurn</c> and made
+    /// it a no-op when the player cannot un-end the turn (Void Form, Pael's Eye;
+    /// <c>Combat/CombatManager.cs:1000</c>), so there the removal is done by
+    /// hand. <c>PlayerUnendedTurn</c> is not raised on that path: only UI nodes
+    /// listen to it, and the oracle has none.</summary>
     internal static void UndoReadyToEndTurn(Player player)
     {
 #if GAME_V0113
-        CombatManager.Instance.TryUndoReadyToEndTurn(player);
+        var cm = CombatManager.Instance;
+        if (cm.CanUnEndTurn(player))
+        {
+            cm.TryUndoReadyToEndTurn(player);
+            return;
+        }
+        object? turnState = TurnStateField.GetValue(cm);
+        if (turnState != null)
+        {
+            var t = turnState.GetType();
+            var readyLock = (System.Threading.Lock)AccessTools.Property(t, "ReadyLock").GetValue(turnState)!;
+            var ready = (HashSet<Player>)AccessTools.Property(t, "PlayersReadyToEndTurn").GetValue(turnState)!;
+            using (readyLock.EnterScope())
+                ready.Remove(player);
+        }
+        if (LocalContext.IsMe(player))
+            PlayerActionsDisabledSetter.Invoke(cm, new object[] { false });
 #else
         CombatManager.Instance.UndoReadyToEndTurn(player);
 #endif
     }
 
+#if GAME_V0113
+    private static readonly System.Reflection.FieldInfo TurnStateField =
+        AccessTools.Field(typeof(CombatManager), "_turnState")
+        ?? throw new MissingFieldException(nameof(CombatManager), "_turnState");
+    private static readonly System.Reflection.MethodInfo PlayerActionsDisabledSetter =
+        AccessTools.PropertySetter(typeof(CombatManager), nameof(CombatManager.PlayerActionsDisabled))
+        ?? throw new MissingMethodException(nameof(CombatManager), "set_PlayerActionsDisabled");
+#endif
+
+    /// <summary>The awaitable proceed-from-rewards. v0.113.0 made
+    /// <c>ProceedFromTerminalRewardsScreen</c> fire-and-forget and added the
+    /// <c>…Async</c> twin (<c>Runs/RunManager.cs:1541-1549</c>).</summary>
     internal static Task ProceedFromTerminalRewardsScreen()
     {
 #if GAME_V0113

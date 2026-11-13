@@ -23,7 +23,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Collections.Concurrent;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading.Tasks;
@@ -487,17 +486,23 @@ internal static class SimLoopbackHosting
 /// </summary>
 public static class SimNetHosts
 {
-    private static readonly ConcurrentDictionary<Type, Type> Concrete = new();
+    // Guarded by Gate: DefineType throws on a second type of the same name in
+    // one module, so every build of a host type goes through the cache.
+    private static readonly object Gate = new();
+    private static readonly Dictionary<Type, Type> Concrete = new();
     private static ModuleBuilder? _module;
+
+    private static readonly Lazy<MethodInfo?> NetHostDisconnect =
+        new(() => DisconnectMethod(typeof(NetHost)));
 
     /// <summary><c>new T(args)</c> for one of the abstract hosts.</summary>
     internal static T Create<T>(params object[] args) where T : NetHost =>
-        (T)Activator.CreateInstance(Concrete.GetOrAdd(typeof(T), Build), args)!;
+        (T)Activator.CreateInstance(Build(typeof(T)), args)!;
 
     /// <summary><c>host.DisconnectClient(peer, why, now)</c> on any build.</summary>
     internal static void DisconnectClient(NetHost host, ulong peer, NetError why, bool now)
     {
-        MethodInfo m = DisconnectMethod(typeof(NetHost))
+        MethodInfo m = NetHostDisconnect.Value
             ?? throw new MissingMethodException(nameof(NetHost), nameof(NetHost.DisconnectClient));
         ParameterInfo[] p = m.GetParameters();
         var args = new object?[p.Length];
@@ -530,7 +535,22 @@ public static class SimNetHosts
                     && p.Skip(3).All(x => x.IsOptional);
             });
 
+    /// <summary>The concrete subclass of <paramref name="abstractHost"/>,
+    /// emitted once and cached (the wire smoke test calls this too).</summary>
     private static Type Build(Type abstractHost)
+    {
+        lock (Gate)
+        {
+            if (!Concrete.TryGetValue(abstractHost, out Type? concrete))
+            {
+                concrete = Emit(abstractHost);
+                Concrete[abstractHost] = concrete;
+            }
+            return concrete;
+        }
+    }
+
+    private static Type Emit(Type abstractHost)
     {
         _module ??= AssemblyBuilder
             .DefineDynamicAssembly(new AssemblyName("SpireMentor.NetHosts"), AssemblyBuilderAccess.Run)

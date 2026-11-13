@@ -23,6 +23,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
+from card_inventory import has_v0111_cards
+
 # Canonical Ironclad card ids. Cross-checked against the Rust generated
 # specs in sts2-content/src/cards/ironclad_specs_generated.rs. STRIKE
 # resolves as STRIKE_IRONCLAD (T1 probe confirmed bare "STRIKE" fails).
@@ -1349,7 +1351,7 @@ def sweep_game_version() -> str:
 def _for_build(cards: list[str], added: list[str], game_version: str | None) -> list[str]:
     """`cards` as game build `game_version` has them (see the deltas above)."""
     version = game_version or sweep_game_version()
-    if version != "v0.111.0":
+    if not has_v0111_cards(version):
         return cards
     return [c for c in cards if c not in _V0111_REMOVED_CARDS] + added
 

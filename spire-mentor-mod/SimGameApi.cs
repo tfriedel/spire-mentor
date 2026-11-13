@@ -233,12 +233,20 @@ internal static class SimGameApi
         if (PurchaseWrapperMethod != null)
             return (Task<bool>)Invoke(PurchaseWrapperMethod, entry, inventory, false)!;
         object runManager = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
-        object synchronizer = AccessTools.Property(runManager.GetType(), "MerchantSynchronizer")?.GetValue(runManager)
+        // Looked up on first use, not in the static initializer: both exist
+        // only on v0.113.0+, and the binding check (RefCheck) holds the
+        // initializer to every build.
+        MerchantSynchronizerProperty ??= AccessTools.Property(runManager.GetType(), "MerchantSynchronizer")
             ?? throw Missing("RunManager.MerchantSynchronizer");
-        MethodInfo purchase = AccessTools.Method(synchronizer.GetType(), "PurchaseLocalEntry")
+        object synchronizer = MerchantSynchronizerProperty.GetValue(runManager)
+            ?? throw Missing("RunManager.MerchantSynchronizer");
+        PurchaseLocalEntryMethod ??= AccessTools.Method(synchronizer.GetType(), "PurchaseLocalEntry")
             ?? throw Missing("MerchantSynchronizer.PurchaseLocalEntry");
-        return (Task<bool>)Invoke(purchase, synchronizer, entry)!;
+        return (Task<bool>)Invoke(PurchaseLocalEntryMethod, synchronizer, entry)!;
     }
+
+    private static PropertyInfo? MerchantSynchronizerProperty;
+    private static MethodInfo? PurchaseLocalEntryMethod;
 
     // ── Hotkeys ─────────────────────────────────────────────────────────
 
@@ -270,23 +278,36 @@ internal static class SimGameApi
 
     /// <summary>
     /// A fresh watchdog with the game's default fuse. v0.113.0's constructor
-    /// takes the log sinks (Watchdog.cs:62); they go to the mod log.
+    /// takes the info and error log sinks (Watchdog.cs:62); they get
+    /// <c>AutoSlayLog.Info</c> / <c>AutoSlayLog.Error</c>, as the game's own
+    /// AutoSlayer passes (AutoSlayer.cs:187) and as older builds' Watchdog
+    /// logs internally. Any constructor shape other than <c>()</c> or
+    /// <c>(Action&lt;string&gt;, Action&lt;string&gt;, optional...)</c> is a
+    /// build this code does not know, and fails here by name.
     /// </summary>
     public static Watchdog NewWatchdog()
     {
         ConstructorInfo ctor = typeof(Watchdog).GetConstructors()
-            .Where(c => c.GetParameters().Skip(2).All(x => x.IsOptional))
+            .Where(c =>
+            {
+                ParameterInfo[] p = c.GetParameters();
+                return p.Length == 0
+                    || (p.Length >= 2
+                        && p[0].ParameterType == typeof(Action<string>)
+                        && p[1].ParameterType == typeof(Action<string>)
+                        && p.Skip(2).All(x => x.IsOptional));
+            })
             .OrderBy(c => c.GetParameters().Length)
             .FirstOrDefault()
-            ?? throw Missing("Watchdog()");
+            ?? throw Missing("Watchdog() / Watchdog(Action<string>, Action<string>, ...)");
         ParameterInfo[] p = ctor.GetParameters();
         var args = new object?[p.Length];
-        for (int i = 0; i < p.Length; i++)
+        if (p.Length >= 2)
         {
-            args[i] = p[i].ParameterType == typeof(Action<string>)
-                ? new Action<string>(msg => Logger.Log(msg))
-                : p[i].DefaultValue;
+            args[0] = new Action<string>(AutoSlayLog.Info);
+            args[1] = new Action<string>(AutoSlayLog.Error);
         }
+        for (int i = 2; i < p.Length; i++) args[i] = p[i].DefaultValue;
         return (Watchdog)ctor.Invoke(args);
     }
 
