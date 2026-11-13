@@ -121,6 +121,18 @@ public sealed class SimConfig
     public bool ResumeRun { get; init; } = false;
 
     /// <summary>
+    /// Which singleplayer mode an auto-started run uses: "standard" (default)
+    /// or "blitz" (v0.113.0+: the Blitz screen of the singleplayer submenu,
+    /// the same route as the game's own `BlitzRunLauncher`). Exists so the
+    /// live test lane can play Blitz unattended; on a build without Blitz the
+    /// start fails loudly instead of quietly playing a standard run.
+    /// </summary>
+    public string GameMode { get; init; } = "standard";
+
+    /// <summary>True when <see cref="GameMode"/> asks for a Blitz run.</summary>
+    public bool IsBlitz => string.Equals(GameMode?.Trim(), "blitz", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The game's FastModeType applied at run start: "instant" (skip
     /// animations entirely — same as the dev-console `instant` command,
     /// InstantConsoleCmd.cs; best for experiments), "fast", or "normal".
@@ -343,6 +355,7 @@ public sealed class SimConfig
                 AdvisorAutoplay = ReadBool(root, "advisor_autoplay", defaults.AdvisorAutoplay),
                 PauseOn = AutoplayPause.FromJson(root, "pause_on", defaults.PauseOn),
                 ResumeRun = ReadBool(root, "resume_run", defaults.ResumeRun),
+                GameMode = ReadString(root, "game_mode", defaults.GameMode),
                 FastMode = ReadString(root, "fast_mode", defaults.FastMode),
                 TimeScale = ReadDouble(root, "time_scale", defaults.TimeScale),
                 ClientRunConfig = ReadBool(root, "client_run_config", defaults.ClientRunConfig),

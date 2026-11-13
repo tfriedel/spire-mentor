@@ -930,6 +930,42 @@ def _unranked(state: dict[str, Any], why: str, trigger: str | None = None) -> di
     }
 
 
+def _blitz_shop_answer(state: dict[str, Any]) -> dict[str, Any]:
+    """The Blitz merchant (v0.113.0): an admitted rule, never a net ranking.
+
+    `_unranked`'s first-option default would be "Leave shop" here -- three
+    free picks thrown away -- so `realgame_ppo.blitz_shop_choice` names the
+    pick instead, and the note says what it is. Still a hand-back surface:
+    nothing was trained on it (GH #874).
+    """
+    import realgame_ppo
+
+    pick, reason = realgame_ppo.blitz_shop_choice(state)
+    why = "Blitz shop: no net was trained on Blitz wares"
+    options = [o for o in state.get("options") or [] if isinstance(o, dict)]
+    labels = {
+        int(o.get("index", i)): realgame_ppo._strip_bbcode(
+            (o.get("item") or {}).get("title") or o.get("label") or f"option {i}"
+        )
+        for i, o in enumerate(options)
+    }
+    logger.warning(
+        "%s trigger=blitz_shop prompt_key=- source_model=- :: %s (%s)",
+        UNRANKED_LOG_PREFIX,
+        why,
+        reason,
+    )
+    return {
+        "note": f"{why} — {reason}, NOT a recommendation",
+        "options": [
+            {"label": str(label), "is_best": idx == pick, "index": idx, "action": "choose"}
+            for idx, label in labels.items()
+        ],
+        "best": {"action": "choose", "index": pick, "label": str(labels.get(pick, pick))},
+        "hand_back": why,
+    }
+
+
 def _build_card_bundle(state: dict[str, Any]) -> Any:
     """Rank Scroll Boxes packs with the obs the engine gives the Rust agent.
 
@@ -1062,6 +1098,8 @@ def compute_screen_advice(
         searched = _searched_card_select_advice(fight_offer_as_select(state), mirror, cfg, sims)
         if searched is not None:
             return searched
+    if advice_for == "shop" and realgame_ppo.is_blitz_shop(state):
+        return _blitz_shop_answer(state)
     run_state = state.get("run_state") or {}
     character = character_display_name(run_state.get("character")) or "Ironclad"
     policy, error = policies.get(character)

@@ -275,6 +275,13 @@ _COMBAT_PROMPTS = {
     "TRANSFIGURE.selectionScreenPrompt",
     "WELL_LAID_PLANS_POWER.selectionScreenPrompt",
     "WISH.selectionScreenPrompt",
+    # v0.113.0: The Fool's cards, all `CardSelectCmd.FromCombatPile`
+    # (Models.Cards/ArrowStab.cs, KiChant.cs, LockedIn.cs, Recall.cs, Tutor.cs).
+    "ARROW_STAB.selectionScreenPrompt",
+    "KI_CHANT.selectionScreenPrompt",
+    "LOCKED_IN.selectionScreenPrompt",
+    "RECALL.selectionScreenPrompt",
+    "TUTOR.selectionScreenPrompt",
 }
 
 
@@ -291,15 +298,25 @@ _NON_COMBAT_PROMPTS = {
     "DOLLYS_MIRROR.selectionScreenPrompt": None,
     # The shared removal prompt; already covered by `_SOURCE_DIRECTION` too.
     "COMBAT_REWARD_CARD_REMOVAL.selectionScreenPrompt": None,
+    # v0.113.0 Blitz Neow: 3 of 10 generated cards into the deck
+    # (Models.Blitz/BlitzRunModel.cs:24-35).
+    "BLITZ.NEOW.selectionScreenPrompt": "grant",
+    # v0.113.0: shipped, but `CardUpgradeReward` asks with `TO_UPGRADE`.
+    "COMBAT_REWARD_CARD_UPGRADE.selectionScreenPrompt": "smith",
 }
+
+#: Every vendored localization the live advisor can meet: the baseline plus
+#: each newer supported build's own copy (a new build's prompts appear only
+#: there).
+_LOC_DIRS = ("localization_eng", "localization_eng_v0.113.0")
 
 
 def _loc_selection_prompts() -> dict[str, str]:
-    """Every ``*.selectionScreenPrompt`` string shipped in `localization_eng`."""
+    """Every ``*.selectionScreenPrompt`` string shipped in any of `_LOC_DIRS`."""
     import json
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "localization_eng"
+    pycli = Path(__file__).resolve().parents[1]
 
     def walk(node: Any, path: list[str]):
         if isinstance(node, dict):
@@ -309,7 +326,8 @@ def _loc_selection_prompts() -> dict[str, str]:
             yield ".".join(path), node
 
     out: dict[str, str] = {}
-    for f in sorted(root.glob("*.json")):
+    files = [f for d in _LOC_DIRS for f in sorted((pycli / d).glob("*.json"))]
+    for f in files:
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -356,4 +374,19 @@ def test_a_relic_that_adds_to_the_deck_is_ranked_not_leftmost() -> None:
     state = _state("SEA_GLASS.selectionScreenPrompt", _RUN025_CARDS, min_select=0, max_select=3)
     decision = rp._build_card_select(state, None)
     assert decision is not None, "a deck grant is not an unranked screen"
+    assert [a["action"] for a in decision.actions] == ["grant_deck_card"] * 3
+
+
+def test_blitz_neow_pick_is_ranked_not_leftmost() -> None:
+    """v0.113.0 Blitz Neow: "add 3 of these 10 cards to your deck".
+
+    `FromSimpleGridForRewards(prefs(3))` -> `CardPileCmd.Add(item, Deck)`
+    (Models.Blitz/BlitzRunModel.cs:24-35). Unmapped, the live advisor said
+    "the net does not cover this surface" and took the first three cards of
+    the rarity-sorted list (2026-11-13). The mod re-asks once per pick with
+    min/max 3 and the list one card shorter, so each ask is a grant ranking.
+    """
+    state = _state("BLITZ.NEOW.selectionScreenPrompt", _RUN025_CARDS, min_select=3, max_select=3)
+    decision = rp._build_card_select(state, None)
+    assert decision is not None, "the Blitz Neow pick is a deck grant, not an unranked screen"
     assert [a["action"] for a in decision.actions] == ["grant_deck_card"] * 3

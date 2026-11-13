@@ -48,7 +48,22 @@ internal static class SimRoomNodes
     internal const string RestSiteProceedButtonPath = RestSiteRoomPath + "/ProceedButton";
     internal const string EventRoomPath = RoomContainer + "/EventRoom";
     internal const string TreasureRoomPath = RoomContainer + "/TreasureRoom";
-    internal const string MerchantRoomPath = RoomContainer + "/MerchantRoom";
+
+    /// <summary>
+    /// The live shop room, found by type through the run's room container
+    /// (`NMerchantRoom.Instance` = `NRun.MerchantRoom`, in every supported
+    /// build). Never by node path: v0.113.0 made `NMerchantRoom` abstract and
+    /// instantiates `rooms/standard_merchant_room` or
+    /// `rooms/blitz_merchant_room` instead, so `RoomContainer/MerchantRoom`
+    /// stopped existing and both lanes stood in front of a shop they could
+    /// not see (live, 2026-11-13). The game's own AutoSlay moved the same way
+    /// (v0.113.0 `ShopRoomHandler`).
+    /// </summary>
+    internal static NMerchantRoom? MerchantRoom()
+    {
+        NMerchantRoom? room = NMerchantRoom.Instance;
+        return room != null && GodotObject.IsInstanceValid(room) ? room : null;
+    }
 
     internal static Node SceneRoot => ((SceneTree)Engine.GetMainLoop()).Root;
 
@@ -106,6 +121,8 @@ internal static class NonCombatBridgeProtocol
     public const string BuyPotionAction = "buy_potion";
     public const string RemoveCardAction = "remove_card";
     public const string BuyItemAction = "buy_item";
+    /// <summary>One of the Blitz merchant's free wares (v0.113.0+, SimBlitzShop).</summary>
+    public const string BlitzChoiceAction = "blitz_choice";
     public const string EventChoiceAction = "event_choice";
     public const string CollectTreasureAction = "collect";
     public const string PickRelicAction = "pick_relic";
@@ -421,8 +438,9 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
 
     public async Task HandleAsync(Rng random, CancellationToken ct)
     {
-        NMerchantRoom room = await WaitHelper.ForNode<NMerchantRoom>(
-            SimRoomNodes.SceneRoot, SimRoomNodes.MerchantRoomPath, ct);
+        await WaitHelper.Until(() => SimRoomNodes.MerchantRoom()?.IsVisibleInTree() ?? false,
+            ct, null, "Merchant room not found");
+        NMerchantRoom room = SimRoomNodes.MerchantRoom()!;
         Logger.Log("[SimShop] Opening merchant inventory");
         room.OpenInventory();
         await Task.Delay(InventoryOpenSettleMs, ct);
@@ -588,7 +606,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
                     SimStateExtractor.SerializeRelic(relicEntry.Model),
                 MerchantPotionEntry potionEntry when potionEntry.Model != null =>
                     SimStateExtractor.SerializePotionSlot(potionEntry.Model, -1),
-                _ => null,
+                _ => SimBlitzShop.Detail(slot.Entry),
             };
         }
         catch (Exception ex)
@@ -618,6 +636,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
         NMerchantRelic => NonCombatBridgeProtocol.BuyRelicAction,
         NMerchantPotion => NonCombatBridgeProtocol.BuyPotionAction,
         NMerchantCardRemoval => NonCombatBridgeProtocol.RemoveCardAction,
+        _ when SimBlitzShop.IsBlitzEntry(slot.Entry) => NonCombatBridgeProtocol.BlitzChoiceAction,
         _ => NonCombatBridgeProtocol.BuyItemAction,
     };
 
@@ -628,6 +647,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
         MerchantRelicEntry relic => relic.Model?.Id.Entry ?? "relic",
         MerchantPotionEntry potion => potion.Model?.Id.Entry ?? "potion",
         MerchantCardRemovalEntry => NonCombatBridgeProtocol.RemoveCardAction,
+        _ when SimBlitzShop.Kind(slot.Entry) is { } kind => "blitz:" + kind,
         _ => slot.Entry?.GetType().Name ?? "unknown",
     };
 

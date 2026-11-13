@@ -62,7 +62,15 @@ public class SimAutoSlayer
     private const string ContinueRunMenuButtonPath = "MainMenuTextButtons/ContinueButton";
     private const string SingleplayerMenuButtonPath = "MainMenuTextButtons/SingleplayerButton";
     private const string CharSelectScreenNodePath = "Submenus/CharacterSelectScreen";
-    private const string StandardModeButtonPath = "Submenus/SingleplayerSubmenu/StandardButton";
+    private const string SingleplayerSubmenuPath = "Submenus/SingleplayerSubmenu";
+    // A direct child of the submenu up to v0.111.0; v0.113.0 moved the mode
+    // buttons into a container and named them uniquely (NSingleplayerSubmenu
+    // `GetNode("%StandardButton")`), so the child path found nothing and
+    // Autopilot timed out on the main menu (live, 2026-11-13).
+    private const string StandardModeButtonChild = "StandardButton";
+    private const string StandardModeButtonUniquePath = "%StandardButton";
+    private const string BlitzModeButtonUniquePath = "%BlitzButton";
+    private const string BlitzScreenNodePath = "Submenus/BlitzScreen";
     private const string CharConfirmButtonNodePath = "Submenus/CharacterSelectScreen/ConfirmButton";
     private const string CharButtonContainerNodePath = "CharSelectButtons/ButtonContainer";
     private const string AscensionPanelUniquePath = "%AscensionPanel";
@@ -954,11 +962,17 @@ public class SimAutoSlayer
         // on every poll.
         await WaitHelper.Until(
             () => IsShown(mainMenu.GetNodeOrNull<Control>(CharSelectScreenNodePath))
-                  || IsShown(mainMenu.GetNodeOrNull<Control>(StandardModeButtonPath)),
+                  || IsShown(StandardRunButton(mainMenu)),
             ct, AutoSlayConfig.nodeWaitTimeout, "Neither character select nor standard run appeared");
 
+        if (_config.IsBlitz)
+        {
+            await StartBlitzRunAsync(mainMenu, character, ascension, seed, ct);
+            return;
+        }
+
         // CLEANROOM-Q3: "visible" for menu nodes is read as IsVisibleInTree.
-        NClickableControl? standardRun = mainMenu.GetNodeOrNull<NClickableControl>(StandardModeButtonPath);
+        NClickableControl? standardRun = StandardRunButton(mainMenu);
         if (IsShown(standardRun) && !IsShown(mainMenu.GetNodeOrNull<Control>(CharSelectScreenNodePath)))
         {
             Logger.Log("[SimAutoSlayer] Clicking standard run");
@@ -982,6 +996,56 @@ public class SimAutoSlayer
         NGame.Instance!.DebugSeedOverride = seed;
         Logger.Log("[SimAutoSlayer] Confirming character");
         await UiHelper.Click(confirm);
+    }
+
+    /// <summary>
+    /// `game_mode: "blitz"`: the singleplayer submenu's Blitz button, then the
+    /// Blitz screen's character buttons and embark button -- the node names
+    /// the game's own `BlitzRunLauncher` / `ModeScreen` use (v0.113.0). Node
+    /// lookups by name only, so the DLL still binds on builds without Blitz;
+    /// there the button is missing and this throws instead of silently
+    /// playing a standard run.
+    /// </summary>
+    private static async Task StartBlitzRunAsync(
+        Control mainMenu, string character, int ascension, string seed, CancellationToken ct)
+    {
+        Control? submenu = mainMenu.GetNodeOrNull<Control>(SingleplayerSubmenuPath);
+        NClickableControl? blitz = submenu?.GetNodeOrNull<NClickableControl>(BlitzModeButtonUniquePath);
+        if (!IsShown(submenu) || blitz == null || !IsShown(blitz))
+        {
+            throw new InvalidOperationException(
+                "game_mode=blitz: no Blitz button in the singleplayer submenu (needs v0.113.0+, the Blitz " +
+                "epoch unlocked, and a profile with a finished run so Singleplayer opens the submenu)");
+        }
+        Logger.Log("[SimAutoSlayer] Clicking Blitz");
+        await UiHelper.Click(blitz);
+        await WaitHelper.Until(
+            () => IsShown(mainMenu.GetNodeOrNull<Control>(BlitzScreenNodePath)),
+            ct, AutoSlayConfig.nodeWaitTimeout, "Blitz screen did not open");
+        Control screen = RequireNode<Control>(mainMenu, BlitzScreenNodePath);
+
+        await SelectCharacterAsync(screen, character, ct);
+        // Blitz has its own 5-level ladder (AscensionHelper.GetLevelForBlitz);
+        // the screen's panel takes the level when it has one.
+        if (screen.GetNodeOrNull<NAscensionPanel>(AscensionPanelUniquePath) != null
+            || UiHelper.FindFirst<NAscensionPanel>(screen) != null)
+        {
+            ApplyAscension(screen, ascension);
+        }
+
+        NClickableControl embark = await WaitHelper.ForNode<NClickableControl>(screen, "ConfirmButton", ct);
+        Logger.Log($"[SimAutoSlayer] Setting DebugSeedOverride: {seed}");
+        NGame.Instance!.DebugSeedOverride = seed;
+        Logger.Log("[SimAutoSlayer] Embarking on a Blitz run");
+        await UiHelper.Click(embark);
+    }
+
+    /// <summary>The singleplayer submenu's Standard button, on every build.</summary>
+    private static NClickableControl? StandardRunButton(Control mainMenu)
+    {
+        Control? submenu = mainMenu.GetNodeOrNull<Control>(SingleplayerSubmenuPath);
+        return submenu?.GetNodeOrNull<NClickableControl>(StandardModeButtonChild)
+               ?? submenu?.GetNodeOrNull<NClickableControl>(StandardModeButtonUniquePath);
     }
 
     private static bool IsShown(Control? control) =>

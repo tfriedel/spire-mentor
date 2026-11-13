@@ -159,6 +159,7 @@ settings. Fields (authoritative docs: `SimConfig.cs`):
 | `character` / `ascension` / `seed` | `"Ironclad"` / `0` / `null` | Run setup for Autopilot; `seed: null` = fresh random seed |
 | `num_runs` | `1` | Runs to play in sequence before going idle |
 | `resume_run` | `false` | Click Continue instead of starting a new run (recover a run after a game crash) |
+| `game_mode` | `"standard"` | Which singleplayer mode Autopilot starts: `"standard"` or `"blitz"` (v0.113.0+, needs Blitz unlocked). How the live test lane plays Blitz unattended |
 | `speed_patches` | `true` | Faster-than-realtime patches while Autopilot is engaged |
 | `fast_mode` | `"normal"`* | Game `FastModeType` at run start: `"instant"` / `"fast"` / `"normal"` |
 | `time_scale` | `1.0` | Whole-game `Engine.TimeScale` (0.1–4.0), Autopilot only |

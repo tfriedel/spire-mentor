@@ -331,9 +331,10 @@ and a fresh re-send; the disabled button is never clicked.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `options` | array | Index 0 is always `{index:0, id:"leave_shop", action:"leave_shop", ...}`; remaining entries are `{index, id:<action>, action:<action>, label, description, enabled, price, item?}` where `<action>` is `buy_card`\|`buy_relic`\|`buy_potion`\|`remove_card`\|`buy_item`. `item` (new, optional) is the full Card/Relic/Potion object for that slot when resolvable. |
+| `options` | array | Index 0 is always `{index:0, id:"leave_shop", action:"leave_shop", ...}`; remaining entries are `{index, id:<action>, action:<action>, label, description, enabled, price, item?}` where `<action>` is `buy_card`\|`buy_relic`\|`buy_potion`\|`remove_card`\|`buy_item`\|`blitz_choice`. `item` (new, optional) is the full Card/Relic/Potion object for that slot when resolvable. |
 | `player_gold` | int | **New.** Also available via `run_state.gold`, duplicated here for convenience. |
 | `purge_cost` | int | **New, optional.** Present iff a card-removal slot is stocked; its current price. |
+| `blitz_choices_remaining` | int | **New (v0.113.0 Blitz), optional.** Present iff this is the Blitz merchant: how many more wares the player may take (`MerchantInventory.BlitzChoicesRemaining`). Its wares are `action:"blitz_choice"`, `price` 0, label `blitz:<kind>`, `item` = `{blitz_kind, cursed, rare, title, description}` (`blitz_kind` = the game's `BlitzMerchantEntryType`; `cursed` = the ware also adds a random Curse). Choosing one opens its own follow-up screen (a card reward, a deck pick, a relic). |
 
 ### `event`
 

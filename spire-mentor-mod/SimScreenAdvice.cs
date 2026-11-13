@@ -1209,16 +1209,12 @@ internal static class SimScreenAdvice
     // Shop (what to buy with the gold you have)
     // ------------------------------------------------------------------
 
-    private const string MerchantRoomPath = "/root/Game/RootSceneContainer/Run/RoomContainer/MerchantRoom";
-
     private static SimScreenDecision? DescribeShop()
     {
-        if (Engine.GetMainLoop() is not SceneTree tree)
-        {
-            return null;
-        }
-        NMerchantRoom? room = tree.Root.GetNodeOrNull<NMerchantRoom>(MerchantRoomPath);
-        if (room == null || !GodotObject.IsInstanceValid(room) || !room.IsVisibleInTree())
+        // By type, not by node path: v0.113.0 renamed the room node
+        // (SimRoomNodes.MerchantRoom).
+        NMerchantRoom? room = SimRoomNodes.MerchantRoom();
+        if (room == null || !room.IsVisibleInTree())
         {
             return null;
         }
@@ -1305,6 +1301,13 @@ internal static class SimScreenAdvice
         {
             state["purge_cost"] = purgeCost.Value;
         }
+        // Blitz (v0.113.0+): free wares, a fixed number of picks. Gold never
+        // moves there, so the count also keys the signature below.
+        int? blitzLeft = SimBlitzShop.ChoicesRemaining(room.Inventory.Inventory);
+        if (blitzLeft.HasValue)
+        {
+            state["blitz_choices_remaining"] = blitzLeft.Value;
+        }
         // The WHOLE shopfront (sold-out and unaffordable slots included) for
         // the workbench mirror; `options` above stays purchasable-only
         // because it is what the policy ranks.
@@ -1327,7 +1330,7 @@ internal static class SimScreenAdvice
             OptionCount = options.Count,
             // Gold too: buying does not always shrink the stock (a purge
             // leaves the slot count alone), but it always spends.
-            Signature = $"shop:{me?.Gold ?? 0}:" +
+            Signature = $"shop:{me?.Gold ?? 0}:{blitzLeft?.ToString() ?? "-"}:" +
                         string.Join("|", options.Select(o => o.TryGetValue("id", out object? id) ? id : "?")),
             Screen = room,
             ScreenName = nameof(NMerchantRoom),
