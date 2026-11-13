@@ -91,7 +91,8 @@ fn greedy_attempt_summary_and_log_agree() {
         json!({"seed": seed, "seq": "check", "k": 0}),
     );
     // Net-agnostic: the shipped net need not win this seed greedily (d1250
-    // did, d2500 avg5 dies on floor 22); summary and log must agree with it.
+    // did, d2500 avg5 died on floor 22, d5250 on floor 46); summary and log
+    // must agree with it.
     assert_eq!(a["won"], a["death_room"].is_null(), "{a}");
     assert_eq!(a["temp"], 0.0);
     let s = call(

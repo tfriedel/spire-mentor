@@ -11,6 +11,8 @@
 // verbs act on THIS decision. While the AI plays, the bar turns amber and
 // leads with a Stop button nobody can miss.
 
+import type { InstinctEstimate } from "../api";
+import { estimateChip, estimateText } from "../advice/estimate";
 import type { Brain, MentorMode, MentorState } from "./mentorStatus";
 
 export type { Brain, MentorMode, MentorState };
@@ -27,6 +29,10 @@ export interface MentorBarProps {
   letAiPick?: { run: () => void; disabledReason?: string };
   autobattle?: { on: boolean; toggle: () => void };
   status: { text: string; state: MentorState; title?: string };
+  /** Instinct's win estimate for this position (GH #1222): "Run 71% · Fight
+   *  100%" beside the status. Only while Instinct advises: the numbers assume
+   *  it plays every move from here. */
+  estimate?: InstinctEstimate | null;
   aiPlaying: boolean;
   onStop: () => void;
   /** A phone held upright splits the bar: `mode` is the bar itself (the
@@ -58,6 +64,7 @@ const BRAINS: { key: Brain; label: string; title: string }[] = [
 export default function MentorBar(p: MentorBarProps) {
   const parts = p.parts ?? "all";
   const rest = parts !== "mode";
+  const showEstimate = estimateChip(p.estimate).length > 0;
   return (
     <span className={`wb-mentor wb-mentor--${p.mode}${p.aiPlaying ? " wb-mentor--ai" : ""}${parts === "mode" ? " wb-mentor--phonebar" : ""}`}>
       {p.aiPlaying && parts !== "rest" && (
@@ -116,9 +123,29 @@ export default function MentorBar(p: MentorBarProps) {
       {rest && (
       <span className="wb-mentor-status" title={p.status.title ?? p.status.text} data-testid="mentor-status">
         <span className={`wb-mentor-dot wb-mentor-dot--${p.status.state}`} aria-hidden="true" />
-        {p.status.text}
+        {/* Room for the estimate chip: an idle "Instinct ready" keeps just
+            its dot (the words stay in the tooltip). */}
+        {showEstimate && p.status.state === "idle" ? <span className="wb-sr-only">{p.status.text}</span> : p.status.text}
       </span>
       )}
+      {rest && <EstimateChip estimate={p.estimate} />}
+    </span>
+  );
+}
+
+function EstimateChip({ estimate }: { estimate?: InstinctEstimate | null }) {
+  const parts = estimateChip(estimate);
+  if (parts.length === 0) return null;
+  const title = `${estimateText(estimate)}. A small net reading Instinct's view of the position (GH #1222); `
+    + "each number assumes Instinct plays every move from here. It is not the search's win chance.";
+  return (
+    <span className="wb-estimate" title={title} data-testid="estimate-chip">
+      {parts.map((x, i) => (
+        <span key={x.label}>
+          {i > 0 && <span className="wb-estimate-sep" aria-hidden="true">· </span>}
+          {x.label} <b className={`wb-estimate--${x.tone}`}>{x.text}</b>
+        </span>
+      ))}
     </span>
   );
 }

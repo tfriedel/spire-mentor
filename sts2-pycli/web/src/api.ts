@@ -385,6 +385,18 @@ export interface StepAdvice {
   note?: string | null;
   options?: { label: string; share?: number | null; is_best?: boolean }[];
 }
+/** GH #1222: Instinct's win probe — a small net on the student's state
+ *  embedding. Every number means "if Instinct plays on from here".
+ *  `p_fight` / `hp_loss` are null outside a fight; `hp_loss` holds quantiles
+ *  of the HP the fight costs (end-of-fight heals included, so it can be
+ *  negative), clamped to `hp_now`. */
+export interface InstinctEstimate {
+  p_run: number;
+  p_fight: number | null;
+  hp_loss: { q10: number; q25: number; q50: number; q75: number; q90: number } | null;
+  hp_now: number | null;
+}
+
 export interface Step {
   idx: number;
   decision: string;
@@ -409,6 +421,8 @@ export interface Step {
   };
   /** GH #801: the session's game build; absent = v0.107.1. */
   game_version?: string;
+  /** Instinct's estimate for this position, attached by the hint (GH #1222). */
+  estimate?: InstinctEstimate | null;
 }
 /**
  * Whether the loaded recording can be taken over interactively, and where.
@@ -708,6 +722,8 @@ export interface PpoPolicyPayload {
   policy?: "e2e";
   /** e2e: the position is a forced step (one option at probability 1). */
   forced?: boolean;
+  /** e2e: the win probe's estimate (GH #1222); null without a probe. */
+  estimate?: InstinctEstimate | null;
 }
 
 /** Who advises a hand-played run: the combat MCTS + run PPO ("search", the
@@ -746,6 +762,8 @@ export interface E2eAdvice {
   options: E2eAdviceOption[];
   /** The combat classes as hint rows (a card's `stable_idx` = hand index). */
   scores: Score[];
+  /** The win probe's estimate (GH #1222); null without a probe. */
+  estimate?: InstinctEstimate | null;
 }
 
 /** Resolved two-axis run-mode config (off-combat brain x combat budget) —
@@ -1664,7 +1682,10 @@ export const api = {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ config }),
-      }).then(json<{ scores: Score[]; pv: string[] | null; advisor?: "e2e"; error?: string }>),
+      }).then(json<{
+        scores: Score[]; pv: string[] | null; advisor?: "e2e"; error?: string;
+        estimate?: InstinctEstimate | null;
+      }>),
     // The e2e student's evaluation of the live node (the e2e advisor's
     // probabilities + picks for every surface).
     e2eAdvice: () => apiFetch("/api/live/e2e-advice", { method: "POST" }).then(json<E2eAdvice>),

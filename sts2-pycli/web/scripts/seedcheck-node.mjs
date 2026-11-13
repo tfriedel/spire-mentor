@@ -9,7 +9,7 @@
 //
 // Needs `just wasm-build` (src/wasm/pkg) and the net in ../data/e2e/.
 // The reference (Python `ppo.e2e.solve` on ema0999_d1250.pt, 2026-11-08). STALE: the
-// shipped net is now ironclad_e2e_d2500_avg5_ema0999 (stronger), so the sampled
+// shipped net is now ironclad_e2e_d5250_ema0999 (stronger), so the sampled
 // interval below is d1250's and needs re-measuring on the new net:
 // 1SNVTCEXKR0Q greedy won, sampled 15/200 = 7.5%, Wilson 95% [4.6%, 12.0%];
 // 1SNVTCEXKR0G greedy won.

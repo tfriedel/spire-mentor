@@ -424,6 +424,17 @@
 .wb-mentor-dot--thinking { background: oklch(80% 0.15 75); animation: wb-pulse 1s ease-in-out infinite; }
 .wb-mentor-dot--ai { background: oklch(80% 0.15 75); animation: wb-pulse 1.4s ease-in-out infinite; }
 @keyframes wb-pulse { 50% { opacity: .35; } }
+/* Instinct's win estimate (GH #1222): "Run 71% · Fight 100%", the numbers
+   banded green / amber / red (advice/estimate.ts estimateChip). */
+.wb-estimate { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 8px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--field-bg);
+  font-size: 12px; font-family: var(--font); color: var(--muted); white-space: nowrap; cursor: help; }
+.wb-estimate-sep { opacity: .5; }
+.wb-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.wb-estimate b { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wb-estimate--good { color: oklch(72% 0.16 150); }
+.wb-estimate--mid { color: oklch(76% 0.15 75); }
+.wb-estimate--bad { color: oklch(66% 0.19 25); }
 /* While the AI plays, the whole bar says so: an amber rule and tint. */
 .wb-topbar:has(.wb-mentor--ai) { box-shadow: inset 0 -2px 0 oklch(80% 0.15 75);
   background: oklch(80% 0.15 75 / 0.08); }

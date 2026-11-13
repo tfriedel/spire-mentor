@@ -49,6 +49,17 @@ describe("MentorBar", () => {
     expect(set).toHaveBeenCalledWith("instinct");
     expect(screen.getByRole("button", { name: /Peek/ })).toBeInTheDocument();
   });
+
+  it("shows Instinct's run and fight chances side by side, and nothing without them", () => {
+    const { rerender } = render(<MentorBar {...props()} />);
+    expect(screen.queryByTestId("estimate-chip")).toBeNull();
+    const estimate = { p_run: 0.71, p_fight: 0.55, hp_loss: null, hp_now: 40 };
+    rerender(<MentorBar {...props({ estimate })} />);
+    const chip = screen.getByTestId("estimate-chip");
+    expect(chip).toHaveTextContent("Run 71%· Fight 55%");
+    expect(chip.querySelector(".wb-estimate--bad")).toHaveTextContent("55%");
+    expect(chip).toHaveAttribute("title", expect.stringContaining("If Instinct plays on: fight 55% · run 71%"));
+  });
 });
 
 describe("mentorStatus", () => {

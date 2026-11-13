@@ -170,8 +170,139 @@ pub struct E2ewHeader {
     #[serde(default)]
     pub filled: Option<Vec<String>>,
     pub layout: LayoutHeader,
+    /// The display-only win probe fitted on this student's `h_STATE` (GH
+    /// #1222), when the file carries one: tensors `probe.l1`, `probe.l2`,
+    /// `probe.out` (`ppo.e2e.probe.Probe`).
+    #[serde(default)]
+    pub probe: Option<ProbeHeader>,
     tensors: Vec<TensorEntry>,
     data_bytes: usize,
+}
+
+/// `probe` of the header: `ppo.e2e.probe.Probe`'s config and provenance.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProbeHeader {
+    pub format: String,
+    pub hidden: usize,
+    /// The HP-loss quantile levels, ascending (`QUANTILES`).
+    pub quantiles: Vec<f32>,
+    /// HP units per output unit (`Probe.HP_SCALE`).
+    pub hp_scale: f32,
+    /// Where the probe came from (training panel, calibration read).
+    #[serde(default)]
+    pub meta: serde_json::Value,
+}
+
+/// The probe's read of one state, all "if the student plays on from here".
+#[derive(Debug, Clone, PartialEq)]
+pub struct Estimate {
+    /// P(win the run).
+    pub p_run: f32,
+    /// P(win the current fight); `None` outside a fight.
+    pub p_fight: Option<f32>,
+    /// HP the current fight costs, at each of `quantiles` (end-of-fight heals
+    /// included, a death counts as all current HP); empty outside a fight.
+    pub hp_loss: Vec<f32>,
+    /// The quantile levels of `hp_loss`.
+    pub quantiles: Vec<f32>,
+}
+
+impl Estimate {
+    /// The JSON the workbench and the mod read: `{p_run, p_fight, hp_loss:
+    /// {q10, q25, q50, q75, q90} | null, hp_now}`. With `hp_now`, every HP
+    /// quantile is clamped to it (a fight cannot cost more HP than there is).
+    pub fn to_json(&self, hp_now: Option<i64>) -> serde_json::Value {
+        let hp = if self.hp_loss.is_empty() {
+            serde_json::Value::Null
+        } else {
+            let mut m = serde_json::Map::new();
+            for (q, v) in self.quantiles.iter().zip(&self.hp_loss) {
+                let v = hp_now.map_or(*v, |h| v.min(h as f32));
+                m.insert(
+                    format!("q{}", (q * 100.0).round() as i64),
+                    serde_json::json!((f64::from(v) * 10.0).round() / 10.0),
+                );
+            }
+            serde_json::Value::Object(m)
+        };
+        serde_json::json!({
+            "p_run": self.p_run,
+            "p_fight": self.p_fight,
+            "hp_loss": hp,
+            "hp_now": hp_now,
+        })
+    }
+}
+
+/// [`E2eNet::evaluate`]'s output: the policy logits and, when the weights
+/// carry a probe, its estimate.
+#[derive(Debug, Clone)]
+pub struct Eval {
+    pub logits: Vec<f32>,
+    pub estimate: Option<Estimate>,
+}
+
+/// `ppo.e2e.probe.Probe`: `h -> SiLU(l1) -> SiLU(l2) -> out`, out =
+/// `[run logit, fight logit, hp base, hp deltas...]`.
+struct Probe {
+    l1: Linear,
+    l2: Linear,
+    /// `out`: `[2 + n_q, hidden]` row-major, plain dot products (too few
+    /// outputs for the packed [`Linear`]).
+    out_w: Vec<f32>,
+    out_b: Vec<f32>,
+    quantiles: Vec<f32>,
+    hp_scale: f32,
+}
+
+impl Probe {
+    fn estimate(&self, h: &[f32], is_combat: bool) -> Estimate {
+        let mut a = vec![0.0f32; self.l1.n_out];
+        self.l1.forward(h, 1, &mut a);
+        for v in &mut a {
+            *v = silu(*v);
+        }
+        let mut b = vec![0.0f32; self.l2.n_out];
+        self.l2.forward(&a, 1, &mut b);
+        for v in &mut b {
+            *v = silu(*v);
+        }
+        let hid = b.len();
+        let o: Vec<f32> = self
+            .out_b
+            .iter()
+            .enumerate()
+            .map(|(k, &bias)| dot(&b, &self.out_w[k * hid..(k + 1) * hid]) + bias)
+            .collect();
+        let sigmoid = |x: f32| 1.0 / (1.0 + (-x).exp());
+        let (p_fight, hp_loss) = if is_combat {
+            let mut q = Vec::with_capacity(self.quantiles.len());
+            let mut acc = o[2];
+            q.push(acc * self.hp_scale);
+            for &dv in &o[3..] {
+                acc += softplus(dv);
+                q.push(acc * self.hp_scale);
+            }
+            (Some(sigmoid(o[1])), q)
+        } else {
+            (None, Vec::new())
+        };
+        Estimate {
+            p_run: sigmoid(o[0]),
+            p_fight,
+            hp_loss,
+            quantiles: self.quantiles.clone(),
+        }
+    }
+}
+
+/// torch's `F.softplus` (beta 1, threshold 20).
+fn softplus(x: f32) -> f32 {
+    if x > 20.0 {
+        x
+    } else {
+        x.exp().ln_1p()
+    }
 }
 
 // ── the input row ─────────────────────────────────────────────────────────
@@ -257,6 +388,7 @@ pub struct E2eNet {
     kind: Vec<f32>,
     head_combat: Head,
     head_ooc: Head,
+    probe: Option<Probe>,
 }
 
 impl fmt::Debug for E2eNet {
@@ -416,6 +548,23 @@ impl E2eNet {
             kind: t.get("kind.weight", &[l.n_kind, d])?,
             head_combat: t.head("head_combat", d, n.head_hidden)?,
             head_ooc: t.head("head_ooc", d, n.head_hidden)?,
+            probe: match &header.probe {
+                None => None,
+                Some(p) => {
+                    let nq = p.quantiles.len();
+                    if nq == 0 || p.hidden == 0 || !p.hp_scale.is_finite() {
+                        return Err("e2ew: probe header without quantiles or size".into());
+                    }
+                    Some(Probe {
+                        l1: t.linear("probe.l1", d, p.hidden, true)?,
+                        l2: t.linear("probe.l2", p.hidden, p.hidden, true)?,
+                        out_w: t.get("probe.out.weight", &[2 + nq, p.hidden])?,
+                        out_b: t.get("probe.out.bias", &[2 + nq])?,
+                        quantiles: p.quantiles.clone(),
+                        hp_scale: p.hp_scale,
+                    })
+                }
+            },
             header,
         };
         Ok(net)
@@ -441,6 +590,30 @@ impl E2eNet {
 
     /// [`E2eNet::logits`], with `to_batch`'s structural checks as errors.
     pub fn try_logits(&self, row: &PolicyRow) -> Result<Vec<f32>, String> {
+        self.forward_row(row).map(|(logits, _)| logits)
+    }
+
+    /// Whether the weights carry a win probe ([`E2eNet::evaluate`] estimates).
+    pub fn has_probe(&self) -> bool {
+        self.probe.is_some()
+    }
+
+    /// The logits and, with a probe, its estimate of the state: one forward.
+    pub fn evaluate(&self, row: &PolicyRow) -> Result<Eval, String> {
+        let (logits, h) = self.forward_row(row)?;
+        let estimate = self.probe.as_ref().map(|p| p.estimate(&h, row.is_combat));
+        Ok(Eval { logits, estimate })
+    }
+
+    /// The probe's estimate from a given `h_STATE` (`[dim]`); `None` without
+    /// a probe. For parity checks against `ppo.e2e.probe`.
+    pub fn estimate_from_state(&self, h: &[f32], is_combat: bool) -> Option<Estimate> {
+        self.probe.as_ref().map(|p| p.estimate(h, is_combat))
+    }
+
+    /// The forward: `(logits, h_STATE)`, `h_STATE` being the final-normed
+    /// RUNCTX output (`[dim]`).
+    fn forward_row(&self, row: &PolicyRow) -> Result<(Vec<f32>, Vec<f32>), String> {
         let l = &self.header.layout;
         let d = self.d;
         let nt = row.sec.len();
@@ -643,7 +816,8 @@ impl E2eNet {
             }
             out.push(dot(&z, &head.out_w) + head.out_b);
         }
-        Ok(out)
+        hn.truncate(d);
+        Ok((out, hn))
     }
 
     /// `Block.forward` (`q` = every token) or `Block.forward_query` (`q` a

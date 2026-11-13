@@ -472,6 +472,7 @@ impl Session {
         let rm: &sts2_core::run_manager::RunManager = rm;
         let acts = rm.get_available_actions();
         let is_combat = rmx::phase_str(rm) == "combat";
+        let mut estimate = Value::Null;
         // (class, run action, prob, members) per class; the forced step is
         // one class at probability 1.
         let (rows, forced, dtype, ms): (Vec<(usize, Value, f64, usize)>, bool, Value, f64) =
@@ -491,7 +492,10 @@ impl Session {
                 Next::Forced(f) => (vec![(0, f.action, 1.0, 1)], true, Value::Null, 0.0),
                 Next::Decision(d) => {
                     let c = match e2e::decide(net, &d, rm, &mut st.cache, clock) {
-                        Ok(c) => c,
+                        Ok(c) => {
+                            estimate = e2e::estimate_json(c.estimate.as_ref(), rm);
+                            c
+                        }
                         Err(e) => {
                             return Ok(unavailable(
                                 node_id,
@@ -599,6 +603,7 @@ impl Session {
             "pick": pick,
             "options": options,
             "scores": scores,
+            "estimate": estimate,
         }))
     }
 
@@ -621,6 +626,7 @@ impl Session {
             "pv": Value::Null,
             "advisor": "e2e",
             "config": {},
+            "estimate": adv.get("estimate").cloned().unwrap_or(Value::Null),
         });
         if adv["available"] != json!(true) {
             out["error"] = adv["reason"].clone();
@@ -680,6 +686,7 @@ impl Session {
             "options": options,
             "forced": adv["forced"],
             "error": adv["reason"],
+            "estimate": adv.get("estimate").cloned().unwrap_or(Value::Null),
         })))
     }
 
@@ -852,6 +859,9 @@ impl Session {
                 }
             },
         };
+        let estimate = choice
+            .as_ref()
+            .map_or(Value::Null, |c| e2e::estimate_json(c.estimate.as_ref(), rm));
         // Labels BEFORE the move (the map row / bundle sub-state are pre-move).
         let (verb, wb_args) = runmode::to_workbench_verb(rm, &action);
         let act_label = label_of(&parent_named, &verb, &wb_args);
@@ -921,6 +931,7 @@ impl Session {
             "action": act_label,
             "result": result,
             "forced": choice.is_none(),
+            "estimate": estimate,
         });
         let search = if let (Some(c), Some(d)) = (&choice, &decision) {
             let ms = c.ms_tokenize + c.ms_net;
@@ -931,9 +942,16 @@ impl Session {
             debug["ms_net"] = json!(c.ms_net);
             debug["ms"] = json!(ms);
             debug["summary"] = json!(format!(
-                "e2e {} → {act_label} (p {:.2}, {ms:.1} ms)",
+                "e2e {} → {act_label} (p {:.2}, {ms:.1} ms){}",
                 ct::dtype_name(d.dtype),
-                c.probs[c.class]
+                c.probs[c.class],
+                c.estimate
+                    .as_ref()
+                    .map_or_else(String::new, |e| match e.p_fight {
+                        Some(f) =>
+                            format!(" · fight {:.0}% run {:.0}%", f * 100.0, e.p_run * 100.0),
+                        None => format!(" · run {:.0}%", e.p_run * 100.0),
+                    })
             ));
             Some(json!({
                 "scores": rows,

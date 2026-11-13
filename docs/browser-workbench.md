@@ -388,6 +388,25 @@ student's pick and its softmax probabilities (a POLICY's, never win chances):
 | map route overlay | `full_map` / `/api/live/map` | seeded on the student's map pick |
 | per-turn combat coach | `/api/live/last-turn-grade` | silent (409): it grades against the search's line |
 
+**Win estimate (GH #1222).** The shipped `.e2ew` also carries a small probe
+(`ppo.e2e.probe`: a ~0.13M-parameter MLP on the student's `h_STATE`, the
+RUNCTX output its policy forward already computes, so it costs no extra
+forward). `E2eNet::evaluate` returns it with the logits; `e2e-advice`, the
+hint and the policy panel carry it as `estimate` — `{p_run, p_fight,
+hp_loss: {q10, q25, q50, q75, q90}, hp_now}` (`p_fight` / `hp_loss` only in a
+fight; `hp_loss` includes end-of-fight heals and is clamped to `hp_now`) — and
+the sidebar shows one line under Instinct's advice: "If Instinct plays on:
+fight 93% · −9 HP (−2 HP to −20 HP) · run 34%". The top bar shows the two
+chances side by side as a chip, "Run 34% · Fight 93%" (the fight only in
+combat), banded green / amber / red (`advice/estimate.ts` `estimateChip`);
+the idle "Instinct ready" shrinks to its dot to make room. Every number assumes Instinct
+plays every move from here; it is a state estimate, not a per-option value
+(per-choice numbers wait on #1222 step 5). Run mode adds it to the step's
+`debug.estimate` and summary. The probe is fitted per student: re-fit it
+(`ppo.e2e.probe collect` / `fit` / `report`, then `export_wb weights --probe`)
+whenever the weights change. Calibration: the `.provenance.md` next to the
+weights.
+
 Left on the search, deliberately: the search tree (`search_tree`, an explicit
 MCTS tool), the on-demand EV analyzers (card / decision advisor, choice
 "check it" — Monte-Carlo rollouts with MCTS fights, a different question than
@@ -505,7 +524,7 @@ below A10 that the net trained at A10. Design:
   after `just wasm-build`: the greedy attempt must win both reference seeds and
   the sampled rate on `1SNVTCEXKR0Q` must fall in [4.6%, 12.0%], the Wilson
   interval of the Python `ppo.e2e.solve` d1250 rate (15/200). That reference
-  predates the d2500 avg5 net (shipped 2026-11-08) and needs re-measuring.
+  predates the d2500 avg5 (2026-11-08) and d5250 (2026-11-13) nets and needs re-measuring.
 
 ## Persistence
 

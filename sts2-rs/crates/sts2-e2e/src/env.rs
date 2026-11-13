@@ -262,6 +262,14 @@ fn finish_run(rm: RunManager, gv: sts2_core::GameVersion, master_seed: u64) -> R
 
 /// Whether a run-level action list is a fight's (`is_combat`: by kind).
 #[must_use]
+/// The player's current HP: the fight's while one is on, else the run's.
+pub fn hp_now(rm: &RunManager) -> i64 {
+    rm.combat.as_ref().map_or_else(
+        || i64::from(rm.run_state.current_hp),
+        |c| i64::from(c.player.current_hp),
+    )
+}
+
 pub fn is_combat(actions: &[Value]) -> bool {
     !actions.is_empty()
         && actions

@@ -16,16 +16,19 @@ pub struct Decision {
     pub row: PolicyRow,
     pub logits: Vec<f32>,
     pub chosen: usize,
+    /// torch's probe estimate (`p_run`, `p_fight`, `hp_loss`) when the
+    /// fixtures were written with `--probe`.
+    pub estimate: Option<Value>,
 }
 
 fn home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
 }
 
-/// `E2E_WEIGHTS`, default `~/runs/e2e-wb/export/ironclad_e2e_d2500_avg5_ema0999.e2ew`.
+/// `E2E_WEIGHTS`, default `~/runs/e2e-wb/export/ironclad_e2e_d5250_ema0999.e2ew`.
 pub fn weights_path() -> PathBuf {
     std::env::var_os("E2E_WEIGHTS").map_or_else(
-        || home().join("runs/e2e-wb/export/ironclad_e2e_d2500_avg5_ema0999.e2ew"),
+        || home().join("runs/e2e-wb/export/ironclad_e2e_d5250_ema0999.e2ew"),
         PathBuf::from,
     )
 }
@@ -104,6 +107,7 @@ pub fn read_fixture(path: &Path) -> Vec<Decision> {
             row,
             logits,
             chosen: v["chosen"].as_u64().expect("chosen") as usize,
+            estimate: v.get("estimate").cloned(),
         });
     }
     out

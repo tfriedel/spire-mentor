@@ -24,7 +24,7 @@ use sts2_e2e::tokens::{self, TokCache};
 
 /// The weights file the host serves under `/e2e/` (the static build copies
 /// `sts2-pycli/data/e2e/<this>`).
-pub const E2E_FILE: &str = "ironclad_e2e_d2500_avg5_ema0999.e2ew";
+pub const E2E_FILE: &str = "ironclad_e2e_d5250_ema0999.e2ew";
 /// The only character the student plays.
 pub const CHARACTER: &str = "Ironclad";
 /// The build it was trained on (`sts2_e2e::env::GAME_VERSION`).
@@ -126,6 +126,15 @@ pub struct Choice {
     /// Milliseconds spent tokenizing / in the forward.
     pub ms_tokenize: f64,
     pub ms_net: f64,
+    /// The win probe's read of the state, when the weights carry one (GH #1222).
+    pub estimate: Option<sts2_e2e::net::Estimate>,
+}
+
+/// The probe's estimate as the JSON the pages read (`null` without one); see
+/// [`sts2_e2e::net::Estimate::to_json`]. `hp_now` comes from `rm`.
+#[must_use]
+pub fn estimate_json(e: Option<&sts2_e2e::net::Estimate>, rm: &RunManager) -> Value {
+    e.map_or(Value::Null, |e| e.to_json(Some(sts2_e2e::env::hp_now(rm))))
 }
 
 /// Softmax in f64 (max-subtracted).
@@ -155,13 +164,14 @@ pub fn decide(
     let t0 = clock();
     let row = tokens::encode(d, rm, cache)?;
     let t1 = clock();
-    let logits = net.try_logits(&row.into())?;
+    let ev = net.evaluate(&row.into())?;
     let t2 = clock();
     Ok(Choice {
-        class: sts2_e2e::net::argmax(&logits),
-        probs: softmax(&logits),
+        class: sts2_e2e::net::argmax(&ev.logits),
+        probs: softmax(&ev.logits),
         ms_tokenize: t1 - t0,
         ms_net: t2 - t1,
+        estimate: ev.estimate,
     })
 }
 
@@ -537,13 +547,15 @@ mod tests {
 
     /// The shipped net's greedy attempt 0 on the two reference seeds. d1250
     /// (`~/runs/seedcheck/ref/REFERENCE.md`, `ppo.e2e.solve`) won both; the
-    /// d2500 avg5 net (2026-11-08) wins `1SNVTCEXKR0G` and dies to an act-2
-    /// elite on floor 22 of `1SNVTCEXKR0Q`. Pinned natively (no Python
-    /// cross-check for this net yet): a change means the net or engine moved.
+    /// d2500 avg5 net (2026-11-08) won `1SNVTCEXKR0G` and died to an act-2
+    /// elite on floor 22 of `1SNVTCEXKR0Q`; the d5250 net (2026-11-13) wins
+    /// `1SNVTCEXKR0G` and dies on floor 46 (the act-3 bosses) of
+    /// `1SNVTCEXKR0Q`. Pinned natively (no Python cross-check for this net
+    /// yet): a change means the net or engine moved.
     #[test]
     fn greedy_attempt_matches_reference() {
         let Some(net) = shipped_net() else { return };
-        for (seed, won, floor) in [("1SNVTCEXKR0Q", false, 22), ("1SNVTCEXKR0G", true, 46)] {
+        for (seed, won, floor) in [("1SNVTCEXKR0Q", false, 46), ("1SNVTCEXKR0G", true, 46)] {
             let a = attempt(&net, seed, 10, Seq::Check, 0, usize::MAX, fallback_ms).unwrap();
             assert_eq!((a.won, a.floor), (won, floor), "{seed}: {}", a.outcome);
             assert_eq!(a.temp, 0.0);

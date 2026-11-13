@@ -5,11 +5,12 @@
 // instead (Q, visit shares, W/L/T, the tie band, the principal variation),
 // which is the workbench's analysis view and stays exactly as it was.
 
-import type { Card, Enemy, PpoPolicyPayload, Score, StepAdvice } from "../api";
+import type { Card, Enemy, InstinctEstimate, PpoPolicyPayload, Score, StepAdvice } from "../api";
 import Reasoning from "../components/Reasoning";
 import { enemyLabeller } from "../enemyLabels";
 import { isE2eScores } from "../advisor";
 import AdviceList from "./AdviceList";
+import { estimateText } from "./estimate";
 import { humanize, type Mark } from "./marks";
 import { policyRows, scoreRows, type AdviceRow } from "./rows";
 
@@ -21,9 +22,23 @@ function recordedRows(advice: StepAdvice): AdviceRow[] {
   }));
 }
 
-export function CombatAdvice({ scores, pv, enemies, hand, advice, marks, showNumbers }: {
+/** Instinct's win estimate (GH #1222), one line; nothing without one. */
+export function EstimateNote({ estimate }: { estimate?: InstinctEstimate | null }) {
+  const text = estimateText(estimate);
+  if (!text) return null;
+  return (
+    <div className="wb-advice-note" data-testid="instinct-estimate"
+      title="A small net reading Instinct's view of the position (GH #1222). Each number assumes Instinct plays every move from here; it is not the search's win chance.">
+      {text}
+    </div>
+  );
+}
+
+export function CombatAdvice({ scores, pv, estimate, enemies, hand, advice, marks, showNumbers }: {
   scores: Score[];
   pv: string[] | null;
+  /** Instinct's win estimate for the position (GH #1222). */
+  estimate?: InstinctEstimate | null;
   enemies?: Enemy[];
   hand?: Card[];
   advice?: StepAdvice | null;
@@ -49,6 +64,7 @@ export function CombatAdvice({ scores, pv, enemies, hand, advice, marks, showNum
       {isE2eScores(scores) && (
         <div className="wb-advice-note">Instinct · no search · its percentages are a policy's, not win chances</div>
       )}
+      {isE2eScores(scores) && <EstimateNote estimate={estimate} />}
       {advice?.note && <div className="wb-advice-note">{advice.note}</div>}
     </>
   );
@@ -72,6 +88,7 @@ export function PolicyAdvice({ payload, marks, showNumbers, implToggle }: {
   return (
     <>
       <AdviceList rows={policyRows(payload.options, marks)} showNumbers={showNumbers} />
+      {payload.policy === "e2e" && <EstimateNote estimate={payload.estimate} />}
       <div className="wb-advice-note">
         {payload.policy === "e2e" ? "Instinct" : "PPO run policy"}
         {payload.forced ? " · the only option" : ""}

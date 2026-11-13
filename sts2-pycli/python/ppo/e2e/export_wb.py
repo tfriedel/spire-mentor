@@ -79,15 +79,33 @@ def layout_header(net: Any) -> dict[str, Any]:
     }
 
 
-def export_weights(ckpt: str, out: str) -> dict[str, Any]:
+def probe_header(meta: dict[str, Any]) -> dict[str, Any]:
+    """The `.e2ew` header's `probe` entry from `ppo.e2e.probe` metadata."""
+    keep = ("train_seeds", "val_seeds", "train_rows", "w_distil", "epochs", "calibration")
+    return {
+        "format": meta["format"],
+        "hidden": int(meta["hidden"]),
+        "quantiles": [float(q) for q in meta["quantiles"]],
+        "hp_scale": float(meta["hp_scale"]),
+        "meta": {k: meta[k] for k in keep if k in meta},
+    }
+
+
+def export_weights(ckpt: str, out: str, probe: str | None = None) -> dict[str, Any]:
     from . import net as N
 
     netm, cfg = N.load_checkpoint(ckpt, device="cpu")
-    sd = netm.state_dict()
+    items = [(k, v) for k, v in netm.state_dict().items() if _policy_tensor(k)]
+    pmeta = None
+    if probe is not None:
+        from .probe import load_probe
+
+        pm, pmeta = load_probe(probe)
+        if pmeta["dim"] != netm.cfg.dim:
+            raise SystemExit(f"probe dim {pmeta['dim']} != net dim {netm.cfg.dim}")
+        items += [(f"probe.{k}", v) for k, v in pm.state_dict().items()]
     tensors, blobs, off = [], [], 0
-    for name, t in sd.items():
-        if not _policy_tensor(name):
-            continue
+    for name, t in items:
         a = np.ascontiguousarray(t.detach().cpu().numpy().astype("<f4"))
         tensors.append({"name": name, "shape": list(a.shape), "offset": off})
         blobs.append(a.tobytes())
@@ -106,6 +124,7 @@ def export_weights(ckpt: str, out: str) -> dict[str, Any]:
         "from_state": stamps.get("from_state"),
         "filled": stamps.get("filled"),
         "layout": layout_header(netm),
+        "probe": probe_header(pmeta) if pmeta is not None else None,
         "tensors": tensors,
         "data_bytes": off,
     }
@@ -143,7 +162,7 @@ def _jsonable(x: Any) -> Any:
     return x
 
 
-def play_fixture(pol: Any, seed: int, out_dir: pathlib.Path) -> dict[str, Any]:
+def play_fixture(pol: Any, seed: int, out_dir: pathlib.Path, probe: Any = None) -> dict[str, Any]:
     from .env import E2EDecision, E2EEnv
 
     pol.begin_run(seed)
@@ -159,7 +178,9 @@ def play_fixture(pol: Any, seed: int, out_dir: pathlib.Path) -> dict[str, Any]:
                 from .net import to_batch
 
                 b = to_batch(rb, pol.device)
-                logits = pol.net.policy(b, bf16=False)[0, : d.n_classes].float().cpu().numpy()
+                _, h = pol.net.trunk(b)
+                logits = pol.net._logits(h, b)[0, : d.n_classes].float().cpu().numpy()
+                h_state = h[0, 0].float().cpu().numpy()
             chosen = int(np.argmax(logits))
             rec = {
                 "i": n,
@@ -188,6 +209,15 @@ def play_fixture(pol: Any, seed: int, out_dir: pathlib.Path) -> dict[str, Any]:
                 "logits": [float(x) for x in logits],
                 "chosen": chosen,
             }
+            if probe is not None:
+                from .probe import predict
+
+                e = predict(probe, h_state[None])
+                rec["estimate"] = {
+                    "p_run": float(e["run"][0]),
+                    "p_fight": float(e["fight"][0]) if d.is_combat else None,
+                    "hp_loss": [float(x) for x in e["hp_q"][0]] if d.is_combat else [],
+                }
             f.write(json.dumps(rec) + "\n")
             d = env.step(chosen)
             n += 1
@@ -202,13 +232,15 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.add_parser("weights")
     w.add_argument("ckpt")
     w.add_argument("out")
+    w.add_argument("--probe", help="a ppo.e2e.probe fit to embed (GH #1222)")
     fx = sub.add_parser("fixtures")
     fx.add_argument("ckpt")
     fx.add_argument("out_dir")
     fx.add_argument("seeds", nargs="+", type=int)
+    fx.add_argument("--probe", help="also record the probe's estimate per decision")
     a = ap.parse_args(argv)
     if a.cmd == "weights":
-        print(json.dumps(export_weights(a.ckpt, a.out)))
+        print(json.dumps(export_weights(a.ckpt, a.out, a.probe)))
         return 0
     from . import net as N
 
@@ -216,8 +248,13 @@ def main(argv: list[str] | None = None) -> int:
     pol = N.make_student(a.ckpt, device="cpu")
     od = pathlib.Path(a.out_dir)
     od.mkdir(parents=True, exist_ok=True)
+    probe = None
+    if a.probe:
+        from .probe import load_probe
+
+        probe = load_probe(a.probe)[0]
     for s in a.seeds:
-        print(json.dumps(play_fixture(pol, s, od)), flush=True)
+        print(json.dumps(play_fixture(pol, s, od, probe)), flush=True)
     return 0
 
 

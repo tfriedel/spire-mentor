@@ -1709,7 +1709,7 @@ function AppBody() {
     setHintBusy(true);
     try {
       const r = await api.live.hint({ ...hintConfigRef.current });
-      setLive((s) => (s ? { ...s, scores: r.scores, pv: r.pv } : s));
+      setLive((s) => (s ? { ...s, scores: r.scores, pv: r.pv, estimate: r.estimate ?? null } : s));
       setAdvisorNote(r.advisor === "e2e" && r.error ? `Instinct: ${r.error}` : null);
       return r.scores;
     } catch (e) {
@@ -2265,6 +2265,10 @@ function AppBody() {
     }),
     aiPlaying: autoRunning,
     onStop: () => { stopAutoRef.current = true; },
+    estimate: advisor !== "e2e" || !live ? null
+      : live.decision === "combat_play" ? live.estimate ?? null
+      : policy?.policy === "e2e" ? policy.estimate ?? null
+      : null,
   } : undefined;
 
   // The run policy's read of a non-combat screen (PPO, or Instinct when it
@@ -2849,6 +2853,7 @@ function AppBody() {
                     </div>
                   ) : (
                     <CombatAdvice scores={view.scores} pv={view.pv}
+                      estimate={view.kind === "scores" && view.scores === live.scores ? live.estimate : null}
                       enemies={view.enemies ?? live.state.enemies} hand={live.state.hand}
                       marks={marksValue.marks} showNumbers={engineNumbers} />
                   )}

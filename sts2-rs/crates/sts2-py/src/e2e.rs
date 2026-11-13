@@ -166,8 +166,11 @@ impl PyE2eStudent {
     }
 
     /// Tokenize `peek`'s decision at `rm` (with `driver`'s per-run cache)
-    /// and run the student: `{class, probs, ms_tokenize, ms_net}`, `class`
-    /// being the greedy merged class and `probs` the softmax per class.
+    /// and run the student: `{class, probs, logits, estimate, ms_tokenize,
+    /// ms_net}`, `class` being the greedy merged class, `probs` the softmax
+    /// per class and `estimate` the win probe's read of the state (GH #1222;
+    /// `None` when the weights carry no probe): `{p_run, p_fight, hp_loss:
+    /// {q10..q90} | None, hp_now}`.
     ///
     /// `rm` must still be at the position `peek` was taken at.
     ///
@@ -188,17 +191,22 @@ impl PyE2eStudent {
         let row =
             tokens::encode(d, &rm.inner, &mut driver.cache).map_err(PyRuntimeError::new_err)?;
         let t1 = Instant::now();
-        let logits = self
+        let ev = self
             .net
-            .try_logits(&row.into())
+            .evaluate(&row.into())
             .map_err(PyRuntimeError::new_err)?;
         let t2 = Instant::now();
+        let logits = ev.logits;
+        let estimate = ev.estimate.map_or(Value::Null, |e| {
+            e.to_json(Some(sts2_e2e::env::hp_now(&rm.inner)))
+        });
         value_to_py(
             py,
             &json!({
                 "class": sts2_e2e::net::argmax(&logits),
                 "probs": softmax(&logits),
                 "logits": logits,
+                "estimate": estimate,
                 "ms_tokenize": (t1 - t0).as_secs_f64() * 1000.0,
                 "ms_net": (t2 - t1).as_secs_f64() * 1000.0,
             }),

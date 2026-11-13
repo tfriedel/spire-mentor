@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 #: The student's weights, relative to the data root (dev: ``sts2-pycli/``;
 #: frozen: the bundle root, where the spec replicates the layout).
-WEIGHTS_RELPATH = Path("data/e2e/ironclad_e2e_d2500_avg5_ema0999.e2ew")
+WEIGHTS_RELPATH = Path("data/e2e/ironclad_e2e_d5250_ema0999.e2ew")
 
 #: What this student plays. A tuple per character as more students land.
 INSTINCT_CHARACTER = "Ironclad"
@@ -91,6 +91,37 @@ class InstinctPick:
     best: int
     """The greedy class."""
     ms: float
+    estimate: dict[str, Any] | None = None
+    """The win probe's read of the position (GH #1222), when the weights carry one."""
+
+
+def _hp_delta(loss: float) -> str:
+    v = round(loss)
+    if v == 0:
+        return "±0 HP"
+    return f"−{v} HP" if v > 0 else f"+{-v} HP"
+
+
+def estimate_text(e: dict[str, Any] | None) -> str:
+    """The win probe's estimate in words (GH #1222), the twin of the
+    workbench's ``advice/estimate.ts``: "If Instinct plays on: fight 93% ·
+    −9 HP (−2 HP to −20 HP) · run 34%"; "" without an estimate."""
+    if not e or not isinstance(e.get("p_run"), (int, float)):
+        return ""
+
+    def pct(p: float) -> str:
+        return f"{round(max(0.0, min(1.0, float(p))) * 100)}%"
+
+    parts = []
+    if e.get("p_fight") is not None:
+        parts.append(f"fight {pct(e['p_fight'])}")
+    hp = e.get("hp_loss")
+    if hp:
+        lo, hi = _hp_delta(hp["q10"]), _hp_delta(hp["q90"])
+        mid = _hp_delta(hp["q50"])
+        parts.append(mid if lo == hi else f"{mid} ({lo} to {hi})")
+    parts.append(f"run {pct(e['p_run'])}")
+    return "If Instinct plays on: " + " · ".join(parts)
 
 
 def default_weights_path() -> Path:
@@ -617,6 +648,8 @@ class InstinctAdvisor:
         #: The current event's trail of taken options
         #: (``realgame_instinct_screens._event_track``).
         self.event_track: dict[str, Any] | None = None
+        #: The win probe's estimate of the request's position (GH #1222).
+        self._first_estimate: dict[str, Any] | None = None
 
     # -- loading -------------------------------------------------------
 
@@ -722,11 +755,21 @@ class InstinctAdvisor:
             self._load_locked()
             if self._student is None:
                 raise InstinctUnavailable(self._error or "no Instinct net loaded")
+            self._first_estimate = None
             try:
                 advice = self._dispatch(state, advice_for, cfg, mirror, session, sims)
             finally:
                 self.last_screen = advice_for
+            estimate = self._first_estimate
         advice["brain"] = "instinct"
+        if estimate is not None:
+            # GH #1222: the position's own estimate (the first one this
+            # request evaluated; a turn plan evaluates later positions too).
+            advice["estimate"] = estimate
+            text = estimate_text(estimate)
+            if text:
+                note = advice.get("note") or ""
+                advice["note"] = f"{note} · {text}" if note else text
         if is_coop(state):
             advice["note"] = f"{advice.get('note', '')} · co-op: Instinct trained single-player"
         return advice
@@ -815,11 +858,15 @@ class InstinctAdvisor:
             out = self._student.decide(probe, peek, rm)
         except Exception as exc:
             raise InstinctUnavailable(f"Instinct could not evaluate this position ({exc})") from exc
+        estimate = out.get("estimate")
+        if estimate is not None and self._first_estimate is None:
+            self._first_estimate = estimate
         return InstinctPick(
             decision=decision,
             probs=[float(p) for p in out["probs"]],
             best=int(out["class"]),
             ms=(time.perf_counter() - t0) * 1000.0,
+            estimate=estimate,
         )
 
     # -- fights -------------------------------------------------------
