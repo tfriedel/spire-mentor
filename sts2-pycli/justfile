@@ -154,6 +154,35 @@ regression-test: build-cs
         uv run --frozen --no-sync python python/play_full_run.py 5 "$char" 2>&1 | grep -E "Wins|Completed"; \
     done
 
+# The later game builds' half of the gate (v0.107.1 is `just test` +
+# `just regression-test`). Every build in GATE_BUILDS gets the pytest suite and
+# the 5x5 random-policy regression; a game version that ships is a gate entry.
+gate_builds := "v0.111.0 v0.113.0"
+
+# pytest on every later game build
+test-builds: build-cs-all
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for v in {{gate_builds}}; do
+        echo "🧪 pytest @ $v"
+        uv run --frozen pytest tests/ -q --game-version "$v"
+    done
+
+# 5 games x 5 characters on every later game build; fails on the first
+# incomplete run (unlike `regression-test`, which only prints the counts)
+regression-builds: build-cs-all
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for v in {{gate_builds}}; do
+        for char in Ironclad Silent Defect Regent Necrobinder; do
+            echo "── $v $char ──"
+            out="$(STS2_GAME_VERSION="$v" uv run --frozen --no-sync python python/play_full_run.py 5 "$char" 2>&1 \
+                | grep -E "Wins|Completed")"
+            echo "$out"
+            grep -q "Completed: 5/5" <<<"$out"
+        done
+    done
+
 ## C# Build
 
 # Build the C# headless runner for one game build (GH #789): lib/<ver>/ ->

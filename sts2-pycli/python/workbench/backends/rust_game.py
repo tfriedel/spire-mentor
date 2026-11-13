@@ -156,8 +156,9 @@ _REST_LABELS = {0: "Rest", 1: "Smith"}
 # is the Torch Head Amalgam it spawns alongside the Queen (QueenBoss.cs slots
 # ["amalgam", "queen"]); players know that node as "Queen". Keyed by monster
 # ``kind`` → encounter display name. Only the map node is renamed — both
-# monsters keep their own names as combatants.
-_BOSS_KIND_ENCOUNTER_NAME = {"TorchHeadAmalgam": "Queen"}
+# monsters keep their own names as combatants. The Kin's lead is a follower
+# (the roster mirrors C#'s spawn order, priest last); its node is "The Kin".
+_BOSS_KIND_ENCOUNTER_NAME = {"TorchHeadAmalgam": "Queen", "KinFollower": "The Kin"}
 
 
 def _boss_encounter_title(encounter_id: str) -> str:

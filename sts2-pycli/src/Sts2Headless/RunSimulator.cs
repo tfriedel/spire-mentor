@@ -240,7 +240,15 @@ internal class LocLookup
     /// <summary>Strip BBCode tags like [gold], [/blue], [b], [sine], etc.</summary>
     private static string StripBBCode(string text)
     {
-        return System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        // Inline icons first: the game draws energy and stars as images
+        // (`[img]res://…/ironclad_energy_icon.png[/img]`); text gets the usual
+        // card notation instead of a resource path.
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"\[img\]([^\[]*)\[/img\]",
+            m => m.Groups[1].Value.Contains("energy_icon") ? "\u0001"
+                : m.Groups[1].Value.Contains("star_icon") ? "\u0002" : "");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        return text.Replace("\u0001", "[E]").Replace("\u0002", "[star]");
     }
 
     /// <summary>Language is fixed to English. Property kept for callsite compatibility.</summary>
@@ -271,6 +279,50 @@ internal class LocLookup
     /// `DECIMILLIPEDE_SEGMENT.name` (GH #1324). A template that does not format
     /// falls back to the raw entry.
     /// </summary>
+    /// <summary>
+    /// A card's text as the game renders it on the card
+    /// (`CardModel.GetDescriptionForPile` for the pile it is in): its
+    /// variables filled, keywords added. Falls back to the raw template if
+    /// the game's formatter throws.
+    /// </summary>
+    public string CardText(CardModel card)
+    {
+        try { return StripBBCode(card.GetDescriptionForPile(card.Pile?.Type ?? PileType.None)); }
+        catch (Exception) { return Bilingual("cards", card.Id.Entry + ".description"); }
+    }
+
+    /// <summary>A relic's text with its variables filled (`RelicModel.DynamicDescription`).</summary>
+    public string RelicText(RelicModel relic) =>
+        Text(relic.DynamicDescription, "relics", relic.Id.Entry + ".description");
+
+    /// <summary>A potion's text with its variables filled (`PotionModel.DynamicDescription`).</summary>
+    public string PotionText(PotionModel potion) =>
+        Text(potion.DynamicDescription, "potions", potion.Id.Entry + ".description");
+
+    /// <summary>
+    /// A power's text as its hover tip shows it (`PowerModel.HoverTips`, the
+    /// first tip: the smart description with Amount and the owner filled in).
+    /// </summary>
+    public string PowerText(PowerModel power)
+    {
+        try
+        {
+            // The first tip is the power's own `HoverTip` (its `Description` is
+            // not on the `IHoverTip` interface); read it off the runtime type.
+            var tip = power.HoverTips.FirstOrDefault();
+            if (tip?.GetType().GetProperty("Description")?.GetValue(tip) is string { Length: > 0 } d)
+                return StripBBCode(d);
+        }
+        catch (Exception) { }
+        return Bilingual("powers", power.Id.Entry + ".description");
+    }
+
+    private string Text(LocString text, string table, string key)
+    {
+        try { return Text(text); }
+        catch (Exception) { return Bilingual(table, key); }
+    }
+
     public string Text(LocString text)
     {
         try { return StripBBCode(text.GetFormattedText()); }
@@ -838,7 +890,7 @@ public class RunSimulator
         {
             ["id"] = entry,
             ["name"] = _loc.Relic(entry),
-            ["description"] = _loc.Bilingual("relics", entry + ".description"),
+            ["description"] = relic != null ? _loc.RelicText(relic) : _loc.Bilingual("relics", entry + ".description"),
             ["vars"] = vars.Count > 0 ? vars : null,
         };
         if (index != null) d["index"] = index;
@@ -863,7 +915,7 @@ public class RunSimulator
         {
             ["id"] = entry,
             ["name"] = _loc.Potion(entry),
-            ["description"] = _loc.Bilingual("potions", entry + ".description"),
+            ["description"] = potion != null ? _loc.PotionText(potion) : _loc.Bilingual("potions", entry + ".description"),
             ["vars"] = vars.Count > 0 ? vars : null,
         };
         if (index != null) d["index"] = index;
@@ -946,7 +998,7 @@ public class RunSimulator
                 {
                     ["id"] = c.Id.Entry,
                     ["name"] = _loc.Card(c.Id.Entry),
-                    ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                    ["description"] = _loc.CardText(c),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["upgraded"] = cm.IsUpgraded,
                 });
@@ -3611,7 +3663,7 @@ public class RunSimulator
                         ["name"] = _loc.Card(card.Id.Entry),
                         ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
                         ["type"] = card.Type.ToString(),
-                        ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                        ["description"] = _loc.CardText(card),
                         ["stats"] = stats.Count > 0 ? stats : null,
                     };
                 }).ToList(),
@@ -3644,7 +3696,7 @@ public class RunSimulator
                     ["type"] = cr.Card.Type.ToString(),
                     ["upgraded"] = cr.Card.IsUpgraded,
                     ["rarity"] = cr.Card.Rarity.ToString(),
-                    ["description"] = _loc.Bilingual("cards", cr.Card.Id.Entry + ".description"),
+                    ["description"] = _loc.CardText(cr.Card),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card),
                 };
@@ -3681,7 +3733,7 @@ public class RunSimulator
                     ["upgraded"] = card.IsUpgraded,
                     ["rarity"] = card.Rarity.ToString(),
                     ["stats"] = stats.Count > 0 ? stats : null,
-                    ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                    ["description"] = _loc.CardText(card),
                     ["after_upgrade"] = GetUpgradedInfo(card),
                 };
             }).ToList();
@@ -4516,7 +4568,7 @@ public class RunSimulator
             // state. The run-scope deck serializer already emits it.
             ["upgraded"] = c.IsUpgraded,
             ["stats"] = stats.Count > 0 ? stats : null,
-            ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+            ["description"] = _loc.CardText(c),
             ["tinker_time_rider"] = MadScienceRider(c),
             // GH #370. The SINGLE-TURN halves of Sly and Retain live in two
             // private `CardModel` bools (`_hasSingleTurnSly`,
@@ -4638,7 +4690,7 @@ public class RunSimulator
                     // with no loc title resolve to None and were silently dropped,
                     // defanging the enemy in the dict-reconstructed search).
                     ["id"] = pw.Id.Entry,
-                    ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
+                    ["description"] = _loc.PowerText(pw),
                     ["amount"] = pw.Amount,
                     // Counter powers (e.g. Slow) override DisplayAmount: Amount is
                     // the stack count (constant) while DisplayAmount is the value
@@ -4738,7 +4790,7 @@ public class RunSimulator
             // Canonical power id; see the enemy-power note above (lets the hint
             // adapter reconstruct the power from the id, not the ambiguous title).
             ["id"] = pw.Id.Entry,
-            ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
+            ["description"] = _loc.PowerText(pw),
             ["amount"] = pw.Amount,
             // See enemy-power note above: DisplayAmount is the player-facing
             // (and scaling) value for Counter powers; Amount is the stack count.
@@ -5187,7 +5239,7 @@ public class RunSimulator
                 // A reward card can come already upgraded (act 2+ odds, an egg
                 // relic); without the flag it reads as the plain card.
                 ["upgraded"] = c.IsUpgraded,
-                ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                ["description"] = _loc.CardText(c),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["after_upgrade"] = GetUpgradedInfo(c),
             };
@@ -5574,7 +5626,7 @@ public class RunSimulator
                     ["name"] = _loc.Card(entry),
                     ["type"] = card?.Type.ToString() ?? "?",
                     ["card_cost"] = cardCost,
-                    ["description"] = _loc.Bilingual("cards", entry + ".description"),
+                    ["description"] = card != null ? _loc.CardText(card) : _loc.Bilingual("cards", entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["after_upgrade"] = card != null ? GetUpgradedInfo(card) : null,
                     ["cost"] = e.Cost,
@@ -5642,7 +5694,7 @@ public class RunSimulator
             item["type"] = "relic";
             item["id"] = relic.Id.Entry;
             item["name"] = _loc.Relic(relic.Id.Entry);
-            item["description"] = _loc.Bilingual("relics", relic.Id.Entry + ".description");
+            item["description"] = _loc.RelicText(relic);
         }
         if (entry.ChestRelic != null)
         {
@@ -5662,7 +5714,7 @@ public class RunSimulator
                 item["type"] = "potion";
                 item["id"] = potion.Potion.Id.Entry;
                 item["name"] = _loc.Potion(potion.Potion.Id.Entry);
-                item["description"] = _loc.Bilingual("potions", potion.Potion.Id.Entry + ".description");
+                item["description"] = _loc.PotionText(potion.Potion);
                 break;
             case MegaCrit.Sts2.Core.Rewards.SpecialCardReward special:
                 item["type"] = "special_card";
@@ -5670,7 +5722,7 @@ public class RunSimulator
                 {
                     item["id"] = card.Id.ToString();
                     item["name"] = _loc.Card(card.Id.Entry);
-                    item["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description");
+                    item["description"] = _loc.CardText(card);
                 }
                 break;
             case CardReward:
@@ -6397,7 +6449,7 @@ public class RunSimulator
             {
                 ["cost"] = clone.EnergyCost?.GetResolved() ?? 0,
                 ["stats"] = stats.Count > 0 ? stats : null,
-                ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                ["description"] = _loc.CardText(clone),
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
@@ -6490,7 +6542,7 @@ public class RunSimulator
                     // CHOSEN_CHEESE → "The Chosen Cheese") false-diverged.
                     ["id"] = r.Id.Entry,
                     ["name"] = _loc.Relic(r.Id.Entry),
-                    ["description"] = _loc.Bilingual("relics", r.Id.Entry + ".description"),
+                    ["description"] = _loc.RelicText(r),
                     ["vars"] = vars.Count > 0 ? vars : null,
                     // The relic's LIVE counter, for the relics that have one.
                     // `vars` above are the canonical thresholds (Nunchaku's
@@ -6542,7 +6594,7 @@ public class RunSimulator
                     // read only by the run tracer.
                     ["entry"] = p.Id.Entry,
                     ["name"] = _loc.Potion(p.Id.Entry),
-                    ["description"] = _loc.Bilingual("potions", p.Id.Entry + ".description"),
+                    ["description"] = _loc.PotionText(p),
                     ["vars"] = pvars.Count > 0 ? pvars : null,
                     ["target_type"] = p.TargetType.ToString(),
                 };
@@ -6560,7 +6612,7 @@ public class RunSimulator
                     ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
                     ["type"] = c.Type.ToString(),
                     ["upgraded"] = c.IsUpgraded,
-                    ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                    ["description"] = _loc.CardText(c),
                     ["stats"] = dstats.Count > 0 ? dstats : null,
                     ["keywords"] = dkws?.Count > 0 ? dkws : null,
                     ["tinker_time_rider"] = MadScienceRider(c),

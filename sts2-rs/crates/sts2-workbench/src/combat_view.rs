@@ -40,11 +40,14 @@ pub fn act_name(act_index: u8, act1: &str) -> Option<&'static str> {
 
 /// `_BOSS_KIND_ENCOUNTER_NAME`: boss encounters the map labels by their
 /// common encounter name rather than by the fight's lead monster (the Queen
-/// fight's lead is the Torch Head Amalgam it spawns alongside her).
+/// fight's lead is the Torch Head Amalgam it spawns alongside her, The Kin's a
+/// follower).
 #[must_use]
 pub fn boss_kind_encounter_name(kind: &str) -> Option<&'static str> {
     match kind {
         "TorchHeadAmalgam" => Some("Queen"),
+        // The Kin's lead is a follower (roster in C# spawn order, priest last).
+        "KinFollower" => Some("The Kin"),
         _ => None,
     }
 }

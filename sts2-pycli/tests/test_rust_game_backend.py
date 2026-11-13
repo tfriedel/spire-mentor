@@ -776,13 +776,15 @@ def test_full_map_boss_carries_pre_rolled_name() -> None:
     where the boss is visible on the map widget at act start. Act 1's
     live pool is multi-entry (Vantom, Ceremonial Beast, The Kin); the
     seed-dependent pick is one of those three, and the Python side
-    resolves a display ``name`` from ``kind``."""
+    resolves a display ``name`` from ``kind``. The Kin's ``kind`` is its
+    lead roster entry, a ``KinFollower`` (C# spawn order, priest last); the
+    node is labelled by the encounter, "The Kin"."""
     g = _new()
     boss = g.get_map().get("boss")
     assert isinstance(boss, dict)
     assert boss.get("type") == "Boss"
-    assert boss.get("kind") in {"Vantom", "CeremonialBeast", "KinPriest"}
-    assert boss.get("name") in {"Vantom", "Ceremonial Beast", "Kin Priest"}
+    assert boss.get("kind") in {"Vantom", "CeremonialBeast", "KinFollower"}
+    assert boss.get("name") in {"Vantom", "Ceremonial Beast", "The Kin"}
     g.close()
 
 

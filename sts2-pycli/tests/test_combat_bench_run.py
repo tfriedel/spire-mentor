@@ -420,14 +420,21 @@ def test_damage_rows_and_hp_end_on_a_clean_burning_blood_win(engine_env):
 
 
 def test_unlogged_thorns_damage_is_booked_and_the_end_hp_still_balances(engine_env):
-    rm, rec = _play(THORNS)
-    assert rec["end"] == "won"
-    rows = _player_damage(rm)
-    assert rec["dmg_c"] == sum(r["hp_before"] - r["hp_after"] for r in rows)
-    assert rec["dmg_unlogged"] > 0
-    # No heal source: every HP lost is a row or unlogged, nothing else.
-    assert rec["hp_end_combat"] == THORNS["hp_before"] - rec["dmg_c"] - rec["dmg_unlogged"]
-    assert rec["hp_after"] == min(rec["hp_end_combat"] + 6, rec["max_hp_after"])
+    # Whether the agent hits a Toadpole while its Thorns are up depends on the
+    # line it plays, which moves with the build's card content (v0.113.0 rep 0
+    # kills both before Spike Spit's Thorns matter). Play a few reps: every one
+    # must balance, and at least one must book Thorns damage.
+    unlogged = []
+    for rep in range(4):
+        rm, rec = _play(THORNS, rep)
+        assert rec["end"] == "won", (rep, rec)
+        rows = _player_damage(rm)
+        assert rec["dmg_c"] == sum(r["hp_before"] - r["hp_after"] for r in rows)
+        # No heal source: every HP lost is a row or unlogged, nothing else.
+        assert rec["hp_end_combat"] == THORNS["hp_before"] - rec["dmg_c"] - rec["dmg_unlogged"]
+        assert rec["hp_after"] == min(rec["hp_end_combat"] + 6, rec["max_hp_after"])
+        unlogged.append(rec["dmg_unlogged"])
+    assert max(unlogged) > 0, unlogged
 
 
 def test_every_fixture_balances_and_heals_are_never_negative(engine_env):

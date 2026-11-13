@@ -1333,6 +1333,9 @@ _V0111_ADDED_CLASS_CARDS: dict[str, list[str]] = {
 }
 _V0111_ADDED_COLORLESS_CARDS: list[str] = ["THE_BALL"]
 _V0111_ADDED_EVENT_CARDS: list[str] = ["ABUNDANCE"]
+#: v0.113.0 event cards (`CardId::V0113_ONLY`): Waterfall of Obvious Secrets'
+#: Dingy Dagger, Shrine of the Warlord's Mighty Weapon and Mighty Shield.
+_V0113_ADDED_EVENT_CARDS: list[str] = ["DINGY_DAGGER", "MIGHTY_WEAPON", "MIGHTY_SHIELD"]
 
 
 def sweep_game_version() -> str:
@@ -1376,8 +1379,12 @@ def colorless_cards_for_build(game_version: str | None = None) -> list[str]:
 
 
 def event_cards_for_build(game_version: str | None = None) -> list[str]:
-    """`ALL_EVENT_CARDS` at `game_version`."""
-    return _for_build(ALL_EVENT_CARDS, _V0111_ADDED_EVENT_CARDS, game_version)
+    """`ALL_EVENT_CARDS` at `game_version`; v0.113.0 appends its event cards."""
+    version = game_version or sweep_game_version()
+    cards = _for_build(ALL_EVENT_CARDS, _V0111_ADDED_EVENT_CARDS, version)
+    if _version_tuple(version) >= (0, 113, 0):
+        cards = cards + _V0113_ADDED_EVENT_CARDS
+    return cards
 
 
 def _v2_card_pool(character: str, game_version: str | None = None) -> list[str]:

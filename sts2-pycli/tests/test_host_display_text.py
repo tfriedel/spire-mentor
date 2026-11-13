@@ -48,3 +48,34 @@ def test_decimillipede_segments_and_a_potion_power_have_display_names(game):
     assert names.get("SPEED_POTION_POWER") == "Speed Potion", names
     for name in [*names.values(), *(e["name"] for e in state["enemies"])]:
         assert not UNLOCALIZED.match(name), name
+
+
+def test_cards_relics_potions_and_powers_carry_their_filled_text(game):
+    """Descriptions are the game's own rendering (`CardModel.GetDescriptionForPile`,
+    `DynamicDescription`, the power's hover tip), not the raw template: Beckon's
+    ``lose {HpLoss} HP`` reached the agent unfilled. Energy icons read ``[E]``."""
+    game.send({"cmd": "start_run", "character": "Ironclad", "seed": "TEXT1", "ascension": 0})
+    game.send(
+        {
+            "cmd": "set_player",
+            "deck": ["BECKON", "OFFERING", "BASH"],
+            "relics": ["BURNING_BLOOD", "LANTERN"],
+            "potions": ["SPEED_POTION"],
+        }
+    )
+    state = game.send({"cmd": "enter_room", "type": "monster", "encounter": "TOADPOLES_WEAK"})
+    cards = {c["id"]: c["description"] for c in state["hand"] + state.get("draw_pile", [])}
+    assert cards["CARD.BECKON"].endswith("lose 6 HP.")
+    assert cards["CARD.OFFERING"].startswith("Lose 6 HP.\nGain [E][E].\nDraw 3 cards.")
+    assert cards["CARD.BASH"] == "Deal 8 damage.\nApply 2 Vulnerable."
+    relics = {r["id"]: r["description"] for r in state["player"]["relics"]}
+    assert relics["BURNING_BLOOD"] == "At the end of combat, heal 6 HP."
+    assert relics["LANTERN"] == "Start each combat with an additional [E]."
+    potion = state["player"]["potions"][0]["description"]
+    assert potion == "Gain 5 Dexterity. At the end of your turn, lose 5 Dexterity."
+
+    state = game.send({"cmd": "action", "action": "use_potion", "args": {"potion_index": 0}})
+    powers = {p["id"]: p["description"] for p in state["player_powers"]}
+    assert powers["SPEED_POTION_POWER"] == "Gain 5 Dexterity until the end of this turn."
+    texts = [*cards.values(), *relics.values(), potion, *powers.values()]
+    assert not [t for t in texts if PLACEHOLDER.search(t) or "res://" in t]

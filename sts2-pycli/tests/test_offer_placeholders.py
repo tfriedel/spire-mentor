@@ -42,8 +42,9 @@ _ALLOWED_MISSING = {"singlestaricon", "energyprefix"}
 # A capitalised "[VarName]" left in the rendered output means a template token
 # survived strip-but-not-substitute — i.e. the payload sent no vars dict at all
 # (the original shop-relic bug shape). Lowercase bracket tokens are synthetic
-# icons and are checked via the stderr warning path instead.
-_BRACKET_RESIDUE = re.compile(r"\[[A-Z][A-Za-z0-9]*\]")
+# icons and are checked via the stderr warning path instead. ``[E]`` is the
+# host's rendering of the game's energy icon (GH #1324), not a template token.
+_BRACKET_RESIDUE = re.compile(r"\[(?!E\])[A-Z][A-Za-z0-9]*\]")
 _MISSING_WARNING = re.compile(r"missing template var:\s*(\S+)")
 
 
