@@ -77,7 +77,11 @@ pub(crate) fn play_charge(state: &mut CombatState, _t: Option<CreatureUid>) -> E
             ))
         })
         .collect();
-    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    keyed.sort_by(|a, b| {
+        a.0.cmp(&b.0).then_with(|| {
+            sts2_core::cards::draw_select_tiebreak(&state.cards, a.2, b.2, state.game_version)
+        })
+    });
     let options: Vec<sts2_core::ChoiceOption> = keyed
         .iter()
         .filter_map(|&(_, _, uid)| {

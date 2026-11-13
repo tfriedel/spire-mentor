@@ -3913,6 +3913,12 @@ pub struct TurnEvents {
     /// `combat_loop::flush_played_cards_after_choice` sends it to the hand top
     /// once the choice closes. `None` at rest.
     pub feral_claimed_in_play: Option<CardUid>,
+    /// v0.113.0 `JugglingPower` Data `cardToClone`: the turn's 3rd Attack,
+    /// remembered by `BeforeCardPlayed` and cloned (then cleared) by
+    /// `AfterCardPlayed` once that play finishes. Kept apart from the power's
+    /// counter (`attacksPlayedThisTurn`), which `AfterSideTurnEnd` resets
+    /// without touching this. Per combat, not reset per turn. `None` at rest.
+    pub juggling_card_to_clone: Option<CardUid>,
     /// The `Hook.AfterCardPlayed` walk running now is an auto-play's (C#
     /// `cardPlay.IsAutoPlay`): Brilliant Scarf's listener skips it
     /// (BrilliantScarf.cs:95-98, both builds). `false` at rest.
@@ -5211,9 +5217,12 @@ pub struct CombatState {
 // card cost model (an ordered `CardEnergyCost` list per card) must not grow
 // it past what it was before (8168 bytes on x86-64; `PendingPlay` holds a
 // `Card` inline). Raise this only deliberately, after the clone bench.
+// The one deliberate raise: v0.113.0's `PlayerRng.NonCombatGeneration`
+// stream (one more `Rng` in the embedded `RunRngSet`), which in-combat
+// content draws from (Entropic Brew, Delicate Frond, War Hammer).
 const _: () = assert!(
-    core::mem::size_of::<CombatState>() <= 8168,
-    "size_of::<CombatState>() grew past 8168 bytes"
+    core::mem::size_of::<CombatState>() <= 8168 + core::mem::size_of::<crate::dotnet_rng::Rng>(),
+    "size_of::<CombatState>() grew past 8168 bytes + the NonCombatGeneration Rng"
 );
 
 impl Default for CombatState {
@@ -5398,13 +5407,18 @@ impl CombatState {
                 props = props.union(crate::hooks::ValueProps::MOVE);
             }
             let dealer = crate::hooks::CreatureRef::Nobody;
+            // v0.113.0: the card source reaches the damage call so Buffer can
+            // let a Brightest Flame (the only card-sourced max-HP loss) through
+            // (`BufferPower.cs:26-29`).
+            let card = (from_card && self.game_version >= crate::GameVersion::V0_113_0)
+                .then_some(crate::cards::CardId::BrightestFlame);
             if self.player.creature_uid == Some(owner) {
                 let _ = crate::combat_loop::apply_damage_to_player(
                     self,
                     dealer,
                     cur - new_max,
                     props,
-                    None,
+                    card,
                 );
             } else {
                 let _ =
@@ -8313,11 +8327,12 @@ impl CombatState {
             return self.draw_suspending(n, from_hand_draw);
         }
         let hand_len_before = self.player.hand.len();
-        let (moved, shuffles) = crate::cards::draw_signaling(
+        let (moved, shuffles) = crate::cards::draw_signaling_for(
             &mut self.player,
             n,
             &self.cards,
             &mut self.run_rng.shuffle,
+            self.game_version,
         );
         // bead sts2-rs-o05r: per-combat cards-drawn counter. Saturate
         // at `u16::MAX` so degenerate infinite-draw scenarios can't alias
@@ -8622,10 +8637,11 @@ impl CombatState {
             // `sts2-rs-draw-end-reshuffle`.
             if self.player.draw.is_empty() && !crate::combat_loop::combat_is_ending(self) {
                 let perfect_fit_order = self.perfect_fit_listener_order();
-                let shuffled = crate::cards::discard_pile_into_draw_pile_signaling(
+                let shuffled = crate::cards::discard_pile_into_draw_pile_signaling_for(
                     &mut self.player,
                     &self.cards,
                     &mut self.run_rng.shuffle,
+                    self.game_version,
                 );
                 if shuffled {
                     // C# `CardPileCmd.Shuffle` order: StableShuffle →
@@ -9440,10 +9456,11 @@ impl CombatState {
             return false;
         }
         let perfect_fit_order = self.perfect_fit_listener_order();
-        let shuffled = crate::cards::discard_pile_into_draw_pile_signaling(
+        let shuffled = crate::cards::discard_pile_into_draw_pile_signaling_for(
             &mut self.player,
             &self.cards,
             &mut self.run_rng.shuffle,
+            self.game_version,
         );
         if shuffled {
             let cards_snapshot: Vec<crate::cards::Card> = self.cards.to_vec();
@@ -10155,10 +10172,11 @@ impl CombatState {
     /// for the `after_shuffle` surface.
     pub fn shuffle_draw_pile(&mut self) {
         let perfect_fit_order = self.perfect_fit_listener_order();
-        crate::cards::shuffle_draw_and_discard(
+        crate::cards::shuffle_draw_and_discard_for(
             &mut self.player,
             &self.cards,
             &mut self.run_rng.shuffle,
+            self.game_version,
         );
         // Bead `sts2-rs-6ynt.11`: enchantment `modify_shuffle_order`
         // channel. Explicit shuffle path (not an auto-reshuffle) —
@@ -10406,10 +10424,11 @@ impl CombatState {
             return false;
         }
         let perfect_fit_order = self.perfect_fit_listener_order();
-        if crate::cards::discard_pile_into_draw_pile_signaling(
+        if crate::cards::discard_pile_into_draw_pile_signaling_for(
             &mut self.player,
             &self.cards,
             &mut self.run_rng.shuffle,
+            self.game_version,
         ) {
             // C# `CardPileCmd.Shuffle`: `Hook.ModifyShuffleOrder`, then
             // `Hook.AfterShuffle`.
@@ -13147,7 +13166,18 @@ impl CombatState {
             // they outlive the flush on this pile-less clone (loadout Silent
             // 1264 v0.111.0: an Expertise-drawn Untouchable's three copies were
             // retained next turn).
-            let flags = self.clone_flags_of(uid);
+            let mut flags = self.clone_flags_of(uid);
+            if self.game_version >= GameVersion::V0_113_0 {
+                // v0.113.0 `NightmarePower.SetSelectedCard` also runs
+                // `EndOfTurnCleanup` on the snapshot (NightmarePower.cs:59):
+                // the single-turn Retain / Sly, the `EndOfTurn` cost
+                // modifiers, a this-turn free star cost and
+                // `ExhaustOnNextPlay` do not reach the next-turn copies.
+                flags &= !0b11;
+                snapshot.cost.end_of_turn_cleanup();
+                snapshot.set_combat_var(crate::cards::VarKey::StarCostFreeThisTurn, 0);
+                snapshot.set_combat_var(crate::cards::VarKey::ExhaustOnNextPlay, 0);
+            }
             snapshot.set_combat_var(crate::cards::VarKey::CloneTurnFlags, flags);
             let snaps = &mut self.combat_log.nightmare_snapshots;
             snaps.retain(|(p, _)| *p != puid);

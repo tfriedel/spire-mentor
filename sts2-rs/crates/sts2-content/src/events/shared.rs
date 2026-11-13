@@ -640,7 +640,9 @@ pub fn battleworn_dummy_resume(
             let _ = state.upgrade_random_cards_stable_with_rng(2, &mut rng);
         }
         BattlewornDummySetting::Setting3 => {
-            let rarity = state.roll_reward_relic_rarity();
+            // v0.113.0: `PullNextRelicFromFront(Owner, base.Rng)` — read #1 of
+            // the event stream (Setting 3 draws nothing else from it).
+            let rarity = super::event_relic_rarity(state, BATTLEWORN_DUMMY_STREAM, 0);
             if let Some(id) = state.pop_relic_from_grab_bag(rarity) {
                 if state.game_version >= sts2_core::GameVersion::V0_111_0 {
                     // v0.111.0: the relic is OFFERED (`new RelicReward(relic,
@@ -1160,7 +1162,7 @@ fn darv_relic_options(state: &RunState) -> [RelicId; 3] {
         .filter(|(keep, _)| *keep)
         .map(|(_, relics)| rng_next_item(&mut rng, relics))
         .collect();
-    rng.shuffle(&mut source);
+    rng.shuffle_for(state.game_version, &mut source);
 
     if rng.next_bool() {
         [source[0], source[1], RelicId::DustyTome]
@@ -1407,6 +1409,12 @@ fn doors_light(state: &mut RunState) -> EventOutcome {
     // `base.Rng`; this is the FIRST (and only) `base.Rng` read of the event
     // (CanonicalVars = `CardsVar(2)`, no entry roll) → fresh `event_rng` at
     // cursor 0 matches.
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0 `Light`: `CardSelectCmd.FromDeckForUpgrade(prefs(1))` — the
+        // player upgrades ONE card of their choice, no event-stream read.
+        let _ = state.upgrade_random_cards(1);
+        return EventOutcome::finished("Upgrade 1 card.");
+    }
     let mut rng = event_rng(state, DOORS_OF_LIGHT_AND_DARK_STREAM);
     let _ = state.upgrade_random_cards_stable_with_rng(2, &mut rng);
     EventOutcome::finished("Upgraded 2 cards.")
@@ -1430,7 +1438,14 @@ const DOORS_OPTIONS: &[EventOptionSpec] = &[
         default_label: "Door of Light",
         default_description: "Upgrade 2 random cards",
         default_vars: &[("Cards", EventVarSpec::Int(2))],
-        vars_fn: None,
+        // v0.113.0 drops `CardsVar(2)` from `CanonicalVars`.
+        vars_fn: Some(|s| {
+            if s.game_version >= sts2_core::GameVersion::V0_113_0 {
+                Vec::new()
+            } else {
+                vec![("Cards", 2.into())]
+            }
+        }),
         title_vars_fn: None,
         handler: doors_light,
     },
@@ -2250,6 +2265,40 @@ mod tests {
             niche_before,
             "v0.107.1 draws the shuffle from the event stream, not the niche stream",
         );
+    }
+
+    /// v0.113.0 `DoorsOfLightAndDark.Light` (`DoorsOfLightAndDark.cs:23`) is
+    /// `CardSelectCmd.FromDeckForUpgrade(prefs(1))` -- a player pick reading no
+    /// RNG. Under agent decisions (PPO env, e2e env, workbench, run_parity
+    /// lockstep) the door queues one pick and draws from neither the rewards
+    /// stream nor the event stream (PR #1319 review finding 1).
+    #[test]
+    fn doors_light_v0113_agent_mode_queues_one_pick_and_reads_no_rng() {
+        crate::cards::dispatch::ensure_installed();
+        let mut rs = RunState::new();
+        rs.game_version = sts2_core::GameVersion::V0_113_0;
+        rs.set_agent_decisions();
+        rs.master_deck.clear();
+        for _ in 0..4 {
+            rs.master_deck.push(
+                crate::cards::spec_index::card_pod_from_id(
+                    sts2_core::cards::CardId::StrikeIronclad,
+                    false,
+                )
+                .expect("strike exists"),
+            );
+        }
+        let rewards_before = rs.rng.rewards.counter();
+        let niche_before = rs.rng.niche.counter();
+        let outcome = doors_light(&mut rs);
+        assert!(outcome.finished);
+        assert_eq!(rs.pending_deck_upgrades, 1, "one FromDeckForUpgrade pick");
+        assert!(
+            rs.master_deck.iter().all(|c| !c.upgraded),
+            "nothing auto-upgraded"
+        );
+        assert_eq!(rs.rng.rewards.counter(), rewards_before, "no rewards read");
+        assert_eq!(rs.rng.niche.counter(), niche_before, "no niche read");
     }
 
     /// The two event-local upgrade streams are seeded by distinct event Ids

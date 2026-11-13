@@ -23,7 +23,19 @@ pub(crate) fn preview_helix_drill(
     _target: Option<CreatureUid>,
 ) -> i32 {
     let own_cost = if sts2_core::card_effects::resolving_card_uid(state) == Some(card.uid) {
-        sts2_core::hooks::effective_card_cost(state, card.uid)
+        if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+            // v0.113.0 `HelixDrill.cs:36-39`: subtract the in-progress
+            // play's `Resources.EnergySpent`, not the card's current cost.
+            // `CardCmd.AutoPlay` sets it to 0 (CardCmd.cs:125); Rust's
+            // `energy_spent` then holds the play's `EnergyValue` instead.
+            if state.combat_log.resolving_auto_play {
+                0
+            } else {
+                card.energy_spent
+            }
+        } else {
+            sts2_core::hooks::effective_card_cost(state, card.uid)
+        }
     } else {
         0
     };

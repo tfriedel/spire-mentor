@@ -41,7 +41,7 @@ pub(crate) fn play_drain_power(
     state
         .run_rng
         .combat_card_selection
-        .shuffle(upgradable.as_mut_slice());
+        .shuffle_for(state.game_version, upgradable.as_mut_slice());
 
     // C# `CardCmd.Upgrade` returns early while `CombatManager.IsEnding`
     // (CardCmd.cs:267-270), AFTER `TakeRandom` already shuffled. So a killing

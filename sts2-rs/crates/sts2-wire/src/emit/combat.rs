@@ -346,6 +346,15 @@ pub fn run_rng_counters(state: &CombatState) -> Value {
     set(&mut d, "rewards", rng.rewards.counter());
     set(&mut d, "shops", rng.shops.counter());
     set(&mut d, "transformations", rng.transformations.counter());
+    // v0.113.0 `PlayerRng.NonCombatGeneration`; emitted only for the builds
+    // that have it so older wire goldens keep their key set.
+    if rng.game_version >= sts2_core::GameVersion::V0_113_0 {
+        set(
+            &mut d,
+            "non_combat_generation",
+            rng.non_combat_generation.counter(),
+        );
+    }
     Value::Object(d)
 }
 

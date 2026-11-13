@@ -850,7 +850,8 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
                 .collect();
             if let Ok(last) = i32::try_from(upgradable.len().wrapping_sub(1)) {
                 if !upgradable.is_empty() {
-                    let idx = rs.rng.niche.next_int(0, last) as usize;
+                    // v0.113.0: `PlayerRng.NonCombatGeneration.NextItem`.
+                    let idx = rs.rng.non_combat_or_niche().next_int(0, last) as usize;
                     let deck_idx = upgradable[idx];
                     let version = rs.game_version;
                     rs.master_deck[deck_idx].upgrade_for(version);

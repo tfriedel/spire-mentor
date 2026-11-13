@@ -26,6 +26,13 @@ pub(crate) fn on_after_died_to_doom(state: &mut CombatState, ctx: &DiedToDoomCtx
     if state.player.creature_uid == Some(ctx.victim) {
         return EffectResult::NotImplemented;
     }
+    // v0.113 counts `c.IsEnemy` instead (BookRepairKnife.cs:24): a doomed
+    // pet / ally heals nothing either.
+    if state.game_version >= crate::GameVersion::V0_113_0
+        && !state.enemy_uids.iter().any(|u| u.0 == ctx.victim.0)
+    {
+        return EffectResult::NotImplemented;
+    }
     // `c.Powers.All(p => p.ShouldOwnerDeathTriggerFatal())`: a Minion, or a
     // Decimillipede segment whose siblings stand (it REATTACHes), heals
     // nothing (act23 Necrobinder:1004: Doom took two of three segments and

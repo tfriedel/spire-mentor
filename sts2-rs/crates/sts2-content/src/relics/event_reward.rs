@@ -1486,7 +1486,8 @@ fn listener_darkstone_periapt(rs: &mut RunState, ctx: &CardAddedRunCtx) -> Effec
     EffectResult::Resolved
 }
 
-/// Run-side `BingBong.AfterCardChangedPiles` (`BingBong.cs:28-38`, both builds):
+/// Run-side `BingBong.AfterCardChangedPiles` (`BingBong.cs:28-38`, v0.107.1 /
+/// v0.111.0):
 ///
 /// [decompiled C# omitted — see the cited path]
 ///
@@ -1495,6 +1496,13 @@ fn listener_darkstone_periapt(rs: &mut RunState, ctx: &CardAddedRunCtx) -> Effec
 /// it: here [`AddSource::BingBongDuplicate`]. The added card is the newest deck
 /// card with the context's id (a batch add appends every card before any
 /// listener runs, `CardPileCmd.cs:497-636`).
+///
+/// v0.113.0 drops `CardsToSkip`; the `clonedBy == null` guard alone keeps
+/// the clone from recursing. The set never decided anything here: `&&`
+/// short-circuits on `clonedBy` before `CardsToSkip.Remove` runs for the
+/// clone, and nothing else is ever in the set. So one body serves every
+/// build. (The Hoarder modifier made the same change; custom-run modifiers
+/// are not modelled.)
 ///
 /// [`AddSource::BingBongDuplicate`]: sts2_core::relic_effects::AddSource::BingBongDuplicate
 fn listener_bing_bong_run(rs: &mut RunState, ctx: &CardAddedRunCtx) -> EffectResult {

@@ -211,7 +211,7 @@ def _needs(nodeid: str) -> str | None:
 #:   these builds (``tests/e2e/test_e2e_static_tables.py`` ``PENDING_TABLES``).
 PENDING_BUILDS: dict[str, tuple[frozenset[str], str, type[BaseException] | None]] = {
     "run_level": (
-        frozenset({"v0.113.0"}),
+        frozenset(),
         "run level (Neow offer, act rolls) not ported to this build yet (GH #1303)",
         None,
     ),

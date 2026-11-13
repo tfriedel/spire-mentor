@@ -129,11 +129,28 @@ def v0111_only_cards() -> frozenset[str]:
     return frozenset(names[v] for v in re.findall(r"Self::(\w+)", m.group(1)))
 
 
+_V0113_ONLY = re.compile(r"pub const V0113_ONLY: \[CardId; \d+\] = \[(.*?)\];", re.S)
+
+
+@lru_cache(maxsize=1)
+def v0113_only_cards() -> frozenset[str]:
+    """Id strings of `CardId::V0113_ONLY` — cards that exist from v0.113.0 on."""
+    text = _CARD_IDS_RS.read_text(encoding="utf-8")
+    m = _V0113_ONLY.search(text)
+    if m is None:
+        raise RuntimeError(f"no CardId::V0113_ONLY list found in {_CARD_IDS_RS}")
+    names = card_id_python_names()
+    return frozenset(names[v] for v in re.findall(r"Self::(\w+)", m.group(1)))
+
+
+def _version_tuple(game_version: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in game_version.lstrip("v").split("."))
+
+
 def has_v0111_cards(game_version: str) -> bool:
     """Whether `game_version` (``"v0.111.0"``-style) has v0.111.0's card set,
     i.e. is v0.111.0 or later."""
-    parts = tuple(int(x) for x in game_version.lstrip("v").split("."))
-    return parts >= (0, 111, 0)
+    return _version_tuple(game_version) >= (0, 111, 0)
 
 
 def sweepable_cards(game_version: str = "v0.107.1") -> set[str]:
@@ -141,12 +158,15 @@ def sweepable_cards(game_version: str = "v0.107.1") -> set[str]:
 
     `game_version` picks the build: v0.107.1 (the default) leaves out the
     v0.111.0-only cards; v0.111.0 and later leave out the cards v0.111.0
-    removed (Rust gates the same split on ``>= V0_111_0``).
+    removed (Rust gates the same split on ``>= V0_111_0``). Builds before
+    v0.113.0 also leave out the v0.113.0-only cards.
     """
     if has_v0111_cards(game_version):
-        excluded = V0111_REMOVED_CARDS
+        excluded = set(V0111_REMOVED_CARDS)
     else:
-        excluded = v0111_only_cards()
+        excluded = set(v0111_only_cards())
+    if _version_tuple(game_version) < (0, 113, 0):
+        excluded |= v0113_only_cards()
     return {
         name
         for name, rarity in engine_cards().items()

@@ -1801,6 +1801,21 @@ pub(crate) fn hp_lost_after_osty(
     props: ValueProps,
     amount: i32,
 ) -> i32 {
+    hp_lost_after_osty_buffer(state, target, dealer, props, amount, true)
+}
+
+/// [`hp_lost_after_osty`] with the Buffer stage optional: v0.113.0
+/// `BufferPower.ModifyHpLostAfterOstyLate` returns the amount unchanged for a
+/// `BrightestFlame` card source (`BufferPower.cs:26-29`), so that loss is
+/// neither absorbed nor spends a stack.
+pub(crate) fn hp_lost_after_osty_buffer(
+    state: &mut CombatState,
+    target: CreatureRef,
+    dealer: CreatureRef,
+    props: ValueProps,
+    amount: i32,
+    buffer: bool,
+) -> i32 {
     let mut amount = amount;
     if amount > 0 && relic_channel_live(state, PlannedChannel::ModifyHpLost) {
         if let Some(target_uid) = target.to_creature_uid(state) {
@@ -1812,7 +1827,7 @@ pub(crate) fn hp_lost_after_osty(
             amount = crate::relic_effects::dispatch_modify_hp_lost(state, &ml_ctx, amount);
         }
     }
-    if amount > 0 && decrement_buffer_on_target(state, target) {
+    if buffer && amount > 0 && decrement_buffer_on_target(state, target) {
         amount = 0;
     }
     amount

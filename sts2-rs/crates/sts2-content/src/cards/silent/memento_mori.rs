@@ -14,6 +14,30 @@ pub(crate) fn play_memento_mori(
     state: &mut CombatState,
     target: Option<CreatureUid>,
 ) -> EffectResult {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0: `HittableEnemies.MinBy(c => c.CurrentHp)` — the first
+        // living enemy with the lowest current HP, no RNG — then a flat
+        // `DamageVar` hit (decomp MementoMori.cs:24-33).
+        let lowest = state
+            .enemy_uids
+            .iter()
+            .filter_map(|u| {
+                state
+                    .creatures
+                    .iter()
+                    .find(|c| c.id == u.0 && c.current_hp > 0)
+                    .map(|c| (*u, c.current_hp))
+            })
+            .fold(None::<(CreatureUid, i32)>, |best, (u, hp)| match best {
+                Some((_, b)) if b <= hp => best,
+                _ => Some((u, hp)),
+            });
+        if let Some((t, _)) = lowest {
+            let damage = resolving_preview(state, preview_memento_mori, Some(t));
+            let _ = deal_damage_player_to_enemy(state, t, damage);
+        }
+        return EffectResult::Resolved;
+    }
     let t = target.expect("MementoMori: Enemy-targeted");
     // C# `MementoMori.cs` CalculatedDamage =
     //   CalculationBase + ExtraDamage × count(CardDiscardedEntry @ Owner == player,
@@ -35,6 +59,10 @@ pub(crate) fn preview_memento_mori(
     card: &Card,
     _target: Option<CreatureUid>,
 ) -> i32 {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0: a flat `DamageVar` (decomp MementoMori.cs:17).
+        return card.base_damage;
+    }
     let extra: i32 = if card.upgraded { 5 } else { 4 };
     let discarded = i32::from(state.combat_log.cards_discarded_this_turn);
     card.base_damage

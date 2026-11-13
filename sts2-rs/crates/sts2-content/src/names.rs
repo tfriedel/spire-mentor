@@ -231,7 +231,12 @@ pub fn card_id_from_str(input: &str) -> Option<CardId> {
     // GH #793: the v0.111.0-only ids are outside `CardId::all` (the v0.107.1
     // universe the tables above walk). A v0.111.0 scenario deck names them, so
     // resolve them last — after every v0.107.1 name, which they cannot shadow.
-    let v0111: Vec<CardId> = CardId::V0111_ONLY.to_vec();
+    // The v0.113.0-only ids follow the same rule.
+    let v0111: Vec<CardId> = CardId::V0111_ONLY
+        .iter()
+        .chain(CardId::V0113_ONLY.iter())
+        .copied()
+        .collect();
     let v0111_names: Vec<&'static str> = v0111.iter().map(|v| v.to_python_name()).collect();
     if let Some(hit) = name_lookup(input, &v0111, &v0111_names) {
         return Some(hit);
@@ -1143,6 +1148,12 @@ mod tests {
     }
 
     // ── _CARD-suffix-stripped CardId resolution (bead sts2-rs-u5zc) ─────
+
+    #[test]
+    fn card_id_from_str_resolves_v0113_only_cards() {
+        assert_eq!(card_id_from_str("MY_SHINIES"), Some(CardId::MyShinies));
+        assert_eq!(card_id_from_str("DINGY_DAGGER"), Some(CardId::DingyDagger));
+    }
 
     #[test]
     fn card_id_from_str_accepts_rupture_without_suffix() {

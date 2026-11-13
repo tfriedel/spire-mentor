@@ -629,6 +629,23 @@ pub enum RelicId {
     /// v0.111.0 Neow curse option: procures Ambergris, adds Guilty
     /// (`NeowsSacrifice.cs`).
     NeowsSacrifice,
+    // ── v0.113.0-only. Not in [`RelicId::all`]; see [`RelicId::V0113_ONLY`].
+    /// v0.113.0 event relic (`ObsidianVice.cs`) — MuseumOfTorture: turn end, 1 damage per card in hand to a random enemy.
+    ObsidianVice,
+    /// v0.113.0 event relic (`Thumbscrew.cs`) — MuseumOfTorture: multi-hit attack cards hit once more.
+    Thumbscrew,
+    /// v0.113.0 event relic (`TormentousCollar.cs`) — MuseumOfTorture: 2 Weak to all enemies at the start of elite fights.
+    TormentousCollar,
+    /// v0.113.0 event relic (`MightyWings.cs`) — ShrineOfTheWarlord: +2 Strength when a powered attack deals 30+.
+    MightyWings,
+    /// v0.113.0 event relic (`BathTowel.cs`) — ThermaeNonupeipe: heal 8 at the start of turn 1.
+    BathTowel,
+    /// v0.113.0 event relic (`BathRobes.cs`) — ThermaeNonupeipe: once, full heal at the start of the boss fight.
+    BathRobes,
+    /// v0.113.0 event relic (`Wuppy.cs`) — WuppyInTrouble: HP-tracked pet (AddsPet).
+    Wuppy,
+    /// v0.113.0 event relic (`Byrdine.cs`) — Byrdpip evolution (AddsPet).
+    Byrdine,
 }
 
 impl RelicId {
@@ -935,6 +952,14 @@ impl RelicId {
             Self::SilkenTress => "SILKEN_TRESS",
             Self::DowsingRod => "DOWSING_ROD",
             Self::NeowsSacrifice => "NEOWS_SACRIFICE",
+            Self::ObsidianVice => "OBSIDIAN_VICE",
+            Self::Thumbscrew => "THUMBSCREW",
+            Self::TormentousCollar => "TORMENTOUS_COLLAR",
+            Self::MightyWings => "MIGHTY_WINGS",
+            Self::BathTowel => "BATH_TOWEL",
+            Self::BathRobes => "BATH_ROBES",
+            Self::Wuppy => "WUPPY",
+            Self::Byrdine => "BYRDINE",
         }
     }
 
@@ -1246,11 +1271,31 @@ impl RelicId {
     /// order the C# added them.
     pub const V0111_ONLY: [RelicId; 2] = [Self::DowsingRod, Self::NeowsSacrifice];
 
+    /// Relics that exist only from game build v0.113.0 on.
+    pub const V0113_ONLY: [RelicId; 8] = [
+        Self::ObsidianVice,
+        Self::Thumbscrew,
+        Self::TormentousCollar,
+        Self::MightyWings,
+        Self::BathTowel,
+        Self::BathRobes,
+        Self::Wuppy,
+        Self::Byrdine,
+    ];
+
     /// The build a relic first exists in.
     #[must_use]
     pub const fn introduced_in(self) -> crate::GameVersion {
         match self {
             Self::DowsingRod | Self::NeowsSacrifice => crate::GameVersion::V0_111_0,
+            Self::ObsidianVice
+            | Self::Thumbscrew
+            | Self::TormentousCollar
+            | Self::MightyWings
+            | Self::BathTowel
+            | Self::BathRobes
+            | Self::Wuppy
+            | Self::Byrdine => crate::GameVersion::V0_113_0,
             _ => crate::GameVersion::V0_107_1,
         }
     }
@@ -1263,6 +1308,9 @@ impl RelicId {
         let mut v = Self::all().to_vec();
         if version >= crate::GameVersion::V0_111_0 {
             v.extend_from_slice(&Self::V0111_ONLY);
+        }
+        if version >= crate::GameVersion::V0_113_0 {
+            v.extend_from_slice(&Self::V0113_ONLY);
         }
         v
     }

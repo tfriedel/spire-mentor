@@ -313,3 +313,25 @@ fn our_turn_start_screen_is_not_answered_by_a_teammate_s_setup() {
     );
     assert!(state.allies[0].exhaust.is_empty());
 }
+
+/// v0.113.0 `RingingTriangle.AfterRoomEntered` (RingingTriangle.cs:19-25)
+/// applies 1 RetainHand to its OWNER: a teammate's Triangle is theirs, so it
+/// keeps their turn-1 hand, not ours.
+#[test]
+fn a_teammates_ringing_triangle_retains_their_hand_v0113() {
+    let mut state = two_seat_fight(1, 0);
+    state.game_version = sts2_core::GameVersion::V0_113_0;
+    give_mate_relic(&mut state, 53, RelicKind::RingingTriangle);
+
+    let _ = sts2_core::combat_loop::start_combat(&mut state);
+
+    assert_eq!(
+        state.player_power_amount(PowerKind::RetainHand),
+        0,
+        "their Triangle is not ours"
+    );
+    sts2_core::coop::swap_seat(&mut state, 0);
+    let theirs = state.player_power_amount(PowerKind::RetainHand);
+    sts2_core::coop::swap_seat(&mut state, 0);
+    assert_eq!(theirs, 1, "their Triangle gave them RetainHand");
+}

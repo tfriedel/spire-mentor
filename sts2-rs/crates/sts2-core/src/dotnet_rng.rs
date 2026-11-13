@@ -564,6 +564,44 @@ impl Rng {
         }
     }
 
+    /// C# `Rng.NextUnsignedLong()` (`Rng.cs:146-150`): one raw 64-bit step,
+    /// counter +1.
+    pub fn next_unsigned_long(&mut self) -> u64 {
+        self.counter += 1;
+        self.base.next_u64()
+    }
+
+    /// C# `ListExtensions.UnstableShuffle` for game build `version`.
+    ///
+    /// v0.113.0 (`ListExtensions.cs:45-62`) seeds a child
+    /// `new Rng(rng.NextUnsignedLong())` and runs the Fisher-Yates on the
+    /// child, so the caller's stream advances by exactly ONE draw whatever
+    /// the list length (an empty or one-card list included). Earlier builds
+    /// draw the `n - 1` swaps straight off this stream ([`Self::shuffle`]).
+    pub fn shuffle_for<T>(&mut self, version: crate::GameVersion, lst: &mut [T]) {
+        if version >= crate::GameVersion::V0_113_0 {
+            let mut child = Self::from_seed(self.next_unsigned_long());
+            child.shuffle(lst);
+        } else {
+            self.shuffle(lst);
+        }
+    }
+
+    /// [`Self::stable_shuffle_by`] for game build `version` (the shuffle
+    /// half is [`Self::shuffle_for`]).
+    pub fn stable_shuffle_by_for<T, F>(
+        &mut self,
+        version: crate::GameVersion,
+        lst: &mut [T],
+        cmp: &F,
+    ) where
+        T: Copy,
+        F: Fn(T, T) -> core::cmp::Ordering,
+    {
+        crate::cards::dotnet_list_sort(lst, cmp);
+        self.shuffle_for(version, lst);
+    }
+
     /// "Stable" shuffle: sort the slice in-place, then run
     /// [`Self::shuffle`]. Mirrors C# `ListExtensions.StableShuffle`
     /// (`MegaCrit.Sts2.Core.Extensions/ListExtensions.cs:10`):
@@ -736,6 +774,30 @@ mod tests {
         assert_eq!(sorted, before);
         // Counter advanced by len-1.
         assert_eq!(rng.counter(), 19);
+    }
+
+    /// v0.113.0 `UnstableShuffle` (`ListExtensions.cs:45-62`): one
+    /// `NextUnsignedLong` off the caller's stream seeds a child `Rng` that
+    /// does the Fisher-Yates — even for an empty list. v0.111.0 unchanged.
+    #[test]
+    fn shuffle_for_v0113_seeds_a_child_rng() {
+        let v113 = crate::GameVersion::V0_113_0;
+        for len in [0usize, 1, 2, 5, 40] {
+            let mut rng = Rng::from_seed(7);
+            let mut probe = Rng::from_seed(7);
+            let mut got: Vec<usize> = (0..len).collect();
+            rng.shuffle_for(v113, &mut got);
+            assert_eq!(rng.counter(), 1, "len {len}: one parent draw");
+            let mut want: Vec<usize> = (0..len).collect();
+            Rng::from_seed(probe.next_unsigned_long()).shuffle(&mut want);
+            assert_eq!(got, want);
+        }
+        let mut a = Rng::from_seed(7);
+        let mut b = Rng::from_seed(7);
+        let (mut x, mut y): (Vec<u8>, Vec<u8>) = ((0..9).collect(), (0..9).collect());
+        a.shuffle_for(crate::GameVersion::V0_111_0, &mut x);
+        b.shuffle(&mut y);
+        assert_eq!((x, a.counter()), (y, 8));
     }
 
     #[test]

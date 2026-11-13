@@ -41,9 +41,6 @@ pub(crate) fn play_seeker_strike(
 ) -> EffectResult {
     let t = target.expect("SeekerStrike: Enemy-targeted");
     let _ = deal_damage_player_to_enemy(state, t, current_damage(state));
-    if state.player.draw.is_empty() {
-        return EffectResult::Resolved;
-    }
     let mut shuffled: SmallVec<[CardUid; 32]> = SmallVec::from_slice(&state.player.draw);
     // C# `StableShuffle` = `list.Sort()` (by `CardModel.CompareTo` =
     // ordinal Entry string, then `CurrentUpgradeLevel`/upgraded ascending)
@@ -55,12 +52,18 @@ pub(crate) fn play_seeker_strike(
     let cmp = |a: CardUid, b: CardUid| {
         let ca = &state.cards[a.0.get() as usize - 1];
         let cb = &state.cards[b.0.get() as usize - 1];
-        sts2_core::cards::card_model_compare(ca, cb)
+        sts2_core::cards::card_model_compare_for(ca, cb, state.game_version)
     };
-    state
-        .run_rng
-        .combat_card_selection
-        .stable_shuffle_by(shuffled.as_mut_slice(), &cmp);
+    state.run_rng.combat_card_selection.stable_shuffle_by_for(
+        state.game_version,
+        shuffled.as_mut_slice(),
+        &cmp,
+    );
+    // An empty draw pile is shuffled too: from v0.113 that still reads one
+    // `NextUnsignedLong`, which `shuffle_for` handles.
+    if shuffled.is_empty() {
+        return EffectResult::Resolved;
+    }
     // A lethal SeekerStrike ends combat before the draw-pile select: C#
     // `CardSelectCmd.FromCombatPile` returns empty when `IsEnding`
     // (CardSelectCmd.cs:383), so suppress the select here too. But the
@@ -106,8 +109,7 @@ pub(crate) fn play_seeker_strike(
                 state.game_version,
             ))
             .then_with(|| {
-                sts2_core::cards::card_model_entry(ca.card_id)
-                    .cmp(sts2_core::cards::card_model_entry(cb.card_id))
+                sts2_core::cards::draw_select_tiebreak(&state.cards, a, b, state.game_version)
             })
     });
     // C# `FromCombatPile` skips the prompt when the offered count is

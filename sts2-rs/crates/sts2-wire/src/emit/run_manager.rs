@@ -155,7 +155,8 @@ pub fn act_map_for(rm: &mut RunManager, act: u8) -> Value {
     // LOCAL per-act RNG (does not poison `map_rngs`); same salt name as
     // `RunRngSet::map_rng(act-1)` → `act_{act}_map`.
     let mut rng = rm.run_state.rng.named(&format!("act_{act}_map"));
-    let mut act_map = sts2_core::map_generator::generate_act_map(
+    let mut act_map = sts2_core::map_generator::generate_act_map_for(
+        rm.run_state.game_version,
         num_rooms,
         &mut rng,
         ascension_level,
@@ -451,6 +452,13 @@ pub fn rng_counters(rm: &RunManager) -> Value {
     set(&mut d, "rewards", rng.rewards.counter());
     set(&mut d, "shops", rng.shops.counter());
     set(&mut d, "transformations", rng.transformations.counter());
+    if rng.game_version >= sts2_core::GameVersion::V0_113_0 {
+        set(
+            &mut d,
+            "non_combat_generation",
+            rng.non_combat_generation.counter(),
+        );
+    }
     Value::Object(d)
 }
 

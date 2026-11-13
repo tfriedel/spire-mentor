@@ -4415,7 +4415,8 @@ impl RunManager {
             let ascension_level = i32::from(self.run_state.ascension_level);
             let mut act_map = {
                 let rng = self.run_state.rng.map_rng(act_idx_rng_arg);
-                crate::map_generator::generate_act_map(
+                crate::map_generator::generate_act_map_for(
+                    self.run_state.game_version,
                     num_rooms,
                     rng,
                     ascension_level,
@@ -5956,7 +5957,8 @@ impl RunManager {
         let act_idx_gen = i32::from(new_act);
         let mut act_map = {
             let rng = self.run_state.rng.map_rng(act_idx_rng_arg);
-            crate::map_generator::generate_act_map(
+            crate::map_generator::generate_act_map_for(
+                self.run_state.game_version,
                 num_rooms,
                 rng,
                 ascension_level,
@@ -6191,9 +6193,22 @@ impl RunManager {
         // `rooms_generated` so subsequent `initialize_run` calls
         // (re-init paths) don't re-shuffle.
         if !self.run_state.rooms_generated {
-            for act in &mut self.run_state.acts {
-                let mut shuffled: Vec<&'static str> = act.event_ids.to_vec();
-                self.run_state.rng.up_front.shuffle(&mut shuffled);
+            let version = self.run_state.game_version;
+            let act1 = self.run_state.act1;
+            for (i, act) in self.run_state.acts.iter_mut().enumerate() {
+                // v0.113.0: the same version-aware `own ++ shared` pools
+                // `run_room_gen` shuffles (the legacy static `acts.rs`
+                // lists lack every v0.113-only event).
+                let mut shuffled: Vec<&'static str> =
+                    if version >= crate::GameVersion::V0_113_0 && i < 3 {
+                        crate::run_room_gen::act_event_pool_for(version, act1, i)
+                    } else {
+                        act.event_ids.to_vec()
+                    };
+                self.run_state
+                    .rng
+                    .up_front
+                    .shuffle_for(version, &mut shuffled);
                 act.event_ids_shuffled = shuffled;
                 act.events_visited = 0;
             }
@@ -6218,7 +6233,8 @@ impl RunManager {
         let ascension_level = i32::from(self.ascension_level);
         let mut act_map = {
             let rng = self.run_state.rng.map_rng(act_idx_rng_arg);
-            crate::map_generator::generate_act_map(
+            crate::map_generator::generate_act_map_for(
+                self.run_state.game_version,
                 num_rooms,
                 rng,
                 ascension_level,
@@ -13041,6 +13057,34 @@ mod tests {
         }
     }
 
+    /// v0.113.0: the `!rooms_generated` fallback must shuffle the same
+    /// version-aware `own ++ shared` pools as `run_room_gen` (PR #1319
+    /// review) -- not the legacy static `acts.rs` lists, which lack every
+    /// v0.113-only event (MuseumOfTorture, ShrineOfTheWarlord, ...).
+    #[test]
+    fn initialize_run_fallback_uses_v0113_event_pools() {
+        let mut rm = RunManager::new(7, CharacterId::Ironclad)
+            .with_game_version(crate::GameVersion::V0_113_0);
+        let _ = rm.initialize_run(Vec::new(), Vec::new(), Vec::new());
+        for (i, act) in rm.run_state.acts.iter().enumerate() {
+            let mut got = act.event_ids_shuffled.clone();
+            let mut want = crate::run_room_gen::act_event_pool_for(
+                crate::GameVersion::V0_113_0,
+                rm.run_state.act1,
+                i,
+            );
+            got.sort_unstable();
+            want.sort_unstable();
+            assert_eq!(got, want, "act {} pool", i + 1);
+        }
+        assert!(rm.run_state.acts[1]
+            .event_ids_shuffled
+            .contains(&"MuseumOfTorture"));
+        assert!(rm.run_state.acts[2]
+            .event_ids_shuffled
+            .contains(&"ShrineOfTheWarlord"));
+    }
+
     #[test]
     fn initialize_run_shuffle_is_deterministic_under_seed() {
         let mut a = RunManager::new(91, CharacterId::Ironclad);
@@ -13901,7 +13945,8 @@ mod tests {
     fn coop_map(rm: &RunManager, act: u8) -> crate::map::ActMap {
         let rooms = i32::from(rm.run_state.acts[usize::from(act) - 1].num_rooms);
         let mut rng = rm.run_state.rng.named(&format!("act_{act}_map"));
-        crate::map_generator::generate_act_map(
+        crate::map_generator::generate_act_map_for(
+            rm.run_state.game_version,
             rooms,
             &mut rng,
             i32::from(rm.run_state.ascension_level),

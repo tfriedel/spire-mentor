@@ -1253,13 +1253,22 @@ fn listener_paels_legion_modify_block(state: &CombatState, ctx: &BlockCtx) -> ho
     if !matches!(ctx.target, CreatureRef::Player) {
         return hooks::DamageMul::ONE;
     }
-    let on_cooldown = state
+    let counter = state
         .relics
         .iter()
         .find(|r| !r.is_melted && r.kind == RelicKind::PaelsLegion)
-        .is_some_and(|r| r.counter > 0);
+        .map(|r| r.counter);
+    let on_cooldown = counter.is_some_and(|c| c > 0);
+    // v0.113.0 `PaelsLegion.cs:152-156`: while a doubling is pending on one
+    // `CardPlay` (`AffectedCardPlay`), a different card's block is no longer
+    // doubled.
+    let latched_elsewhere = state.game_version >= sts2_core::GameVersion::V0_113_0
+        && counter.is_some_and(|c| c < 0)
+        && ctx
+            .card_source
+            .is_some_and(|src| paels_legion_pending(src) != counter.unwrap_or(0));
     let owned = state.relics.owns(RelicKind::PaelsLegion);
-    if owned && !on_cooldown {
+    if owned && !on_cooldown && !latched_elsewhere {
         hooks::DamageMul::new(2, 1)
     } else {
         hooks::DamageMul::ONE
@@ -1900,7 +1909,14 @@ fn listener_jeweled_mask(state: &mut CombatState) -> EffectResult {
         .combat_card_selection
         .next_int_exclusive(0, pool.len() as i32) as usize;
     let uid = pool[idx];
-    sts2_core::card_effects::set_card_free_this_turn(state, uid);
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0 `JeweledMask.cs:34`: `SetToFreeThisCombat`.
+        if let Some(card) = state.cards.get_mut(uid.0.get() as usize - 1) {
+            card.set_to_free_this_combat();
+        }
+    } else {
+        sts2_core::card_effects::set_card_free_this_turn(state, uid);
+    }
     state.move_card_to_hand(uid);
     EffectResult::Resolved
 }
@@ -2410,7 +2426,12 @@ fn listener_music_box_card_played(state: &mut CombatState, ctx: &CardEventCtx) -
     state.combat_log.music_box_card_being_played = None;
     // C# `cardPlay.Card.CreateClone()` (MusicBox.cs:77): a new instance, so
     // no inherited play-history stamp (Ironclad-6161-a0-act2#b0).
-    let cloned = state.cards[idx].create_clone();
+    let mut cloned = state.cards[idx].create_clone();
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0: Swift / Sown disable after Music Box (relics precede card
+        // enchantments in `AfterCardPlayed`), so the clone keeps them Normal.
+        sts2_core::enchantment_hooks::clear_pending_first_play_disable(&mut cloned);
+    }
     // C# `AddGeneratedCardToCombat(card, Hand, base.Owner)` (MusicBox.cs:80):
     // player-created regardless of Play-pile occupancy.
     let new_uid = spawn_card_into_hand_with_origin(state, cloned, true);
@@ -2881,7 +2902,7 @@ fn listener_distinguished_cape(rs: &mut RunState) -> EffectResult {
         // v0.111.0: the Max-HP loss moved to SereTalon; the Cape adds 2
         // random generatable curses instead, then the Apparitions (decomp
         // DistinguishedCape.cs:32-53).
-        add_random_generatable_curses(rs, DISTINGUISHED_CAPE_CURSES_V0111);
+        add_random_generatable_curses(rs, DISTINGUISHED_CAPE_CURSES_V0111, true);
         for _ in 0..DISTINGUISHED_CAPE_CARDS {
             push_deck_card(rs, sts2_core::cards::CardId::Apparition);
         }
@@ -3417,7 +3438,10 @@ fn beautiful_bracelet_v0111(rs: &mut RunState) {
             crate::enchantments::can_enchant_card(&spec, card, ench, rs.game_version).then_some(i)
         })
         .collect();
-    rs.rng.niche.shuffle(&mut eligible);
+    let version = rs.game_version;
+    rs.rng
+        .non_combat_or_niche()
+        .shuffle_for(version, &mut eligible);
     for &i in eligible.iter().take(BEAUTIFUL_BRACELET_CARDS_V0111) {
         let _ = crate::enchantments::apply_static_enchantment(
             &mut rs.master_deck[i],
@@ -3449,7 +3473,10 @@ fn listener_royal_stamp(rs: &mut RunState) -> EffectResult {
     let n =
         enchantable_candidate_card_ids(rs, sts2_core::cards::EnchantmentId::RoyallyApproved).len();
     let mut shuffled: Vec<usize> = (0..n).collect();
-    rs.rng.niche.shuffle(&mut shuffled);
+    let version = rs.game_version;
+    rs.rng
+        .non_combat_or_niche()
+        .shuffle_for(version, &mut shuffled);
     // C# `RoyalStamp.AfterObtained` awaits an interactive
     // `CardSelectCmd.FromDeckForEnchantment` (pick 1 of the enchantable
     // cards) — surface that deck card-select when the run is interactive.
@@ -4084,7 +4111,7 @@ fn listener_choices_paradox(state: &mut CombatState, side: Side) -> EffectResult
     state
         .run_rng
         .combat_card_generation
-        .shuffle(candidates.as_mut_slice());
+        .shuffle_for(state.game_version, candidates.as_mut_slice());
     let take = CHOICES_PARADOX_CARDS.min(candidates.len());
     let options: Vec<ChoiceOption> = candidates
         .into_iter()
@@ -4174,7 +4201,7 @@ const SERE_TALON_HP_LOSS_V0111: i32 = 9;
 /// `CanBeGeneratedByModifiers`, `orderby c.Id`, drawn without replacement by
 /// `Rng.Niche.NextItem` (decomp DistinguishedCape.cs:32-43). The pool is the
 /// one NeowsBones samples (`NEOWS_BONES_CURSE_POOL`, already in id order).
-fn add_random_generatable_curses(rs: &mut RunState, count: usize) {
+fn add_random_generatable_curses(rs: &mut RunState, count: usize, non_combat_from_v0113: bool) {
     let mut available: Vec<sts2_core::cards::CardId> =
         crate::relics::neow_relics::NEOWS_BONES_CURSE_POOL.to_vec();
     for _ in 0..count {
@@ -4182,7 +4209,14 @@ fn add_random_generatable_curses(rs: &mut RunState, count: usize) {
             return;
         }
         let len = i32::try_from(available.len()).unwrap_or(i32::MAX);
-        let idx = rs.rng.niche.next_int_exclusive(0, len) as usize;
+        // Distinguished Cape draws on `PlayerRng.NonCombatGeneration` from
+        // v0.113.0 on; Sere Talon stays on `Rng.Niche`.
+        let rng = if non_combat_from_v0113 {
+            rs.rng.non_combat_or_niche()
+        } else {
+            &mut rs.rng.niche
+        };
+        let idx = rng.next_int_exclusive(0, len) as usize;
         let card_id = available.remove(idx);
         if let Some(card) = crate::cards::spec_index::card_pod_from_id(card_id, false) {
             rs.add_card_to_deck_with_hooks(card, sts2_core::relic_effects::AddSource::RelicGain);
@@ -4205,7 +4239,7 @@ fn listener_sere_talon(rs: &mut RunState) -> EffectResult {
     if rs.game_version >= sts2_core::GameVersion::V0_111_0 {
         rs.lose_max_hp(SERE_TALON_HP_LOSS_V0111);
     } else {
-        add_random_generatable_curses(rs, SERE_TALON_CURSES);
+        add_random_generatable_curses(rs, SERE_TALON_CURSES, false);
     }
     for _ in 0..SERE_TALON_WISHES {
         if let Some(card) =
@@ -4272,7 +4306,10 @@ fn listener_wing_charm_card_reward(
     if eligible.is_empty() {
         return EffectResult::NotImplemented;
     }
-    let pick = rs.rng.niche.next_int_exclusive(0, eligible.len() as i32) as usize;
+    let pick = rs
+        .rng
+        .rewards_or_niche()
+        .next_int_exclusive(0, eligible.len() as i32) as usize;
     cards[eligible[pick]].add_enchantment(EnchantmentId::Swift, WING_CHARM_SWIFT);
     EffectResult::Resolved
 }
@@ -4855,8 +4892,9 @@ fn listener_alchemical_coffer(rs: &mut RunState) -> EffectResult {
     }
     let original_slot_count = rs.potion_belt_cap();
     rs.gain_potion_slots(ALCHEMICAL_COFFER_POTION_SLOTS);
+    // v0.113.0 rolls on `PlayerRng.NonCombatGeneration` (`AlchemicalCoffer.cs`).
     let kinds = crate::potions::all::create_random_potions_out_of_combat(
-        &mut rs.rng.combat_potion_generation,
+        rs.rng.non_combat_or_combat_potion(),
         rs.character_id,
         ALCHEMICAL_COFFER_POTION_SLOTS as usize,
     );
@@ -4978,7 +5016,7 @@ fn fur_coat_mark_rooms(rs: &RunState, act_map: &mut sts2_core::map::ActMap) -> E
         .map(|(&coord, _)| coord)
         .collect();
     let mut rng = rs.rng.named("FUR_COAT");
-    rng.shuffle(&mut candidates);
+    rng.shuffle_for(rs.game_version, &mut candidates);
     candidates.truncate(fur_coat_combats(rs.game_version));
     act_map.mark_rooms(candidates, RelicId::FurCoat);
     EffectResult::Resolved

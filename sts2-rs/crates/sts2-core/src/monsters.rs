@@ -1475,6 +1475,15 @@ impl MonsterKind {
     ///   `v0.111.0/…/Entomancer.cs:23-25`.
     fn hp_roll_for(self, ascension: u8, version: crate::GameVersion) -> HpRoll {
         use crate::ascension::{get_value_if_ascension, AscensionLevel::ToughEnemies};
+        if version >= crate::GameVersion::V0_113_0 {
+            // v0.113.0: Axebot HP 70-78 (A8 76-86) -> fixed 70 (A8 80),
+            // `MaxInitialHp => MinInitialHp` (decomp Axebot.cs:48-50). Still a
+            // `Range`, so the spawn keeps its one unique-HP Niche read.
+            if self == MonsterKind::Axebot {
+                let hp = get_value_if_ascension(ascension, ToughEnemies, 80, 70);
+                return HpRoll::Range(hp, hp);
+            }
+        }
         if version >= crate::GameVersion::V0_111_0 {
             match self {
                 // v0.111.0: Exoskeleton HP (A8) 25-29 -> 26-30 (decomp Exoskeleton.cs:30)

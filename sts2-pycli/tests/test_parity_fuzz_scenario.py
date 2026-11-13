@@ -100,14 +100,24 @@ def test_generate_v2_full_pools() -> None:
 
 
 def test_builds_after_v0111_keep_its_card_set():
-    # v0.113.0 has no card waves yet: it must get v0.111.0's lists, not
-    # v0.107.1's (Rust gates the split on `>= V0_111_0`).
-    from card_inventory import has_v0111_cards, sweepable_cards
+    # v0.113.0 builds on v0.111.0's lists, not v0.107.1's (Rust gates the
+    # split on `>= V0_111_0`). Its colorless pool adds MY_SHINIES right after
+    # MIND_BLAST (Rust `specs_in` / `COLORLESS_V0113`), and its sweepable set
+    # adds only the v0.113.0-only cards (CardId::V0113_ONLY).
+    from card_inventory import has_v0111_cards, sweepable_cards, v0113_only_cards
 
     assert not has_v0111_cards("v0.107.1")
     assert has_v0111_cards("v0.111.0") and has_v0111_cards("v0.113.0")
     assert class_cards_for_build("Ironclad", "v0.113.0") == class_cards_for_build(
         "Ironclad", "v0.111.0"
     )
-    assert colorless_cards_for_build("v0.113.0") == colorless_cards_for_build("v0.111.0")
-    assert sweepable_cards("v0.113.0") == sweepable_cards("v0.111.0")
+    v0111_colorless = colorless_cards_for_build("v0.111.0")
+    at = v0111_colorless.index("MIND_BLAST") + 1
+    assert colorless_cards_for_build("v0.113.0") == [
+        *v0111_colorless[:at],
+        "MY_SHINIES",
+        *v0111_colorless[at:],
+    ]
+    assert "MY_SHINIES" not in v0111_colorless
+    assert sweepable_cards("v0.113.0") == sweepable_cards("v0.111.0") | v0113_only_cards()
+    assert not sweepable_cards("v0.111.0") & v0113_only_cards()

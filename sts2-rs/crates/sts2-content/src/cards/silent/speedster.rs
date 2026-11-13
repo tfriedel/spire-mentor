@@ -5,7 +5,13 @@ use super::prelude::*;
 /// player. Mirrors `sts2-rl-agent@01c094d:sts2_env/cards/silent.py:580-583`.
 /// Bead `sts2-rs-rez` retrofit.
 pub(crate) fn play_speedster(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    apply_power_to_player(state, PowerKind::Speedster, 2);
+    // v0.113.0: SpeedsterPower 2 -> 3 (decomp Speedster.cs:13).
+    let amount = if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        3
+    } else {
+        2
+    };
+    apply_power_to_player(state, PowerKind::Speedster, amount);
     EffectResult::Resolved
 }
 

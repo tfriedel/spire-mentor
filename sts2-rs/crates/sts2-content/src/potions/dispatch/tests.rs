@@ -3025,6 +3025,30 @@ fn entropic_brew_fills_belt_off_combat_potion_generation() {
     );
 }
 
+/// v0.113.0 `EntropicBrew.cs:26` rolls on `PlayerRng.NonCombatGeneration`,
+/// leaving `CombatPotionGeneration` untouched.
+#[test]
+fn entropic_brew_v0113_fills_belt_off_non_combat_generation() {
+    use sts2_core::potions::{CharacterId, MAX_POTIONS};
+    let mut state = fresh_state_with_player(50, 50);
+    state.player.character = Some(CharacterId::Ironclad);
+    state.run_rng.game_version = sts2_core::GameVersion::V0_113_0;
+    state.player.potions.push(PotionKind::BlockPotion);
+    let open = MAX_POTIONS - 1;
+
+    let cpg_before = state.run_rng.combat_potion_generation.counter();
+    let ncg_before = state.run_rng.non_combat_generation.counter();
+    crate::potions::all::entropic_brew_fill_belt(&mut state);
+
+    assert_eq!(state.player.potions.len(), MAX_POTIONS, "belt filled");
+    assert_eq!(state.run_rng.combat_potion_generation.counter(), cpg_before);
+    assert_eq!(
+        state.run_rng.non_combat_generation.counter() - ncg_before,
+        2 * open as u32,
+        "2 draws per filled slot"
+    );
+}
+
 /// EntropicBrew drunk from slot 0 of [Brew, Energy, _] refills the HOLE
 /// first: C# `RemovePotionInternal` nulls the slot without compacting and
 /// `AddPotionInternal` takes `_potionSlots.IndexOf(null)` (`Player.cs:640`,

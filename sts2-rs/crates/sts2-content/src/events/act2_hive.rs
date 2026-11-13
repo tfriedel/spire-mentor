@@ -231,7 +231,9 @@ fn doll_room_open_pick(state: &mut RunState, damage: i32, take: usize) -> EventO
     // `Models.Events/DollRoom.cs:28`, `Models/ModelId.cs:43`, identical in
     // v0.107.1 and v0.111.0): BING_BONG < DAUGHTER_OF_THE_WIND < MR_STRUGGLES.
     let entry = |c: i16| DOLL_ROOM_DOLLS[c as usize].0.to_python_name();
-    rng.stable_shuffle_by(&mut codes, &|a: i16, b: i16| entry(a).cmp(entry(b)));
+    rng.stable_shuffle_by_for(state.game_version, &mut codes, &|a: i16, b: i16| {
+        entry(a).cmp(entry(b))
+    });
     codes.truncate(take);
     state.event_state.scratch = codes;
     state.event_state.page = 1;
@@ -905,7 +907,10 @@ const FAKE_MERCHANT_STOCK_SIZE: usize = 6;
 /// visit resolves exactly one option: buy XOR throw-foul XOR leave).
 fn fake_merchant_stock(state: &RunState) -> Vec<RelicId> {
     let mut idx: Vec<usize> = (0..FAKE_MERCHANT_INVENTORY.len()).collect();
-    state.rng.named(FAKE_MERCHANT_STREAM).shuffle(&mut idx);
+    state
+        .rng
+        .named(FAKE_MERCHANT_STREAM)
+        .shuffle_for(state.game_version, &mut idx);
     idx.truncate(FAKE_MERCHANT_STOCK_SIZE);
     idx.into_iter()
         .map(|i| FAKE_MERCHANT_INVENTORY[i])
@@ -1427,7 +1432,9 @@ fn luminous_choir_tribute(state: &mut RunState) -> EventOutcome {
     // Rewards stream, front-pop the grab bag (FallbackRelic = Circlet), Obtain.
     let cost = luminous_choir_rolled_cost(state);
     state.gold = state.gold.saturating_sub(cost);
-    let rarity = state.roll_reward_relic_rarity();
+    // v0.113.0 `PullNextRelicFromFront(Owner, base.Rng)`: the rarity is the
+    // event stream's read #2, after `CalculateVars`' cost roll.
+    let rarity = super::event_relic_rarity(state, LUMINOUS_CHOIR_STREAM, 1);
     let relic = state
         .pop_relic_from_grab_bag(rarity)
         .unwrap_or(LUMINOUS_CHOIR_FALLBACK_RELIC);
@@ -1649,6 +1656,16 @@ const RANWID_STREAM: &str = "RANWID_THE_ELDER";
 /// Read-only and recomputed: nothing else draws from the stream, so the same
 /// pair comes out whether asked while presenting the options or resolving one.
 fn ranwid_asks_for(state: &RunState) -> (Option<usize>, Option<RelicId>) {
+    let (potion, relic, _) = ranwid_asks_for_with_rng(state);
+    (potion, relic)
+}
+
+/// [`ranwid_asks_for`] plus the event stream after its two draws — where
+/// v0.113.0's relic-rarity rolls continue (`PullNextRelicFromFront(Owner,
+/// base.Rng)`). Capture it BEFORE the option mutates the belt / relics.
+fn ranwid_asks_for_with_rng(
+    state: &RunState,
+) -> (Option<usize>, Option<RelicId>, sts2_core::dotnet_rng::Rng) {
     let mut rng = state.rng.named(RANWID_STREAM);
     let potion = (!state.potions.is_empty()).then(|| {
         let len = i32::try_from(state.potions.len()).unwrap_or(1);
@@ -1664,13 +1681,35 @@ fn ranwid_asks_for(state: &RunState) -> (Option<usize>, Option<RelicId>) {
         let len = i32::try_from(tradable.len()).unwrap_or(1);
         tradable[usize::try_from(rng.next_int_exclusive(0, len)).unwrap_or(0)]
     });
-    (potion, relic)
+    (potion, relic, rng)
 }
 
-/// One `RelicFactory.PullNextRelicFromFront(owner)` — roll a rarity off the
-/// rewards stream, take the front of that bucket, hand it over.
-pub(super) fn ranwid_grant_front_relic(state: &mut RunState) {
-    let rarity = state.roll_reward_relic_rarity();
+/// [`ranwid_asks_for`] plus the event stream to roll relic rarities on, or
+/// `None` for builds that roll them on the player's Rewards stream (before
+/// v0.113.0). One derivation serves both, so they cannot disagree.
+fn ranwid_asks_and_rarity_rng(
+    state: &RunState,
+) -> (
+    Option<usize>,
+    Option<RelicId>,
+    Option<sts2_core::dotnet_rng::Rng>,
+) {
+    let (potion, relic, rng) = ranwid_asks_for_with_rng(state);
+    let rng = (state.game_version >= sts2_core::GameVersion::V0_113_0).then_some(rng);
+    (potion, relic, rng)
+}
+
+/// One `RelicFactory.PullNextRelicFromFront(owner[, rng])` — roll a rarity
+/// (on `event_rng` when given, else the Rewards stream), take the front of that
+/// bucket, hand it over.
+pub(super) fn ranwid_grant_front_relic(
+    state: &mut RunState,
+    event_rng: Option<&mut sts2_core::dotnet_rng::Rng>,
+) {
+    let rarity = match event_rng {
+        Some(rng) => sts2_core::runstate::roll_relic_rarity(rng),
+        None => state.roll_reward_relic_rarity(),
+    };
     if let Some(id) = state.pop_relic_from_grab_bag(rarity) {
         state.grant_event_relic(id);
     }
@@ -1678,26 +1717,29 @@ pub(super) fn ranwid_grant_front_relic(state: &mut RunState) {
 
 fn ranwid_potion(state: &mut RunState) -> EventOutcome {
     // C# `GivePotion`: `PotionCmd.Discard(potion)` then one front pull.
-    if let (Some(idx), _) = ranwid_asks_for(state) {
+    let (potion, _, mut rng) = ranwid_asks_and_rarity_rng(state);
+    if let Some(idx) = potion {
         state.remove_potion_from_belt(idx);
     }
-    ranwid_grant_front_relic(state);
+    ranwid_grant_front_relic(state, rng.as_mut());
     EventOutcome::finished("Gave Ranwid a potion for a relic.")
 }
 
 fn ranwid_gold(state: &mut RunState) -> EventOutcome {
+    let (_, _, mut rng) = ranwid_asks_and_rarity_rng(state);
     state.gold = state.gold.saturating_sub(RANWID_GOLD_COST);
-    ranwid_grant_front_relic(state);
+    ranwid_grant_front_relic(state, rng.as_mut());
     EventOutcome::finished(format!("Gave Ranwid {RANWID_GOLD_COST}g for a relic."))
 }
 
 fn ranwid_relic(state: &mut RunState) -> EventOutcome {
     // C# `GiveRelic`: remove the chosen relic, then TWO front pulls.
-    if let (_, Some(id)) = ranwid_asks_for(state) {
+    let (_, relic, mut rng) = ranwid_asks_and_rarity_rng(state);
+    if let Some(id) = relic {
         state.lose_relic(id);
     }
     for _ in 0..2 {
-        ranwid_grant_front_relic(state);
+        ranwid_grant_front_relic(state, rng.as_mut());
     }
     EventOutcome::finished("Gave Ranwid a relic for two.")
 }

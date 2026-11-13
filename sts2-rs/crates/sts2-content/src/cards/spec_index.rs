@@ -610,6 +610,13 @@ pub const V0111_ONLY_SPECS: &[fn() -> CardSpec] = &[
     crate::cards::colorless::the_ball::spec,
     crate::cards::regent::tutor::spec,
     crate::cards::necrobinder::underworld_card::spec,
+    // v0.113.0 event cards (`EventCardPool` 28 -> 32): only ever handed out
+    // by their events, so no pool offers them. Listed here so the id-keyed
+    // lookups resolve; they share this slice's "not in v0.107.1" scan slot.
+    crate::cards::colorless::dingy_dagger::spec,
+    crate::cards::colorless::my_shinies::spec,
+    crate::cards::colorless::mighty_weapon::spec,
+    crate::cards::colorless::mighty_shield::spec,
 ];
 
 /// Auto-listed status card factories (75 entries).
@@ -793,13 +800,23 @@ fn unlocked_specs(
 /// slot ([`super::v0111::pool_spec`]: Scare -> Sidestep).
 /// Slice order is kept, so a `NextItem` index over the result still matches
 /// C#'s pool order. For v0.107.1 it yields exactly `slice.iter().map(|f| f())`.
+///
+/// v0.113.0 adds MyShinies to `ColorlessCardPool` right after MindBlast
+/// (`ColorlessCardPool.cs:62-63`), so from that build on a MindBlast slot
+/// is followed by a MyShinies one. Keyed on the card, not on the slice's
+/// address: a `const` slice has no unique address. MindBlast sits only in
+/// [`COLORLESS_SPECS`].
 pub(crate) fn specs_in(
     slice: &'static [fn() -> CardSpec],
     version: sts2_core::GameVersion,
 ) -> impl Iterator<Item = CardSpec> {
-    slice
-        .iter()
-        .map(move |f| super::v0111::pool_spec(*f, version))
+    let v0113 = version >= sts2_core::GameVersion::V0_113_0;
+    slice.iter().flat_map(move |f| {
+        let spec = super::v0111::pool_spec(*f, version);
+        let shinies =
+            (v0113 && spec.id == CardId::MindBlast).then(crate::cards::colorless::my_shinies::spec);
+        std::iter::once(spec).chain(shinies)
+    })
 }
 
 /// Sample one [`CardId`] from the union of per-character slice(s)
@@ -933,7 +950,12 @@ pub fn roll_transform_replacement_basic_niche(
     if pool.is_empty() {
         return None;
     }
-    let idx = rs.rng.niche.next_int_exclusive(0, pool.len() as i32) as usize;
+    // Every caller (New Leaf, Astrolabe, Pandora's Box) moved from
+    // `Rng.Niche` to `PlayerRng.Transformations` in v0.113.0.
+    let idx = rs
+        .rng
+        .transformations_or_niche()
+        .next_int_exclusive(0, pool.len() as i32) as usize;
     Some(pool[idx])
 }
 
@@ -1297,11 +1319,12 @@ pub fn roll_kaleidoscope_card_rewards(
             .copied()
             .filter(|c| *c != owner)
             .collect();
-        rs.rng
-            .niche
-            .stable_shuffle_by(&mut pools, &|a: CharacterId, b: CharacterId| {
-                character_pool_entry(a).cmp(character_pool_entry(b))
-            });
+        let version = rs.game_version;
+        rs.rng.non_combat_or_niche().stable_shuffle_by_for(
+            version,
+            &mut pools,
+            &|a: CharacterId, b: CharacterId| character_pool_entry(a).cmp(character_pool_entry(b)),
+        );
         pools.truncate(POOLS_PER_REWARD);
         // One `CardCreationSource.Other` card per pool on the Rewards stream,
         // keeping its upgrade roll (`CardFactory.cs:98-102`). Each
@@ -3104,9 +3127,11 @@ fn merchant_roll_character_card_slot(
 ) -> sts2_core::shop::ShopCardEntry {
     use sts2_core::card_rewards::RarityContext;
     use sts2_core::shop::{card_price, ShopCardEntry};
+    // v0.113.0 rolls the rarity and the upgrade on `Shops`
+    // (`CardFactory.CreateForMerchant`, `CardRarityOdds` rng override).
     let mut rarity = rs
         .card_rarity_odds
-        .roll_without_changing_odds_with_dotnet(&mut rs.rng.rewards, RarityContext::Shop);
+        .roll_without_changing_odds_with_dotnet(rs.rng.shops_or_rewards(), RarityContext::Shop);
     let version = rs.game_version;
     let mut candidates =
         merchant_character_candidates_in(character, rarity, want_type, chosen, version);
@@ -3126,7 +3151,7 @@ fn merchant_roll_character_card_slot(
         let idx = rs.rng.shops.next_int_exclusive(0, candidates.len() as i32) as usize;
         Some(candidates[idx])
     };
-    let _ = rs.rng.rewards.next_float(1.0);
+    let _ = rs.rng.shops_or_rewards().next_float(1.0);
     let price = if on_sale {
         let _discard = card_price(rarity, &mut rs.rng.shops, false, false);
         card_price(rarity, &mut rs.rng.shops, false, true)
@@ -3176,7 +3201,7 @@ fn merchant_roll_colorless_card_slot(
         let idx = rs.rng.shops.next_int_exclusive(0, candidates.len() as i32) as usize;
         Some(candidates[idx])
     };
-    let _ = rs.rng.rewards.next_float(1.0);
+    let _ = rs.rng.shops_or_rewards().next_float(1.0);
     let price = card_price(rarity, &mut rs.rng.shops, true, false);
     let card = pick.and_then(|id| {
         chosen.insert(id);
@@ -3270,6 +3295,11 @@ pub fn generate_merchant_inventory(
     inv.removal_cost = card_removal_cost(rs.card_shop_removals_used, rs.ascension_level);
     let mut chosen: std::collections::BTreeSet<CardId> = std::collections::BTreeSet::new();
 
+    if rs.game_version >= sts2_core::GameVersion::V0_113_0 {
+        generate_merchant_inventory_v0113(rs, character, &mut inv, &mut chosen);
+        return inv;
+    }
+
     // ── character card row: Shops sale index, then per-slot rarity(Rewards)
     //    / pick(Shops) / upgrade-noop(Rewards) / cost(Shops). ──
     let sale_index =
@@ -3328,6 +3358,75 @@ pub fn generate_merchant_inventory(
     }
 
     inv
+}
+
+/// v0.113.0 `MerchantInventory.CreateForNormalMerchant`
+/// (`MerchantInventory.cs:125-198`), every roll on `PlayerRng.Shops`. The
+/// constructor arguments are evaluated in order — relic entries
+/// (`[RollRarity(Shops), RollRarity(Shops), Shop]`, then per slot
+/// `FillSlot` + cost jitter), potion entries (3 potions, then one jitter
+/// each) — and only then does `Setup` populate the card entries (character
+/// row, then colorless: rarity / pick / upgrade no-op / cost jitter) and,
+/// LAST, roll the sale slot (`Shops.NextInt(5)`) whose `SetOnSale` re-runs
+/// `CalcCost` (one more jitter, halved).
+fn generate_merchant_inventory_v0113(
+    rs: &mut RunState,
+    character: CharacterId,
+    inv: &mut sts2_core::shop::ShopInventory,
+    chosen: &mut std::collections::BTreeSet<CardId>,
+) {
+    use sts2_core::runstate::RelicRarity;
+    use sts2_core::shop::{
+        card_price, ShopPotionEntry, ShopPotionRarity, MERCHANT_CHARACTER_CARD_TYPES,
+        MERCHANT_COLORLESS_CARD_RARITIES, MERCHANT_POTION_COUNT,
+    };
+    use sts2_core::PotionRarity;
+
+    let empty_exclude = std::collections::BTreeSet::new();
+    let r0 = sts2_core::runstate::roll_relic_rarity(&mut rs.rng.shops);
+    let r1 = sts2_core::runstate::roll_relic_rarity(&mut rs.rng.shops);
+    for slot_rarity in [r0, r1, RelicRarity::Shop] {
+        let entry = merchant_roll_relic_slot(rs, slot_rarity, &empty_exclude);
+        inv.relics.push(entry);
+    }
+
+    let potions = crate::potions::all::create_random_potions_out_of_combat(
+        &mut rs.rng.shops,
+        character,
+        MERCHANT_POTION_COUNT,
+    );
+    for kind in potions {
+        let shop_rarity = match crate::potions::all::spec_for(kind).rarity {
+            PotionRarity::Rare => ShopPotionRarity::Rare,
+            PotionRarity::Uncommon => ShopPotionRarity::Uncommon,
+            _ => ShopPotionRarity::Common,
+        };
+        inv.potions.push(ShopPotionEntry {
+            potion_rarity: shop_rarity,
+            potion_kind: Some(kind),
+            price: merchant_potion_price(rs, shop_rarity),
+        });
+    }
+
+    for &want_type in &MERCHANT_CHARACTER_CARD_TYPES {
+        let entry = merchant_roll_character_card_slot(rs, character, want_type, false, chosen);
+        inv.cards.push(entry);
+    }
+    for &rarity in &MERCHANT_COLORLESS_CARD_RARITIES {
+        let entry = merchant_roll_colorless_card_slot(rs, rarity, chosen);
+        inv.colorless_cards.push(entry);
+    }
+
+    if !inv.cards.is_empty() {
+        let sale_index = rs.rng.shops.next_int_exclusive(0, inv.cards.len() as i32) as usize;
+        let entry = &mut inv.cards[sale_index];
+        // `SetOnSale` → `CalcCost` only when the slot holds a card (C# throws
+        // on an empty slot; the pool never runs dry in practice).
+        if entry.card.is_some() {
+            entry.on_sale = true;
+            entry.price = card_price(entry.rarity, &mut rs.rng.shops, false, true);
+        }
+    }
 }
 
 /// Merchant potion price, rolled off `Shops` like the real game. See
@@ -3405,7 +3504,8 @@ pub fn restock_shop_entry(
                 .filter(|(i, _)| *i != idx)
                 .filter_map(|(_, e)| e.relic_id)
                 .collect();
-            let slot_rarity = rs.roll_reward_relic_rarity();
+            // v0.113.0: `RelicFactory.RollRarity(PlayerRng.Shops)`.
+            let slot_rarity = sts2_core::runstate::roll_relic_rarity(rs.rng.shops_or_rewards());
             let entry = merchant_roll_relic_slot(rs, slot_rarity, &exclude);
             inv.relics[idx] = entry;
         }

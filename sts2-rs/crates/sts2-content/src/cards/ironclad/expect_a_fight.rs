@@ -26,6 +26,11 @@ pub(crate) fn preview_expect_a_fight(
     card: &Card,
     _target: Option<CreatureUid>,
 ) -> i32 {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0: a flat `BlockVar(15)`, +5 on upgrade (decomp
+        // ExpectAFight.cs:18,43).
+        return card.base_block;
+    }
     if state.game_version >= sts2_core::GameVersion::V0_111_0 {
         // v0.111.0: CalculatedBlock = base + extra x max(0, Strength)
         // (decomp ExpectAFight.cs:21-23, OnUpgrade :41-42).
@@ -51,6 +56,27 @@ pub(crate) fn play_expect_a_fight(
     state: &mut CombatState,
     _t: Option<CreatureUid>,
 ) -> EffectResult {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0: `GainBlock(Block)`, then every Attack in hand that is
+        // not X-cost costs `Energy` (1) less until played (decomp
+        // ExpectAFight.cs:30-38). The hand is snapshotted before the loop.
+        let block = resolving_preview(state, preview_expect_a_fight, None);
+        gain_block_player(state, block);
+        let attacks: Vec<sts2_core::CardUid> = state
+            .player
+            .hand
+            .iter()
+            .copied()
+            .filter(|u| {
+                let c = &state.cards[u.0.get() as usize - 1];
+                c.card_type == CardType::Attack && !c.is_x_cost()
+            })
+            .collect();
+        for uid in attacks {
+            state.add_card_cost_reduction_until_played(uid, 1);
+        }
+        return EffectResult::Resolved;
+    }
     if state.game_version >= sts2_core::GameVersion::V0_111_0 {
         // v0.111.0: `CreatureCmd.GainBlock(CalculatedBlock, Move)` — no energy,
         // no NoEnergyGain (decomp ExpectAFight.cs:36).

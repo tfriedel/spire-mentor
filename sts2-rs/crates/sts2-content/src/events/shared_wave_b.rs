@@ -211,7 +211,8 @@ fn round_tea_party_pick_fight(state: &mut RunState) -> EventOutcome {
 /// pulled relic is not cross-engine-validated at this pin.
 fn round_tea_party_continue_fight(state: &mut RunState) -> EventOutcome {
     let lost = state.lose_hp(ROUND_TEA_PARTY_FIGHT_DAMAGE);
-    let rarity = state.roll_reward_relic_rarity();
+    // No earlier `base.Rng` read: the v0.113.0 rarity is read #1.
+    let rarity = super::event_relic_rarity(state, "ROUND_TEA_PARTY", 0);
     if let Some(id) = state.pop_relic_from_grab_bag(rarity) {
         state.grant_event_relic(id);
     }
@@ -1441,8 +1442,9 @@ fn this_or_that_ornate(state: &mut RunState) -> EventOutcome {
     // `relics` and `deck_size` vs C# (seed PARITY11 Ironclad: C# gained
     // PetrifiedToad + a Clumsy curse; Rust gained neither). Same
     // roll-then-front-pull shape as `unrest_site_kill`. Bead
-    // `sts2-rs-thisorthat-ornate`.
-    let rarity = state.roll_reward_relic_rarity();
+    // `sts2-rs-thisorthat-ornate`. v0.113.0: rarity on the event stream,
+    // after `CalculateVars`' gold roll.
+    let rarity = super::event_relic_rarity(state, "THIS_OR_THAT", 1);
     let granted = state.pop_relic_from_grab_bag(rarity);
     if let Some(id) = granted {
         state.obtain_relic(id);
@@ -1733,7 +1735,7 @@ fn tinker_time_take_rng(state: &mut RunState) -> Rng {
 fn tinker_time_choose_card_type(state: &mut RunState) -> EventOutcome {
     let mut rng = tinker_time_take_rng(state);
     let mut types = [CardType::Attack, CardType::Skill, CardType::Power];
-    rng.shuffle(&mut types);
+    rng.shuffle_for(state.game_version, &mut types);
     state.event_state.rng = Some(rng);
     state.event_state.scratch = vec![tt_type_code(types[0]), tt_type_code(types[1])];
     state.event_state.page = 1;
@@ -1745,7 +1747,7 @@ fn tinker_time_choose_card_type(state: &mut RunState) -> EventOutcome {
 fn tinker_time_pick_type(state: &mut RunState, chosen: CardType) -> EventOutcome {
     let mut riders = tt_riders_for(chosen);
     let mut rng = tinker_time_take_rng(state);
-    rng.shuffle(&mut riders);
+    rng.shuffle_for(state.game_version, &mut riders);
     state.event_state.rng = Some(rng);
     state.event_state.scratch = vec![i16::from(riders[0].to_u8()), i16::from(riders[1].to_u8())];
     state.event_state.page = 2;
@@ -2036,8 +2038,15 @@ fn trial_merchant_guilty(state: &mut RunState) -> EventOutcome {
     // `MerchantGuilty` (`Trial.cs:145-153`): Regret, then two
     // `RelicFactory.PullNextRelicFromFront(Owner)` obtains.
     trial_add_curse(state, CardId::Regret);
+    // v0.113.0 rolls the rarities on the event stream (`PullNextRelicFromFront(
+    // Owner, base.Rng)`), right after the defendant roll (read #1).
+    let mut rng = (state.game_version >= sts2_core::GameVersion::V0_113_0).then(|| {
+        let mut rng = state.rng.named(TRIAL_STREAM);
+        let _ = rng.next_int_exclusive(0, 3);
+        rng
+    });
     for _ in 0..TRIAL_COUNT {
-        super::act2_hive::ranwid_grant_front_relic(state);
+        super::act2_hive::ranwid_grant_front_relic(state, rng.as_mut());
     }
     EventOutcome::finished("Guilty: gained Regret and two relics.")
 }
@@ -2273,7 +2282,8 @@ fn unrest_site_kill(state: &mut RunState) -> EventOutcome {
     // owner))` — DIRECT obtain, no reward screen. The rarity is
     // `RollRarity(PlayerRng.Rewards)` (one float: <0.5 Common,
     // <0.83 Uncommon, else Rare), then a front pull from the grab bag.
-    let rarity = state.roll_reward_relic_rarity();
+    // v0.113.0: rarity is read #1 of the event's own stream.
+    let rarity = super::event_relic_rarity(state, "UNREST_SITE", 0);
     let granted = state.pop_relic_from_grab_bag(rarity);
     if let Some(id) = granted {
         state.obtain_relic(id);
@@ -2603,17 +2613,40 @@ fn zen_weaver_allowed(state: &RunState) -> bool {
     state.gold >= ZEN_WEAVER_MIN_GOLD
 }
 
+/// v0.113.0 Breathing Techniques: 25 gold for ONE Enlightenment
+/// (`BreathingTechniquesCost` 50 -> 25, `new CardModel[2]` -> `[1]`).
+pub const ZEN_WEAVER_BREATHING_COST_V0113: i32 = 25;
+
+/// Breathing Techniques `(cost, Enlightenment count)` for the run's build.
+fn zen_weaver_breathing_terms(state: &RunState) -> (i32, usize) {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        (ZEN_WEAVER_BREATHING_COST_V0113, 1)
+    } else {
+        (ZEN_WEAVER_BREATHING_COST, 2)
+    }
+}
+
 fn zen_weaver_breathing(state: &mut RunState) -> EventOutcome {
-    // C# `ZenWeaver.BreathingTechniques`: `LoseGold(50)`, then two
+    // C# `ZenWeaver.BreathingTechniques`: `LoseGold(cost)`, then `count`
     // `CreateCard<Enlightenment>` added to the deck. Unconditional adds.
-    state.gold = state.gold.saturating_sub(ZEN_WEAVER_BREATHING_COST);
-    for _ in 0..2 {
-        if let Some(card) = card_pod_from_id(CardId::Enlightenment, false) {
+    let (cost, count) = zen_weaver_breathing_terms(state);
+    state.gold = state.gold.saturating_sub(cost);
+    for _ in 0..count {
+        if let Some(mut card) = card_pod_from_id(CardId::Enlightenment, false) {
+            if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+                // v0.113.0 Enlightenment drops `CanonicalKeywords => [Exhaust]`
+                // (decomp Enlightenment.cs). Zen Weaver is its only source, so
+                // the override is stamped here; `normalize_for_version` keeps a
+                // non-default override.
+                card.keyword_override = Some(crate::cards::spec_index::keyword_override_from(
+                    crate::cards::types::CardKeywords::NONE,
+                ));
+            }
             state.add_card_to_deck_with_hooks(card, sts2_core::relic_effects::AddSource::EventGain);
         }
     }
     EventOutcome::finished(format!(
-        "Paid {ZEN_WEAVER_BREATHING_COST}g, gained 2 Enlightenment cards."
+        "Paid {cost}g, gained {count} Enlightenment card(s)."
     ))
 }
 
@@ -2683,7 +2716,12 @@ const ZEN_WEAVER_OPTIONS: &[EventOptionSpec] = &[
             "BreathingTechniquesCost",
             EventVarSpec::Int(ZEN_WEAVER_BREATHING_COST as i64),
         )],
-        vars_fn: None,
+        vars_fn: Some(|s| {
+            vec![(
+                "BreathingTechniquesCost",
+                zen_weaver_breathing_terms(s).0.into(),
+            )]
+        }),
         title_vars_fn: None,
         handler: zen_weaver_breathing,
     },
@@ -2752,6 +2790,27 @@ mod tests {
 
     fn fresh_state() -> RunState {
         RunState::new()
+    }
+
+    /// v0.113.0 Breathing Techniques: 25 gold, ONE Enlightenment, which no
+    /// longer exhausts. Earlier builds keep 50 gold / two exhausting copies.
+    #[test]
+    fn zen_weaver_breathing_v0113_is_one_card_for_25_gold() {
+        for (version, cost, count, exhausts) in [
+            (sts2_core::GameVersion::V0_111_0, 50, 2, true),
+            (sts2_core::GameVersion::V0_113_0, 25, 1, false),
+        ] {
+            let mut rs = fresh_state();
+            rs.game_version = version;
+            rs.gold = 200;
+            let deck = rs.master_deck.len();
+            let _ = zen_weaver_breathing(&mut rs);
+            assert_eq!(rs.gold, 200 - cost, "{version:?}");
+            assert_eq!(rs.master_deck.len(), deck + count, "{version:?}");
+            let card = rs.master_deck.last().unwrap();
+            assert_eq!(card.card_id, CardId::Enlightenment);
+            assert_eq!(card.keyword_override.is_none(), exhausts, "{version:?}");
+        }
     }
 
     /// `ZenWeaver.GenerateInitialOptions` swaps a removal the player cannot

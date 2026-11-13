@@ -1317,7 +1317,12 @@ mod tests {
         // silently degrades to the developer shorthand this replaced.
         let events = &data::data().loc_events;
         let mut missing = Vec::new();
-        for id in sts2_core::EventId::all() {
+        // The workbench ships the default build's events.json; the v0.113.0
+        // events' keys are rows of `localization_eng_v0.113.0/events.json`.
+        for id in sts2_core::EventId::all()
+            .iter()
+            .filter(|e| !sts2_core::EventId::V0113_ONLY.contains(e))
+        {
             for opt in sts2_content::events::dispatch::spec_for(*id).options {
                 if opt.loc_key.is_empty() {
                     continue;

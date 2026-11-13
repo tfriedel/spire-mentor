@@ -313,6 +313,27 @@ pub fn effective_max_energy(state: &CombatState) -> i32 {
 // than an `intersects` against a one-kind mask; see the `PowerKindSet` docs
 // in lib.rs.
 
+/// v0.113.0 `RingingTriangle.AfterRoomEntered(CombatRoom)`
+/// (RingingTriangle.cs:19-25): apply 1 RetainHand to the owner, the seated
+/// player. C# fires it from `CombatRoom.StartCombat` after `SetUpCombat`
+/// (deck shuffle) and before the turn loop's `BeforeCombatStart`
+/// (CombatRoom.cs:228-233), for every player's Triangle; [`start_combat`]
+/// calls it for us and, seated, for each teammate. v0.111.0 kept the hand
+/// through the relic's own `ShouldFlush` on turn 1 instead.
+fn ringing_triangle_after_room_entered_v0113(state: &mut CombatState) {
+    if state.game_version < crate::GameVersion::V0_113_0
+        || !state
+            .relics
+            .iter()
+            .any(|r| !r.is_melted && r.kind == crate::RelicKind::RingingTriangle)
+    {
+        return;
+    }
+    if let Some(uid) = state.player.creature_uid {
+        crate::card_effects::apply_power_to_creature(state, uid, crate::PowerKind::RetainHand, 1);
+    }
+}
+
 /// Initialize combat scalars + fire `before_combat_start` + roll initial
 /// enemy intents + advance phase from `Setup` to `PlayerTurnStart`.
 ///
@@ -402,7 +423,8 @@ pub fn start_combat(state: &mut CombatState) -> StepResult {
     // (those collections start empty) but keeps the canonical entry
     // point. Determinism is preserved: identical seeds yield identical
     // draw orderings.
-    crate::cards::shuffle(&mut state.player, &mut state.run_rng.shuffle);
+    let version = state.game_version;
+    crate::cards::shuffle_for(&mut state.player, &mut state.run_rng.shuffle, version);
 
     // Bead `sts2-rs-d03` Phase 1: ensure the player has a unified
     // [`Creature`] record in `state.creatures` mirroring the canonical
@@ -463,6 +485,7 @@ pub fn start_combat(state: &mut CombatState) -> StepResult {
     // primary_player relics). Phase 2 has no active
     // before_combat_start listeners; the dispatcher walks all
     // listeners but every per-listener fn is a no-op default.
+    ringing_triangle_after_room_entered_v0113(state);
     hooks::dispatch_before_combat_start(state, &CombatLifecycleCtx::default());
     // VitalSpark (Infested Prism) `BeforeCombatStart`: taint every player Skill
     // card (bead `…wb8lk.4`). Dedicated pass because the generic
@@ -492,13 +515,15 @@ pub fn start_combat(state: &mut CombatState) -> StepResult {
     crate::coop::each_teammate(state, |state| {
         state.player.energy = 0;
         state.player.stars = 0;
-        crate::cards::shuffle(&mut state.player, &mut state.run_rng.shuffle);
+        let version = state.game_version;
+        crate::cards::shuffle_for(&mut state.player, &mut state.run_rng.shuffle, version);
         state.combat_log = crate::TurnEvents::default();
         state.player.generated_cards_this_combat = 0;
         state.player.sly_this_combat.clear();
         if state.player.character == Some(crate::potions::CharacterId::Defect) {
             state.player.orbs = crate::orbs::OrbSlots::with_default_capacity();
         }
+        ringing_triangle_after_room_entered_v0113(state);
         let _ = crate::relic_effects::dispatch_before_combat_start(state);
     });
     // C# `Hook.BeforeCombatStart`'s second walk (Hook.cs:455-467, both
@@ -1334,6 +1359,7 @@ pub(crate) fn resume_after_relic_hand_draw_select(
     }
     // The count is final: v0.107.1 Pollinous Core's `AfterModifyingHandDraw`.
     crate::relic_effects::pendulum::pollinous_core_after_modifying_hand_draw_v0107(state);
+    hooks::draw_cards_next_turn_after_modifying_hand_draw_v0113(state);
     // Card-side `BeforeHandDraw`: Bolas / ThrummingHatchet return themselves
     // to hand at turn start iff they were played on the owner's PREVIOUS
     // player turn. C# `Bolas.cs:41` / `ThrummingHatchet.cs:35` (both builds):
@@ -4344,6 +4370,14 @@ fn finish_phase_two_after_turn_end_late(state: &mut CombatState) -> StepResult {
     // bit). The exhaust-hand body lives in the relic's `before_turn_end`
     // listener (PaelsEye); this short-circuit only handles re-entry.
     if hooks::dispatch_should_take_extra_turn(state, &CombatLifecycleCtx::default()) {
+        // v0.113.0: `Hook.ShouldTakeExtraTurn` returns ONE source (Pael's Eye
+        // via `ShouldTakeExtraTurnEarly` first, else Ambergris) and
+        // `AfterTakingExtraTurn` runs on that source only (Hook.cs:1415,
+        // :2707). Before v0.113.0 every listener's after-hook ran.
+        let per_source = state.game_version >= crate::GameVersion::V0_113_0;
+        let relic_source = hooks::relic_should_take_extra_turn_any(state);
+        let latch_paels = !per_source || relic_source;
+        let spend_ambergris = !per_source || !relic_source;
         // Latch the once-per-combat flag on any relic that opted in.
         // At this pin only PaelsEye (`shop_event.py`) consumes this
         // channel; its `_used_this_combat` flag is encoded as bit 0 of
@@ -4353,14 +4387,16 @@ fn finish_phase_two_after_turn_end_late(state: &mut CombatState) -> StepResult {
             if relic.is_melted {
                 continue;
             }
-            if relic.kind == crate::RelicKind::PaelsEye {
+            if latch_paels && relic.kind == crate::RelicKind::PaelsEye {
                 relic.counter |= 0b01;
             }
         }
         hooks::dispatch_after_taking_extra_turn(state, &CombatLifecycleCtx::default());
         // v0.111.0: AmbergrisPower spends one stack per extra turn taken
         // (decomp AmbergrisPower.cs:23). No-op before v0.111.0.
-        hooks::ambergris_after_taking_extra_turn_v0111(state);
+        if spend_ambergris {
+            hooks::ambergris_after_taking_extra_turn_v0111(state);
+        }
         // `SwitchSides` increments the extra-turn player's `TurnNumber` but
         // not `RoundNumber` (v0.111.0 CombatManager.cs:1866-1888, v0.107.1
         // :1390-1424, same body), so the turn-number gates see turn 2 on an
@@ -4495,7 +4531,6 @@ fn execute_turn_end_in_hand_effect(
     card_id: cards::CardId,
     cards_in_hand_at_turn_end: i32,
 ) -> i32 {
-    use crate::card_effects::apply_power_to_creature;
     match card_id {
         // 6 unblockable HP loss (Python `combat.py:2369-2378`).
         cards::CardId::Beckon => {
@@ -4600,7 +4635,7 @@ fn execute_turn_end_in_hand_effect(
         // `tests/parity/known_divergences.md`.
         cards::CardId::Doubt => {
             if let Some(player_uid) = state.player.creature_uid {
-                apply_power_to_creature(state, player_uid, crate::PowerKind::Weak, 1);
+                apply_curse_debuff_with_skip(state, player_uid, crate::PowerKind::Weak);
             }
             0
         }
@@ -4624,7 +4659,7 @@ fn execute_turn_end_in_hand_effect(
         // skip_next_tick divergence as DOUBT.
         cards::CardId::Shame => {
             if let Some(player_uid) = state.player.creature_uid {
-                apply_power_to_creature(state, player_uid, crate::PowerKind::Frail, 1);
+                apply_curse_debuff_with_skip(state, player_uid, crate::PowerKind::Frail);
             }
             0
         }
@@ -6704,8 +6739,16 @@ pub fn apply_damage_to_player(
     // when a positive loss actually reached it. Bead `sts2-rs-q6bix.6`,
     // reordered for sweep seeds 3553/3943. Both steps:
     // [`crate::damage::hp_lost_after_osty`].
-    modified_hp_loss =
-        crate::damage::hp_lost_after_osty(state, target_ref, dealer, props, modified_hp_loss);
+    let buffer_applies = state.game_version < crate::GameVersion::V0_113_0
+        || card != Some(crate::cards::CardId::BrightestFlame);
+    modified_hp_loss = crate::damage::hp_lost_after_osty_buffer(
+        state,
+        target_ref,
+        dealer,
+        props,
+        modified_hp_loss,
+        buffer_applies,
+    );
 
     // Step 5: write HP loss to the player.
     // C# records this hit's `DamageReceivedEntry` unless combat was already
@@ -13463,6 +13506,32 @@ pub(crate) fn clear_per_turn_card_vars(state: &mut CombatState) {
         // C# `CardModel.EndOfTurnCleanup` (CardModel.cs:1613).
         if card.combat_vars.maybe_nonzero(VarKey::ExhaustOnNextPlay) {
             card.combat_vars.zero(VarKey::ExhaustOnNextPlay);
+        }
+    }
+}
+
+/// Doubt / Shame `OnTurnEndInHand`: apply 1 Weak / Frail to the owner and, when
+/// the owner did not already have it, latch `SkipNextDurationTick` on the fresh
+/// instance (decomp `Models.Cards/Doubt.cs:31-36`, `Shame.cs:33-38`, all
+/// builds). Before v0.113.0 `PowerCmd.Apply` latched every fresh player debuff
+/// anyway; from v0.113.0 it only does so on the enemy side, so the card's own
+/// latch is what defers the first tick.
+fn apply_curse_debuff_with_skip(
+    state: &mut CombatState,
+    player_uid: crate::CreatureUid,
+    kind: crate::PowerKind,
+) {
+    let already_has = state.player_power_amount(kind) != 0;
+    crate::card_effects::apply_power_to_creature(state, player_uid, kind, 1);
+    if already_has {
+        return;
+    }
+    let uids = state.player_power_uids();
+    for uid in uids {
+        if let Some(p) = state.powers.get_mut_by_id(uid.0) {
+            if p.kind == kind {
+                p.skip_next_tick = true;
+            }
         }
     }
 }

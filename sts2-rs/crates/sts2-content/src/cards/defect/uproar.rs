@@ -38,6 +38,24 @@ pub(crate) fn play_uproar(state: &mut CombatState, target: Option<CreatureUid>) 
                 && !sts2_core::card_effects::card_unplayable(card.card_id)
         })
         .collect();
+    // C# `StableShuffle` (`ListExtensions.cs:10`) = `Sort()` by
+    // `CardModel.CompareTo` (Entry ordinal, then `CurrentUpgradeLevel`
+    // ascending: base before upgraded) THEN `UnstableShuffle` (n-1
+    // Fisher-Yates reads off `Rng.Shuffle`); take index 0. Routed through
+    // `Rng::stable_shuffle_by` (faithful .NET introsort + Fisher-Yates),
+    // matching the Catastrophe / reshuffle precedent (`sts2-rs-5aelq`).
+    // An empty list is shuffled too: from v0.113 that still reads one
+    // `NextUnsignedLong` (Uproar.cs:34-38), which `shuffle_for` handles.
+    let version = state.game_version;
+    let cmp = |a: sts2_core::CardUid, b: sts2_core::CardUid| {
+        let ca = &state.cards[a.0.get() as usize - 1];
+        let cb = &state.cards[b.0.get() as usize - 1];
+        sts2_core::cards::card_model_compare_for(ca, cb, version)
+    };
+    state
+        .run_rng
+        .shuffle_or_card_selection(version)
+        .stable_shuffle_by_for(version, pool.as_mut_slice(), &cmp);
     if pool.is_empty() {
         // C# null-fallback: any Attack (the `!Unplayable` filter dropped).
         pool = state
@@ -47,24 +65,12 @@ pub(crate) fn play_uproar(state: &mut CombatState, target: Option<CreatureUid>) 
             .copied()
             .filter(|uid| state.cards[uid.0.get() as usize - 1].card_type == CardType::Attack)
             .collect();
-    }
-    if !pool.is_empty() {
-        // C# `StableShuffle` (`ListExtensions.cs:10`) = `Sort()` by
-        // `CardModel.CompareTo` (Entry ordinal, then `CurrentUpgradeLevel`
-        // ascending: base before upgraded) THEN `UnstableShuffle` (n-1
-        // Fisher-Yates reads off `Rng.Shuffle`); take index 0. Routed through
-        // `Rng::stable_shuffle_by` (faithful .NET introsort + Fisher-Yates),
-        // matching the Catastrophe / reshuffle precedent (`sts2-rs-5aelq`).
-        let cmp = |a: sts2_core::CardUid, b: sts2_core::CardUid| {
-            let ca = &state.cards[a.0.get() as usize - 1];
-            let cb = &state.cards[b.0.get() as usize - 1];
-            sts2_core::cards::card_model_compare(ca, cb)
-        };
         state
             .run_rng
-            .shuffle
-            .stable_shuffle_by(pool.as_mut_slice(), &cmp);
-        let chosen = pool[0];
+            .shuffle_or_card_selection(version)
+            .stable_shuffle_by_for(version, pool.as_mut_slice(), &cmp);
+    }
+    if let Some(&chosen) = pool.first() {
         // C# `CardCmd.AutoPlay`: the picked card resolves and routes to its
         // natural pile (discard / self-exhaust); it is NOT moved to hand.
         sts2_core::combat_loop::auto_play_specific_card(state, chosen, false);

@@ -33,8 +33,7 @@ pub(crate) fn drink_droplet_of_precognition(
         csharp_rarity_ordinal(id_a, state.game_version)
             .cmp(&csharp_rarity_ordinal(id_b, state.game_version))
             .then_with(|| {
-                sts2_core::cards::card_model_entry(id_a)
-                    .cmp(sts2_core::cards::card_model_entry(id_b))
+                sts2_core::cards::draw_select_tiebreak(&state.cards, a, b, state.game_version)
             })
     });
     // C# `CardSelectCmd.FromSimpleGrid` auto-resolves inline when

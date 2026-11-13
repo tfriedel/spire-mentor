@@ -45,9 +45,34 @@ pub fn generate_all_cards(pool: Pool, version: GameVersion) -> &'static [CardId]
         (Pool::Character(CharacterId::Regent), false) => g::REGENT_V0107,
         (Pool::Character(CharacterId::Regent), true) => g::REGENT_V0111,
         (Pool::Colorless, false) => g::COLORLESS_V0107,
+        (Pool::Colorless, true) if version >= GameVersion::V0_113_0 => &COLORLESS_V0113,
         (Pool::Colorless, true) => g::COLORLESS_V0111,
     }
 }
+
+/// `ColorlessCardPool.GenerateAllCards()`, v0.113.0: the v0.111.0 list with
+/// MyShinies right after MindBlast (`ColorlessCardPool.cs:62-63`), the only
+/// change. The character pools did not change in v0.113.0; the Event and
+/// Token pools did, and only [`in_colorless_pool`] reads those.
+static COLORLESS_V0113: std::sync::LazyLock<Vec<CardId>> = std::sync::LazyLock::new(|| {
+    let mut ids = generated::COLORLESS_V0111.to_vec();
+    let at = ids
+        .iter()
+        .position(|&id| id == CardId::MindBlast)
+        .expect("MindBlast is in ColorlessCardPool");
+    ids.insert(at + 1, CardId::MyShinies);
+    ids
+});
+
+/// Cards v0.113.0 adds to a colorless pool: MyShinies (Colorless) and the
+/// event cards DingyDagger, MightyShield, MightyWeapon (Event). The Event
+/// pool's GodByrd and the Token pool's tarot cards have no `CardId` yet.
+const V0113_COLORLESS_POOL_ADDITIONS: [CardId; 4] = [
+    CardId::MyShinies,
+    CardId::DingyDagger,
+    CardId::MightyShield,
+    CardId::MightyWeapon,
+];
 
 /// Whether `id` is in a C# card pool whose `IsColorless` is true: the
 /// Colorless, Event and Token pools (`ColorlessCardPool.cs`,
@@ -72,6 +97,7 @@ pub fn in_colorless_pool(id: CardId) -> bool {
     ]
     .iter()
     .any(|pool| pool.contains(&id))
+        || V0113_COLORLESS_POOL_ADDITIONS.contains(&id)
 }
 
 /// Whether `id` overrides C# `VisualCardPool` with a pool whose
@@ -166,7 +192,11 @@ mod tests {
         CharacterId::Necrobinder,
         CharacterId::Regent,
     ];
-    const VERSIONS: [GameVersion; 2] = [GameVersion::V0_107_1, GameVersion::V0_111_0];
+    const VERSIONS: [GameVersion; 3] = [
+        GameVersion::V0_107_1,
+        GameVersion::V0_111_0,
+        GameVersion::V0_113_0,
+    ];
 
     fn ids(pool: &[CardSpec]) -> Vec<CardId> {
         pool.iter().map(|s| s.id).collect()
@@ -191,14 +221,47 @@ mod tests {
 
     #[test]
     fn the_single_player_colorless_derivation_is_the_validated_pool() {
-        let validated = crate::cards::colorless::helpers::colorless_combat_generatable_card_ids();
         for version in VERSIONS {
+            let validated =
+                crate::cards::colorless::helpers::colorless_combat_generatable_ids_in(version);
             assert_eq!(
                 ids(&combat_pool(Pool::Colorless, version, false)),
-                validated,
+                validated.as_slice(),
                 "{version:?}"
             );
         }
+    }
+
+    /// v0.113.0 `ColorlessCardPool.GenerateAllCards()` read off the decomp.
+    #[test]
+    fn colorless_v0113_matches_the_decomp() {
+        let tag = "v0.113.0";
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../../sts2-wiki/decompiled/{tag}/MegaCrit.Sts2.Core.Models.CardPools/ColorlessCardPool.cs"
+        ));
+        // The public snapshot ships no decomp; nothing to compare there.
+        let Ok(src) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let body = &src[src.find("GenerateAllCards").expect("list")..];
+        let body = &body[..body.find("};").expect("end")];
+        let names: Vec<String> = body
+            .split("ModelDb.Card<")
+            .skip(1)
+            .map(|c| c[..c.find('>').expect("close")].to_string())
+            .collect();
+        let ours: Vec<String> = generate_all_cards(Pool::Colorless, GameVersion::V0_113_0)
+            .iter()
+            .map(|id| {
+                let n = format!("{id:?}");
+                if names.contains(&n) {
+                    n
+                } else {
+                    n.trim_end_matches("Card").to_string()
+                }
+            })
+            .collect();
+        assert_eq!(ours, names);
     }
 
     /// [`combat_pool`] skips an id without a spec, which would silently

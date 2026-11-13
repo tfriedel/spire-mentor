@@ -200,6 +200,14 @@ pub struct RunRngSet {
     pub rewards: Rng,
     pub shops: Rng,
     pub transformations: Rng,
+    /// C# `PlayerRng.NonCombatGeneration` (v0.113.0, `PlayerRngType.cs:7`,
+    /// `PlayerRngSet.cs:34`): out-of-combat card/potion picks that used to
+    /// roll on `Rng.Niche` / `CombatPotionGeneration` / `PlayerRng.Rewards`
+    /// (Fishing Rod, Phial Holster, Neow's Bones, War Paint, ...). Created
+    /// for every build — `new Rng(playerSeed, "non_combat_generation")` —
+    /// but only v0.113.0+ content draws from it, so older builds never
+    /// advance it.
+    pub non_combat_generation: Rng,
 
     /// Per-act map RNGs, lazily created via [`Self::map_rng`]. Mirrors
     /// Python `self.map_rngs: dict[int, Rng]`.
@@ -207,6 +215,18 @@ pub struct RunRngSet {
 }
 
 impl RunRngSet {
+    /// The stream a combat card pick that used `Rng.Shuffle` reads in game
+    /// build `version`: v0.113.0 moved Beat Down, Uproar, Catastrophe and
+    /// Stampede to `Rng.CombatCardSelection` (decomp BeatDown.cs:26,
+    /// Uproar.cs:34,38, Catastrophe.cs:25,29, StampedePower.cs:28).
+    pub fn shuffle_or_card_selection(&mut self, version: crate::GameVersion) -> &mut Rng {
+        if version >= crate::GameVersion::V0_113_0 {
+            &mut self.combat_card_selection
+        } else {
+            &mut self.shuffle
+        }
+    }
+
     /// Construct a fresh `RunRngSet` from `master_seed`.
     ///
     /// The hash applied to `str(master_seed)` matches Python's
@@ -281,6 +301,7 @@ impl RunRngSet {
             rewards: named(player_seed, "rewards"),
             shops: named(player_seed, "shops"),
             transformations: named(player_seed, "transformations"),
+            non_combat_generation: named(player_seed, "non_combat_generation"),
             map_rngs: BTreeMap::new(),
         }
     }
@@ -304,6 +325,78 @@ impl RunRngSet {
             eprintln!("RNGMAP seed={seed} name={name}");
         }
         Rng::from_seed(seed)
+    }
+
+    /// Whether this build has the v0.113.0 RNG-stream moves (out-of-combat
+    /// generation on `PlayerRng.NonCombatGeneration`, see the "RNG stream
+    /// changes" table in `docs/plans/2026-11-12-v0.113.0-port-inventory.md`).
+    #[must_use]
+    pub fn has_v0113_streams(&self) -> bool {
+        self.game_version >= crate::GameVersion::V0_113_0
+    }
+
+    /// `PlayerRng.NonCombatGeneration` from v0.113.0 on, else `Rng.Niche`
+    /// (the pre-v0.113.0 stream of Beautiful Bracelet, Distinguished Cape,
+    /// Fishing Rod, Fragrant Mushroom, Kaleidoscope, Neow's Bones' curse,
+    /// Royal Stamp, Sand Castle, War Hammer, War Paint, Whetstone).
+    pub fn non_combat_or_niche(&mut self) -> &mut Rng {
+        if self.has_v0113_streams() {
+            &mut self.non_combat_generation
+        } else {
+            &mut self.niche
+        }
+    }
+
+    /// `PlayerRng.NonCombatGeneration` from v0.113.0 on, else
+    /// `Rng.CombatPotionGeneration` (Alchemical Coffer, Delicate Frond,
+    /// Entropic Brew, Phial Holster).
+    pub fn non_combat_or_combat_potion(&mut self) -> &mut Rng {
+        if self.has_v0113_streams() {
+            &mut self.non_combat_generation
+        } else {
+            &mut self.combat_potion_generation
+        }
+    }
+
+    /// `PlayerRng.NonCombatGeneration` from v0.113.0 on, else
+    /// `PlayerRng.Rewards` (Neow's Bones' bundle shuffle).
+    pub fn non_combat_or_rewards(&mut self) -> &mut Rng {
+        if self.has_v0113_streams() {
+            &mut self.non_combat_generation
+        } else {
+            &mut self.rewards
+        }
+    }
+
+    /// `PlayerRng.Transformations` from v0.113.0 on, else `Rng.Niche`
+    /// (Astrolabe, New Leaf, Pandora's Box transforms).
+    pub fn transformations_or_niche(&mut self) -> &mut Rng {
+        if self.has_v0113_streams() {
+            &mut self.transformations
+        } else {
+            &mut self.niche
+        }
+    }
+
+    /// `PlayerRng.Shops` from v0.113.0 on, else `PlayerRng.Rewards`: the
+    /// merchant's card-rarity / upgrade rolls (`CardFactory.CreateForMerchant`)
+    /// and relic-rarity rolls (`MerchantInventory`, `MerchantRelicEntry`
+    /// restock), which v0.113.0 moved off the reward stream.
+    pub fn shops_or_rewards(&mut self) -> &mut Rng {
+        if self.has_v0113_streams() {
+            &mut self.shops
+        } else {
+            &mut self.rewards
+        }
+    }
+
+    /// `PlayerRng.Rewards` from v0.113.0 on, else `Rng.Niche` (Wing Charm).
+    pub fn rewards_or_niche(&mut self) -> &mut Rng {
+        if self.has_v0113_streams() {
+            &mut self.rewards
+        } else {
+            &mut self.niche
+        }
     }
 
     /// [`Self::seed`] as the wire spells `$.rng.run_seed`: the same integer.
@@ -493,6 +586,7 @@ impl RunRngSet {
             "rewards" => &mut self.rewards,
             "shops" => &mut self.shops,
             "transformations" => &mut self.transformations,
+            "non_combat_generation" => &mut self.non_combat_generation,
             _ => return None,
         })
     }
@@ -531,6 +625,7 @@ mod tests {
             "rewards",
             "shops",
             "transformations",
+            "non_combat_generation",
         ] {
             assert!(
                 set.stream_mut(name).is_some(),

@@ -189,6 +189,9 @@ pub(crate) fn random_ironclad_attack_spec(state: &mut CombatState) -> Option<Car
     if pool.is_empty() {
         return None;
     }
-    state.run_rng.combat_card_generation.shuffle(&mut pool);
+    state
+        .run_rng
+        .combat_card_generation
+        .shuffle_for(state.game_version, &mut pool);
     Some(pool[0])
 }

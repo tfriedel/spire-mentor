@@ -459,6 +459,32 @@ fn entropy_transforms_the_ball_off_the_colorless_pool_v0111() {
     );
 }
 
+/// v0.113.0: MyShinies (Rare) sits in `ColorlessCardPool`
+/// (ColorlessCardPool.cs:63), so `CardFactory.GetDefaultTransformationOptions`
+/// uses `original.Pool` = the colorless pool. Its spec lives outside
+/// `COLORLESS_SPECS`, so it used to fall through to the Silent pool.
+#[test]
+fn entropy_transforms_my_shinies_off_the_colorless_pool_v0113() {
+    use super::helpers::{colorless_combat_generatable_ids_in, transform_card_to_random_for_hook};
+    let (mut state, _euid) = fresh_state(CardId::MyShinies, 10, 0);
+    state.game_version = sts2_core::GameVersion::V0_113_0;
+    state.player.character = Some(sts2_core::potions::CharacterId::Silent);
+    let uid = sts2_core::CardUid(NonZeroU32::new(1).expect("nz"));
+    state.player.play.clear();
+    state.player.hand.push(uid);
+    let new_uid = transform_card_to_random_for_hook(&mut state, uid).expect("transforms");
+    let new_id = state
+        .cards
+        .iter()
+        .find(|c| c.uid == new_uid)
+        .unwrap()
+        .card_id;
+    assert!(
+        colorless_combat_generatable_ids_in(sts2_core::GameVersion::V0_113_0).contains(&new_id),
+        "MyShinies must transform into a colorless card, got {new_id:?}",
+    );
+}
+
 /// GH #1054 item 7: a **Curse** original transforms off the CurseCardPool
 /// (C# `CardFactory.GetDefaultTransformationOptions` -> `original.Pool`; no
 /// rarity filter for Status/Curse; `CanBeGeneratedInCombat` drops only
@@ -7171,4 +7197,60 @@ fn mad_science_chaos_card_is_generated_on_v0111() {
         generated_before + 1,
         "a generated card"
     );
+}
+
+/// v0.113.0 `MyShinies.cs`: `Damage.BaseValue` (1) `floor(Gold / 20)` times;
+/// the upgrade lowers the gold per hit to 10.
+#[test]
+fn play_my_shinies_hits_once_per_twenty_gold() {
+    install_pool();
+    let f = lookup(CardId::MyShinies).expect("registered");
+    for (gold, upgraded, hits) in [
+        (45, false, 2),
+        (19, false, 0),
+        (45, true, 4),
+        (60, false, 3),
+    ] {
+        let (mut state, euid) = fresh_state(CardId::MyShinies, 1, 0);
+        state.gold = gold;
+        state.cards[0].upgraded = upgraded;
+        let hp_before = state.creatures[0].current_hp;
+        f(&mut state, Some(euid));
+        assert_eq!(
+            hp_before - state.creatures[0].current_hp,
+            hits,
+            "gold {gold} upgraded {upgraded}"
+        );
+    }
+}
+
+/// v0.113.0 `ColorlessCardPool.cs:62-63`: MyShinies follows MindBlast in
+/// every run-level colorless pool read and in the combat generation pool;
+/// earlier builds never see it.
+#[test]
+fn my_shinies_follows_mind_blast_only_from_v0113() {
+    use sts2_core::GameVersion;
+    let run_pool = |v| {
+        crate::cards::spec_index::specs_in(crate::cards::spec_index::COLORLESS_SPECS, v)
+            .map(|s| s.id)
+            .collect::<Vec<_>>()
+    };
+    for v in [GameVersion::V0_107_1, GameVersion::V0_111_0] {
+        assert!(!run_pool(v).contains(&CardId::MyShinies), "{v:?}");
+        assert!(
+            !super::helpers::colorless_combat_generatable_ids_in(v).contains(&CardId::MyShinies)
+        );
+    }
+    let pool = run_pool(GameVersion::V0_113_0);
+    let at = pool
+        .iter()
+        .position(|&id| id == CardId::MindBlast)
+        .expect("MindBlast");
+    assert_eq!(pool[at + 1], CardId::MyShinies);
+    let combat = super::helpers::colorless_combat_generatable_ids_in(GameVersion::V0_113_0);
+    let at = combat
+        .iter()
+        .position(|&id| id == CardId::MindBlast)
+        .expect("MindBlast");
+    assert_eq!(combat[at + 1], CardId::MyShinies);
 }

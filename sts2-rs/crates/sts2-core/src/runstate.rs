@@ -4669,13 +4669,17 @@ impl RunState {
     /// (`Pael.cs:173-178`) and the `ByrdonisNest` event.
     #[must_use]
     pub fn has_event_pet(&self) -> bool {
-        self.relics
+        self.relics.iter().any(|r| {
+            matches!(
+                r,
+                // v0.113.0 adds Wuppy and Byrdine (`AddsPet => true`); they
+                // exist in no earlier build's state.
+                RelicId::Byrdpip | RelicId::PaelsLegion | RelicId::Wuppy | RelicId::Byrdine
+            )
+        }) || self
+            .master_deck
             .iter()
-            .any(|r| matches!(r, RelicId::Byrdpip | RelicId::PaelsLegion))
-            || self
-                .master_deck
-                .iter()
-                .any(|c| c.card_id == crate::cards::CardId::ByrdonisEgg)
+            .any(|c| c.card_id == crate::cards::CardId::ByrdonisEgg)
     }
 
     /// Deck/run predicates the Ancient `GenerateInitialOptions` methods read.
@@ -4852,7 +4856,8 @@ impl RunState {
             return;
         }
         let mut rng = self.rng.named("spoils_map");
-        *act_map = crate::map_generator::generate_spoils_act_map(
+        *act_map = crate::map_generator::generate_spoils_act_map_for(
+            self.game_version,
             act_map.map_length - 1,
             &mut rng,
             i32::from(self.ascension_level),
@@ -4933,7 +4938,8 @@ impl RunState {
         let ascension_level = i32::from(self.ascension_level);
         let mut act_map = {
             let rng = self.rng.map_rng(act_idx_0_based);
-            crate::map_generator::generate_act_map(
+            crate::map_generator::generate_act_map_for(
+                self.game_version,
                 num_rooms,
                 rng,
                 ascension_level,
@@ -5094,7 +5100,7 @@ impl RunState {
             }
             let rooms = self.master_deck[idx].combat_var(VarKey::Generic) + 1;
             self.master_deck[idx].set_combat_var(VarKey::Generic, rooms);
-            if rooms < 5 {
+            if rooms < self.dowsing_max_rooms() {
                 idx += 1;
                 continue;
             }
@@ -5115,6 +5121,28 @@ impl RunState {
             let _ = crate::run_effects::dispatch_on_card_added_to_deck(self, &ctx);
             // The deck shifted down over `idx`; re-check the same slot.
         }
+    }
+
+    /// `Dowsing.maxRooms`: 5 in v0.111.0, 4 from v0.113.0 (`Dowsing.cs:16`).
+    #[must_use]
+    pub fn dowsing_max_rooms(&self) -> i32 {
+        if self.game_version >= crate::GameVersion::V0_113_0 {
+            4
+        } else {
+            5
+        }
+    }
+
+    /// v0.113.0 `Dowsing.ModifyUnknownMapPointRoomTypes` (`Dowsing.cs:69-83`):
+    /// once a Dowsing quest card has entered 3 `?` rooms, the next `?` can no
+    /// longer be a Monster or an Elite (it guarantees the 4th is not a fight).
+    #[must_use]
+    pub fn dowsing_strips_fights(&self) -> bool {
+        self.game_version >= crate::GameVersion::V0_113_0
+            && self.master_deck.iter().any(|c| {
+                c.card_id == crate::cards::CardId::Dowsing
+                    && c.combat_var(crate::cards::VarKey::Generic) >= 3
+            })
     }
 
     /// Fire the `modify_merchant_card_creation_results` channel for
@@ -5799,7 +5827,18 @@ impl RunState {
         // order); sort positional indices into them by the C# key, then map
         // back to the deck indices.
         let mut order: Vec<usize> = (0..candidates.len()).collect();
+        let version = self.game_version;
+        // v0.113.0 `CardModel.CompareTo` adds tie-breaks after the upgrade
+        // level (enchantment, affliction, cost, replays, base values).
+        let snapshot: Vec<crate::cards::Card> = if version >= crate::GameVersion::V0_113_0 {
+            candidates.iter().map(|&i| self.master_deck[i]).collect()
+        } else {
+            Vec::new()
+        };
         let cmp = |a: usize, b: usize| {
+            if version >= crate::GameVersion::V0_113_0 {
+                return crate::cards::card_model_compare_for(&snapshot[a], &snapshot[b], version);
+            }
             keyed[a]
                 .0
                 .cmp(keyed[b].0)
@@ -5808,8 +5847,15 @@ impl RunState {
         match event_rng {
             // v0.107.1: BattlewornDummy / DoorsOfLightAndDark draw the shuffle
             // from the event's own `base.Rng` stream rather than `Rng.Niche`.
-            Some(rng) => rng.stable_shuffle_by(order.as_mut_slice(), &cmp),
-            None => self.rng.niche.stable_shuffle_by(order.as_mut_slice(), &cmp),
+            Some(rng) => rng.stable_shuffle_by_for(version, order.as_mut_slice(), &cmp),
+            // Every no-event-rng caller (Whetstone, War Paint, War Hammer,
+            // Fragrant Mushroom, Sand Castle) moved from `Rng.Niche` to
+            // `PlayerRng.NonCombatGeneration` in v0.113.0.
+            None => self.rng.non_combat_or_niche().stable_shuffle_by_for(
+                version,
+                order.as_mut_slice(),
+                &cmp,
+            ),
         }
         let candidates: Vec<usize> = order.into_iter().map(|i| candidates[i]).collect();
         let take = count.min(candidates.len());
@@ -5856,7 +5902,13 @@ impl RunState {
             return 0;
         }
         let mut indices: Vec<usize> = (0..self.master_deck.len()).collect();
-        self.rng.niche.shuffle(&mut indices);
+        // v0.113.0 moved transforms onto `PlayerRng.Transformations` and
+        // shuffles onto a child Rng seeded by one parent read
+        // (`Rng.Shuffle`); earlier builds shuffle `Rng.Niche` in place.
+        let version = self.rng.game_version;
+        self.rng
+            .transformations_or_niche()
+            .shuffle_for(version, &mut indices);
         // Slice the first `take` of the shuffled index list. Sort
         // descending so we can remove in-place without shifting the
         // earlier indices we still plan to remove.
@@ -9408,6 +9460,41 @@ mod tests {
         let a_ids: Vec<_> = a.master_deck.iter().map(|c| c.card_id).collect();
         let b_ids: Vec<_> = b.master_deck.iter().map(|c| c.card_id).collect();
         assert_eq!(a_ids, b_ids, "same seed → identical post-transform deck");
+    }
+
+    /// v0.113.0: `transform_cards` shuffles on `PlayerRng.Transformations`
+    /// with ONE parent read (child-Rng shuffle) and leaves `Rng.Niche` alone.
+    #[test]
+    fn transform_cards_v0113_uses_one_transformations_draw() {
+        let mut rs = RunState {
+            rng: crate::run_rng_set::RunRngSet::new_for(crate::GameVersion::V0_113_0, 0x42),
+            ..RunState::default()
+        };
+        for _ in 0..8 {
+            rs.master_deck
+                .push(mk_deck_card(crate::cards::CardId::StrikeIronclad, false));
+        }
+        let mut transformations = rs.rng.transformations.clone();
+        let mut niche = rs.rng.niche.clone();
+        assert_eq!(
+            rs.transform_cards(
+                2,
+                vec![
+                    mk_deck_card(crate::cards::CardId::AscendersBane, false),
+                    mk_deck_card(crate::cards::CardId::AscendersBane, false),
+                ],
+            ),
+            2
+        );
+        let _ = transformations.next_unsigned_long();
+        assert_eq!(
+            rs.rng.transformations.next_unsigned_long(),
+            transformations.next_unsigned_long()
+        );
+        assert_eq!(
+            rs.rng.niche.next_unsigned_long(),
+            niche.next_unsigned_long()
+        );
     }
 
     // ── transform_specific_cards — bead ab8uo (P9.3.a) ──

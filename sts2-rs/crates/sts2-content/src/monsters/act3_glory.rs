@@ -673,7 +673,12 @@ fn aeonglass_increasing_intensity_effect(state: &mut CombatState, owner: Creatur
     // Co-op: every player the move targets gets these cards.
     sts2_core::coop::each_player(state, |state| {
         for _ in 0..wither_amount {
-            let _ = crate::cards::status::spawn_wither(state, PileKind::Discard);
+            let uid = crate::cards::status::spawn_wither(state, PileKind::Discard);
+            // v0.113 adds each Wither at `CardPilePosition.Random`
+            // (Aeonglass.cs:162-163): one `Rng.Shuffle.NextInt(Count + 1)`.
+            if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+                state.insert_card_into_discard_pile(uid, true);
+            }
         }
     });
     // 4. Grant self Strength = base + AdditionalStrength(count_before).
@@ -4435,6 +4440,32 @@ mod tests {
         let mut levels = wither_levels(&state);
         levels.sort_unstable();
         assert_eq!(levels, vec![2, 2], "both Withers synced to upgrade count 2");
+    }
+
+    /// v0.113 adds the Wither at `CardPilePosition.Random` in Discard: one
+    /// `Rng.Shuffle` read per Wither (Aeonglass.cs:162-163); v0.111 appends.
+    #[test]
+    fn aeonglass_wither_random_discard_position_v0113() {
+        use sts2_core::{CombatState, GameVersion, MonsterKind};
+        for (version, reads) in [(GameVersion::V0_111_0, 0), (GameVersion::V0_113_0, 1)] {
+            let mut state = CombatState {
+                game_version: version,
+                ..CombatState::default()
+            };
+            state.player.current_hp = 70;
+            state.player.max_hp = 70;
+            let _player = state.init_player_creature();
+            let owner = state.spawn_enemy(MonsterKind::Aeonglass);
+            state.set_creature_ai(owner, create_aeonglass_ai());
+            let before = state.run_rng.shuffle.counter();
+            aeonglass_increasing_intensity_effect(&mut state, owner);
+            assert_eq!(
+                state.run_rng.shuffle.counter() - before,
+                reads,
+                "{version:?}"
+            );
+            assert_eq!(state.player.discard.len(), 1);
+        }
     }
 
     /// C# `Aeonglass.AfterCardGeneratedForCombat` matches EVERY Wither

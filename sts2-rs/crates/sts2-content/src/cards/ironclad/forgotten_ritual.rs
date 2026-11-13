@@ -20,9 +20,11 @@ pub(crate) fn play_forgotten_ritual(
 ) -> EffectResult {
     // v0.111.0: the energy gain is unconditional — the
     // `WasCardExhaustedThisTurn` gate is gone (decomp ForgottenRitual.cs:35-38).
-    if state.game_version >= sts2_core::GameVersion::V0_111_0
-        || state.combat_log.cards_exhausted_this_turn > 0
-    {
+    // v0.113.0 reverts it: energy only when the owner exhausted a card this
+    // turn (decomp ForgottenRitual.cs:33,42).
+    let unconditional = state.game_version >= sts2_core::GameVersion::V0_111_0
+        && state.game_version < sts2_core::GameVersion::V0_113_0;
+    if unconditional || state.combat_log.cards_exhausted_this_turn > 0 {
         let amt = if current_upgraded(state) { 4 } else { 3 };
         state.gain_energy(amt);
     }

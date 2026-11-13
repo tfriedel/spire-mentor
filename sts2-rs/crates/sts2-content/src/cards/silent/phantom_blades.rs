@@ -10,7 +10,18 @@ pub(crate) fn play_phantom_blades(
     _t: Option<CreatureUid>,
 ) -> EffectResult {
     // C# PhantomBlades.cs OnUpgrade bumps PhantomBladesPower 9->12. Bead `sts2-rs-yk4wg`.
-    let amt = if current_card_upgraded(state) { 12 } else { 9 };
+    // v0.113.0: PhantomBladesPower 9 -> 8, still +3 on upgrade (decomp
+    // PhantomBlades.cs:22,37).
+    let base = if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        8
+    } else {
+        9
+    };
+    let amt = if current_card_upgraded(state) {
+        base + 3
+    } else {
+        base
+    };
     apply_power_to_player(state, PowerKind::PhantomBlades, amt);
     // C# `PhantomBladesPower.AfterApplied`: grant Retain to every owned
     // Shiv-tagged card across ALL piles (`PlayerCombatState.AllCards`). Shivs

@@ -2745,3 +2745,28 @@ fn defect_energy_cards_gain_nothing_under_no_energy_gain() {
         );
     }
 }
+
+/// v0.113.0 `HelixDrill.cs:36-39` subtracts the in-progress play's
+/// `Resources.EnergySpent`. `CardCmd.AutoPlay` sets that to 0
+/// (CardCmd.cs:125), while Rust's `energy_spent` holds the auto-play's
+/// `EnergyValue` (the card's cost). An auto-played HelixDrill must not
+/// subtract it.
+#[test]
+fn helix_drill_v0113_auto_play_subtracts_no_energy() {
+    let (mut state, euid) = fresh_state(CardId::HelixDrill, 3, 0);
+    state.game_version = sts2_core::GameVersion::V0_113_0;
+    state.combat_log.energy_spent_this_turn = 3;
+    state.cards[0].energy_spent = 1;
+    let card = state.cards[0];
+    assert_eq!(
+        preview_helix_drill(&state, &card, Some(euid)),
+        2,
+        "hand play"
+    );
+    state.combat_log.resolving_auto_play = true;
+    assert_eq!(
+        preview_helix_drill(&state, &card, Some(euid)),
+        3,
+        "auto-play"
+    );
+}

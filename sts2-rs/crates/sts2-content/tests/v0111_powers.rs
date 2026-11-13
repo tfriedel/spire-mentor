@@ -399,6 +399,72 @@ fn juggling_clones_before_play_v0111() {
     assert_eq!(juggled_fiend_fire(GameVersion::V0_111_0), (0, 4));
 }
 
+/// v0.113.0 `JugglingPower.cs:38-69`: counted in `BeforeCardPlayed`, cloned
+/// in `AfterCardPlayed`, so the copy again survives Fiend Fire's exhaust.
+#[test]
+fn juggling_clones_after_play_v0113() {
+    assert_eq!(juggled_fiend_fire(GameVersion::V0_113_0), (1, 3));
+}
+
+fn juggling_counter(state: &CombatState) -> i32 {
+    state
+        .player_power_uids()
+        .into_iter()
+        .filter_map(|pid| state.powers.get_by_id(pid.0))
+        .find(|pw| pw.kind == PowerKind::Juggling)
+        .map_or(-1, |pw| pw.counter)
+}
+
+/// v0.113.0 `JugglingPower` keeps `attacksPlayedThisTurn` and `cardToClone`
+/// as two separate Data fields (JugglingPower.cs). The power's counter is the
+/// plain count even while the remembered 3rd Attack is still resolving (here
+/// paused at Headbutt's discard pick), and the clone still lands once the
+/// play finishes.
+#[test]
+fn juggling_counter_is_the_plain_count_mid_play_v0113() {
+    let (mut state, _) = fresh(GameVersion::V0_113_0);
+    let p = player_uid(&state);
+    give(&mut state, p, PowerKind::Juggling, 1);
+    for pid in state.player_power_uids() {
+        if let Some(pw) = state.powers.get_mut_by_id(pid.0) {
+            if pw.kind == PowerKind::Juggling {
+                pw.counter = 2;
+            }
+        }
+    }
+    let strike = add_to_hand(&mut state, CardId::StrikeIronclad);
+    let defend = add_to_hand(&mut state, CardId::DefendIronclad);
+    state.player.hand.clear();
+    state.player.discard.push(strike);
+    state.player.discard.push(defend);
+    let headbutt = add_to_hand(&mut state, CardId::Headbutt);
+    let step = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+    assert_eq!(step, sts2_core::StepResult::PendingChoice);
+    assert_eq!(
+        juggling_counter(&state),
+        3,
+        "no card uid packed into the counter"
+    );
+    let _ = sts2_core::apply(
+        &mut state,
+        Action::ResolveChoice {
+            selection: smallvec::smallvec![0],
+        },
+    );
+    assert_eq!(juggling_counter(&state), 3);
+    let hand: Vec<CardUid> = state.player.hand.to_vec();
+    assert_eq!(
+        hand.len(),
+        1,
+        "the Headbutt clone reaches the hand: {hand:?}"
+    );
+    assert_ne!(hand[0], headbutt);
+    assert_eq!(
+        sts2_core::card_by_uid(&state.cards, hand[0]).map(|c| c.card_id),
+        Some(CardId::Headbutt)
+    );
+}
+
 /// Strike as the turn's 3rd Attack under Juggling(1) and Calamity(1), the two
 /// powers applied in `juggling_first` order. Returns the hand's card ids.
 fn juggled_with_calamity(juggling_first: bool) -> Vec<CardId> {
@@ -1123,4 +1189,78 @@ fn diamond_diadem_power_is_inert_v0111() {
             "{v}"
         );
     }
+}
+
+/// Pael's Eye + Ambergris on the same end of turn. v0.111.0 fires every
+/// `AfterTakingExtraTurn` (Pael's Eye latches AND Ambergris spends a stack);
+/// v0.113.0 `Hook.ShouldTakeExtraTurn` returns Pael's Eye as the single
+/// source (`ShouldTakeExtraTurnEarly`, Hook.cs:2707-2727) and only it runs
+/// its after-hook (Hook.cs:1415-1425), so the Ambergris stack is kept.
+fn paels_and_ambergris(version: GameVersion) -> (i32, i32) {
+    let (mut state, _) = fresh(version);
+    state.relics.push(sts2_core::Relic {
+        id: std::num::NonZeroU32::new(1).expect("nz"),
+        kind: sts2_core::RelicKind::PaelsEye,
+        counter: sts2_core::RelicKind::PaelsEye.initial_counter(),
+        is_wax: false,
+        is_melted: false,
+    });
+    let p = player_uid(&state);
+    give(&mut state, p, PowerKind::Ambergris, 1);
+    let _ = sts2_core::apply(&mut state, Action::EndTurn);
+    assert_eq!(state.phase, CombatPhase::PlayerPlayPhase);
+    (
+        state.player_power_amount(PowerKind::Ambergris),
+        state.relics[0].counter & 1,
+    )
+}
+
+#[test]
+fn paels_eye_and_ambergris_both_spent_v0111() {
+    assert_eq!(paels_and_ambergris(GameVersion::V0_111_0), (0, 1));
+}
+
+#[test]
+fn paels_eye_is_the_only_extra_turn_source_v0113() {
+    assert_eq!(paels_and_ambergris(GameVersion::V0_113_0), (1, 1));
+}
+
+/// DrawCardsNextTurnPower: +N on the next turn-start draw, then gone. v0.113.0
+/// removes it in `AfterModifyingHandDraw` (DrawCardsNextTurnPower.cs:31-34)
+/// instead of `AfterSideTurnStart`; the observable draw is the same.
+fn draw_cards_next_turn(version: GameVersion) -> (usize, i32) {
+    let (mut state, enemy) = fresh(version);
+    if let Some(c) = state.creatures.iter_mut().find(|c| c.id == enemy.0) {
+        c.max_hp = 999;
+        c.current_hp = 999;
+    }
+    state.player.max_hp = 999;
+    state.player.current_hp = 999;
+    for _ in 0..15 {
+        let mut card = sts2_core::lookup_card_factory()
+            .and_then(|f| f(CardId::DefendIronclad, false))
+            .expect("card factory has the card");
+        let uid = CardUid::new(u32::try_from(state.cards.len() + 1).expect("fits")).expect("nz");
+        card.uid = uid;
+        state.cards.push(card);
+        state.player.draw.push(uid);
+    }
+    let p = player_uid(&state);
+    give(&mut state, p, PowerKind::DrawCardsNextTurn, 2);
+    let _ = sts2_core::apply(&mut state, Action::EndTurn);
+    assert_eq!(state.phase, CombatPhase::PlayerPlayPhase);
+    (
+        state.player.hand.len(),
+        state.player_power_amount(PowerKind::DrawCardsNextTurn),
+    )
+}
+
+#[test]
+fn draw_cards_next_turn_v0111() {
+    assert_eq!(draw_cards_next_turn(GameVersion::V0_111_0), (7, 0));
+}
+
+#[test]
+fn draw_cards_next_turn_v0113() {
+    assert_eq!(draw_cards_next_turn(GameVersion::V0_113_0), (7, 0));
 }

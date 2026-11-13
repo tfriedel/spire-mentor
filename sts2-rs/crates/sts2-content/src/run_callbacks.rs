@@ -440,8 +440,8 @@ const GRAB_BAG_SHUFFLE_ORDER: [sts2_core::runstate::RelicRarity; 4] = {
 /// `sts2-pycli/parity_walk.py`; beads `sts2-rs-mcesz` / `7e04v` / `jenwp`):
 /// C# `InitializeNewRun` shuffles TWO bags off the *same* `up_front` stream —
 /// first the shared-only `SharedRelicGrabBag` (`RunManager.cs:311`, ~111 reads
-/// for the 30/25/35/25 shared buckets), then a `NextInt(2)` setup read
-/// (counter 112, a single-element-range read not visible in the IL decomp),
+/// for the 30/25/35/25 shared buckets), then its Event (1 relic, 0 reads) and
+/// Ancient (2 relics, one `NextInt(2)` at counter 112) buckets,
 /// then the player's shared+character bag (`:314`). Relic rewards draw from the
 /// player bag, but the shared bag's shuffle must run first or the player Common
 /// shuffle starts ~111 reads too early. The shuffled shared bag is retained
@@ -449,24 +449,40 @@ const GRAB_BAG_SHUFFLE_ORDER: [sts2_core::runstate::RelicRarity; 4] = {
 /// Then `GenerateRooms` pre-rolls all acts' contents (reads 231..413).
 pub fn initialize_run_setup(rm: &mut sts2_core::run_manager::RunManager) {
     let cid = rm.run_state.character_id;
+    let version = rm.run_state.game_version;
     let (mut by_rarity, fallback, boss) = default_relic_grab_bag_for(cid);
 
     // (1) shared-only bag first (its shuffle consumes ~111 `up_front` reads).
     let mut shared = crate::relics::grab_bag::shared_grab_bag_buckets();
     for rarity in GRAB_BAG_SHUFFLE_ORDER {
         if let Some(bucket) = shared.get_mut(&rarity) {
-            rm.run_state.rng.up_front.shuffle(bucket);
+            rm.run_state.rng.up_front.shuffle_for(version, bucket);
         }
     }
     rm.run_state.shared_relic_grab_bag_by_rarity = shared;
 
-    // (2) one setup `NextInt(2)` between the two populates (counter 112).
-    rm.run_state.rng.up_front.next_int(0, 1);
+    // (2) the shared bag's two other buckets. `Populate(relics, rng)` does not
+    // filter rarities, so `SharedRelicPool` also yields an Event bucket
+    // ([FresnelLens], first at pool index 28) and an Ancient one
+    // ([LoomingFruit, VeryHotCocoa], index 52), shuffled after Shop in
+    // insertion order. Before v0.113.0 they cost 0 reads and one `NextInt(2)`
+    // (the "setup read", counter 112); from v0.113.0 each shuffle seeds a
+    // child Rng with one `NextUnsignedLong`. Their contents are never pulled
+    // (rewards roll Common / Uncommon / Rare / Shop).
+    if version >= sts2_core::GameVersion::V0_113_0 {
+        rm.run_state.rng.up_front.shuffle_for(version, &mut [()]);
+        rm.run_state
+            .rng
+            .up_front
+            .shuffle_for(version, &mut [(), ()]);
+    } else {
+        rm.run_state.rng.up_front.next_int(0, 1);
+    }
 
     // (3) player shared+character bag.
     for rarity in GRAB_BAG_SHUFFLE_ORDER {
         if let Some(bucket) = by_rarity.get_mut(&rarity) {
-            rm.run_state.rng.up_front.shuffle(bucket);
+            rm.run_state.rng.up_front.shuffle_for(version, bucket);
         }
     }
     rm.run_state

@@ -62,7 +62,7 @@
 
 use crate::dotnet_rng::Rng;
 use crate::map::{ActMap, MapPointIdx, MapPointType};
-use crate::map_generator::{is_type_valid_for_point, PoolCounts};
+use crate::map_generator::{is_type_valid_for_point_v, PoolCounts};
 
 fn trace_enabled() -> bool {
     std::env::var_os("MAP_PRUNE_TRACE").is_some()
@@ -77,11 +77,16 @@ fn coord(map: &ActMap, idx: MapPointIdx) -> String {
 /// (`MapPathPruning.cs:13-23`). Runs up to three passes of
 /// `prune_duplicate_segments` + `repair_pruned_point_types`; stops
 /// early when a repair pass returns `false` (nothing to fix).
-pub fn prune_and_repair(map: &mut ActMap, rng: &mut Rng, counts: PoolCounts) {
+pub fn prune_and_repair(
+    map: &mut ActMap,
+    rng: &mut Rng,
+    counts: PoolCounts,
+    version: crate::GameVersion,
+) {
     let map_length = map.map_length;
     for _ in 0..3 {
-        prune_duplicate_segments(map, rng);
-        if !repair_pruned_point_types(map, rng, counts, map_length) {
+        prune_duplicate_segments(map, rng, version);
+        if !repair_pruned_point_types(map, rng, counts, map_length, version) {
             break;
         }
     }
@@ -100,17 +105,33 @@ fn repair_pruned_point_types(
     rng: &mut Rng,
     counts: PoolCounts,
     map_length: i32,
+    version: crate::GameVersion,
 ) -> bool {
     let mut changed = false;
     // Order matters — matches the C# call sequence exactly.
-    changed |= repair_point_type(map, MapPointType::Shop, counts.num_shops, rng, map_length);
-    changed |= repair_point_type(map, MapPointType::Elite, counts.num_elites, rng, map_length);
+    changed |= repair_point_type(
+        map,
+        MapPointType::Shop,
+        counts.num_shops,
+        rng,
+        map_length,
+        version,
+    );
+    changed |= repair_point_type(
+        map,
+        MapPointType::Elite,
+        counts.num_elites,
+        rng,
+        map_length,
+        version,
+    );
     changed |= repair_point_type(
         map,
         MapPointType::RestSite,
         counts.num_rests,
         rng,
         map_length,
+        version,
     );
     changed |= repair_point_type(
         map,
@@ -118,6 +139,7 @@ fn repair_pruned_point_types(
         counts.num_unknowns,
         rng,
         map_length,
+        version,
     );
     changed
 }
@@ -132,12 +154,21 @@ fn repair_point_type(
     target_count: i32,
     rng: &mut Rng,
     map_length: i32,
+    version: crate::GameVersion,
 ) -> bool {
+    // v0.113.0 counts only modifiable points (`MapPathPruning.cs:54`
+    // `p.PointType == type && p.CanBeModified`): the pinned top-row rest
+    // sites / treasure-row elites no longer count toward the target.
+    let v113 = version >= crate::GameVersion::V0_113_0;
     let current: i32 = map
         .points
         .iter()
         .enumerate()
-        .filter(|(i, p)| map.is_in_map(*i as MapPointIdx) && p.point_type == kind)
+        .filter(|(i, p)| {
+            map.is_in_map(*i as MapPointIdx)
+                && p.point_type == kind
+                && !(v113 && is_pinned_row(p.row(), map_length))
+        })
         .count() as i32;
     let mut deficit = target_count - current;
     if trace_enabled() {
@@ -169,14 +200,33 @@ fn repair_point_type(
         .map(|(i, p)| (p.coord, i as MapPointIdx))
         .collect();
     candidates.sort_by_key(|(c, _)| (c.col, c.row));
-    rng.shuffle(&mut candidates);
+    rng.shuffle_for(version, &mut candidates);
+    // v0.113.0 (`MapPathPruning.cs:65-72`): a non-Unknown deficit may also
+    // take a modifiable Unknown point, tried after every Monster point —
+    // a second `StableShuffle` on the same rng.
+    if v113 && kind != MapPointType::Unknown {
+        let mut unknowns: Vec<(crate::map::MapCoord, MapPointIdx)> = map
+            .points
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| {
+                map.is_in_map(*i as MapPointIdx)
+                    && p.point_type == MapPointType::Unknown
+                    && !is_pinned_row(p.row(), map_length)
+            })
+            .map(|(i, p)| (p.coord, i as MapPointIdx))
+            .collect();
+        unknowns.sort_by_key(|(c, _)| (c.col, c.row));
+        rng.shuffle_for(version, &mut unknowns);
+        candidates.extend(unknowns);
+    }
 
     let mut changed = false;
     for (coord, idx) in candidates {
         if deficit == 0 {
             break;
         }
-        if is_type_valid_for_point(map, idx, kind, map_length) {
+        if is_type_valid_for_point_v(map, idx, kind, map_length, version) {
             if trace_enabled() {
                 eprintln!("[REP]   ({},{}) <- {:?}", coord.col, coord.row, kind);
             }
@@ -210,7 +260,7 @@ const fn is_pinned_row(row: i32, map_length: i32) -> bool {
 /// killed by each prune (GH #468 fix idea 3) — see the `SegmentIndex`
 /// docs for the argument that each refresh yields byte-identical
 /// buckets, in the same order, to a from-scratch recompute.
-fn prune_duplicate_segments(map: &mut ActMap, rng: &mut Rng) {
+fn prune_duplicate_segments(map: &mut ActMap, rng: &mut Rng, version: crate::GameVersion) {
     let Some(start_idx) = map.start else {
         return;
     };
@@ -226,7 +276,7 @@ fn prune_duplicate_segments(map: &mut ActMap, rng: &mut Rng) {
             sizes
         );
     }
-    while prune_paths(map, rng, &matching, &mut log) {
+    while prune_paths(map, rng, &matching, &mut log, version) {
         iters += 1;
         assert!(
             iters <= 50,
@@ -1079,6 +1129,7 @@ fn prune_paths(
     rng: &mut Rng,
     matching: &[Vec<Segment>],
     log: &mut PruneLog,
+    version: crate::GameVersion,
 ) -> bool {
     for bucket in matching {
         // C# `UnstableShuffle` on the bucket. Our `Rng::shuffle` is
@@ -1086,7 +1137,7 @@ fn prune_paths(
         // Shuffling by reference draws the same RNG sequence as
         // shuffling owned clones — consumption depends only on length.
         let mut shuffled: Vec<&Segment> = bucket.iter().collect();
-        rng.shuffle(&mut shuffled);
+        rng.shuffle_for(version, &mut shuffled);
         if prune_all_but_last(map, &shuffled, log) > 0 {
             return true;
         }
@@ -1343,7 +1394,7 @@ mod tests {
             num_rests: 5,
         };
         let mut rng2 = Rng::new(2026);
-        prune_and_repair(&mut map, &mut rng2, counts);
+        prune_and_repair(&mut map, &mut rng2, counts, crate::GameVersion::V0_107_1);
 
         // Boss reachable from start.
         let start = map.start.expect("start");

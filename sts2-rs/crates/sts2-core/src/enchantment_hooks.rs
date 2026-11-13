@@ -53,6 +53,28 @@ const VIGOROUS_USED_BIT: i32 = 0b0001;
 const GLAM_USED_BIT: i32 = 0b0010;
 const SWIFT_USED_BIT: i32 = 0b0100;
 const SOWN_USED_BIT: i32 = 0b1000;
+/// v0.113.0 Swift / Sown disable in `AfterCardPlayed`, not in `OnPlay`
+/// (`Swift.cs:19`, `Sown.cs:17`). The effect fires with the card still
+/// Normal; these PENDING bits stand for "disabled once this play iteration's
+/// `AfterCardPlayed` reaches the enchantment". They turn into the USED bits at
+/// the card's next enchantment `OnPlay` (always after that `AfterCardPlayed`),
+/// and a Music Box clone made during the same `AfterCardPlayed` (relics come
+/// before card enchantments in `IterateHookListeners`) drops them, so it keeps
+/// a Normal Swift / Sown ([`clear_pending_first_play_disable`]).
+const SWIFT_PENDING_BIT: i32 = 0b1_0000_0000;
+const SOWN_PENDING_BIT: i32 = 0b10_0000_0000;
+
+/// Music Box clone of the card being played (v0.113.0): the enchantment has
+/// not yet disabled itself, so drop the pending Swift / Sown disables.
+pub fn clear_pending_first_play_disable(card: &mut crate::cards::Card) {
+    let bits = card.combat_var(VarKey::EnchantmentUsed);
+    if bits & (SWIFT_PENDING_BIT | SOWN_PENDING_BIT) != 0 {
+        card.set_combat_var(
+            VarKey::EnchantmentUsed,
+            bits & !(SWIFT_PENDING_BIT | SOWN_PENDING_BIT),
+        );
+    }
+}
 
 /// Additive damage bonus contributed by the *played card's* enchantments,
 /// for a powered attack. Mirrors the C# `*.EnchantDamageAdditive` chain
@@ -669,6 +691,25 @@ fn on_card_played_stub(state: &mut CombatState, card_uid: CardUid) {
     // discipline: the immutable borrow of `card_for` dies before we
     // call `apply_damage_to_player` / `gain_block_player` (which
     // need `&mut state`).
+    // v0.113.0: a disable pending from an earlier play iteration has landed
+    // by now (its `AfterCardPlayed` ran).
+    if state.game_version >= crate::GameVersion::V0_113_0 {
+        let idx = (card_uid.get() as usize).saturating_sub(1);
+        if let Some(card) = state.cards.get_mut(idx) {
+            let bits = card.combat_var(VarKey::EnchantmentUsed);
+            let mut landed = bits & !(SWIFT_PENDING_BIT | SOWN_PENDING_BIT);
+            if bits & SWIFT_PENDING_BIT != 0 {
+                landed |= SWIFT_USED_BIT;
+            }
+            if bits & SOWN_PENDING_BIT != 0 {
+                landed |= SOWN_USED_BIT;
+            }
+            if landed != bits {
+                card.set_combat_var(VarKey::EnchantmentUsed, landed);
+            }
+        }
+    }
+    let disable_later = state.game_version >= crate::GameVersion::V0_113_0;
     let (
         card_id,
         momentum_amount,
@@ -734,7 +775,15 @@ fn on_card_played_stub(state: &mut CombatState, card_uid: CardUid) {
     // after it; the draw cannot reach this card (it is on the Play pile), so
     // one order serves both.
     if swift_amount > 0 && (used_bits & SWIFT_USED_BIT) == 0 {
-        mark_used(state, card_uid, SWIFT_USED_BIT);
+        mark_used(
+            state,
+            card_uid,
+            if disable_later {
+                SWIFT_PENDING_BIT
+            } else {
+                SWIFT_USED_BIT
+            },
+        );
         // C# `Swift.OnPlay` → `CardPileCmd.Draw(fromHandDraw = false)` —
         // vetoed by NoDraw/Fiddle like every card-effect draw.
         let _ = state.draw_into_hand_card_effect(swift_amount);
@@ -743,7 +792,15 @@ fn on_card_played_stub(state: &mut CombatState, card_uid: CardUid) {
     // Sown: gain N energy on first play per combat. Same first-play gate and
     // in-play disable as Swift (Sown.cs:13-20).
     if sown_amount > 0 && (used_bits & SOWN_USED_BIT) == 0 {
-        mark_used(state, card_uid, SOWN_USED_BIT);
+        mark_used(
+            state,
+            card_uid,
+            if disable_later {
+                SOWN_PENDING_BIT
+            } else {
+                SOWN_USED_BIT
+            },
+        );
         state.gain_energy(sown_amount);
     }
 }
@@ -1383,6 +1440,33 @@ mod tests {
             state.player.energy, 2,
             "the Disabled clone grants no energy"
         );
+    }
+
+    /// v0.113 `Sown`/`Swift` disable in `AfterCardPlayed`, not in `OnPlay`: a
+    /// Music Box clone made earlier in that hook pass (relics before card
+    /// enchantments) is still Normal and fires again; the original is spent.
+    #[test]
+    fn sown_v0113_disables_after_play_so_a_mid_play_clone_stays_normal() {
+        let mut state = state_with_one_enchanted_card(EnchantmentId::Sown, 2);
+        state.game_version = crate::GameVersion::V0_113_0;
+        state.player.energy = 0;
+        dispatch_on_card_played(&mut state, uid(1));
+        assert_eq!(state.player.energy, 2);
+        assert_eq!(
+            state.cards[0].combat_var(VarKey::EnchantmentUsed) & SOWN_USED_BIT,
+            0,
+            "not yet Disabled inside the play"
+        );
+        let mut clone = state.cards[0].create_clone();
+        clear_pending_first_play_disable(&mut clone);
+        clone.uid = uid(2);
+        state.cards.push(clone);
+        dispatch_after_card_played(&mut state, uid(1));
+        dispatch_on_card_played(&mut state, uid(2));
+        assert_eq!(state.player.energy, 4, "the Normal clone grants energy");
+        // The original's next play is inert.
+        dispatch_on_card_played(&mut state, uid(1));
+        assert_eq!(state.player.energy, 4);
     }
 
     /// Glam: after_card_played sets bit 1 (matches sts2-content

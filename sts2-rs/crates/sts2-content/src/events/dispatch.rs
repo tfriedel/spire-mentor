@@ -35,6 +35,10 @@ use super::shared_wave_b::{
     SUNKEN_TREASURY, TABLET_OF_TRUTH, TANX, TEZCATARA, THE_LANTERN_KEY, THIS_OR_THAT, TINKER_TIME,
     TRIAL, UNREST_SITE, VAKUU, WELLSPRING, WOOD_CARVINGS, ZEN_WEAVER,
 };
+use super::v0113::{
+    MUSEUM_OF_TORTURE, SHRINE_OF_THE_WARLORD, THERMAE_NONUPEIPE, WATERFALL_OF_OBVIOUS_SECRETS,
+    WUPPY_IN_TROUBLE,
+};
 use super::EventSpec;
 
 /// Resolve an [`EventId`] to its static [`EventSpec`].
@@ -126,6 +130,11 @@ pub fn spec_for(id: EventId) -> &'static EventSpec {
         EventId::WaterloggedScriptorium => &WATERLOGGED_SCRIPTORIUM,
         EventId::WelcomeToWongos => &WELCOME_TO_WONGOS,
         EventId::WhisperingHollow => &WHISPERING_HOLLOW,
+        EventId::MuseumOfTorture => &MUSEUM_OF_TORTURE,
+        EventId::ShrineOfTheWarlord => &SHRINE_OF_THE_WARLORD,
+        EventId::ThermaeNonupeipe => &THERMAE_NONUPEIPE,
+        EventId::WaterfallOfObviousSecrets => &WATERFALL_OF_OBVIOUS_SECRETS,
+        EventId::WuppyInTrouble => &WUPPY_IN_TROUBLE,
     }
 }
 

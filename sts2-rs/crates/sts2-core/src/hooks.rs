@@ -1955,7 +1955,7 @@ fn retrieve_attacks_from_discard(state: &mut CombatState, count: i32, upgrade: b
     state
         .run_rng
         .combat_card_selection
-        .shuffle(attacks.as_mut_slice());
+        .shuffle_for(state.game_version, attacks.as_mut_slice());
     let picks: SmallVec<[CardUid; 4]> = attacks.into_iter().take(count as usize).collect();
     // Move each pick from discard to hand.
     for uid in &picks {
@@ -2067,9 +2067,10 @@ fn auto_play_random_attack_from_hand(state: &mut CombatState) {
     if playable.is_empty() {
         return;
     }
+    let version = state.game_version;
     let chosen = playable[state
         .run_rng
-        .shuffle
+        .shuffle_or_card_selection(version)
         .next_int_exclusive(0, playable.len() as i32) as usize];
     // C# `CardCmd.AutoPlay` returns at once when `IsOverOrEnding` (CardCmd.cs,
     // both builds): the pick above is still drawn, but a Stampede batch whose
@@ -2131,10 +2132,22 @@ pub fn juggling_before_card_played_v0111(
     {
         return;
     }
+    let v0113 = state.game_version >= crate::GameVersion::V0_113_0;
     let mut clone_amount: Option<i32> = None;
     for puid in state.player_power_uids() {
         if let Some(power) = state.powers.get_mut_by_id(puid.0) {
             if power.kind == PowerKind::Juggling {
+                if v0113 {
+                    // v0.113.0 `JugglingPower.BeforeCardPlayed` only counts
+                    // and remembers the 3rd Attack (`cardToClone`); the
+                    // clone moved to `AfterCardPlayed`
+                    // ([`juggling_after_card_played_v0113`]).
+                    power.counter = power.counter.saturating_add(1);
+                    if power.counter == 3 {
+                        state.combat_log.juggling_card_to_clone = Some(card_uid);
+                    }
+                    break;
+                }
                 power.counter = power.counter.saturating_add(1);
                 if power.counter == 3 {
                     clone_amount = Some(power.amount);
@@ -2143,6 +2156,32 @@ pub fn juggling_before_card_played_v0111(
             }
         }
     }
+    if let Some(amount) = clone_amount {
+        crate::event_log::flash_player_power(state, PowerKind::Juggling);
+        clone_card_to_hand(state, card_uid, amount, false);
+    }
+}
+
+/// v0.113.0 `JugglingPower.AfterCardPlayed` (decomp JugglingPower.cs:56-69):
+/// when the play that finished is the remembered 3rd Attack, forget it and
+/// clone the card AS IT IS NOW (after it resolved) `Amount` times to hand.
+/// No-op before v0.113.0.
+pub fn juggling_after_card_played_v0113(state: &mut CombatState, card_uid: CardUid) {
+    if state.game_version < crate::GameVersion::V0_113_0
+        || !power_kind_live(state, PowerKind::Juggling)
+    {
+        return;
+    }
+    if state.combat_log.juggling_card_to_clone != Some(card_uid) {
+        return;
+    }
+    state.combat_log.juggling_card_to_clone = None;
+    let clone_amount = state
+        .player_power_uids()
+        .into_iter()
+        .filter_map(|puid| state.powers.get_by_id(puid.0))
+        .find(|power| power.kind == PowerKind::Juggling)
+        .map(|power| power.amount);
     if let Some(amount) = clone_amount {
         crate::event_log::flash_player_power(state, PowerKind::Juggling);
         clone_card_to_hand(state, card_uid, amount, false);
@@ -4510,7 +4549,10 @@ pub fn before_damage_received(
             // `DamageCtx` carries no card, so read the resolving card off the
             // top of Play, gated on a player `Move` hit (Necrobinder full seed
             // 3645).
-            let omnislice_hit = ctx.dealer == CreatureRef::Player
+            // v0.113 drops the special case (ThornsPower.cs:18): the splash
+            // is a plain `Move` hit there.
+            let omnislice_hit = state.game_version < crate::GameVersion::V0_113_0
+                && ctx.dealer == CreatureRef::Player
                 && ctx.props.contains(ValueProps::MOVE)
                 && state
                     .player
@@ -6102,7 +6144,10 @@ fn relic_should_flush(state: &CombatState, relic: &crate::Relic) -> bool {
     if relic.kind == crate::RelicKind::RunicPyramid {
         return false;
     }
-    if relic.kind == crate::RelicKind::RingingTriangle && state.turn_number() == 1 {
+    if relic.kind == crate::RelicKind::RingingTriangle
+        && state.turn_number() == 1
+        && state.game_version < crate::GameVersion::V0_113_0
+    {
         return false;
     }
     true
@@ -6127,8 +6172,15 @@ pub fn should_play(state: &CombatState, listener: ListenerRef, ctx: &CardCtx) ->
 
 /// The relic arm of [`should_play`] on an already-resolved relic. Only the
 /// kinds in [`SHOULD_PLAY_RELIC_KINDS`] can return `false`.
-fn relic_should_play(_state: &CombatState, relic: &crate::Relic, _ctx: &CardCtx) -> bool {
+fn relic_should_play(state: &CombatState, relic: &crate::Relic, _ctx: &CardCtx) -> bool {
     match relic.kind {
+        // v0.113.0 `VelvetChoker.GetCardsPlayedThisTurn` (VelvetChoker.cs:45-52)
+        // counts this turn's `CardPlaysStarted` instead of a counter bumped
+        // in `AfterCardPlayed`, so a play still resolving already counts.
+        crate::RelicKind::VelvetChoker if state.game_version >= crate::GameVersion::V0_113_0 => {
+            i32::try_from(state.player.card_plays_started_this_turn).unwrap_or(i32::MAX)
+                < VELVET_CHOKER_MAX_CARDS
+        }
         // C# `VelvetChoker.ShouldPlay` → `!(_cardsPlayedThisTurn >= 6)`
         // (`CardsVar(6)`). The counter is bumped by the sts2-content
         // `after_card_played` listener and reset at the player's turn start.
@@ -8988,6 +9040,12 @@ pub fn after_side_turn_start(
             // turn-start (the draw step runs before this walk), so removing
             // the power here scopes the bonus to exactly one turn. Applied by
             // Silent's Predator.
+            // v0.113.0 moved the removal to `AfterModifyingHandDraw`
+            // (DrawCardsNextTurnPower.cs:31-34), see
+            // [`draw_cards_next_turn_after_modifying_hand_draw_v0113`].
+            if state.game_version >= crate::GameVersion::V0_113_0 {
+                return None;
+            }
             let owner = owner_of_listener(state, listener)?;
             if creature_ref_side(owner) != ctx.side {
                 return None;
@@ -13711,6 +13769,17 @@ const MODIFY_MAX_ENERGY_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_k
 /// free, i.e. while `CardsPlayedThisTurn == Cards - 1`.
 pub const BRILLIANT_SCARF_FREE_AFTER: i32 = 4;
 
+/// [`BRILLIANT_SCARF_FREE_AFTER`] for a game build: v0.113.0 raised the var to
+/// `CardsVar(6)` (`BrilliantScarf.cs:34`), so the SIXTH card is free.
+#[must_use]
+pub fn brilliant_scarf_free_after(version: crate::GameVersion) -> i32 {
+    if version >= crate::GameVersion::V0_113_0 {
+        5
+    } else {
+        BRILLIANT_SCARF_FREE_AFTER
+    }
+}
+
 /// C# `BrilliantScarf.ShouldModifyCost`
 /// (`BrilliantScarf.cs`):
 /// true while the owner has played exactly `Cards - 1` = 4 cards this turn
@@ -13730,7 +13799,7 @@ pub fn brilliant_scarf_makes_free(state: &CombatState, card_uid: CardUid) -> boo
     state.relics.iter().any(|r| {
         !r.is_melted
             && r.kind == crate::RelicKind::BrilliantScarf
-            && r.counter == BRILLIANT_SCARF_FREE_AFTER
+            && r.counter == brilliant_scarf_free_after(state.game_version)
     }) && (state.player.hand.contains(&card_uid) || state.player.play.contains(&card_uid))
 }
 
@@ -14146,9 +14215,17 @@ dispatch_all_hook!(
 /// result, and the arm is read-only, so skipping them changes nothing.
 #[must_use]
 pub fn dispatch_should_take_extra_turn(state: &CombatState, _ctx: &CombatLifecycleCtx) -> bool {
+    relic_should_take_extra_turn_any(state) || ambergris_should_take_extra_turn_v0111(state)
+}
+
+/// True when a relic (Pael's Eye) grants the extra turn. v0.113.0 asks these
+/// `ShouldTakeExtraTurnEarly` listeners before any `ShouldTakeExtraTurn` one
+/// (Hook.cs:2707-2727) and remembers the winning `source`, so only that
+/// source's `AfterTakingExtraTurn` runs (Hook.cs:1415-1425).
+#[must_use]
+pub fn relic_should_take_extra_turn_any(state: &CombatState) -> bool {
     relics_of_kinds(state, SHOULD_TAKE_EXTRA_TURN_RELIC_KINDS)
         .any(|r| relic_should_take_extra_turn(state, r))
-        || ambergris_should_take_extra_turn_v0111(state)
 }
 
 /// v0.111.0 `AmbergrisPower.ShouldTakeExtraTurn` (decomp AmbergrisPower.cs:14):
@@ -14188,6 +14265,33 @@ pub fn ambergris_after_taking_extra_turn_v0111(state: &mut CombatState) {
             Effect::DecrementPowerAmount {
                 listener: ListenerRef::Power(uid),
                 delta: -1,
+            },
+        );
+    }
+}
+
+/// v0.113.0 `DrawCardsNextTurnPower.AfterModifyingHandDraw`
+/// (DrawCardsNextTurnPower.cs:31-34): `PowerCmd.Remove(this)` once the
+/// turn-start hand draw is final. `Hook.AfterModifyingHandDraw` only calls the
+/// models that changed the count (Hook.cs:934-944), i.e. a non-zero stack.
+/// Replaces the v0.111.0 `AfterSideTurnStart` removal. No-op before v0.113.0.
+pub fn draw_cards_next_turn_after_modifying_hand_draw_v0113(state: &mut CombatState) {
+    if state.game_version < crate::GameVersion::V0_113_0
+        || !power_kind_live(state, PowerKind::DrawCardsNextTurn)
+    {
+        return;
+    }
+    let uid = state.player_power_uids().into_iter().find(|u| {
+        state
+            .powers
+            .get_by_id(u.0)
+            .is_some_and(|p| p.kind == PowerKind::DrawCardsNextTurn && p.amount != 0)
+    });
+    if let Some(uid) = uid {
+        apply_effect(
+            state,
+            Effect::RemovePower {
+                listener: ListenerRef::Power(uid),
             },
         );
     }
@@ -14892,7 +14996,11 @@ fn run_foregone_conclusion_select(
                 })
             })
             .collect();
-        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+        keyed.sort_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| {
+                crate::cards::draw_select_tiebreak(&state.cards, a.2, b.2, state.game_version)
+            })
+        });
         let sorted: Vec<crate::CardUid> = keyed.into_iter().map(|(_, _, uid)| uid).collect();
         // Pile larger than the take: C# surfaces a player `card_select`
         // (FromSimpleGrid opens `NSimpleCardSelectScreen` when
@@ -16096,6 +16204,11 @@ pub fn dispatch_after_card_played_ordered_enemy_hits(state: &mut CombatState, ct
             // times to hand. It appends to the hand, so it fires in this
             // application-order walk: Juggling applied before Calamity puts
             // the clone ahead of Calamity's conjured Attacks (and vice versa).
+            PowerKind::Juggling if state.game_version >= crate::GameVersion::V0_113_0 => {
+                if let Some(card_uid) = ctx.card_uid {
+                    juggling_after_card_played_v0113(state, card_uid);
+                }
+            }
             PowerKind::Juggling
                 if is_attack && state.game_version < crate::GameVersion::V0_111_0 =>
             {
@@ -19179,7 +19292,11 @@ fn after_shuffle_stratagem_post_walk(state: &mut CombatState) {
             })
         })
         .collect();
-    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    keyed.sort_by(|a, b| {
+        a.0.cmp(&b.0).then_with(|| {
+            crate::cards::draw_select_tiebreak(&state.cards, a.2, b.2, state.game_version)
+        })
+    });
     let options: Vec<crate::ChoiceOption> = keyed
         .into_iter()
         .map(|(_, _, uid)| {

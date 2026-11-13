@@ -568,8 +568,10 @@ pub fn entropic_brew_fill_belt(state: &mut CombatState) {
         return;
     };
     while state.player.potions.len() < state.player.effective_potion_slots() {
+        // v0.113.0 (Entropic Brew and Delicate Frond alike) rolls on
+        // `PlayerRng.NonCombatGeneration`.
         let Some(kind) = create_random_potions_out_of_combat(
-            &mut state.run_rng.combat_potion_generation,
+            state.run_rng.non_combat_or_combat_potion(),
             character,
             1,
         )

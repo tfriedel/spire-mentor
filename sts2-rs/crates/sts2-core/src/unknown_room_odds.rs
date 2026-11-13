@@ -269,6 +269,11 @@ impl RunState {
         if self.lantern_key_redirects_to_war_historian() {
             room_types = std::iter::once(RoomType::Event).collect();
         }
+        // v0.113.0 Dowsing quest card: strips Monster/Elite after 3 rooms.
+        if self.dowsing_strips_fights() {
+            room_types.remove(&RoomType::Monster);
+            room_types.remove(&RoomType::Elite);
+        }
 
         // Roll.
         self.unknown_map_point_odds

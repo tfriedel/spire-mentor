@@ -2514,6 +2514,7 @@ pub fn card_id_from_python_name(s: &str) -> Option<CardId> {
         CardId::all()
             .iter()
             .chain(CardId::V0111_ONLY.iter())
+            .chain(CardId::V0113_ONLY.iter())
             .copied()
     };
     if let Some(c) = ids().find(|k| k.to_python_name() == s) {

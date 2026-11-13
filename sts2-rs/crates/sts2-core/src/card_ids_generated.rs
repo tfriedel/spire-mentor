@@ -1234,6 +1234,20 @@ pub enum CardId {
     Tutor,
     /// v0.111.0 MP-only Necrobinder Skill (`Cards/Underworld.cs`); `_CARD` disambiguates it from `UnderworldPower`. GH #793.
     UnderworldCard,
+    // ── v0.113.0-only. Not in [`CardId::all`]; see [`CardId::V0113_ONLY`].
+    /// v0.113.0 event Attack (`Cards/DingyDagger.cs`), from Waterfall of
+    /// Obvious Secrets: 0 cost, 7 damage, upgradable without limit.
+    DingyDagger,
+    /// v0.113.0 event Attack (`Cards/MightyWeapon.cs`), from Shrine of the
+    /// Warlord: 1 cost, 25 damage to all, 2 Dazed into the draw pile.
+    MightyWeapon,
+    /// v0.113.0 event Skill (`Cards/MightyShield.cs`), from Shrine of the
+    /// Warlord: 1 cost, 20 block, 3 Dazed into the draw pile.
+    MightyShield,
+    /// v0.113.0 Rare colorless Attack (`Cards/MyShinies.cs`): 1 damage
+    /// `floor(Gold / 20)` times (`/ 10` upgraded). After MindBlast in
+    /// `ColorlessCardPool`.
+    MyShinies,
 }
 
 impl CardId {
@@ -1840,6 +1854,10 @@ impl CardId {
             Self::TheBall => "THE_BALL",
             Self::Tutor => "TUTOR",
             Self::UnderworldCard => "UNDERWORLD_CARD",
+            Self::DingyDagger => "DINGY_DAGGER",
+            Self::MightyWeapon => "MIGHTY_WEAPON",
+            Self::MightyShield => "MIGHTY_SHIELD",
+            Self::MyShinies => "MY_SHINIES",
         }
     }
 
@@ -2453,6 +2471,14 @@ impl CardId {
         Self::UnderworldCard,
     ];
 
+    /// Cards that exist only from game build v0.113.0 on.
+    pub const V0113_ONLY: [CardId; 4] = [
+        Self::DingyDagger,
+        Self::MightyWeapon,
+        Self::MightyShield,
+        Self::MyShinies,
+    ];
+
     /// The build a card first exists in.
     #[must_use]
     pub const fn introduced_in(self) -> crate::GameVersion {
@@ -2476,6 +2502,9 @@ impl CardId {
             | Self::TheBall
             | Self::Tutor
             | Self::UnderworldCard => crate::GameVersion::V0_111_0,
+            Self::DingyDagger | Self::MightyWeapon | Self::MightyShield | Self::MyShinies => {
+                crate::GameVersion::V0_113_0
+            }
             _ => crate::GameVersion::V0_107_1,
         }
     }
@@ -2487,6 +2516,9 @@ impl CardId {
         let mut v = Self::all().to_vec();
         if version >= crate::GameVersion::V0_111_0 {
             v.extend_from_slice(&Self::V0111_ONLY);
+        }
+        if version >= crate::GameVersion::V0_113_0 {
+            v.extend_from_slice(&Self::V0113_ONLY);
         }
         v
     }

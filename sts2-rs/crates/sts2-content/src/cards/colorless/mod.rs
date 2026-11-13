@@ -104,6 +104,10 @@ pub mod whistle;
 pub mod wish;
 // v0.111.0-only cards (GH #793).
 pub mod abundance;
+pub mod dingy_dagger;
+pub mod mighty_shield;
+pub mod mighty_weapon;
+pub mod my_shinies;
 pub mod the_ball;
 
 pub use helpers::automation;
@@ -376,5 +380,18 @@ const POOL: &[(CardId, PlayCardFn)] = &[
 #[allow(clippy::type_complexity)]
 const POOL_V0111: &[(CardId, PlayCardFn)] = &[
     (CardId::Abundance, abundance::play_abundance as PlayCardFn),
+    (
+        CardId::DingyDagger,
+        dingy_dagger::play_dingy_dagger as PlayCardFn,
+    ),
+    (CardId::MyShinies, my_shinies::play_my_shinies as PlayCardFn),
+    (
+        CardId::MightyWeapon,
+        mighty_weapon::play_mighty_weapon as PlayCardFn,
+    ),
+    (
+        CardId::MightyShield,
+        mighty_shield::play_mighty_shield as PlayCardFn,
+    ),
     (CardId::TheBall, the_ball::play_the_ball as PlayCardFn),
 ];

@@ -34,7 +34,14 @@ pub(crate) fn play_wish(state: &mut CombatState, _t: Option<CreatureUid>) -> Eff
                 // `ModelId.CompareTo`; see `play_seeker_strike`).
                 card_rarity_rank_csharp_in(ca.card_id, state.game_version)
                     .cmp(&card_rarity_rank_csharp_in(cb.card_id, state.game_version))
-                    .then_with(|| card_model_entry(ca.card_id).cmp(card_model_entry(cb.card_id)))
+                    .then_with(|| {
+                        sts2_core::cards::draw_select_tiebreak(
+                            &state.cards,
+                            a,
+                            b,
+                            state.game_version,
+                        )
+                    })
             });
             let options: Vec<sts2_core::ChoiceOption> = candidates
                 .iter()

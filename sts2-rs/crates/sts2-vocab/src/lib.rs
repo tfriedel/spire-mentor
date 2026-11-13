@@ -413,8 +413,8 @@ pub fn parse_pin(text: &str) -> impl Iterator<Item = &str> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
 }
 
-/// The game build whose id universe the registries span: the NEWEST
-/// supported build, whose `all_for` is the union of every build's ids (each
+/// The game build whose id universe the registries span: v0.111.0, whose
+/// `all_for` is the union of the v0.107.1 and v0.111.0 ids (each
 /// build's `all_for` only appends; ids a later build removed, such as
 /// v0.111.0's Scare, stay in the v0.107.1 `all()` it extends).
 ///
@@ -425,7 +425,20 @@ pub fn parse_pin(text: &str) -> impl Iterator<Item = &str> {
 /// never produces a 0.111 id, so on that build the only encoding change is the
 /// OOV/PAD index moving to the new tail, which a champion re-exported with
 /// `_widen_padded_embedding` (PPO `model.py`) reads identically.
-pub const VOCAB_BUILD: GameVersion = GameVersion::ALL[GameVersion::ALL.len() - 1];
+///
+/// It stops at v0.111.0: the v0.113.0-only cards, relics and events
+/// (`V0113_ONLY`) stay on the OOV row. Giving them rows widens every
+/// embedding, which needs every champion re-exported (GH #544) — a separate
+/// decision from porting the build.
+pub const VOCAB_BUILD: GameVersion = GameVersion::V0_111_0;
+
+/// The event universe: every [`EventId`] but the v0.113.0-only ones (see
+/// [`VOCAB_BUILD`]).
+fn event_universe() -> impl Iterator<Item = &'static EventId> {
+    EventId::all()
+        .iter()
+        .filter(|e| !EventId::V0113_ONLY.contains(e))
+}
 
 /// Every potion of every build, in declaration order (v0.107.1 first).
 fn potion_universe() -> impl Iterator<Item = &'static PotionKind> {
@@ -450,7 +463,7 @@ pub fn content_ids(kind: &str) -> Option<BTreeSet<&'static str>> {
         "potion" => potion_universe().map(|k| k.python_name()).collect(),
         // v0.111.0 adds no event (the decomp's `Models.Events` file list is
         // identical across the two builds).
-        "event" => EventId::all().iter().map(|k| k.python_name()).collect(),
+        "event" => event_universe().map(|k| k.python_name()).collect(),
         "relic_id" => RelicId::all_for(VOCAB_BUILD)
             .iter()
             .map(|k| k.to_python_name())
@@ -530,8 +543,7 @@ pub fn registry_id_forms(kind: &str) -> Option<Vec<(String, String)>> {
         "potion" => potion_universe()
             .map(|k| (format!("{k:?}"), k.python_name().to_string()))
             .collect(),
-        "event" => EventId::all()
-            .iter()
+        "event" => event_universe()
             .map(|k| (format!("{k:?}"), k.python_name().to_string()))
             .collect(),
         "relic_id" => RelicId::all_for(VOCAB_BUILD)
@@ -571,7 +583,8 @@ pub fn potions() -> &'static Registry {
     POTIONS.get_or_init(|| build_registry("potion"))
 }
 
-/// The run-event registry (`EventId::all()` python names).
+/// The run-event registry (`EventId::all()` python names, minus the
+/// v0.113.0-only events).
 #[must_use]
 pub fn events() -> &'static Registry {
     static EVENTS: OnceLock<Registry> = OnceLock::new();

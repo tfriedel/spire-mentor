@@ -1350,7 +1350,42 @@ impl Card {
         if version.is_default() {
             return self.downgrade();
         }
-        self.downgrade_with(|id, up| crate::build_card_for_version(id, up, version))
+        let keeps_outside_keywords = version >= crate::GameVersion::V0_113_0;
+        let outside = keeps_outside_keywords.then(|| self.outside_keyword_diff_for(version));
+        if !self.downgrade_with(|id, up| crate::build_card_for_version(id, up, version)) {
+            return false;
+        }
+        // v0.113 `DowngradeInternal` (CardModel.cs:2348-2352): the canonical
+        // Local set UNION `_keywordsAddedFromOutside` EXCEPT
+        // `_keywordsRemovedFromOutside` — an `ApplyKeyword`'d Ethereal (Ghost
+        // Seed) or Retain survives the downgrade (the Ghost Seed fix).
+        if let Some((ethereal, added, removed)) = outside {
+            if ethereal != 0 {
+                self.set_combat_var(VarKey::EtherealThisCombat, ethereal);
+            }
+            if added != 0 || removed != 0 {
+                let base_kw = self.keyword_override.unwrap_or_else(|| {
+                    crate::card_effects::registry_keyword_override(self.card_id)
+                });
+                self.keyword_override = Some(KeywordOverride((base_kw.0 | added) & !removed));
+            }
+        }
+        true
+    }
+
+    /// The keywords outside effects added to / removed from this (upgraded)
+    /// card, relative to its upgraded factory build, plus its applied
+    /// `EtherealThisCombat` — C#'s `_keywordsAddedFromOutside` /
+    /// `_keywordsRemovedFromOutside` (v0.113).
+    fn outside_keyword_diff_for(&self, version: crate::GameVersion) -> (i32, u8, u8) {
+        let ethereal = self.combat_var(VarKey::EtherealThisCombat);
+        let Some(current) = self.keyword_override else {
+            return (ethereal, 0, 0);
+        };
+        let built = crate::build_card_for_version(self.card_id, self.upgraded, version)
+            .and_then(|c| c.keyword_override)
+            .unwrap_or_else(|| crate::card_effects::registry_keyword_override(self.card_id));
+        (ethereal, current.0 & !built.0, built.0 & !current.0)
     }
 
     pub(crate) fn upgrade_with(&mut self, factory: impl Fn(CardId, bool) -> Option<Card>) -> bool {
@@ -2063,7 +2098,23 @@ pub fn emit_pile_trace(
 /// [`draw`] itself, [`discard_pile_into_draw_pile`]) maintain the
 /// invariant in the common path.
 pub fn shuffle(player: &mut PlayerCombatState, rng: &mut CombatRng) {
+    shuffle_for(player, rng, crate::GameVersion::V0_107_1);
+}
+
+/// [`shuffle`] for game build `version`. v0.113.0 `UnstableShuffle` draws
+/// one `NextUnsignedLong` seed off `rng` and shuffles on a child `Rng`
+/// ([`crate::dotnet_rng::Rng::shuffle_for`]), so even a 0/1-card pile costs
+/// that one draw.
+pub fn shuffle_for(
+    player: &mut PlayerCombatState,
+    rng: &mut CombatRng,
+    version: crate::GameVersion,
+) {
+    let child_seeded = version >= crate::GameVersion::V0_113_0;
     if player.draw.len() < 2 {
+        if child_seeded && !player.deferred_draw_order {
+            let _ = rng.next_unsigned_long();
+        }
         return;
     }
     // Bead `sts2-rs-09x5n` (F2 `HiddenInfoMode::BeliefDraw`, lightspeed
@@ -2086,7 +2137,7 @@ pub fn shuffle(player: &mut PlayerCombatState, rng: &mut CombatRng) {
     }
     // Fast path: no pins -> identical to the legacy single-call shuffle.
     if player.pinned_top.is_empty() && player.pinned_bottom.is_empty() {
-        rng.shuffle(player.draw.as_mut_slice());
+        rng.shuffle_for(version, player.draw.as_mut_slice());
         return;
     }
     // Drop stale pin entries (not currently in draw). This is the
@@ -2106,8 +2157,8 @@ pub fn shuffle(player: &mut PlayerCombatState, rng: &mut CombatRng) {
             middle.push(uid);
         }
     }
-    if middle.len() >= 2 {
-        rng.shuffle(middle.as_mut_slice());
+    if middle.len() >= 2 || child_seeded {
+        rng.shuffle_for(version, middle.as_mut_slice());
     }
     // Reconstruct `top + middle + bot` in place.
     player.draw.clear();
@@ -2647,12 +2698,13 @@ fn reshuffle_rank(card_id: CardId) -> u16 {
     use std::sync::OnceLock;
     static RANKS: OnceLock<Vec<u16>> = OnceLock::new();
     let ranks = RANKS.get_or_init(|| {
-        // The UNION of every build's cards (GH #792): v0.111.0-only ids
-        // (`CardId::V0111_ONLY`) sit past `all()` in declaration order, so
-        // the table must cover them. Adding names only shifts ranks
-        // uniformly; the relative order of v0.107.1 cards, which is all the
-        // sort compares, is unchanged.
-        let all = CardId::all_for(crate::GameVersion::V0_111_0);
+        // The UNION of every build's cards (GH #792): build-only ids
+        // (`CardId::V0111_ONLY`, `V0113_ONLY`) sit past `all()` in
+        // declaration order, so the table must cover them — keyed on the
+        // LATEST build, or a v0.113 card (MyShinies) indexes past the end.
+        // Adding names only shifts ranks uniformly; the relative order of
+        // older cards, which is all the sort compares, is unchanged.
+        let all = CardId::all_for(crate::GameVersion::V0_113_0);
         let mut by_name: Vec<CardId> = all.clone();
         by_name.sort_by(|a, b| card_model_entry(*a).cmp(card_model_entry(*b)));
         let mut table = vec![0u16; all.len()];
@@ -2678,6 +2730,265 @@ pub fn card_model_compare(a: &Card, b: &Card) -> std::cmp::Ordering {
     reshuffle_rank(a.card_id)
         .cmp(&reshuffle_rank(b.card_id))
         .then_with(|| u8::from(a.upgraded).cmp(&u8::from(b.upgraded)))
+}
+
+/// [`card_model_compare`] for the given build. v0.113.0 `CardModel.CompareTo`
+/// (`CardModel.cs:2473-2526`) breaks the `(ModelId, CurrentUpgradeLevel)` tie
+/// further ([`CardModelKeyV0113`]); earlier builds stop at the upgrade level.
+#[must_use]
+pub fn card_model_compare_for(
+    a: &Card,
+    b: &Card,
+    version: crate::GameVersion,
+) -> std::cmp::Ordering {
+    if version >= crate::GameVersion::V0_113_0 {
+        CardModelKeyV0113::of(a).cmp(&CardModelKeyV0113::of(b))
+    } else {
+        card_model_compare(a, b)
+    }
+}
+
+/// The secondary key of the `CardSelectCmd.FromCombatPile` Draw-pile grid
+/// sort, after `Rarity`: v0.111.0 `orderby c.Rarity, c.Id` (the ordinal
+/// `ModelId` entry, CardSelectCmd.cs:493), v0.113.0 `orderby x.Rarity, x`
+/// (the full `CardModel.CompareTo`, CardSelectCmd.cs:320). Both sorts are
+/// stable. Missing uids compare equal.
+#[must_use]
+pub fn draw_select_tiebreak(
+    cards: &CardStore,
+    a: CardUid,
+    b: CardUid,
+    version: crate::GameVersion,
+) -> std::cmp::Ordering {
+    let (Some(ca), Some(cb)) = (
+        cards.get(a.get() as usize - 1),
+        cards.get(b.get() as usize - 1),
+    ) else {
+        return std::cmp::Ordering::Equal;
+    };
+    if version >= crate::GameVersion::V0_113_0 {
+        card_model_compare_for(ca, cb, version)
+    } else {
+        card_model_entry(ca.card_id).cmp(card_model_entry(cb.card_id))
+    }
+}
+
+/// Byte capacity of a [`ModelEntrySlug`]; the longest enchantment /
+/// affliction entry (`SLUMBERING_ESSENCE`) is 18.
+const MODEL_ENTRY_SLUG_LEN: usize = 24;
+
+/// C# `ModelId.Entry` slug of a type name, `RoyallyApproved` ->
+/// `ROYALLY_APPROVED` (an underscore before every inner capital), held
+/// NUL-padded on the stack. The entries contain no NUL, so comparing the
+/// padded arrays is the ordinal string compare, and the all-zero `NONE`
+/// (C# `ModelId.Compare(null, x)`: null first) sorts before every entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ModelEntrySlug([u8; MODEL_ENTRY_SLUG_LEN]);
+
+impl ModelEntrySlug {
+    const NONE: Self = Self([0; MODEL_ENTRY_SLUG_LEN]);
+
+    /// The slug of `id`'s `Debug` name (its C# type name).
+    fn of(id: &impl std::fmt::Debug) -> Self {
+        struct Writer {
+            buf: [u8; MODEL_ENTRY_SLUG_LEN],
+            len: usize,
+        }
+        impl Writer {
+            fn push(&mut self, b: u8) {
+                debug_assert!(self.len < MODEL_ENTRY_SLUG_LEN, "model entry slug overflow");
+                if let Some(slot) = self.buf.get_mut(self.len) {
+                    *slot = b;
+                    self.len += 1;
+                }
+            }
+        }
+        impl std::fmt::Write for Writer {
+            fn write_str(&mut self, part: &str) -> std::fmt::Result {
+                for b in part.bytes() {
+                    if self.len > 0 && b.is_ascii_uppercase() {
+                        self.push(b'_');
+                    }
+                    self.push(b.to_ascii_uppercase());
+                }
+                Ok(())
+            }
+        }
+        let mut w = Writer {
+            buf: [0; MODEL_ENTRY_SLUG_LEN],
+            len: 0,
+        };
+        let _ = std::fmt::Write::write_fmt(&mut w, format_args!("{id:?}"));
+        Self(w.buf)
+    }
+
+    /// The slug as text (tests and diagnostics).
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        let end = self.0.iter().position(|&b| b == 0).unwrap_or(self.0.len());
+        std::str::from_utf8(&self.0[..end]).unwrap_or("")
+    }
+}
+
+/// The full v0.113.0 `CardModel.CompareTo` sort key of one card
+/// (`CardModel.cs:2473-2526`), in field order: `ModelId` (ordinal entry, as
+/// [`reshuffle_rank`]), `CurrentUpgradeLevel`,
+/// `ModelId.Compare(Enchantment?.Id)` (null first, then ordinal entry),
+/// `ModelId.Compare(Affliction?.Id)`, `EnergyCost.GetResolved()`,
+/// `BaseReplayCount`, then each shared `DynamicVar.BaseValue` in ordinal key
+/// order ([`compare_vars_v0113`]). Allocation-free and `Copy`, so a sort
+/// computes it once per card instead of per comparison.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CardModelKeyV0113 {
+    rank: u16,
+    upgrade: u8,
+    enchantment: ModelEntrySlug,
+    affliction: ModelEntrySlug,
+    resolved_cost: i32,
+    replay: i32,
+    vars: [VarBaseValue; 2],
+}
+
+impl CardModelKeyV0113 {
+    /// The key a uid with no backing `Card` sorts by: before every real card
+    /// (rank `0`), tied with the other missing uids.
+    pub const MISSING: Self = Self {
+        rank: 0,
+        upgrade: 0,
+        enchantment: ModelEntrySlug::NONE,
+        affliction: ModelEntrySlug::NONE,
+        resolved_cost: 0,
+        replay: 0,
+        vars: [VarBaseValue::int(0); 2],
+    };
+
+    #[must_use]
+    pub fn of(c: &Card) -> Self {
+        let resolved_cost = if c.is_x_cost() {
+            c.energy_spent
+        } else {
+            c.local_cost().max(0)
+        };
+        Self {
+            rank: reshuffle_rank(c.card_id),
+            upgrade: u8::from(c.upgraded),
+            enchantment: c
+                .enchantments
+                .first()
+                .map_or(ModelEntrySlug::NONE, |(id, _)| ModelEntrySlug::of(&id)),
+            affliction: c
+                .affliction
+                .map_or(ModelEntrySlug::NONE, |a| ModelEntrySlug::of(&a.kind)),
+            resolved_cost,
+            replay: c.base_replay_count,
+            vars: compare_vars_v0113(c),
+        }
+    }
+
+    /// The key of `uid`'s card, [`Self::MISSING`] without one.
+    #[must_use]
+    pub fn of_uid(cards: &CardStore, uid: CardUid) -> Self {
+        cards
+            .get(uid.get() as usize - 1)
+            .map_or(Self::MISSING, Self::of)
+    }
+}
+
+/// A C# `DynamicVar.BaseValue` (a `decimal`) as an exact fraction
+/// `num / den` (`den > 0`), ordered by value.
+#[derive(Clone, Copy, Debug)]
+pub struct VarBaseValue {
+    num: i64,
+    den: i64,
+}
+
+impl VarBaseValue {
+    const fn int(v: i32) -> Self {
+        Self {
+            num: v as i64,
+            den: 1,
+        }
+    }
+}
+
+impl Ord for VarBaseValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (i128::from(self.num) * i128::from(other.den))
+            .cmp(&(i128::from(other.num) * i128::from(self.den)))
+    }
+}
+
+impl PartialOrd for VarBaseValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for VarBaseValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for VarBaseValue {}
+
+/// The `DynamicVar.BaseValue`s v0.113.0 `CardModel.CompareTo` walks in
+/// ordinal key order (`DynamicVars.Keys.Order(StringComparer.Ordinal)`,
+/// CardModel.cs:2514-2524), reduced to the ones that can differ between two
+/// copies of the same card at the same upgrade level. Every other var is
+/// static per (card, upgrade), so it never breaks a tie.
+///
+/// The vars C# mutates on the instance (decomp v0.113.0):
+/// - `Block` / `Damage` (`Block` sorts first): Claw, Maul, The Ball,
+///   The Scythe, Kingly Punch, Genetic Algorithm and Sovereign Blade's
+///   `AddDamage` grow `base_block`/`base_damage` in Rust too.
+/// - Rampage `Damage += Increase` (Rampage.cs:51): Rust keeps the growth in
+///   [`VarKey::RampageDamage`].
+/// - Thrash's `decimal` `Damage` (Thrash.cs:75): the integer part is
+///   `base_damage`, the fraction the `ThrashFoldRem{Num,Den}` vars.
+/// - Wither `FakeUpgrade` `Damage.UpgradeValueBy(3)` (Wither.cs:100):
+///   [`VarKey::WitherFakeUpgradeLevel`].
+/// - Guilty `Combats = 5 - CombatsSeen` (Guilty.cs:36) and Dowsing
+///   `Rooms = Max(1, 4 - RoomsEntered)` (Dowsing.cs:41): the counts ride in
+///   [`VarKey::Generic`]; neither card has another var.
+///
+/// Not modelled: Show Off's `AimPower` (the card is not ported) and
+/// Sovereign Blade's `HitCount` (`SetRepeats` has no caller).
+#[must_use]
+pub fn compare_vars_v0113(c: &Card) -> [VarBaseValue; 2] {
+    let block = VarBaseValue::int(c.base_block);
+    let damage = match c.card_id {
+        CardId::Rampage => VarBaseValue::int(
+            c.base_damage
+                .saturating_add(c.combat_var(VarKey::RampageDamage)),
+        ),
+        CardId::Thrash => {
+            let den = i64::from(c.combat_var(VarKey::ThrashFoldRemDen)).max(1);
+            VarBaseValue {
+                num: i64::from(c.base_damage) * den
+                    + i64::from(c.combat_var(VarKey::ThrashFoldRemNum)),
+                den,
+            }
+        }
+        CardId::Wither => VarBaseValue::int(
+            c.base_damage
+                .saturating_add(3 * c.combat_var(VarKey::WitherFakeUpgradeLevel).max(0)),
+        ),
+        CardId::Guilty => {
+            return [
+                VarBaseValue::int(5 - c.combat_var(VarKey::Generic)),
+                VarBaseValue::int(0),
+            ];
+        }
+        CardId::Dowsing => {
+            return [
+                VarBaseValue::int((4 - c.combat_var(VarKey::Generic)).max(1)),
+                VarBaseValue::int(0),
+            ];
+        }
+        _ => VarBaseValue::int(c.base_damage),
+    };
+    [block, damage]
 }
 
 /// Reshuffle pre-sort PRIMARY key: the O(1) ordinal rank of a uid's card name
@@ -2880,7 +3191,31 @@ where
 /// component, so every comparison returns exactly the `Ordering` the old
 /// closure returned at the same algorithm step, and the introsort permutes
 /// whole tuples — the final uid order is the same permutation.
+#[cfg(test)]
 fn presort_draw_for_reshuffle(player: &mut PlayerCombatState, cards: &CardStore) {
+    presort_draw_for_reshuffle_for(player, cards, crate::GameVersion::V0_107_1);
+}
+
+/// [`presort_draw_for_reshuffle`] for the given build: v0.113.0 extends the
+/// tie-break (see [`card_model_compare_for`]).
+fn presort_draw_for_reshuffle_for(
+    player: &mut PlayerCombatState,
+    cards: &CardStore,
+    version: crate::GameVersion,
+) {
+    if version >= crate::GameVersion::V0_113_0 {
+        let mut keyed: SmallVec<[(CardModelKeyV0113, CardUid); 32]> = player
+            .draw
+            .iter()
+            .map(|&uid| (CardModelKeyV0113::of_uid(cards, uid), uid))
+            .collect();
+        let cmp = |a: (CardModelKeyV0113, CardUid), b: (CardModelKeyV0113, CardUid)| a.0.cmp(&b.0);
+        dotnet_list_sort(keyed.as_mut_slice(), &cmp);
+        for (slot, k) in player.draw.iter_mut().zip(keyed.iter()) {
+            *slot = k.1;
+        }
+        return;
+    }
     let mut keyed: SmallVec<[(u16, u8, CardUid); 32]> = player
         .draw
         .iter()
@@ -2910,6 +3245,17 @@ pub fn discard_pile_into_draw_pile_signaling(
     player: &mut PlayerCombatState,
     cards: &CardStore,
     rng: &mut CombatRng,
+) -> bool {
+    discard_pile_into_draw_pile_signaling_for(player, cards, rng, crate::GameVersion::V0_107_1)
+}
+
+/// [`discard_pile_into_draw_pile_signaling`] with the build's
+/// `CardModel.CompareTo` pre-sort ([`card_model_compare_for`]).
+pub fn discard_pile_into_draw_pile_signaling_for(
+    player: &mut PlayerCombatState,
+    cards: &CardStore,
+    rng: &mut CombatRng,
+    version: crate::GameVersion,
 ) -> bool {
     if !player.draw.is_empty() || player.discard.is_empty() {
         return false;
@@ -2952,8 +3298,8 @@ pub fn discard_pile_into_draw_pile_signaling(
     // [`presort_draw_for_reshuffle`], which resolves the sort keys once per
     // uid instead of per comparison) replicates .NET's algorithm exactly so
     // the tied run lands at the C# slot.
-    presort_draw_for_reshuffle(player, cards);
-    shuffle(player, rng);
+    presort_draw_for_reshuffle_for(player, cards, version);
+    shuffle_for(player, rng, version);
     // Phase 6+: apply_enchantment_shuffle_order(state.draw, is_initial_shuffle=False)
     // Bead `sts2-rs-jlc`: the caller now fires the `after_shuffle`
     // relic-bus channel based on the returned signal.
@@ -2983,6 +3329,17 @@ pub fn shuffle_draw_and_discard(
     cards: &CardStore,
     rng: &mut CombatRng,
 ) {
+    shuffle_draw_and_discard_for(player, cards, rng, crate::GameVersion::V0_107_1);
+}
+
+/// [`shuffle_draw_and_discard`] with the build's `CardModel.CompareTo`
+/// pre-sort ([`card_model_compare_for`]).
+pub fn shuffle_draw_and_discard_for(
+    player: &mut PlayerCombatState,
+    cards: &CardStore,
+    rng: &mut CombatRng,
+    version: crate::GameVersion,
+) {
     emit_pile_trace(player, cards, "shuf", rng.counter(), None);
     // A full shuffle scrambles all draw-pile position knowledge.
     player.pinned_top.clear();
@@ -2999,8 +3356,8 @@ pub fn shuffle_draw_and_discard(
     // .NET introsort tie-order (see [`dotnet_list_sort`]); the explicit
     // `Shuffle` command (Reboot, BottledPotential) routes through the
     // same C# `StableShuffle` -> `list.Sort()` as the auto-reshuffle.
-    presort_draw_for_reshuffle(player, cards);
-    shuffle(player, rng);
+    presort_draw_for_reshuffle_for(player, cards, version);
+    shuffle_for(player, rng, version);
 }
 
 /// Number of shuffles that occurred during the most recent
@@ -3019,6 +3376,17 @@ pub fn draw_signaling(
     cards: &CardStore,
     rng: &mut CombatRng,
 ) -> (usize, u32) {
+    draw_signaling_for(player, n, cards, rng, crate::GameVersion::V0_107_1)
+}
+
+/// [`draw_signaling`] with the build's reshuffle pre-sort.
+pub fn draw_signaling_for(
+    player: &mut PlayerCombatState,
+    n: i32,
+    cards: &CardStore,
+    rng: &mut CombatRng,
+    version: crate::GameVersion,
+) -> (usize, u32) {
     let target = usize::try_from(n).unwrap_or(0);
     let mut moved = 0;
     let mut shuffles: u32 = 0;
@@ -3026,7 +3394,9 @@ pub fn draw_signaling(
         if is_hand_full(player) {
             break;
         }
-        if player.draw.is_empty() && discard_pile_into_draw_pile_signaling(player, cards, rng) {
+        if player.draw.is_empty()
+            && discard_pile_into_draw_pile_signaling_for(player, cards, rng, version)
+        {
             shuffles = shuffles.saturating_add(1);
         }
         if player.draw.is_empty() {
@@ -3123,6 +3493,17 @@ pub fn draw(
     cards: &CardStore,
     rng: &mut CombatRng,
 ) -> usize {
+    draw_for(player, n, cards, rng, crate::GameVersion::V0_107_1)
+}
+
+/// [`draw`] in game build `version` (the auto-reshuffle's shuffle shape).
+pub fn draw_for(
+    player: &mut PlayerCombatState,
+    n: i32,
+    cards: &CardStore,
+    rng: &mut CombatRng,
+    version: crate::GameVersion,
+) -> usize {
     let target = usize::try_from(n).unwrap_or(0);
     let mut moved = 0;
     for _ in 0..target {
@@ -3135,7 +3516,7 @@ pub fn draw(
         if player.draw.is_empty() {
             // Auto-reshuffle: discard -> draw, shuffle in place. If both
             // piles are empty, this is a no-op and the next branch breaks.
-            discard_pile_into_draw_pile(player, cards, rng);
+            let _ = discard_pile_into_draw_pile_signaling_for(player, cards, rng, version);
         }
         if player.draw.is_empty() {
             // Both draw and (post-reshuffle) discard are empty — bail.
@@ -3293,11 +3674,12 @@ fn draw_via_state_collecting(
         return state.draw_suspending_collecting(n, false, own);
     }
     let hand_len_before = state.player.hand.len();
-    let moved = draw(
+    let moved = draw_for(
         &mut state.player,
         n,
         &state.cards,
         &mut state.run_rng.shuffle,
+        state.game_version,
     );
     // No rider draws mid-batch here (those force the per-card loop above), so
     // the batch's own cards are the hand's new tail.
@@ -3403,6 +3785,110 @@ mod tests {
         assert_eq!(card_model_compare(&clap, &clap), std::cmp::Ordering::Equal);
     }
 
+    /// v0.113.0 `CardModel.CompareTo` (CardModel.cs:2489-2524): copies equal
+    /// on (Entry, upgrade) order by enchantment (none first), then resolved
+    /// cost, then `BaseReplayCount`, then the `Block`/`Damage` base values.
+    /// v0.111.0 leaves them tied.
+    #[test]
+    fn card_model_compare_v0113_breaks_copy_ties() {
+        use std::cmp::Ordering::{Equal, Less};
+        let v111 = crate::GameVersion::V0_111_0;
+        let v113 = crate::GameVersion::V0_113_0;
+        let mk = || Card {
+            card_id: CardId::StrikeIronclad,
+            base_damage: 6,
+            ..Card::pod_defaults()
+        };
+        let plain = mk();
+        let mut sharp = mk();
+        sharp.enchantments.push((EnchantmentId::Sharp, 1));
+        assert_eq!(card_model_compare_for(&plain, &sharp, v111), Equal);
+        assert_eq!(card_model_compare_for(&plain, &sharp, v113), Less);
+        let mut replayed = mk();
+        replayed.base_replay_count = 1;
+        assert_eq!(card_model_compare_for(&plain, &replayed, v113), Less);
+        let mut hard = mk();
+        hard.base_damage = 9;
+        assert_eq!(card_model_compare_for(&plain, &hard, v113), Less);
+        assert_eq!(card_model_compare_for(&hard, &hard, v113), Equal);
+        assert_eq!(
+            ModelEntrySlug::of(&EnchantmentId::RoyallyApproved).as_str(),
+            "ROYALLY_APPROVED"
+        );
+        assert_eq!(
+            ModelEntrySlug::of(&EnchantmentId::SlumberingEssence).as_str(),
+            "SLUMBERING_ESSENCE"
+        );
+        // NUL padding orders like the ordinal string compare: a prefix first.
+        assert!(ModelEntrySlug::NONE < ModelEntrySlug::of(&EnchantmentId::Sown));
+        assert!(
+            ModelEntrySlug::of(&EnchantmentId::Slither)
+                < ModelEntrySlug::of(&EnchantmentId::SlumberingEssence)
+        );
+    }
+
+    /// v0.113.0 `CardModel.CompareTo` compares EVERY shared
+    /// `DynamicVar.BaseValue` in ordinal key order (CardModel.cs:2514-2524).
+    /// The vars C# mutates per instance but Rust keeps outside
+    /// `base_damage`/`base_block` must feed the key with C#'s value:
+    /// Rampage `Damage` (+`RampageDamage`), Thrash's decimal `Damage` (the
+    /// `ThrashFoldRem` fraction), Wither's FakeUpgrade `Damage` (+3/level),
+    /// Guilty `Combats` (5 - seen) and Dowsing `Rooms` (max(1, 4 - entered)).
+    #[test]
+    fn card_model_compare_v0113_covers_per_instance_dynamic_vars() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        let v113 = crate::GameVersion::V0_113_0;
+        let mk = |id: CardId, dmg: i32| Card {
+            card_id: id,
+            base_damage: dmg,
+            ..Card::pod_defaults()
+        };
+        let rampage = mk(CardId::Rampage, 9);
+        let mut grown = rampage;
+        grown.set_combat_var(VarKey::RampageDamage, 5);
+        assert_eq!(card_model_compare_for(&rampage, &grown, v113), Less);
+        assert_eq!(
+            card_model_compare_for(&rampage, &grown, crate::GameVersion::V0_111_0),
+            Equal
+        );
+
+        let thrash = mk(CardId::Thrash, 5);
+        let mut frac = thrash;
+        frac.set_combat_var(VarKey::ThrashFoldRemNum, 1);
+        frac.set_combat_var(VarKey::ThrashFoldRemDen, 2);
+        assert_eq!(card_model_compare_for(&thrash, &frac, v113), Less);
+        let mut third = thrash;
+        third.set_combat_var(VarKey::ThrashFoldRemNum, 1);
+        third.set_combat_var(VarKey::ThrashFoldRemDen, 3);
+        assert_eq!(card_model_compare_for(&third, &frac, v113), Less);
+        let mut six = thrash;
+        six.base_damage = 6;
+        assert_eq!(card_model_compare_for(&frac, &six, v113), Less);
+
+        let wither = mk(CardId::Wither, 3);
+        let mut faked = wither;
+        faked.set_combat_var(VarKey::WitherFakeUpgradeLevel, 1);
+        assert_eq!(card_model_compare_for(&wither, &faked, v113), Less);
+
+        let guilty = mk(CardId::Guilty, 0);
+        let mut seen = guilty;
+        seen.set_combat_var(VarKey::Generic, 2);
+        assert_eq!(
+            card_model_compare_for(&guilty, &seen, v113),
+            Greater,
+            "Combats 5 vs 3"
+        );
+
+        let dowsing = mk(CardId::Dowsing, 0);
+        let mut entered = dowsing;
+        entered.set_combat_var(VarKey::Generic, 1);
+        assert_eq!(
+            card_model_compare_for(&dowsing, &entered, v113),
+            Greater,
+            "Rooms 4 vs 3"
+        );
+    }
+
     use super::*;
 
     /// C# `StableShuffle` pre-sorts with `CardModel.CompareTo` -> ordinal
@@ -3415,7 +3901,9 @@ mod tests {
         assert_eq!(card_model_entry(CardId::Thunderclap), "THUNDERCLAP");
         assert!(reshuffle_rank(CardId::ThunderCard) < reshuffle_rank(CardId::Thunderclap));
         // Entries stay unique, so the rank is still a total order on cards.
-        let all = CardId::all_for(crate::GameVersion::V0_111_0);
+        let all = CardId::all_for(crate::GameVersion::V0_113_0);
+        // Every card of the latest build has a rank (no out-of-bounds index).
+        assert!(all.iter().all(|&c| reshuffle_rank(c) > 0));
         let mut entries: Vec<&str> = all.iter().map(|&c| card_model_entry(c)).collect();
         entries.sort_unstable();
         let n = entries.len();
@@ -3703,6 +4191,35 @@ mod tests {
         assert_eq!(p.hand[0], uid(1));
     }
 
+    /// v0.113: the mid-draw auto-reshuffle is an `UnstableShuffle` that seeds
+    /// a child Rng — exactly one parent read, whatever the discard size.
+    #[test]
+    fn draw_for_v0113_reshuffle_reads_once() {
+        let mut p = PlayerCombatState::default();
+        p.discard.extend([uid(10), uid(11), uid(12), uid(13)]);
+        let mut r = rng();
+        let moved = draw_for(
+            &mut p,
+            2,
+            &empty_store(),
+            &mut r,
+            crate::GameVersion::V0_113_0,
+        );
+        assert_eq!(moved, 2);
+        assert_eq!(r.counter(), 1);
+        let mut p = PlayerCombatState::default();
+        p.discard.extend([uid(10), uid(11), uid(12), uid(13)]);
+        let mut r = rng();
+        draw_for(
+            &mut p,
+            2,
+            &empty_store(),
+            &mut r,
+            crate::GameVersion::V0_111_0,
+        );
+        assert_eq!(r.counter(), 3);
+    }
+
     #[test]
     fn draw_n_when_n_exceeds_draw_pile_size_triggers_reshuffle() {
         let mut p = PlayerCombatState::default();
@@ -3904,6 +4421,17 @@ mod tests {
     ///    orders, reshuffled with the SAME seed, produce IDENTICAL draw
     ///    piles — the property that was broken by the plain
     ///    `UnstableShuffle` (no pre-sort).
+    #[test]
+    fn compare_ranks_cover_the_v0113_only_cards() {
+        for id in CardId::V0113_ONLY {
+            let c = Card {
+                card_id: id,
+                ..Card::pod_defaults()
+            };
+            assert_eq!(card_model_compare(&c, &c), std::cmp::Ordering::Equal);
+        }
+    }
+
     #[test]
     fn reshuffle_uses_stable_shuffle_sort_by_id_then_fisher_yates() {
         // Entry strings (uid -> id): 1=BASH, 2=DEFEND_IRONCLAD,
@@ -6468,6 +6996,21 @@ mod tests {
             1,
             "other instance state survives"
         );
+    }
+
+    /// v0.113 `DowngradeInternal` re-adds `_keywordsAddedFromOutside`: Ghost
+    /// Seed's applied Ethereal survives Dampen's downgrade.
+    #[test]
+    fn downgrade_keeps_applied_ethereal_v0113() {
+        let mut card = Card {
+            card_id: CardId::StrikeIronclad,
+            upgraded: true,
+            ..Card::pod_defaults()
+        };
+        card.set_combat_var(VarKey::EtherealThisCombat, 1);
+        assert!(card.downgrade_for(crate::GameVersion::V0_113_0));
+        assert!(!card.upgraded);
+        assert_eq!(card.combat_var(VarKey::EtherealThisCombat), 1);
     }
 
     /// C# `ResetForDowngrade` restores the base cost (9) under Banshee's Cry's

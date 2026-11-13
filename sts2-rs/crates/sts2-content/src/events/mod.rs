@@ -51,6 +51,7 @@ pub mod dispatch;
 pub mod neow_blessing;
 pub mod shared;
 pub mod shared_wave_b;
+pub mod v0113;
 
 // ── Handler-function aliases ──────────────────────────────────────────
 
@@ -83,6 +84,41 @@ pub type EventChoiceFn = fn(&mut RunState) -> EventOutcome;
 /// [`EventOptionSpec::default_description`] strings; events with
 /// dynamic text (e.g. `LostWisp`'s "Gain {gold} gold") override.
 pub type EventGenerateOptionsFn = fn(&RunState, &EventSpec) -> Vec<EventOptionInfo>;
+
+/// Rarity for an event's `RelicFactory.PullNextRelicFromFront`.
+///
+/// Through v0.111.0 the call was `PullNextRelicFromFront(Owner)`, which rolls
+/// the rarity on the player's Rewards stream. v0.113.0 passes `base.Rng`, so
+/// the rarity is read `prior_draws + 1` of the event's own stream `stream`
+/// (`prior_draws` = the single-draw reads the event made before it, e.g. a
+/// `CalculateVars` roll). Only for events whose earlier reads are each ONE
+/// `NextInt`/`NextFloat` -- every such read is a single `MegaRandom` sample
+/// whatever its range, so replaying them as `next_int_exclusive(0, 2)` leaves
+/// the stream at the same position.
+///
+/// Builds the event stream afresh on every call, so it is only for handlers
+/// that pull ONE relic. A handler pulling several (Ranwid `GiveRelic`, Trial
+/// `MerchantGuilty`, RelicTrader) threads one `Rng` through
+/// `act2_hive::ranwid_grant_front_relic` instead; calling this twice would
+/// re-roll read `prior_draws + 1`. v0.113.0 call sites, checked against the
+/// decomp: RoundTeaParty `ContinueFight` (0 prior), ThisOrThat `Ornate`
+/// (1: `CalculateVars` gold `NextInt(41, 69)`), UnrestSite `Kill` (0; its
+/// `CalculateVars` reads no Rng), BattlewornDummy V3 `Resume` (0).
+pub(crate) fn event_relic_rarity(
+    state: &mut RunState,
+    stream: &str,
+    prior_draws: usize,
+) -> sts2_core::RelicRarity {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        let mut rng = state.rng.named(stream);
+        for _ in 0..prior_draws {
+            let _ = rng.next_int_exclusive(0, 2);
+        }
+        sts2_core::runstate::roll_relic_rarity(&mut rng)
+    } else {
+        state.roll_reward_relic_rarity()
+    }
+}
 
 /// Default `is_allowed` — always true. Used by events without
 /// preconditions.
@@ -532,6 +568,30 @@ pub struct EventSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v0.113.0 `PullNextRelicFromFront(Owner, base.Rng)`: the rarity is read
+    /// `prior_draws + 1` of the event stream and the Rewards stream is left
+    /// alone; before v0.113.0 it is one Rewards read (PR #1319 finding 4).
+    #[test]
+    fn event_relic_rarity_reads_event_stream_at_prior_plus_one() {
+        for prior in 0..3 {
+            let mut rs = RunState::new();
+            rs.game_version = sts2_core::GameVersion::V0_113_0;
+            let mut want_rng = rs.rng.named("THIS_OR_THAT");
+            for _ in 0..prior {
+                let _ = want_rng.next_int(41, 68);
+            }
+            let want = sts2_core::runstate::roll_relic_rarity(&mut want_rng);
+            let rewards = rs.rng.rewards.counter();
+            assert_eq!(event_relic_rarity(&mut rs, "THIS_OR_THAT", prior), want);
+            assert_eq!(rs.rng.rewards.counter(), rewards, "no Rewards read");
+        }
+        let mut rs = RunState::new();
+        rs.game_version = sts2_core::GameVersion::V0_111_0;
+        let rewards = rs.rng.rewards.counter();
+        let _ = event_relic_rarity(&mut rs, "THIS_OR_THAT", 1);
+        assert_eq!(rs.rng.rewards.counter(), rewards + 1, "one Rewards read");
+    }
 
     #[test]
     fn event_spec_is_copy() {

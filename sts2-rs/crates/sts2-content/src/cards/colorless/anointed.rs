@@ -38,7 +38,7 @@ pub(crate) fn play_anointed(state: &mut CombatState, _t: Option<CreatureUid>) ->
     state
         .run_rng
         .combat_card_selection
-        .shuffle(rare_uids.as_mut_slice());
+        .shuffle_for(state.game_version, rare_uids.as_mut_slice());
     rare_uids.truncate(free);
     for uid in rare_uids {
         state.move_card_to_hand(uid);

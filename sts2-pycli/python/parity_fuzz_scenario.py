@@ -23,7 +23,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
-from card_inventory import has_v0111_cards
+from card_inventory import _version_tuple, has_v0111_cards
 
 # Canonical Ironclad card ids. Cross-checked against the Rust generated
 # specs in sts2-content/src/cards/ironclad_specs_generated.rs. STRIKE
@@ -1362,8 +1362,17 @@ def class_cards_for_build(character: str, game_version: str | None = None) -> li
 
 
 def colorless_cards_for_build(game_version: str | None = None) -> list[str]:
-    """`ALL_COLORLESS_CARDS` at `game_version`."""
-    return _for_build(ALL_COLORLESS_CARDS, _V0111_ADDED_COLORLESS_CARDS, game_version)
+    """`ALL_COLORLESS_CARDS` at `game_version`.
+
+    v0.113.0 adds `MY_SHINIES` to the colorless pool right after `MIND_BLAST`
+    (`ColorlessCardPool.cs`; Rust `specs_in` / `COLORLESS_V0113`).
+    """
+    version = game_version or sweep_game_version()
+    cards = _for_build(ALL_COLORLESS_CARDS, _V0111_ADDED_COLORLESS_CARDS, version)
+    if _version_tuple(version) >= (0, 113, 0):
+        at = cards.index("MIND_BLAST") + 1
+        cards = [*cards[:at], "MY_SHINIES", *cards[at:]]
+    return cards
 
 
 def event_cards_for_build(game_version: str | None = None) -> list[str]:

@@ -1012,13 +1012,17 @@ def test_scroll_boxes_renders_bundle_select_and_adds_whole_pack() -> None:
 # always-grabbing `TreasureRoomHandler`. No decision reaches the UI, so the
 # workbench showed nothing at all for a treasure room until `room_reveal`.
 
-TREASURE_SEED = "SEEDTEST"  # Ironclad A0: greedy play reaches an act-1 chest
+#: Ironclad A0 seed whose greedy walk reaches an act-1 chest, per game build.
+#: On v0.113.0 the SEEDTEST walk dies first, so that build walks CHEST1.
+TREASURE_SEED = {"v0.113.0": "CHEST1"}.get(sts2_client.GAME_VERSION, "SEEDTEST")
 
 #: What that first chest holds, per game build: (gold, relic). v0.111.0
 #: rehashed every seed (XxHash64), so the same seed walks a different act 1.
+#: The v0.113.0 pin is the C# headless driven through the same walk.
 _TREASURE_CHEST = {
     "v0.107.1": (43, "HORN_CLEAT.title"),
     "v0.111.0": (47, "MANGO.title"),
+    "v0.113.0": (42, "AMETHYST_AUBERGINE.title"),
 }
 
 

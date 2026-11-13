@@ -403,11 +403,18 @@ pub fn build_ai_for_version(
                     _ => InfestedPrismSlot::Other,
                 },
             };
-            create_infested_prism_ai(slot)
+            if version >= sts2_core::GameVersion::V0_113_0 {
+                crate::monsters::act2_hive::create_infested_prism_v0113_ai()
+            } else {
+                create_infested_prism_ai(slot)
+            }
         }
         MonsterKind::TheInsatiable => create_the_insatiable_ai(),
         MonsterKind::KnowledgeDemon => create_knowledge_demon_ai(),
         MonsterKind::Crusher => create_crusher_ai(),
+        MonsterKind::Rocket if version >= sts2_core::GameVersion::V0_113_0 => {
+            crate::monsters::act2_hive::create_rocket_v0113_ai()
+        }
         MonsterKind::Rocket => create_rocket_ai(),
         // ── Act 3 (sts2-rs-6ynt.10) ──
         MonsterKind::DevotedSculptor => create_devoted_sculptor_ai(),
@@ -562,6 +569,8 @@ pub fn build_ai_for_version(
     crate::ascension_scaling::apply_ascension_attack_scaling(&mut ai, kind, ascension);
     // v0.111.0 re-valued moves (no-op for v0.107.1), GH #796.
     crate::ascension_scaling::apply_v0111_attack_values(&mut ai, kind, ascension, version);
+    // v0.113.0 re-valued moves (no-op before v0.113.0), GH #1303.
+    crate::ascension_scaling::apply_v0113_attack_values(&mut ai, kind, ascension, version);
     ai
 }
 

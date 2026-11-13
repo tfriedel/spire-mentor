@@ -7,7 +7,8 @@
 //! against the headless engine via `sts2-pycli/python/trace_run_rng.py`, seed
 //! `RP0`, reads 231–413):
 //!
-//! 1. `SharedAncients.UnstableShuffle(up_front)` — 1 element → 0 reads.
+//! 1. `SharedAncients.UnstableShuffle(up_front)` — 1 element → 0 reads
+//!    (one `NextUnsignedLong` from v0.113.0).
 //! 2. For acts 2,3 (`Acts.Skip(1)`): `up_front.NextInt(remaining + 1)` distributes
 //!    the shared-ancient subset (2 reads).
 //! 3. Per act, `ActModel.GenerateRooms`:
@@ -110,6 +111,93 @@ const SHARED_EVENTS: &[&str] = &[
     "WarHistorianRepy",
     "WelcomeToWongos",
 ];
+
+/// v0.113.0 `ModelDb.AllSharedEvents` (`ModelDb.cs:159`): 19 — adds
+/// `MuseumOfTorture` (alphabetical, after `FakeMerchant`). It is in every
+/// act's pre-shuffle list; its `IsAllowed` (act 2 only) gates the pick.
+const SHARED_EVENTS_V0113: &[&str] = &[
+    "BrainLeech",
+    "CrystalSphere",
+    "DollRoom",
+    "FakeMerchant",
+    "MuseumOfTorture",
+    "PotionCourier",
+    "RanwidTheElder",
+    "RelicTrader",
+    "RoomFullOfCheese",
+    "SelfHelpBook",
+    "SlipperyBridge",
+    "StoneOfAllTime",
+    "Symbiote",
+    "TeaMaster",
+    "TheFutureOfPotions",
+    "TheLegendsWereTrue",
+    "ThisOrThat",
+    "WarHistorianRepy",
+    "WelcomeToWongos",
+];
+
+/// v0.113.0 Underdocks `AllEvents` (`Underdocks.cs:26-40`): 12, adds
+/// `WaterfallOfObviousSecrets` and `WuppyInTrouble`.
+const ACT1_UNDERDOCKS_OWN_EVENTS_V0113: &[&str] = &[
+    "AbyssalBaths",
+    "DrowningBeacon",
+    "EndlessConveyor",
+    "PunchOff",
+    "SpiralingWhirlpool",
+    "SunkenStatue",
+    "SunkenTreasury",
+    "DoorsOfLightAndDark",
+    "TrashHeap",
+    "WaterfallOfObviousSecrets",
+    "WaterloggedScriptorium",
+    "WuppyInTrouble",
+];
+
+/// v0.113.0 Glory `AllEvents` (`Glory.cs:30-41`): 9, adds
+/// `ShrineOfTheWarlord` and `ThermaeNonupeipe`, and Trial now sorts after
+/// TinkerTime.
+const ACT3_OWN_EVENTS_V0113: &[&str] = &[
+    "BattlewornDummy",
+    "GraveOfTheForgotten",
+    "HungryForMushrooms",
+    "Reflections",
+    "RoundTeaParty",
+    "ShrineOfTheWarlord",
+    "ThermaeNonupeipe",
+    "TinkerTime",
+    "Trial",
+];
+
+/// The act's own events and the shared events for game build `version`.
+fn event_pools_for(
+    act: &ActGenData,
+    version: crate::GameVersion,
+) -> (&'static [&'static str], &'static [&'static str]) {
+    if version >= crate::GameVersion::V0_113_0 {
+        (act.own_events_v0113, SHARED_EVENTS_V0113)
+    } else {
+        (act.own_events, SHARED_EVENTS)
+    }
+}
+
+/// The pre-shuffle event list (`AllEvents ++ AllSharedEvents`) of act
+/// `act_idx0` (0-based) for game build `version`, act 1 being `act1`. This is
+/// the list [`generate_all_rooms_for`] shuffles; exposed so other event-pool
+/// consumers (the `RunManager::initialize_run` fallback) read the same
+/// version-aware pools instead of a hand-kept copy.
+///
+/// # Panics
+/// If `act_idx0 >= 3`.
+#[must_use]
+pub fn act_event_pool_for(
+    version: crate::GameVersion,
+    act1: ActVariant,
+    act_idx0: usize,
+) -> Vec<&'static str> {
+    let (own, shared) = event_pools_for(acts_for(act1)[act_idx0], version);
+    own.iter().chain(shared.iter()).copied().collect()
+}
 
 /// Act 1 (Overgrowth) `AllEvents` (`Overgrowth.cs:28`) — 13 own events, C# order.
 const ACT1_OWN_EVENTS: &[&str] = &[
@@ -221,6 +309,9 @@ struct ActGenData {
     /// The act's own event pool (`AllEvents`) in C# declaration order;
     /// `own ++ SHARED_EVENTS` is the pre-shuffle list. Bead `sts2-rs-1hiht`.
     own_events: &'static [&'static str],
+    /// The act's own event pool from v0.113.0 on (Underdocks and Glory
+    /// gained events; the others are unchanged and repeat `own_events`).
+    own_events_v0113: &'static [&'static str],
     num_weak: usize,
     base_rooms: usize,
     /// The act's own ancient pool (`AllAncients`) in C# declaration order.
@@ -359,6 +450,7 @@ const ACT3: &[GenEnc] = &[
 const ACT1_OVERGROWTH_DATA: ActGenData = ActGenData {
     encounters: ACT1,
     own_events: ACT1_OWN_EVENTS,
+    own_events_v0113: ACT1_OWN_EVENTS,
     num_weak: 3,
     base_rooms: 15,
     own_ancients: ACT1_ANCIENTS,
@@ -371,6 +463,7 @@ const ACT1_OVERGROWTH_DATA: ActGenData = ActGenData {
 const ACT1_UNDERDOCKS_DATA: ActGenData = ActGenData {
     encounters: ACT1_UNDERDOCKS,
     own_events: ACT1_UNDERDOCKS_OWN_EVENTS,
+    own_events_v0113: ACT1_UNDERDOCKS_OWN_EVENTS_V0113,
     num_weak: 3,
     base_rooms: 15,
     own_ancients: ACT1_ANCIENTS,
@@ -379,6 +472,7 @@ const ACT1_UNDERDOCKS_DATA: ActGenData = ActGenData {
 const ACT2_DATA: ActGenData = ActGenData {
     encounters: ACT2,
     own_events: ACT2_OWN_EVENTS,
+    own_events_v0113: ACT2_OWN_EVENTS,
     num_weak: 2,
     base_rooms: 14,
     own_ancients: ACT2_ANCIENTS,
@@ -387,6 +481,7 @@ const ACT2_DATA: ActGenData = ActGenData {
 const ACT3_DATA: ActGenData = ActGenData {
     encounters: ACT3,
     own_events: ACT3_OWN_EVENTS,
+    own_events_v0113: ACT3_OWN_EVENTS_V0113,
     num_weak: 2,
     base_rooms: 13,
     own_ancients: ACT3_ANCIENTS,
@@ -578,13 +673,13 @@ fn generate_act_rooms(
     // Pre-shuffle order is `own ++ shared` (no epoch filtering under the headless
     // `UnlockState.all`). The shuffle both drives the `up_front` cursor AND yields
     // the C#-faithful `RoomSet.events` identity order. Bead `sts2-rs-1hiht`.
-    let mut events_shuffled: Vec<&'static str> = act
-        .own_events
+    let (own_events, shared_events) = event_pools_for(act, version);
+    let mut events_shuffled: Vec<&'static str> = own_events
         .iter()
         .copied()
-        .chain(SHARED_EVENTS.iter().copied())
+        .chain(shared_events.iter().copied())
         .collect();
-    rng.shuffle(&mut events_shuffled);
+    rng.shuffle_for(version, &mut events_shuffled);
 
     // Derived sublists, in `AllEncounters` order (LINQ `.Where` preserves order).
     let weak: Vec<&GenEnc> = enc
@@ -721,8 +816,11 @@ pub fn generate_all_rooms_for(
     act1: ActVariant,
 ) -> Vec<GeneratedActRooms> {
     let acts = acts_for(act1);
-    // (1) SharedAncients.UnstableShuffle — 1 element ([Darv]) → 0 reads. Then
+    // (1) SharedAncients.UnstableShuffle — 1 element ([Darv]): 0 reads before
+    // v0.113.0; from v0.113.0 the shuffle seeds its child Rng with one
+    // `NextUnsignedLong` whatever the length (`ListExtensions.cs:45-47`). Then
     // (2) distribute the subset among acts 2,3 (`Acts.Skip(1)`).
+    up_front.shuffle_for(version, &mut [()]);
     let mut remaining_shared_ancients: i32 = 1;
     let mut subset = [0usize; 3]; // index by act (0-based); act 0 gets none.
     for act_subset in subset.iter_mut().skip(1) {
@@ -759,6 +857,30 @@ pub fn generate_all_rooms_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Per-version event pools keyed on an explicit per-act field (PR #1319
+    /// review): v0.113.0 Underdocks 12 own (+Waterfall, Wuppy), Glory 9 own
+    /// (+ShrineOfTheWarlord, ThermaeNonupeipe), 19 shared (+MuseumOfTorture);
+    /// Overgrowth and Hive own pools unchanged. Pre-0.113 pools unchanged.
+    #[test]
+    fn act_event_pool_for_is_per_version() {
+        use crate::GameVersion::{V0_111_0, V0_113_0};
+        let n = |v, a1, i| act_event_pool_for(v, a1, i).len();
+        let (o, u) = (ActVariant::Overgrowth, ActVariant::Underdocks);
+        assert_eq!(n(V0_111_0, o, 0), 13 + 18);
+        assert_eq!(n(V0_111_0, u, 0), 10 + 18);
+        assert_eq!(n(V0_111_0, o, 2), ACT3_OWN_EVENTS.len() + 18);
+        assert_eq!(n(V0_113_0, o, 0), 13 + 19);
+        assert_eq!(n(V0_113_0, u, 0), 12 + 19);
+        assert_eq!(n(V0_113_0, o, 1), ACT2_OWN_EVENTS.len() + 19);
+        assert_eq!(n(V0_113_0, o, 2), 9 + 19);
+        let u3 = act_event_pool_for(V0_113_0, u, 0);
+        assert!(u3.contains(&"WaterfallOfObviousSecrets") && u3.contains(&"WuppyInTrouble"));
+        let g = act_event_pool_for(V0_113_0, o, 2);
+        assert!(g.contains(&"ShrineOfTheWarlord") && g.contains(&"ThermaeNonupeipe"));
+        assert!(!act_event_pool_for(V0_111_0, o, 2).contains(&"ShrineOfTheWarlord"));
+        assert!(act_event_pool_for(V0_113_0, o, 1).contains(&"MuseumOfTorture"));
+    }
 
     #[test]
     fn act1_sublists_match_csharp_filters() {

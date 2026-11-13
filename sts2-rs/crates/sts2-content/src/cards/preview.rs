@@ -221,6 +221,10 @@ pub fn calculated_value(
             crate::cards::defect::helix_drill::preview_helix_drill,
             ValueKind::Count,
         ),
+        CardId::MyShinies => (
+            crate::cards::colorless::my_shinies::preview_my_shinies,
+            ValueKind::Count,
+        ),
         CardId::KnifeTrap => (
             crate::cards::silent::knife_trap::preview_knife_trap,
             ValueKind::Count,

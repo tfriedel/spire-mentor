@@ -400,7 +400,8 @@ pub fn roll_neow_offers_for(version: crate::GameVersion, rng: &mut Rng) -> NeowO
     // (6) UnstableShuffle (Neow.cs:278). `Rng::shuffle` is exactly
     //     UnstableShuffle (Fisher-Yates with `next_int(0, idx)`); see
     //     `dotnet_rng.rs::Rng::shuffle` doc-comment.
-    rng.shuffle(&mut positive_pool);
+    // v0.113.0: one parent `NextUnsignedLong` seeds the shuffle's child Rng.
+    rng.shuffle_for(version, &mut positive_pool);
 
     NeowOffers {
         positive_1: positive_pool[0],

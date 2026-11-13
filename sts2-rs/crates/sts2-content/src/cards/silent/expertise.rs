@@ -12,6 +12,15 @@ use super::prelude::*;
 ///
 /// `OnUpgrade` is still `Cards.UpgradeValueBy(1)` → 3.
 pub(crate) fn play_expertise(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0: draw 2 (upg 3), then `PowerCmd.Apply<RetainHandPower>(1)`
+        // on the owner — no single-turn Retain on the drawn cards (decomp
+        // Expertise.cs:23-27).
+        let n: i32 = if current_card_upgraded(state) { 3 } else { 2 };
+        let _ = sts2_core::cards::draw_via_state(state, n);
+        apply_power_to_player(state, PowerKind::RetainHand, 1);
+        return EffectResult::Resolved;
+    }
     if state.game_version >= sts2_core::GameVersion::V0_111_0 {
         // v0.111.0: draw 2 (upg 3); the drawn cards Retain this turn
         // (decomp Expertise.cs:21-24).

@@ -974,6 +974,18 @@ impl RelicId {
             // `RelicKind` so its universe (combat encoders, digests) stays
             // the v0.107.1 one.
             Self::DowsingRod | Self::NeowsSacrifice => None,
+            // v0.113.0-only event relics: no combat-side kind yet. Their
+            // combat hooks (BathTowel heal, TormentousCollar Weak, Wuppy's
+            // damage redirect, ...) are not modelled; see the v0.113.0
+            // run-lane progress notes.
+            Self::ObsidianVice
+            | Self::Thumbscrew
+            | Self::TormentousCollar
+            | Self::MightyWings
+            | Self::BathTowel
+            | Self::BathRobes
+            | Self::Wuppy
+            | Self::Byrdine => None,
         }
     }
 }

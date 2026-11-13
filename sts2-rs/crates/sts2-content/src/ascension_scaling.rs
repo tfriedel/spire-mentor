@@ -169,6 +169,10 @@ pub(crate) const ASCENSION_ATTACK_SCALING: &[(MonsterKind, &str, i32, i32)] = &[
     (MonsterKind::Rocket, "LASER_MOVE", 31, 35),
     (MonsterKind::Rocket, "PRECISION_BEAM_MOVE", 18, 20),
     (MonsterKind::Rocket, "TARGETING_RETICLE_MOVE", 3, 4),
+    // v0.113 renames (Rocket.cs:58-62 v0.113.0).
+    (MonsterKind::Rocket, "CALCULATING_MOVE", 3, 4),
+    (MonsterKind::Rocket, "PRECISE_SMASH_MOVE", 18, 20),
+    (MonsterKind::Rocket, "ROCKET_CLAW_MOVE", 31, 35),
     (MonsterKind::ScrollOfBiting, "CHEW", 5, 6),
     (MonsterKind::ScrollOfBiting, "CHOMP", 14, 16),
     (MonsterKind::Seapunk, "SEA_KICK", 11, 13),
@@ -519,6 +523,11 @@ pub fn scaled_damage(
             .map(|e| (e.2, e.3))
     };
     let deadly = ascension >= AscensionLevel::DeadlyEnemies as u8;
+    if version >= sts2_core::GameVersion::V0_113_0 {
+        if let Some((v0113_base, v0113_deadly)) = row(V0113_ATTACK_VALUES) {
+            return if deadly { v0113_deadly } else { v0113_base };
+        }
+    }
     if version >= sts2_core::GameVersion::V0_111_0 {
         if let Some((v0111_base, v0111_deadly)) = row(V0111_ATTACK_VALUES) {
             return if deadly { v0111_deadly } else { v0111_base };
@@ -706,11 +715,68 @@ pub fn apply_v0111_attack_values(
     }
 }
 
+/// v0.113.0 attack damages that differ from v0.111.0, as `(kind, move_id,
+/// base, deadly)` — like [`V0111_ATTACK_VALUES`], applied after it by
+/// [`apply_v0113_attack_values`] when the combat's `game_version` is
+/// `V0_113_0` or later. GH #1303.
+#[rustfmt::skip]
+pub(crate) const V0113_ATTACK_VALUES: &[(MonsterKind, &str, i32, i32)] = &[
+    // v0.113.0: FromBelowDamage (.., 28, 24); was BelowDamage (.., 26, 23)
+    // (decomp Tunneler.cs:54)
+    (MonsterKind::Tunneler, "BELOW_MOVE_1", 24, 28),
+    // v0.113.0: the second Jab state replaces Radiate; JabDamage (.., 17, 15)
+    // (decomp InfestedPrism.cs:36,59)
+    (MonsterKind::InfestedPrism, "JAB_2", 15, 17),
+];
+
+/// Overwrite every [`V0113_ATTACK_VALUES`] move's attack damage with its
+/// v0.113.0 value at `ascension`. A no-op before v0.113.0.
+pub fn apply_v0113_attack_values(
+    ai: &mut MonsterAi,
+    kind: MonsterKind,
+    ascension: u8,
+    version: sts2_core::GameVersion,
+) {
+    if version < sts2_core::GameVersion::V0_113_0
+        || !V0113_ATTACK_VALUES.iter().any(|e| e.0 == kind)
+    {
+        return;
+    }
+    let deadly = ascension >= AscensionLevel::DeadlyEnemies as u8;
+    for state in std::sync::Arc::make_mut(&mut ai.states).values_mut() {
+        let MonsterState::Move(m) = state else {
+            continue;
+        };
+        if let Some(&(_, _, base, deadly_value)) = V0113_ATTACK_VALUES
+            .iter()
+            .find(|e| e.0 == kind && e.1 == m.id)
+        {
+            let value = if deadly { deadly_value } else { base };
+            for intent in &mut m.intents {
+                match intent {
+                    Intent::Attack { damage }
+                    | Intent::DeathBlow { damage }
+                    | Intent::MultiAttack { damage, .. } => *damage = value,
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use sts2_core::powers::PowerKind;
 
     use super::*;
+
+    /// A v0.107.1 table row whose C# member v0.113.0 deleted: Infested
+    /// Prism's Pulsate no longer gains Block (decomp InfestedPrism.cs:93-100).
+    fn removed_in_v0113(kind: MonsterKind, move_id: &str, version: sts2_core::GameVersion) -> bool {
+        version >= sts2_core::GameVersion::V0_113_0
+            && kind == MonsterKind::InfestedPrism
+            && move_id == "PULSATE"
+    }
     use crate::monster_dispatch::{
         build_ai, build_ai_with_ascension, MonsterSpawnArgs, SpawnPosition,
     };
@@ -740,7 +806,25 @@ mod tests {
                 ));
                 continue;
             }
-            let ai = build_ai(kind, MonsterSpawnArgs::None, SpawnPosition::default());
+            // A move renamed in a later build (Rocket v0.113) lives in that
+            // build's machine.
+            let built = |v| {
+                crate::monster_dispatch::build_ai_for_version(
+                    kind,
+                    MonsterSpawnArgs::None,
+                    SpawnPosition::default(),
+                    0,
+                    v,
+                )
+            };
+            let version = [
+                sts2_core::GameVersion::V0_107_1,
+                sts2_core::GameVersion::V0_113_0,
+            ]
+            .into_iter()
+            .find(|&v| move_attack_damage(&built(v), move_id).is_some())
+            .unwrap_or(sts2_core::GameVersion::V0_107_1);
+            let ai = built(version);
             match move_attack_damage(&ai, move_id) {
                 None => fails.push(format!("{kind:?} {move_id}: no attack move with that id")),
                 Some(dmg) if dmg != base => {
@@ -749,7 +833,7 @@ mod tests {
                     ));
                 }
                 Some(_) => {
-                    let mut ai9 = build_ai(kind, MonsterSpawnArgs::None, SpawnPosition::default());
+                    let mut ai9 = built(version);
                     apply_ascension_attack_scaling(&mut ai9, kind, 9);
                     let dmg9 = move_attack_damage(&ai9, move_id).unwrap();
                     if dmg9 != deadly {
@@ -797,6 +881,9 @@ mod tests {
                     fails.push(format!("{kind:?} {move_id}: tough {tough} <= base {base}"));
                 }
                 for version in sts2_core::GameVersion::ALL {
+                    if removed_in_v0113(kind, move_id, version) {
+                        continue;
+                    }
                     for (asc, want) in [(0u8, base), (7, base), (8, tough), (10, tough)] {
                         let ai = crate::monster_dispatch::build_ai_for_version(
                             kind,
@@ -1563,6 +1650,9 @@ mod tests {
         let mut fails = Vec::new();
         for &(kind, move_id, base, tough) in cases {
             for version in GameVersion::ALL {
+                if removed_in_v0113(kind, move_id, version) {
+                    continue;
+                }
                 for (asc, want) in [(0u8, base), (7, base), (8, tough), (10, tough)] {
                     match move_block(kind, move_id, asc, version) {
                         Ok(got) if got == want => {}
@@ -1880,12 +1970,6 @@ mod tests {
         use sts2_core::GameVersion;
 
         for version in GameVersion::ALL {
-            // v0.113.0 (beta) changed monster content the engine has not
-            // ported yet (Axebot HP, Infested Prism). Tracked in GH #1303;
-            // drop this skip when the monster wave lands.
-            if version == GameVersion::V0_113_0 {
-                continue;
-            }
             let Some(dir) = decomp_monsters_dir(version) else {
                 eprintln!("skipping: decomp for {version:?} not present");
                 return;
@@ -1993,15 +2077,25 @@ mod tests {
                 }
             }
             for (row, seen) in TOUGH_ENEMIES_MEMBERS.iter().zip(&seen_rows) {
-                if !seen {
+                // v0.113.0 deleted `InfestedPrism.PulsateBlock`.
+                let gone = version >= GameVersion::V0_113_0
+                    && (row.0, row.1) == ("InfestedPrism", "PulsateBlock");
+                if !seen && !gone {
                     fails.push(format!(
                         "{}.{}: row not found in the {version:?} decomp",
                         row.0, row.1
                     ));
                 }
             }
+            // v0.113.0: Axebot's MaxInitialHp became `=> MinInitialHp` and
+            // InfestedPrism lost PulsateBlock, one member each.
+            let (min_hp, min_other) = if version >= GameVersion::V0_113_0 {
+                (148, 21)
+            } else {
+                (149, 22)
+            };
             assert!(
-                hp_members >= 149 && other_members >= 22,
+                hp_members >= min_hp && other_members >= min_other,
                 "{version:?}: scan found only {hp_members} HP / {other_members} other \
                  ToughEnemies members — is the parse broken?"
             );
@@ -2270,6 +2364,57 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// GH #1303 wave 6: v0.113.0 monster values. Infested Prism's ring is
+    /// JAB, JAB_2, WHIRLWIND, PULSATE (decomp InfestedPrism.cs:57-68), the
+    /// second Jab scales like the first; Tunneler's From Below is 24 / A9 28
+    /// (Tunneler.cs:54); Axebot spawns at a fixed 70 / A8 80 (Axebot.cs:48).
+    /// v0.111.0 keeps Radiate and the old values.
+    #[test]
+    fn v0113_monster_values() {
+        use sts2_core::GameVersion::{V0_111_0, V0_113_0};
+        let build = |kind, asc, v| {
+            crate::monster_dispatch::build_ai_for_version(
+                kind,
+                MonsterSpawnArgs::None,
+                SpawnPosition::default(),
+                asc,
+                v,
+            )
+        };
+        let prism = build(MonsterKind::InfestedPrism, 9, V0_113_0);
+        let mut ids: Vec<_> = prism.states.keys().copied().collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["JAB", "JAB_2", "PULSATE", "WHIRLWIND"]);
+        assert_eq!(move_attack_damage(&prism, "JAB"), Some(17));
+        assert_eq!(move_attack_damage(&prism, "JAB_2"), Some(17));
+        let old = build(MonsterKind::InfestedPrism, 9, V0_111_0);
+        assert!(old.states.contains_key("RADIATE"));
+        assert_eq!(
+            move_attack_damage(&build(MonsterKind::Tunneler, 0, V0_113_0), "BELOW_MOVE_1"),
+            Some(24)
+        );
+        assert_eq!(
+            move_attack_damage(&build(MonsterKind::Tunneler, 9, V0_113_0), "BELOW_MOVE_1"),
+            Some(28)
+        );
+        assert_eq!(
+            move_attack_damage(&build(MonsterKind::Tunneler, 9, V0_111_0), "BELOW_MOVE_1"),
+            Some(26)
+        );
+        for (asc, hp) in [(0_u8, 70), (8, 80)] {
+            assert_eq!(MonsterKind::Axebot.min_initial_hp_for(asc, V0_113_0), hp);
+            assert_eq!(MonsterKind::Axebot.max_initial_hp_for(asc, V0_113_0), hp);
+        }
+        assert_eq!(MonsterKind::Axebot.max_initial_hp_for(0, V0_111_0), 78);
+        // Rocket's renamed moves keep their DeadlyEnemies scaling.
+        let rocket = build(MonsterKind::Rocket, 9, V0_113_0);
+        assert_eq!(move_attack_damage(&rocket, "CALCULATING_MOVE"), Some(4));
+        assert_eq!(move_attack_damage(&rocket, "PRECISE_SMASH_MOVE"), Some(20));
+        assert_eq!(move_attack_damage(&rocket, "ROCKET_CLAW_MOVE"), Some(35));
+        let rocket = build(MonsterKind::Rocket, 0, V0_111_0);
+        assert_eq!(move_attack_damage(&rocket, "LASER_MOVE"), Some(31));
     }
 
     /// Below the DeadlyEnemies threshold the patch is a no-op.

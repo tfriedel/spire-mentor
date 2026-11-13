@@ -42,7 +42,9 @@ pub(crate) fn play_beat_down(state: &mut CombatState, _t: Option<CreatureUid>) -
                 && !sts2_core::card_effects::card_unplayable(card.card_id)
         })
         .collect();
-    if candidates.is_empty() {
+    // v0.113's `UnstableShuffle` draws one `NextUnsignedLong` even for an
+    // empty list (BeatDown.cs:26 has no empty guard).
+    if candidates.is_empty() && state.game_version < sts2_core::GameVersion::V0_113_0 {
         return EffectResult::Resolved;
     }
     // C# `StableShuffle(Rng.Shuffle)` = `Sort()` by `CardModel.CompareTo`
@@ -60,12 +62,13 @@ pub(crate) fn play_beat_down(state: &mut CombatState, _t: Option<CreatureUid>) -
     let cmp = |a: CardUid, b: CardUid| {
         let ca = &state.cards[a.0.get() as usize - 1];
         let cb = &state.cards[b.0.get() as usize - 1];
-        sts2_core::cards::card_model_compare(ca, cb)
+        sts2_core::cards::card_model_compare_for(ca, cb, state.game_version)
     };
+    let version = state.game_version;
     state
         .run_rng
-        .shuffle
-        .stable_shuffle_by(shuffled.as_mut_slice(), &cmp);
+        .shuffle_or_card_selection(version)
+        .stable_shuffle_by_for(state.game_version, shuffled.as_mut_slice(), &cmp);
     // Bead `sts2-rs-5k1mx`: C# `BeatDown.cs` `CardsVar(3)` with `OnUpgrade
     // UpgradeValueBy(1m)` → take 3 base / 4 upgraded. Captured BEFORE the
     // loop: `current_upgraded` reads `play.last()`, which is BeatDown only

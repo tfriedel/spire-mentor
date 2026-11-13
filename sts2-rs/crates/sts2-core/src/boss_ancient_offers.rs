@@ -122,9 +122,9 @@ pub fn roll_offers_for(
         AncientId::Orobas => roll_orobas(version, rng, cond),
         AncientId::Pael => roll_pael(rng, cond),
         AncientId::Tezcatara => roll_tezcatara(rng, cond),
-        AncientId::Nonupeipe => roll_nonupeipe(rng, cond),
-        AncientId::Tanx => roll_tanx(rng, cond),
-        AncientId::Vakuu => roll_vakuu(rng),
+        AncientId::Nonupeipe => roll_nonupeipe(version, rng, cond),
+        AncientId::Tanx => roll_tanx(version, rng, cond),
+        AncientId::Vakuu => roll_vakuu(version, rng),
         AncientId::Darv => roll_darv(version, rng, cond),
         // Neow's offers are rolled via `neow_offers::roll_neow_offers`
         // (2 positives + 1 curse), not this 3-relic boss-relic surface.
@@ -255,7 +255,12 @@ fn roll_pael(rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
 
 /// `Vakuu.GenerateInitialOptions` — `UnstableShuffle` each of 3 pools, take
 /// the head of each. DistinguishedCape's −9 MaxHP is a pickup side effect.
-fn roll_vakuu(rng: &mut Rng) -> Vec<RelicId> {
+///
+/// v0.113.0 replaced the shuffles with `GetOptionsFromThreePools`
+/// (`AncientEventModel.cs:302-360`): one `Rng.NextItem` per pool over its
+/// allowed options. Every Vakuu relic is allowed in a standard run, so the
+/// refill-from-the-union branch never runs.
+fn roll_vakuu(version: crate::GameVersion, rng: &mut Rng) -> Vec<RelicId> {
     use RelicId::{
         BloodSoakedRose, ChoicesParadox, DistinguishedCape, Fiddle, JeweledMask, LordsParasol,
         MusicBox, PreservedFog, SereTalon, WhisperingEarring,
@@ -263,6 +268,12 @@ fn roll_vakuu(rng: &mut Rng) -> Vec<RelicId> {
     let mut pool1 = vec![BloodSoakedRose, WhisperingEarring, Fiddle];
     let mut pool2 = vec![PreservedFog, SereTalon, DistinguishedCape];
     let mut pool3 = vec![ChoicesParadox, MusicBox, LordsParasol, JeweledMask];
+    if version >= crate::GameVersion::V0_113_0 {
+        return [pool1, pool2, pool3]
+            .iter()
+            .map(|pool| pool[rng.next_int_exclusive(0, pool.len() as i32) as usize])
+            .collect();
+    }
     rng.shuffle(&mut pool1);
     rng.shuffle(&mut pool2);
     rng.shuffle(&mut pool3);
@@ -272,7 +283,7 @@ fn roll_vakuu(rng: &mut Rng) -> Vec<RelicId> {
 /// `Tanx.GenerateInitialOptions` — base pool of 9 weapons (+TriBoomerang
 /// when the deck has ≥3 Instinct-enchantable cards), `UnstableShuffle`,
 /// take 3.
-fn roll_tanx(rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
+fn roll_tanx(version: crate::GameVersion, rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
     use RelicId::{
         Claws, Crossbow, IronClub, MeatCleaver, Sai, SpikedGauntlets, TanxsWhistle, ThrowingAxe,
         TriBoomerang, WarHammer,
@@ -291,13 +302,18 @@ fn roll_tanx(rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
     if cond.instinct_eligible_count >= 3 {
         list.push(TriBoomerang);
     }
-    rng.shuffle(&mut list);
+    // v0.113.0 UnstableShuffle: one parent draw seeds a child Rng.
+    rng.shuffle_for(version, &mut list);
     list.into_iter().take(3).collect()
 }
 
 /// `Nonupeipe.GenerateInitialOptions` — base pool of 9 (+BeautifulBracelet
 /// when the deck has ≥4 Swift-enchantable cards), `UnstableShuffle`, take 3.
-fn roll_nonupeipe(rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
+fn roll_nonupeipe(
+    version: crate::GameVersion,
+    rng: &mut Rng,
+    cond: &AncientConditions,
+) -> Vec<RelicId> {
     use RelicId::{
         BeautifulBracelet, BlessedAntler, BrilliantScarf, DelicateFrond, DiamondDiadem, FurCoat,
         Glitter, JewelryBox, LoomingFruit, SignetRing,
@@ -316,7 +332,8 @@ fn roll_nonupeipe(rng: &mut Rng, cond: &AncientConditions) -> Vec<RelicId> {
     if cond.swift_eligible_count >= 4 {
         list.push(BeautifulBracelet);
     }
-    rng.shuffle(&mut list);
+    // v0.113.0 UnstableShuffle: one parent draw seeds a child Rng.
+    rng.shuffle_for(version, &mut list);
     list.into_iter().take(3).collect()
 }
 
@@ -364,7 +381,8 @@ fn roll_darv(version: crate::GameVersion, rng: &mut Rng, cond: &AncientCondition
     }
 
     let mut source: Vec<RelicId> = sets.iter().map(|s| next_item(rng, s)).collect();
-    rng.shuffle(&mut source);
+    // v0.113.0 UnstableShuffle: one parent draw seeds a child Rng.
+    rng.shuffle_for(version, &mut source);
 
     if rng.next_bool() {
         let mut out: Vec<RelicId> = source.into_iter().take(2).collect();
@@ -705,7 +723,9 @@ mod tests {
         let mut saw_no = false;
         for seed in 0..256i32 {
             let mut rng = event_rng(seed, AncientId::Tanx);
-            if roll_tanx(&mut rng, &c).contains(&RelicId::TriBoomerang) {
+            if roll_tanx(crate::GameVersion::V0_107_1, &mut rng, &c)
+                .contains(&RelicId::TriBoomerang)
+            {
                 saw_no = true;
             }
         }
@@ -715,7 +735,9 @@ mod tests {
         let mut saw_yes = false;
         for seed in 0..256i32 {
             let mut rng = event_rng(seed, AncientId::Tanx);
-            if roll_tanx(&mut rng, &c).contains(&RelicId::TriBoomerang) {
+            if roll_tanx(crate::GameVersion::V0_107_1, &mut rng, &c)
+                .contains(&RelicId::TriBoomerang)
+            {
                 saw_yes = true;
                 break;
             }

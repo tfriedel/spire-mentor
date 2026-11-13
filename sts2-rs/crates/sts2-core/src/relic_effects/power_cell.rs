@@ -43,12 +43,35 @@ pub(crate) fn on_before_side_turn_start_power_cell(
         let ia = a.0.get() as usize - 1;
         let ib = b.0.get() as usize - 1;
         let (ca, cb) = (&state.cards[ia], &state.cards[ib]);
-        crate::cards::card_model_compare(ca, cb)
+        crate::cards::card_model_compare_for(ca, cb, state.game_version)
     };
-    state
-        .run_rng
-        .combat_card_selection
-        .stable_shuffle_by(candidates_v.as_mut_slice(), &cmp);
+    if state.game_version >= crate::GameVersion::V0_113_0 {
+        // v0.113.0: the non-Innate candidates first, then the Innate ones,
+        // each list `StableShuffle`d on `CombatCardSelection` (both shuffles
+        // run before the `Take`) (decomp PowerCell.cs:25-28).
+        let (mut plain, mut innate): (Vec<crate::CardUid>, Vec<crate::CardUid>) =
+            candidates_v.iter().partition(|u| {
+                !crate::card_effects::card_innate_inst(&state.cards[u.0.get() as usize - 1])
+            });
+        state.run_rng.combat_card_selection.stable_shuffle_by_for(
+            state.game_version,
+            plain.as_mut_slice(),
+            &cmp,
+        );
+        state.run_rng.combat_card_selection.stable_shuffle_by_for(
+            state.game_version,
+            innate.as_mut_slice(),
+            &cmp,
+        );
+        plain.extend(innate);
+        candidates_v = plain;
+    } else {
+        state.run_rng.combat_card_selection.stable_shuffle_by_for(
+            state.game_version,
+            candidates_v.as_mut_slice(),
+            &cmp,
+        );
+    }
     let take = POWER_CELL_CARDS.min(candidates_v.len());
     let chosen: smallvec::SmallVec<[crate::CardUid; 2]> =
         candidates_v.into_iter().take(take).collect();

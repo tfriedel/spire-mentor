@@ -52,10 +52,12 @@ fn push_new_player_power(state: &mut CombatState, kind: PowerKind, amount: i32) 
         amount,
         counter: 0,
         applier: None,
+        // v0.113.0: only while the enemy side has the turn (decomp
+        // `Commands/PowerCmd.cs:148`); see `side_gate_arms_skip`.
         skip_next_tick: matches!(
             kind,
             PowerKind::Vulnerable | PowerKind::Weak | PowerKind::Frail
-        ),
+        ) && sts2_core::card_effects::side_gate_arms_skip(state),
     });
     state.player.powers.push(sts2_core::PowerUid(new_id));
 }

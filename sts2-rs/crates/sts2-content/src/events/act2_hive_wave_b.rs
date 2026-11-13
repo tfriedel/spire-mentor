@@ -42,6 +42,7 @@
 
 use crate::cards::CardRarity;
 use sts2_core::cards::{CardId, CardType};
+use sts2_core::dotnet_rng::Rng;
 use sts2_core::{
     CardReward, EventId, EventOptionInfo, EventOutcome, EventVarSpec, RelicId, Reward, RunState,
 };
@@ -94,6 +95,13 @@ const RELIC_TRADER_STREAM: &str = "RELIC_TRADER";
 /// stream, so a fresh stream at cursor 0 gives the same three relics whether
 /// asked while presenting the options or while resolving one.
 fn relic_trader_owned(state: &RunState) -> Vec<RelicId> {
+    relic_trader_owned_and_rng(state).0
+}
+
+/// [`relic_trader_owned`] plus the event stream right after the owned-relic
+/// `StableShuffle` — where v0.113.0's `NewRelics` rarity rolls continue
+/// (`RelicTrader.cs:51,68`: `PullNextRelicFromFront(Owner, base.Rng)`).
+fn relic_trader_owned_and_rng(state: &RunState) -> (Vec<RelicId>, Rng) {
     let mut valid: Vec<RelicId> = state
         .relics
         .iter()
@@ -101,11 +109,22 @@ fn relic_trader_owned(state: &RunState) -> Vec<RelicId> {
         .filter(|&id| crate::relics::tradable::relic_is_tradable_in(state, id))
         .collect();
     let mut rng = state.rng.named(RELIC_TRADER_STREAM);
-    rng.stable_shuffle_by(&mut valid, &|a: RelicId, b: RelicId| {
+    rng.stable_shuffle_by_for(state.game_version, &mut valid, &|a: RelicId, b: RelicId| {
         a.to_python_name().cmp(b.to_python_name())
     });
     valid.truncate(RELIC_TRADER_TRADE_COUNT);
-    valid
+    (valid, rng)
+}
+
+/// The stream `NewRelics` rolls rarities on: the player's Rewards stream
+/// through v0.111.0, the event's own stream (after the owned shuffle) from
+/// v0.113.0.
+fn relic_trader_rarity_rng(state: &RunState) -> Rng {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        relic_trader_owned_and_rng(state).1
+    } else {
+        state.rng.rewards.clone()
+    }
 }
 
 /// The three relics the trader offers back, for the options that name them.
@@ -116,7 +135,7 @@ fn relic_trader_owned(state: &RunState) -> Vec<RelicId> {
 /// this rolls against a COPY and feeds each peeked id back as an exclusion,
 /// which is what draining the bag would have done.
 fn relic_trader_stock(state: &RunState) -> Vec<RelicId> {
-    let mut rewards = state.rng.rewards.clone();
+    let mut rewards = relic_trader_rarity_rng(state);
     let mut stock: Vec<RelicId> = Vec::with_capacity(RELIC_TRADER_TRADE_COUNT);
     for _ in 0..RELIC_TRADER_TRADE_COUNT {
         let rarity = sts2_core::runstate::roll_relic_rarity(&mut rewards);
@@ -134,10 +153,16 @@ fn relic_trader_stock(state: &RunState) -> Vec<RelicId> {
 /// pulls all three in `GenerateInitialOptions` — the two you turn down are
 /// spent for the rest of the run. Every option resolves exactly one trade, so
 /// doing the pulls here leaves the bag where C# leaves it.
-fn relic_trader_take_stock(state: &mut RunState) -> Vec<RelicId> {
+///
+/// `event_rng` is the stream after the owned-relic shuffle (from v0.113.0;
+/// `None` rolls on the Rewards stream).
+fn relic_trader_take_stock(state: &mut RunState, mut event_rng: Option<Rng>) -> Vec<RelicId> {
     let mut stock: Vec<RelicId> = Vec::with_capacity(RELIC_TRADER_TRADE_COUNT);
     for _ in 0..RELIC_TRADER_TRADE_COUNT {
-        let rarity = state.roll_reward_relic_rarity();
+        let rarity = match event_rng.as_mut() {
+            Some(rng) => sts2_core::runstate::roll_relic_rarity(rng),
+            None => state.roll_reward_relic_rarity(),
+        };
         let Some(id) = state.pop_relic_from_grab_bag(rarity) else {
             break;
         };
@@ -149,8 +174,11 @@ fn relic_trader_take_stock(state: &mut RunState) -> Vec<RelicId> {
 /// C# `RelicTrader.Trade(index)`: `RelicCmd.Remove(OwnedRelics[index])` then
 /// `RelicCmd.Obtain(NewRelics[index])`.
 fn relic_trader_trade(state: &mut RunState, slot: usize) -> EventOutcome {
-    let owned = relic_trader_owned(state);
-    let stock = relic_trader_take_stock(state);
+    // One derivation of the event stream serves both the owned shuffle and
+    // the v0.113.0 rarity rolls that continue it.
+    let (owned, rng) = relic_trader_owned_and_rng(state);
+    let event_rng = (state.game_version >= sts2_core::GameVersion::V0_113_0).then_some(rng);
+    let stock = relic_trader_take_stock(state, event_rng);
     let (Some(&given), Some(&taken)) = (owned.get(slot), stock.get(slot)) else {
         // Neither can be short in a run — `relic_trader_allowed` demands 5
         // tradable relics and the bag is far from empty in Act 2 — but a
@@ -1171,6 +1199,17 @@ pub const WATERLOGGED_QUILL_COST: i32 = 55;
 /// `CanonicalVars[2] = GoldVar("PricklySpongeGold", 99)` (Python
 /// pin `act2.py:1223`'s 155 drifted). Bead `sts2-rs-rcner`.
 pub const WATERLOGGED_SPONGE_COST: i32 = 99;
+/// v0.113.0 Prickly Sponge cost (`PricklySpongeGold` 99 -> 120).
+pub const WATERLOGGED_SPONGE_COST_V0113: i32 = 120;
+
+/// The Prickly Sponge cost for the run's build.
+fn waterlogged_sponge_cost(state: &RunState) -> i32 {
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        WATERLOGGED_SPONGE_COST_V0113
+    } else {
+        WATERLOGGED_SPONGE_COST
+    }
+}
 
 fn waterlogged_bloody_ink(state: &mut RunState) -> EventOutcome {
     state.gain_max_hp(WATERLOGGED_INK_MAX_HP);
@@ -1184,13 +1223,17 @@ fn waterlogged_tentacle_quill(state: &mut RunState) -> EventOutcome {
 }
 
 fn waterlogged_prickly_sponge(state: &mut RunState) -> EventOutcome {
-    lose_gold_saturating(state, WATERLOGGED_SPONGE_COST);
+    let cost = waterlogged_sponge_cost(state);
+    lose_gold_saturating(state, cost);
     queue_card_reward(state);
-    EventOutcome::finished("Paid 99g, queued enchant-2-cards-with-Steady reward.")
+    EventOutcome::finished(format!(
+        "Paid {cost}g, queued enchant-2-cards-with-Steady reward."
+    ))
 }
 
 fn waterlogged_options(state: &RunState, _spec: &EventSpec) -> Vec<EventOptionInfo> {
     let gold = state.gold;
+    let sponge_cost = waterlogged_sponge_cost(state);
     vec![
         EventOptionInfo {
             option_id: "bloody_ink",
@@ -1219,13 +1262,13 @@ fn waterlogged_options(state: &RunState, _spec: &EventSpec) -> Vec<EventOptionIn
             loc_key: "WATERLOGGED_SCRIPTORIUM.pages.INITIAL.options.PRICKLY_SPONGE",
             vars: Vec::new(),
             title_vars: Vec::new(),
-            label: if gold >= WATERLOGGED_SPONGE_COST {
-                "Prickly Sponge (99g)".to_string()
+            label: if gold >= sponge_cost {
+                format!("Prickly Sponge ({sponge_cost}g)")
             } else {
                 "Prickly Sponge".to_string()
             },
             description: "Enchant 2 cards with Steady.".to_string(),
-            enabled: gold >= WATERLOGGED_SPONGE_COST,
+            enabled: gold >= sponge_cost,
         },
     ]
 }
@@ -1263,7 +1306,12 @@ const WATERLOGGED_SCRIPTORIUM_OPTIONS: &[EventOptionSpec] = &[
             ),
             ("Cards", EventVarSpec::Int(2)),
         ],
-        vars_fn: None,
+        vars_fn: Some(|s| {
+            vec![
+                ("PricklySpongeGold", waterlogged_sponge_cost(s).into()),
+                ("Cards", 2.into()),
+            ]
+        }),
         title_vars_fn: None,
         handler: waterlogged_prickly_sponge,
     },

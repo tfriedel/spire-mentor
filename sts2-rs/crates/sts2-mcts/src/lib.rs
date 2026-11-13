@@ -12194,6 +12194,9 @@ mod tests {
     /// that have nothing to do with hidden information. Hashing equal
     /// would prove nothing here.
     #[test]
+    // Two whole `CombatState`s per array (each grew with the v0.113.0
+    // NonCombatGeneration stream).
+    #[allow(clippy::large_stack_arrays)]
     fn belief_root_is_invariant_to_draw_pile_permutation() {
         // Both canonicalizer branches: unpinned (plain sort) and pinned
         // (preserve head/tail, sort the middle).
@@ -14264,6 +14267,9 @@ mod endturn_prefix_tests {
     /// RNG-free move lets the prefix run through it, so the first check is
     /// not vacuous.
     #[test]
+    // Two whole `CombatState`s per array (each grew with the v0.113.0
+    // NonCombatGeneration stream).
+    #[allow(clippy::large_stack_arrays)]
     fn prefix_stops_before_an_enemy_move_that_draws_randomness() {
         for seed in [3, 17, 4242] {
             let (thievery, flutter) = hopper_rounds(seed);

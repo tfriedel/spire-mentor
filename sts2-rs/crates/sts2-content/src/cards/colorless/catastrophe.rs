@@ -87,12 +87,6 @@ fn catastrophe_run(state: &mut CombatState, catastrophe: CardUid, done: u32) {
                 !sts2_core::card_effects::card_unplayable(state.cards[idx].card_id)
             })
             .collect();
-        if pool.is_empty() {
-            pool = state.player.draw.iter().copied().collect();
-        }
-        if pool.is_empty() {
-            break;
-        }
         // C# `StableShuffle` (`ListExtensions.cs:10`) = `Sort()` by
         // `CardModel.CompareTo` (primary `ModelId.Entry` ordinal, secondary
         // `CurrentUpgradeLevel` ascending: base before upgraded) THEN
@@ -107,15 +101,34 @@ fn catastrophe_run(state: &mut CombatState, catastrophe: CardUid, done: u32) {
         // 16 elements); route the (Entry, upgraded) pre-sort through
         // `Rng::stable_shuffle_by` (faithful introsort + Fisher-Yates)
         // rather than a stable `sort_by`. Bead `sts2-rs-5aelq-followup`.
+        // An empty list is shuffled too: from v0.113 that still reads one
+        // `NextUnsignedLong` (Catastrophe.cs:20-24), which `shuffle_for`
+        // handles, and an empty draw pile does not end the loop — each
+        // iteration pays for both shuffles.
+        let version = state.game_version;
         let cmp = |a: CardUid, b: CardUid| {
             let ca = &state.cards[a.0.get() as usize - 1];
             let cb = &state.cards[b.0.get() as usize - 1];
-            sts2_core::cards::card_model_compare(ca, cb)
+            sts2_core::cards::card_model_compare_for(ca, cb, version)
         };
         state
             .run_rng
-            .shuffle
-            .stable_shuffle_by(pool.as_mut_slice(), &cmp);
+            .shuffle_or_card_selection(version)
+            .stable_shuffle_by_for(version, pool.as_mut_slice(), &cmp);
+        if pool.is_empty() {
+            pool = state.player.draw.iter().copied().collect();
+            state
+                .run_rng
+                .shuffle_or_card_selection(version)
+                .stable_shuffle_by_for(version, pool.as_mut_slice(), &cmp);
+        }
+        if pool.is_empty() {
+            if version >= sts2_core::GameVersion::V0_113_0 {
+                n += 1;
+                continue;
+            }
+            break;
+        }
         let chosen = pool[0];
         // An AnyAlly pick with no living ally (single-player) is NOT special-
         // cased here: `CardCmd.AutoPlay` (`CardCmd.cs:68-79`) sends it through

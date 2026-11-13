@@ -55,6 +55,33 @@ pub(crate) fn play_omnislice(state: &mut CombatState, target: Option<CreatureUid
     // `AfterDeath` (Gremlin Horn's energy + draw) runs with the combat already
     // ending. Killing each as it was hit let the first one's Gremlin Horn draw
     // (random-loadout Regent v0.107.1 8183).
+    if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        // v0.113.0 `Omnislice.cs:41`: the splash is `ValueProp.Move` (a
+        // POWERED attack, so on-hit reactions see it) with
+        // `ModifyDamageHookType.Cap`: no additive / multiplicative modifier,
+        // only the `ModifyDamageCap` fold (Intangible, Hard to Kill).
+        sts2_core::damage::with_deferred_enemy_deaths(state, |state| {
+            for e in other_enemies {
+                let props = sts2_core::hooks::ValueProps::MOVE;
+                let cap = sts2_core::hooks::dispatch_modify_damage_cap(
+                    state,
+                    &sts2_core::hooks::DamageCtx {
+                        dealer: sts2_core::hooks::CreatureRef::Player,
+                        target: sts2_core::hooks::CreatureRef::Enemy(e),
+                        props,
+                    },
+                );
+                let _ = sts2_core::damage::apply_damage_with_final(
+                    state,
+                    sts2_core::hooks::CreatureRef::Player,
+                    e,
+                    splash_amount.min(cap),
+                    props,
+                );
+            }
+        });
+        return EffectResult::Resolved;
+    }
     sts2_core::damage::with_deferred_enemy_deaths(state, |state| {
         for e in other_enemies {
             // C# `Omnislice.cs:41` deals splash damage with

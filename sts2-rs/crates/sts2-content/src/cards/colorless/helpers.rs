@@ -153,8 +153,7 @@ pub(crate) fn move_card_from_draw_to_hand_by_type(
                 state.game_version,
             ))
             .then_with(|| {
-                sts2_core::cards::card_model_entry(ca.card_id)
-                    .cmp(sts2_core::cards::card_model_entry(cb.card_id))
+                sts2_core::cards::draw_select_tiebreak(&state.cards, *a, *b, state.game_version)
             })
     });
     match candidates.as_slice() {
@@ -426,7 +425,7 @@ pub(crate) fn create_character_ethereal_cards_into_arena(
     state
         .run_rng
         .combat_card_generation
-        .shuffle(shuffled.as_mut_slice());
+        .shuffle_for(state.game_version, shuffled.as_mut_slice());
     let chosen: SmallVec<[CardSpec; 4]> = shuffled.into_iter().take(count).collect();
     let mut uids: SmallVec<[CardUid; 4]> = SmallVec::with_capacity(chosen.len());
     for spec in chosen {
@@ -526,8 +525,23 @@ pub(crate) fn fight_colorless_ids(state: &CombatState) -> SmallVec<[CardId; 72]>
             .map(|s| s.id)
             .collect()
     } else {
-        SmallVec::from_slice(colorless_combat_generatable_card_ids())
+        colorless_combat_generatable_ids_in(state.game_version)
     }
+}
+
+/// [`colorless_combat_generatable_card_ids`] in game build `version`:
+/// v0.113.0 adds MyShinies right after MindBlast (`ColorlessCardPool.cs:62-63`;
+/// it can be generated in combat and is not multiplayer-only).
+pub(crate) fn colorless_combat_generatable_ids_in(
+    version: sts2_core::GameVersion,
+) -> SmallVec<[CardId; 72]> {
+    let mut ids = SmallVec::from_slice(colorless_combat_generatable_card_ids());
+    if version >= sts2_core::GameVersion::V0_113_0 {
+        if let Some(at) = ids.iter().position(|&id| id == CardId::MindBlast) {
+            ids.insert(at + 1, CardId::MyShinies);
+        }
+    }
+    ids
 }
 
 /// [`combat_generatable_pool`] in game build `version` (GH #793): the
@@ -862,11 +876,17 @@ pub fn transform_card_to_random_for_hook(
     // `COLORLESS_SPECS`, so it fell through to the player's character pool
     // (Entropy on a Silent hand TheBall rolled KNIFE_TRAP where C# rolls the
     // colorless PREP_TIME). The id exists in no v0.107.1 state.
+    // v0.113.0 adds MyShinies (Rare) to the same pool, and its spec also
+    // lives outside `COLORLESS_SPECS`. Reading the build's
+    // `ColorlessCardPool.GenerateAllCards()` list covers every such card.
     let is_colorless_original = crate::cards::spec_index::COLORLESS_SPECS
         .iter()
         .any(|f| f().id == original_id)
-        || (state.game_version >= sts2_core::GameVersion::V0_111_0
-            && original_id == CardId::TheBall);
+        || crate::cards::pool_order::generate_all_cards(
+            crate::cards::pool_order::Pool::Colorless,
+            state.game_version,
+        )
+        .contains(&original_id);
     // Quest / Event / Ancient / **Token** originals are FORCED onto the
     // ColorlessCardPool by C#
     // (`(Type != Quest && Rarity not in {Event,Ancient,Token}) ? Pool :
@@ -999,10 +1019,15 @@ pub fn transform_card_to_random_for_hook(
     if pool.is_empty() {
         return None;
     }
-    let idx = state
-        .run_rng
-        .combat_card_selection
-        .next_int_exclusive(0, pool.len() as i32) as usize;
+    // The only caller is EntropyPower: v0.113.0 rolls on
+    // `CombatCardGeneration` (decomp EntropyPower.cs:31), before that on
+    // `CombatCardSelection`.
+    let rng = if state.game_version >= sts2_core::GameVersion::V0_113_0 {
+        &mut state.run_rng.combat_card_generation
+    } else {
+        &mut state.run_rng.combat_card_selection
+    };
+    let idx = rng.next_int_exclusive(0, pool.len() as i32) as usize;
     let replacement = card_from_spec(&pool[idx]);
     sts2_core::card_effects::transform_card_in_place(state, card_uid, replacement)
 }
@@ -1058,7 +1083,7 @@ pub(crate) fn create_filtered_character_cards_into_arena(
         state
             .run_rng
             .combat_card_generation
-            .shuffle(shuffled.as_mut_slice());
+            .shuffle_for(state.game_version, shuffled.as_mut_slice());
         shuffled.into_iter().take(count).collect()
     } else {
         (0..count)
@@ -1117,7 +1142,7 @@ pub(crate) fn distinct_character_card_ids(
     state
         .run_rng
         .combat_card_generation
-        .shuffle(pool.as_mut_slice());
+        .shuffle_for(state.game_version, pool.as_mut_slice());
     pool.into_iter().take(count).collect()
 }
 
@@ -1246,7 +1271,7 @@ pub(crate) fn distinct_cross_character_attack_ids(
     state
         .run_rng
         .combat_card_generation
-        .shuffle(pool.as_mut_slice());
+        .shuffle_for(state.game_version, pool.as_mut_slice());
     pool.into_iter().take(count).collect()
 }
 
@@ -1269,7 +1294,7 @@ pub(crate) fn distinct_colorless_modifier_ids(
     state
         .run_rng
         .combat_card_generation
-        .shuffle(shuffled.as_mut_slice());
+        .shuffle_for(state.game_version, shuffled.as_mut_slice());
     shuffled.into_iter().take(count).collect()
 }
 
@@ -1324,7 +1349,7 @@ fn distinct_colorless_ids_except(
     state
         .run_rng
         .combat_card_generation
-        .shuffle(shuffled.as_mut_slice());
+        .shuffle_for(state.game_version, shuffled.as_mut_slice());
     shuffled.into_iter().take(count).collect()
 }
 
@@ -1659,6 +1684,7 @@ pub const fn is_colorless_card_id(id: CardId) -> bool {
             | CardId::MasterOfStrategy
             | CardId::Omnislice
             | CardId::MindBlast
+            | CardId::MyShinies
             | CardId::SecretTechnique
             | CardId::SecretWeapon
             | CardId::ThinkingAhead
@@ -1898,7 +1924,7 @@ pub fn create_colorless_modifier_cards(
         state
             .run_rng
             .combat_card_generation
-            .shuffle(shuffled.as_mut_slice());
+            .shuffle_for(state.game_version, shuffled.as_mut_slice());
         shuffled.into_iter().take(take).collect()
     } else {
         (0..count)

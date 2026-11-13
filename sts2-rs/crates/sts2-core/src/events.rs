@@ -372,6 +372,17 @@ pub enum EventId {
     /// placeholders) vs Hug (-9 HP, transform 1 card — deferred).
     /// Bead `sts2-rs-6ynt.4.7`.
     WhisperingHollow,
+    // ── v0.113.0-only events (in no earlier build's event pool).
+    /// `MuseumOfTorture` (v0.113.0) — shared, act 2 only: Obsidian Vice / Thumbscrew / Tormentous Collar + a curse, or -10 Max HP.
+    MuseumOfTorture,
+    /// `ShrineOfTheWarlord` (v0.113.0) — Glory: Mighty Weapon, Mighty Shield, or Mighty Wings + Clumsy.
+    ShrineOfTheWarlord,
+    /// `ThermaeNonupeipe` (v0.113.0) — Glory: Bath Towel (88g), Bath Robes (all gold), or a Nonupeipe relic for 31 HP + 3 Guilty.
+    ThermaeNonupeipe,
+    /// `WaterfallOfObviousSecrets` (v0.113.0) — Underdocks: Dingy Dagger, a relic + 2 Guilty, or 70g for a Rare card.
+    WaterfallOfObviousSecrets,
+    /// `WuppyInTrouble` (v0.113.0) — Underdocks, shared: Wuppy pet (60 HP + Injury / 30 HP for 5% HP) or a potion.
+    WuppyInTrouble,
 }
 
 impl EventId {
@@ -472,6 +483,11 @@ impl EventId {
             Self::WaterloggedScriptorium => "WaterloggedScriptorium",
             Self::WelcomeToWongos => "WelcomeToWongos",
             Self::WhisperingHollow => "WhisperingHollow",
+            Self::MuseumOfTorture => "MuseumOfTorture",
+            Self::ShrineOfTheWarlord => "ShrineOfTheWarlord",
+            Self::ThermaeNonupeipe => "ThermaeNonupeipe",
+            Self::WaterfallOfObviousSecrets => "WaterfallOfObviousSecrets",
+            Self::WuppyInTrouble => "WuppyInTrouble",
         }
     }
 
@@ -492,6 +508,16 @@ impl EventId {
         }
         None
     }
+
+    /// The events v0.113.0 adds. They are in [`Self::all`] (name lookups and
+    /// the event pools need them); the PPO vocabulary leaves them out.
+    pub const V0113_ONLY: [EventId; 5] = [
+        Self::MuseumOfTorture,
+        Self::ShrineOfTheWarlord,
+        Self::ThermaeNonupeipe,
+        Self::WaterfallOfObviousSecrets,
+        Self::WuppyInTrouble,
+    ];
 
     /// Enumeration of every [`EventId`] variant in declaration order.
     /// Used by the registry-completeness lints in
@@ -579,6 +605,11 @@ impl EventId {
             Self::WaterloggedScriptorium,
             Self::WelcomeToWongos,
             Self::WhisperingHollow,
+            Self::MuseumOfTorture,
+            Self::ShrineOfTheWarlord,
+            Self::ThermaeNonupeipe,
+            Self::WaterfallOfObviousSecrets,
+            Self::WuppyInTrouble,
         ]
     }
 }
@@ -1053,7 +1084,7 @@ mod tests {
         // `events_visited` cursor vs C# (RP3 run-parity divergence,
         // 2026-06-12). Bump this count in the same commit that adds a
         // variant to the enum + `all()` + its `spec_for` arm.
-        assert_eq!(EventId::all().len(), 69);
+        assert_eq!(EventId::all().len(), 74);
     }
 
     #[test]

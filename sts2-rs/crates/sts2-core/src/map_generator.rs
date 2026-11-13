@@ -130,13 +130,18 @@ fn has_invalid_crossover(map: &ActMap, current_idx: MapPointIdx, target_col: i32
 /// Pick the next `(col, row)` for a random walk from `current_idx`.
 /// Tries `[-1, 0, +1]` after a shuffle; if all three would cause a
 /// crossover, falls back to "straight up" (the Python fallback).
-fn generate_next_coord(map: &ActMap, current_idx: MapPointIdx, rng: &mut Rng) -> (i32, i32) {
+fn generate_next_coord(
+    map: &ActMap,
+    current_idx: MapPointIdx,
+    rng: &mut Rng,
+    version: crate::GameVersion,
+) -> (i32, i32) {
     let current = map.point(current_idx);
     let col = current.col();
     let min_col = col.max(1) - 1;
     let max_col = (col + 1).min(MAP_WIDTH - 1);
     let mut directions: Vec<i32> = vec![-1, 0, 1];
-    rng.shuffle(&mut directions);
+    rng.shuffle_for(version, &mut directions);
     for d in directions {
         let target_col = match d {
             -1 => min_col,
@@ -156,10 +161,15 @@ fn generate_next_coord(map: &ActMap, current_idx: MapPointIdx, rng: &mut Rng) ->
 /// [`generate_next_coord`] and wires the chosen child via
 /// `map.add_child`. Mirrors Python's `_path_generate` in
 /// `generator.py:142-149`.
-fn path_generate(map: &mut ActMap, start_idx: MapPointIdx, rng: &mut Rng) {
+fn path_generate(
+    map: &mut ActMap,
+    start_idx: MapPointIdx,
+    rng: &mut Rng,
+    version: crate::GameVersion,
+) {
     let mut current = start_idx;
     while map.point(current).row() < map.map_length - 1 {
-        let (col, row) = generate_next_coord(map, current, rng);
+        let (col, row) = generate_next_coord(map, current, rng, version);
         let next_idx = map.get_or_create(col, row);
         map.add_child(current, next_idx);
         current = next_idx;
@@ -193,22 +203,32 @@ const SIBLING_RESTRICTED: &[MapPointType] = &[
 /// flagged Acts where row-5 RestSite/Elite appeared in Rust but never
 /// in scraped C# corpus runs. Switched to C# semantics:
 ///
-/// 1. Lower map (row < 6): no `RestSite` or `Elite`.
+/// 1. Lower map (row < 6): no `RestSite` or `Elite`. v0.113.0 lowers the
+///    RestSite floor one row (`StandardActMap.cs:31`, `_lowestRowByPointType
+///    = { RestSite: 5, Elite: 6 }`, checked by `IsValidForLower` at `:445`).
 /// 2. Upper map (row ≥ `map_length - 3`): no `RestSite`.
 /// 3. Parent adjacency: `Elite`/`RestSite`/`Treasure`/`Shop` can't
 ///    share type with any parent.
 /// 4. Child adjacency: same restricted set can't share with a child.
 /// 5. Sibling uniqueness: `RestSite`/`Monster`/`Unknown`/`Elite`/`Shop`
 ///    can't share with any sibling (points sharing a parent).
-pub(crate) fn is_type_valid_for_point(
+pub(crate) fn is_type_valid_for_point_v(
     map: &ActMap,
     point_idx: MapPointIdx,
     candidate: MapPointType,
     map_length: i32,
+    version: crate::GameVersion,
 ) -> bool {
     let point = map.point(point_idx);
     let row = point.row();
-    if row < 6 && (candidate == MapPointType::RestSite || candidate == MapPointType::Elite) {
+    let lowest_rest_row = if version >= crate::GameVersion::V0_113_0 {
+        5
+    } else {
+        6
+    };
+    if (candidate == MapPointType::RestSite && row < lowest_rest_row)
+        || (candidate == MapPointType::Elite && row < 6)
+    {
         return false;
     }
     if row >= map_length - 3 && candidate == MapPointType::RestSite {
@@ -251,11 +271,26 @@ fn get_next_valid_type_from_queue(
     map: &ActMap,
     point_idx: MapPointIdx,
     map_length: i32,
+    version: crate::GameVersion,
 ) -> MapPointType {
+    if version >= crate::GameVersion::V0_113_0 {
+        // v0.113.0 `GetNextValidPointType` (`StandardActMap.cs:396-417`,
+        // `SpoilsActMap.cs:425-446`): take the FIRST valid type and remove
+        // only it, leaving the rest of the queue in order (0.111 rotated
+        // every rejected type to the back). No valid type leaves the queue
+        // untouched (0.111's full rotation was also a no-op).
+        let Some(pos) = pool
+            .iter()
+            .position(|&t| is_type_valid_for_point_v(map, point_idx, t, map_length, version))
+        else {
+            return MapPointType::Unassigned;
+        };
+        return pool.remove(pos).expect("position is in range");
+    }
     let len = pool.len();
     for _ in 0..len {
         let candidate = pool.pop_front().expect("len > 0 inside loop");
-        if is_type_valid_for_point(map, point_idx, candidate, map_length) {
+        if is_type_valid_for_point_v(map, point_idx, candidate, map_length, version) {
             return candidate;
         }
         pool.push_back(candidate);
@@ -285,6 +320,7 @@ fn assign_room_types(
     rng: &mut Rng,
     counts: PoolCounts,
     replace_treasure_with_elite: bool,
+    version: crate::GameVersion,
 ) {
     let map_length = map.map_length;
     let row_count = map_length;
@@ -398,7 +434,7 @@ fn assign_room_types(
         // `(MapCoord, MapPointIdx)` lexicographic which is identical to
         // the explicit sort above; instead call the bare `shuffle`
         // (== C# `UnstableShuffle`) after the deliberate sort.
-        rng.shuffle(&mut unassigned);
+        rng.shuffle_for(version, &mut unassigned);
         if trace {
             let order: Vec<String> = unassigned
                 .iter()
@@ -414,7 +450,8 @@ fn assign_room_types(
             if pool.is_empty() {
                 break;
             }
-            let assigned = get_next_valid_type_from_queue(&mut pool, map, *point_idx, map_length);
+            let assigned =
+                get_next_valid_type_from_queue(&mut pool, map, *point_idx, map_length, version);
             if trace {
                 eprintln!(
                     "[ASN]   ({},{}) <- {:?} pool_remaining={}",
@@ -815,6 +852,30 @@ pub fn generate_act_map(
     act_index: i32,
     num_elites_override: Option<i32>,
 ) -> ActMap {
+    generate_act_map_for(
+        crate::GameVersion::V0_107_1,
+        num_rooms,
+        rng,
+        ascension_level,
+        replace_treasure_with_elite,
+        act_index,
+        num_elites_override,
+    )
+}
+
+/// [`generate_act_map`] for a given game build (v0.113.0 changed point-type
+/// placement and the post-prune repair; see [`get_next_valid_type_from_queue`]
+/// and [`crate::map_path_pruning::prune_and_repair`]).
+#[must_use]
+pub fn generate_act_map_for(
+    version: crate::GameVersion,
+    num_rooms: i32,
+    rng: &mut Rng,
+    ascension_level: i32,
+    replace_treasure_with_elite: bool,
+    act_index: i32,
+    num_elites_override: Option<i32>,
+) -> ActMap {
     let mut map = ActMap::new(num_rooms);
     let start = map.get_or_create(3, 0);
     map.start = Some(start);
@@ -847,7 +908,7 @@ pub fn generate_act_map(
             }
         }
         start_points.push(path_start);
-        path_generate(&mut map, path_start, rng);
+        path_generate(&mut map, path_start, rng, version);
     }
 
     // Connect top row → boss.
@@ -867,14 +928,14 @@ pub fn generate_act_map(
         map.add_child(start, idx);
     }
 
-    assign_room_types(&mut map, rng, counts, replace_treasure_with_elite);
+    assign_room_types(&mut map, rng, counts, replace_treasure_with_elite, version);
     // Bead `sts2-rs-l8hcp` — port of C# `MapPathPruning.PruneAndRepair`
     // (`StandardActMap.cs:87` runs it BEFORE `CenterGrid`). Removes
     // duplicate path segments + refills type counts from Monster
     // fallbacks. The Python sim pin `01c094d` had no pruning at all,
     // so this step is C#-only.
     if std::env::var_os("STS2_DISABLE_PRUNING").is_none() {
-        crate::map_path_pruning::prune_and_repair(&mut map, rng, counts);
+        crate::map_path_pruning::prune_and_repair(&mut map, rng, counts, version);
     }
     // C# `StandardActMap` constructor (StandardActMap.cs:89-91) runs
     // these three post-processing passes in order. CenterGrid +
@@ -956,6 +1017,7 @@ fn spoils_generate_next_coord(
     current_idx: MapPointIdx,
     rng: &mut Rng,
     treasure_row: i32,
+    version: crate::GameVersion,
 ) -> (i32, i32) {
     let current = map.point(current_idx).clone();
     let row = current.row() + 1;
@@ -963,13 +1025,13 @@ fn spoils_generate_next_coord(
     let distance_to_treasure = treasure_row - current.row();
     let mut directions: Vec<i32> = if distance_to_treasure > 3 {
         let mut d = vec![-1, 0, 1];
-        rng.shuffle(&mut d);
+        rng.shuffle_for(version, &mut d);
         d
     } else if distance_to_treasure > 0 {
         spoils_centered_directions(current.col())
     } else {
         let mut d = vec![-1, 0, 1];
-        rng.shuffle(&mut d);
+        rng.shuffle_for(version, &mut d);
         d
     };
     // Remove the original .into_iter() shadow with an immutable view.
@@ -1036,10 +1098,11 @@ fn spoils_path_generate(
     start_idx: MapPointIdx,
     rng: &mut Rng,
     treasure_row: i32,
+    version: crate::GameVersion,
 ) {
     let mut current = start_idx;
     while map.point(current).row() < map.map_length - 1 {
-        let (col, row) = spoils_generate_next_coord(map, current, rng, treasure_row);
+        let (col, row) = spoils_generate_next_coord(map, current, rng, treasure_row, version);
         let next_idx = map.get_or_create(col, row);
         map.add_child(current, next_idx);
         current = next_idx;
@@ -1073,15 +1136,21 @@ fn is_spoils_type_valid(
     point_idx: MapPointIdx,
     candidate: MapPointType,
     map_length: i32,
+    version: crate::GameVersion,
 ) -> bool {
     // Same constraints as standard, with a slightly different sibling
     // check shape (still parents-of-parents). Reuse the standard impl
     // for clarity — the lists differ only in being literal `set`s in
     // Python vs slices here.
-    is_type_valid_for_point(map, point_idx, candidate, map_length)
+    is_type_valid_for_point_v(map, point_idx, candidate, map_length, version)
 }
 
-fn assign_spoils_room_types(map: &mut ActMap, rng: &mut Rng, counts: PoolCounts) {
+fn assign_spoils_room_types(
+    map: &mut ActMap,
+    rng: &mut Rng,
+    counts: PoolCounts,
+    version: crate::GameVersion,
+) {
     let map_length = map.map_length;
 
     let top_room_coords: Vec<MapCoord> = map
@@ -1146,15 +1215,26 @@ fn assign_spoils_room_types(map: &mut ActMap, rng: &mut Rng, counts: PoolCounts)
             .map(|(c, &i)| (*c, i))
             .collect();
         unassigned.sort_by_key(|(c, _)| (c.col, c.row));
-        rng.shuffle(&mut unassigned);
+        rng.shuffle_for(version, &mut unassigned);
         for (_coord, point_idx) in &unassigned {
             if pool.is_empty() {
                 break;
             }
+            if version >= crate::GameVersion::V0_113_0 {
+                // Order-preserving queue pick (`SpoilsActMap.cs:425-446`).
+                if let Some(pos) = pool
+                    .iter()
+                    .position(|&t| is_spoils_type_valid(map, *point_idx, t, map_length, version))
+                {
+                    let candidate = pool.remove(pos).expect("position is in range");
+                    map.point_mut(*point_idx).point_type = candidate;
+                }
+                continue;
+            }
             let len = pool.len();
             for _ in 0..len {
                 let candidate = pool.pop_front().expect("len > 0");
-                if is_spoils_type_valid(map, *point_idx, candidate, map_length) {
+                if is_spoils_type_valid(map, *point_idx, candidate, map_length, version) {
                     map.point_mut(*point_idx).point_type = candidate;
                     break;
                 }
@@ -1199,6 +1279,28 @@ pub fn generate_spoils_act_map(
     ascension_level: i32,
     act_index: i32,
 ) -> ActMap {
+    generate_spoils_act_map_for(
+        crate::GameVersion::V0_107_1,
+        num_rooms,
+        rng,
+        ascension_level,
+        act_index,
+    )
+}
+
+/// [`generate_spoils_act_map`] for a given game build.
+///
+/// # Panics
+///
+/// Panics if `num_rooms < 7` (treasure row would be ≤0).
+#[must_use]
+pub fn generate_spoils_act_map_for(
+    version: crate::GameVersion,
+    num_rooms: i32,
+    rng: &mut Rng,
+    ascension_level: i32,
+    act_index: i32,
+) -> ActMap {
     let counts = map_point_type_counts(rng, ascension_level, act_index);
     let mut map = ActMap::new(num_rooms);
     let center = MAP_WIDTH / 2;
@@ -1222,7 +1324,7 @@ pub fn generate_spoils_act_map(
             }
         }
         start_points.push(s);
-        spoils_path_generate(&mut map, s, rng, treasure_row);
+        spoils_path_generate(&mut map, s, rng, treasure_row, version);
     }
 
     let treasure_idx = map.get_or_create(center, treasure_row);
@@ -1255,14 +1357,14 @@ pub fn generate_spoils_act_map(
         map.add_child(start_idx, idx);
     }
 
-    assign_spoils_room_types(&mut map, rng, counts);
+    assign_spoils_room_types(&mut map, rng, counts, version);
     // C# `SpoilsActMap` ctor (`SpoilsActMap.cs:77`) runs
     // `MapPathPruning.PruneAndRepair(...)` after `AssignPointTypes()` — the
     // SAME variant-agnostic pass the standard map uses. The prior port skipped
     // it for spoils, leaving duplicate path segments uncollapsed, the pool-type
     // deficit unrepaired, and the pruning shuffles never advancing the RNG.
     // (Spoils correctly omits CenterGrid/Spread/Straighten, so none is added.)
-    crate::map_path_pruning::prune_and_repair(&mut map, rng, counts);
+    crate::map_path_pruning::prune_and_repair(&mut map, rng, counts, version);
     map
 }
 

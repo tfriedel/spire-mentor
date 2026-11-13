@@ -44,7 +44,72 @@ pub fn spec_for(spec: CardSpec, version: GameVersion) -> CardSpec {
     if !is_v0111(version) {
         return spec;
     }
-    v0111_spec(spec).unwrap_or(spec)
+    let spec = v0111_spec(spec).unwrap_or(spec);
+    if !is_v0113(version) {
+        return spec;
+    }
+    v0113_spec(spec).unwrap_or(spec)
+}
+
+/// `true` from game build v0.113.0 on.
+#[inline]
+#[must_use]
+pub fn is_v0113(version: GameVersion) -> bool {
+    version >= GameVersion::V0_113_0
+}
+
+/// The v0.113.0 spec of a card whose spec-level metadata changed against
+/// v0.111.0 (`s` is already the v0.111.0 spec), `None` for an unchanged card.
+fn v0113_spec(mut s: CardSpec) -> Option<CardSpec> {
+    match s.id {
+        // v0.113.0: DamageVar 12 -> 10 (decomp Salvo.cs:18).
+        CardId::Salvo => s.base_damage = 10,
+        // v0.113.0: DamageVar 13 -> 11 (decomp MinionDiveBomb.cs:17).
+        CardId::MinionDiveBomb => s.base_damage = 11,
+        // v0.113.0: cost 1 -> 3, gains Sly, AnyEnemy -> RandomEnemy (the
+        // handler hits the lowest-HP hittable enemy), flat DamageVar 19
+        // (decomp MementoMori.cs:15-20).
+        CardId::MementoMori => {
+            s.cost = 3;
+            s.keywords = s.keywords.with(CardKeywords::SLY);
+            s.target_type = TargetType::Random;
+            s.base_damage = 19;
+        }
+        // v0.113.0: flat BlockVar 15 (decomp ExpectAFight.cs:18).
+        CardId::ExpectAFight => s.base_block = 15,
+        _ => return None,
+    }
+    Some(s)
+}
+
+/// `Some(delta)` for a card whose spec-level v0.113.0 upgrade differs from
+/// v0.111.0, `None` when the v0.111.0 answer still holds.
+#[allow(clippy::unnecessary_wraps)]
+fn v0113_upgrade_delta(card_id: CardId) -> Option<Option<CardUpgradeDelta>> {
+    let damage = |d: i32| {
+        Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(d),
+            base_block: None,
+            keywords: None,
+        })
+    };
+    Some(match card_id {
+        // v0.113.0: 10 + 4 (decomp Salvo.cs:36).
+        CardId::Salvo => damage(14),
+        // v0.113.0: 11 + 2 (decomp MinionDiveBomb.cs:38).
+        CardId::MinionDiveBomb => damage(13),
+        // v0.113.0: 19 + 4 (decomp MementoMori.cs:38).
+        CardId::MementoMori => damage(23),
+        // v0.113.0: Block 15 + 5 (decomp ExpectAFight.cs:43).
+        CardId::ExpectAFight => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: None,
+            base_block: Some(20),
+            keywords: None,
+        }),
+        _ => return None,
+    })
 }
 
 /// [`spec_for`] over a spec factory — the shape every `*_SPECS` slice walk
@@ -184,6 +249,11 @@ fn v0111_spec(mut s: CardSpec) -> Option<CardSpec> {
 /// [`super::card_upgrades_generated::upgrade_delta`]).
 #[must_use]
 pub fn upgrade_delta_for(card_id: CardId, version: GameVersion) -> Option<CardUpgradeDelta> {
+    if is_v0113(version) {
+        if let Some(delta) = v0113_upgrade_delta(card_id) {
+            return delta;
+        }
+    }
     if is_v0111(version) {
         if let Some(delta) = v0111_upgrade_delta(card_id) {
             return delta;
@@ -351,8 +421,36 @@ pub fn can_be_generated_in_combat(card_id: CardId, version: GameVersion) -> bool
 /// v0.107.1. Rarity-only changes do not count: rarity is not on the POD.
 #[must_use]
 pub fn pod_changes_in(card_id: CardId, version: GameVersion) -> bool {
-    is_v0111(version) && v0111_pods().contains_key(&(card_id, false))
+    (is_v0111(version) && v0111_pods().contains_key(&(card_id, false)))
+        || (is_v0113(version) && v0113_pods().contains_key(&(card_id, false)))
 }
+
+/// The v0.113.0 PODs of every card whose spec or upgrade changed against
+/// v0.111.0. Cards that changed only in v0.111.0 stay in [`v0111_pods`].
+fn v0113_pods() -> &'static std::collections::BTreeMap<(CardId, bool), sts2_core::cards::Card> {
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+    static PODS: OnceLock<BTreeMap<(CardId, bool), sts2_core::cards::Card>> = OnceLock::new();
+    PODS.get_or_init(|| {
+        let mut map = BTreeMap::new();
+        for id in V0113_POD_CARDS {
+            for upgraded in [false, true] {
+                if let Some(card) = build_pod_in(*id, upgraded, GameVersion::V0_113_0) {
+                    map.insert((*id, upgraded), card);
+                }
+            }
+        }
+        map
+    })
+}
+
+/// Every card [`v0113_spec`] or [`v0113_upgrade_delta`] touches.
+const V0113_POD_CARDS: &[CardId] = &[
+    CardId::Salvo,
+    CardId::MinionDiveBomb,
+    CardId::MementoMori,
+    CardId::ExpectAFight,
+];
 
 /// Whether `card_id` changed at the POD level in v0.111.0 — uncached; see
 /// [`v0111_pods`].
@@ -424,15 +522,25 @@ fn v0111_pods() -> &'static std::collections::BTreeMap<(CardId, bool), sts2_core
 /// `CardId`-keyed keyword registries hold the v0.107.1 set), so it does not
 /// depend on whether those registries are installed yet.
 fn build_v0111_pod(card_id: CardId, upgraded: bool) -> Option<sts2_core::cards::Card> {
+    build_pod_in(card_id, upgraded, GameVersion::V0_111_0)
+}
+
+/// Build the POD of `card_id` in game build `version` from [`spec_for`] and
+/// [`upgrade_delta_for`] (see [`build_v0111_pod`]).
+fn build_pod_in(
+    card_id: CardId,
+    upgraded: bool,
+    version: GameVersion,
+) -> Option<sts2_core::cards::Card> {
     let old = super::spec_index::spec_for_card_id(card_id)?;
-    let spec = spec_for(old, GameVersion::V0_111_0);
+    let spec = spec_for(old, version);
     let mut card = super::status::card_from_spec(&spec);
     if spec.keywords != old.keywords {
         card.keyword_override = Some(super::spec_index::keyword_override_from(spec.keywords));
     }
     card.upgraded = upgraded;
     if upgraded {
-        if let Some(delta) = upgrade_delta_for(card_id, GameVersion::V0_111_0) {
+        if let Some(delta) = upgrade_delta_for(card_id, version) {
             super::spec_index::apply_upgrade_delta(&mut card, delta);
         }
     }
@@ -452,6 +560,11 @@ pub fn card_pod_for(
     upgraded: bool,
     version: GameVersion,
 ) -> Option<sts2_core::cards::Card> {
+    if is_v0113(version) {
+        if let Some(card) = v0113_pods().get(&(card_id, upgraded)) {
+            return Some(*card);
+        }
+    }
     if is_v0111(version) {
         if let Some(card) = v0111_pods().get(&(card_id, upgraded)) {
             return Some(*card);

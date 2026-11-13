@@ -596,6 +596,7 @@ fn thievery_steal_from_seated(state: &mut CombatState, owner: CreatureUid) -> bo
     use crate::cards::CardRarity;
     use sts2_core::cards::{CardType, EnchantmentId};
 
+    let v0113 = state.game_version >= sts2_core::GameVersion::V0_113_0;
     // Real-deck cards in Draw then Discard pile order (`DeckVersion != null`,
     // `ThievingHopper.cs:203`). ANY combat-generated card has a null
     // `DeckVersion` in C# — not just Statuses: a Calamity/Stoke/JackOfAll-
@@ -614,6 +615,11 @@ fn thievery_steal_from_seated(state: &mut CombatState, owner: CreatureUid) -> bo
             let card = &state.cards[uid.get() as usize - 1];
             card.card_type != CardType::Status
                 && card.combat_var(sts2_core::cards::VarKey::GeneratedInCombat) == 0
+                // v0.113.0: `&& c.Rarity != CardRarity.Quest` (decomp
+                // ThievingHopper.cs:197) — Quest cards can't be stolen.
+                && !(v0113
+                    && rarity_for_card_id_in(card.card_id, state.game_version)
+                        == Some(CardRarity::Quest))
         })
         .collect();
     if candidates.is_empty() {
@@ -666,11 +672,14 @@ fn thievery_steal_from_seated(state: &mut CombatState, owner: CreatureUid) -> bo
     };
 
     // `RunRng.CombatCardGeneration.NextItem(items)` — one max-exclusive draw.
+    // v0.113.0: `CombatCardSelection` (decomp ThievingHopper.cs:212).
     let len = i32::try_from(items.len()).unwrap_or(i32::MAX);
-    let idx = state
-        .run_rng
-        .combat_card_generation
-        .next_int_exclusive(0, len) as usize;
+    let rng = if v0113 {
+        &mut state.run_rng.combat_card_selection
+    } else {
+        &mut state.run_rng.combat_card_generation
+    };
+    let idx = rng.next_int_exclusive(0, len) as usize;
     let stolen = items[idx];
 
     // `CardPileCmd.RemoveFromCombat(cardToSteal)` — removes the card from its
@@ -2487,6 +2496,78 @@ pub fn create_infested_prism_ai(_slot: InfestedPrismSlot) -> MonsterAi {
     MonsterAi::new(s, "JAB")
 }
 
+/// v0.113.0 `InfestedPrism` — JAB → JAB_2 → WHIRLWIND → PULSATE → JAB
+/// (decomp `v0.113.0/…/InfestedPrism.cs:54-69`). Radiate is gone (its slot is
+/// a second Jab state), and Pulsate trades its 20/22 Block for 1 Vulnerable
+/// on the player (intent Attack + Debuff + Buff). The A9 values come from the
+/// shared tables (`JAB`, `WHIRLWIND`, `PULSATE` rows) plus
+/// `V0113_ATTACK_VALUES` (`JAB_2`).
+#[must_use]
+pub fn create_infested_prism_v0113_ai() -> MonsterAi {
+    static INSTALL_VITAL_SPARK: std::sync::Once = std::sync::Once::new();
+    INSTALL_VITAL_SPARK
+        .call_once(sts2_core::monster_power_effects::install_vital_spark_power_handlers);
+    let mut s = BTreeMap::new();
+    s.insert(
+        "JAB",
+        mv("JAB", smallvec![Intent::Attack { damage: 15 }], "JAB_2"),
+    );
+    s.insert(
+        "JAB_2",
+        mv(
+            "JAB_2",
+            smallvec![Intent::Attack { damage: 15 }],
+            "WHIRLWIND",
+        ),
+    );
+    s.insert(
+        "WHIRLWIND",
+        mv(
+            "WHIRLWIND",
+            smallvec![Intent::MultiAttack { damage: 5, hits: 3 }],
+            "PULSATE",
+        ),
+    );
+    s.insert(
+        "PULSATE",
+        MonsterState::Move(MoveState {
+            id: "PULSATE",
+            effect: infested_prism_pulsate_v0113_effect,
+            intents: smallvec![
+                Intent::Attack { damage: 8 },
+                Intent::Debuff {
+                    kind: PowerKind::Vulnerable,
+                    amount: 1,
+                },
+                Intent::Buff {
+                    kind: PowerKind::VitalSpark,
+                    amount: 2,
+                },
+            ],
+            follow_up: Some("JAB"),
+            must_perform_once: false,
+        }),
+    );
+    MonsterAi::new(s, "JAB")
+}
+
+/// v0.113.0 `InfestedPrism.PulsateMove` (decomp `InfestedPrism.cs:93-100`):
+/// the Attack (primary intent, `perform_intent`), then
+/// `PowerCmd.Apply<VulnerablePower>(targets, 1)`, then VitalSpark on self.
+fn infested_prism_pulsate_v0113_effect(state: &mut CombatState, owner: CreatureUid) {
+    apply_power_to_player_via_legacy_surface(state, PowerKind::Vulnerable, 1);
+    let amount = crate::ascension_scaling::scaled_buff(
+        state.ascension,
+        state.game_version,
+        sts2_core::MonsterKind::InfestedPrism,
+        "PULSATE",
+        PowerKind::VitalSpark,
+        2,
+    );
+    apply_power_to_creature(state, owner, PowerKind::VitalSpark, amount);
+    sts2_core::monster_power_effects::vital_spark_sync_tainted_amounts(state, owner);
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Boss encounters
 // ────────────────────────────────────────────────────────────────────────────
@@ -2858,6 +2939,60 @@ pub fn create_rocket_ai() -> MonsterAi {
         ),
     );
     MonsterAi::new(s, "TARGETING_RETICLE_MOVE")
+}
+
+/// v0.113 `Rocket`: the same five-state cycle with renamed move ids
+/// (`Rocket.cs:81-94` v0.113.0): TARGETING_RETICLE -> CALCULATING,
+/// PRECISION_BEAM -> PRECISE_SMASH, LASER -> ROCKET_CLAW. The extra
+/// `PRECISE_SMASH_MOVE_2` state is listed but never linked, so the cycle and
+/// damages are unchanged (Dread plating/+5 is `mode`, not ported).
+pub fn create_rocket_v0113_ai() -> MonsterAi {
+    let mut s = BTreeMap::new();
+    s.insert(
+        "CALCULATING_MOVE",
+        mv(
+            "CALCULATING_MOVE",
+            smallvec![Intent::Attack { damage: 3 }],
+            "PRECISE_SMASH_MOVE",
+        ),
+    );
+    s.insert(
+        "PRECISE_SMASH_MOVE",
+        mv(
+            "PRECISE_SMASH_MOVE",
+            smallvec![Intent::Attack { damage: 18 }],
+            "CHARGE_UP_MOVE",
+        ),
+    );
+    s.insert(
+        "CHARGE_UP_MOVE",
+        mv_eff(
+            "CHARGE_UP_MOVE",
+            smallvec![Intent::Buff {
+                kind: PowerKind::Strength,
+                amount: 2
+            }],
+            "ROCKET_CLAW_MOVE",
+            rocket_charge_up_effect,
+        ),
+    );
+    s.insert(
+        "ROCKET_CLAW_MOVE",
+        mv(
+            "ROCKET_CLAW_MOVE",
+            smallvec![Intent::Attack { damage: 31 }],
+            "RECHARGE_MOVE",
+        ),
+    );
+    s.insert(
+        "RECHARGE_MOVE",
+        mv(
+            "RECHARGE_MOVE",
+            smallvec![Intent::Sleep],
+            "CALCULATING_MOVE",
+        ),
+    );
+    MonsterAi::new(s, "CALCULATING_MOVE")
 }
 
 // ────────────────────────────────────────────────────────────────────────────

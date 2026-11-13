@@ -695,6 +695,12 @@ fn hash_run_rng_set<H: Hasher>(rr: &RunRngSet, h: &mut H) {
         hash_rng_seed(stream.seed(), h);
         stream.counter().hash(h);
     }
+    // v0.113.0's `non_combat_generation` stream is folded in only for builds
+    // that draw from it, so every pre-v0.113.0 digest stays byte-identical.
+    if rr.game_version >= crate::GameVersion::V0_113_0 {
+        hash_rng_seed(rr.non_combat_generation.seed(), h);
+        rr.non_combat_generation.counter().hash(h);
+    }
     // `map_rngs` is a `BTreeMap` — deterministic key iteration order.
     for (act_index, rng) in &rr.map_rngs {
         act_index.hash(h);

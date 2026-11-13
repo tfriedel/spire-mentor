@@ -1864,12 +1864,42 @@ fn target_is_player(state: &CombatState, target_uid: CreatureUid) -> bool {
 ///     first player-turn-end, matching C#'s non-enemy owner.
 fn arm_skip_next_tick(state: &CombatState, target_uid: CreatureUid, kind: PowerKind) -> bool {
     let is_player = target_is_player(state, target_uid);
+    if !side_gate_arms_skip(state) {
+        return false;
+    }
     (is_player
         && matches!(
             kind,
             PowerKind::Vulnerable | PowerKind::Weak | PowerKind::Frail
         ))
         || (!is_player && kind == PowerKind::Ritual)
+}
+
+/// Whether the enemy side currently has the turn (C# `CombatState.CurrentSide
+/// == CombatSide.Enemy`): from the switch after the player's turn end
+/// (`SwitchFromPlayerToEnemySide`) to the switch after the enemy turn end.
+#[must_use]
+pub fn enemy_side_has_turn(state: &CombatState) -> bool {
+    matches!(
+        state.phase,
+        crate::CombatPhase::EnemyTurnStart
+            | crate::CombatPhase::EnemyTurnExec
+            | crate::CombatPhase::EnemyTurnEnd
+    )
+}
+
+/// The `CurrentSide` gate on the two skip-first-tick latches.
+///
+/// v0.113.0: `PowerCmd.Apply` sets `SkipNextDurationTick` on a player debuff
+/// only while `combatState.CurrentSide == CombatSide.Enemy` (decomp
+/// `Commands/PowerCmd.cs:148`), and `RitualPower.AfterApplied` sets
+/// `WasJustAppliedByEnemy` only then too (`Models.Powers/RitualPower.cs:40`).
+/// Before v0.113.0 both armed at any time. A debuff landing on the player
+/// during the player turn (Doubt / Shame handle their own latch, a monster
+/// reaction to a card) now ticks at the very next enemy-turn end.
+#[must_use]
+pub fn side_gate_arms_skip(state: &CombatState) -> bool {
+    state.game_version < crate::GameVersion::V0_113_0 || enemy_side_has_turn(state)
 }
 
 /// Bead `sts2-rs-47jv`: walk the C#-canon `modify_power_amount_given`
@@ -4630,7 +4660,11 @@ pub fn downgrade_card_in_combat(state: &mut CombatState, uid: CardUid) -> bool {
     if !card.downgrade_for(version) {
         return false;
     }
-    state.player.sly_this_combat.retain(|u| *u != uid);
+    // v0.113 keeps keywords added from outside across the downgrade
+    // (`_keywordsAddedFromOutside`, CardModel.cs:2351).
+    if version < crate::GameVersion::V0_113_0 {
+        state.player.sly_this_combat.retain(|u| *u != uid);
+    }
     true
 }
 
@@ -5177,9 +5211,13 @@ pub fn card_sly(card_id: CardId) -> bool {
 }
 
 /// [`card_sly`] in game build `version` (GH #793): v0.111.0 Haze lost its
-/// Sly keyword (decomp `Models.Cards/Haze.cs:19` — no `CanonicalKeywords`).
+/// Sly keyword (decomp `Models.Cards/Haze.cs:19` — no `CanonicalKeywords`);
+/// v0.113.0 Memento Mori gained it (`Models.Cards/MementoMori.cs`).
 #[must_use]
 pub fn card_sly_in(card_id: CardId, version: crate::GameVersion) -> bool {
+    if card_id == CardId::MementoMori && version >= crate::GameVersion::V0_113_0 {
+        return true;
+    }
     card_sly(card_id) && !(version >= crate::GameVersion::V0_111_0 && card_id == CardId::Haze)
 }
 
@@ -8795,6 +8833,36 @@ mod tests {
                 "{kind:?}: fresh apply on the PLAYER must set skip_next_tick"
             );
             assert_eq!(power.amount, 1);
+        }
+    }
+
+    /// v0.113.0 `PowerCmd.Apply` (decomp `Commands/PowerCmd.cs:148`) and
+    /// `RitualPower.AfterApplied` (`Models.Powers/RitualPower.cs:40`) arm the
+    /// skip-first-tick latch only while the ENEMY side has the turn. The same
+    /// player-turn apply arms it on v0.111.0 and not on v0.113.0.
+    #[test]
+    fn skip_next_tick_needs_enemy_side_v0113() {
+        use crate::{CombatPhase, GameVersion};
+        for (version, phase, want) in [
+            (GameVersion::V0_111_0, CombatPhase::PlayerPlayPhase, true),
+            (GameVersion::V0_113_0, CombatPhase::PlayerPlayPhase, false),
+            (GameVersion::V0_113_0, CombatPhase::EnemyTurnExec, true),
+        ] {
+            let mut state = CombatState {
+                game_version: version,
+                phase,
+                ..Default::default()
+            };
+            state.player.current_hp = 50;
+            state.player.max_hp = 50;
+            let target = state.init_player_creature();
+            apply_power_to_creature(&mut state, target, PowerKind::Weak, 1);
+            let enemy = state.spawn_enemy(MonsterKind::Nibbit);
+            apply_power_to_creature(&mut state, enemy, PowerKind::Ritual, 3);
+            for kind in [PowerKind::Weak, PowerKind::Ritual] {
+                let p = state.powers.iter().find(|p| p.kind == kind).unwrap();
+                assert_eq!(p.skip_next_tick, want, "{version:?} {phase:?} {kind:?}");
+            }
         }
     }
 

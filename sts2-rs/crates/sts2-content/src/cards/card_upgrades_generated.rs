@@ -891,6 +891,36 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
         CardId::Salvo => crate::cards::colorless::salvo::upgrade(),
         CardId::Scrawl => crate::cards::colorless::scrawl::upgrade(),
         CardId::TheGambit => crate::cards::colorless::the_gambit::upgrade(),
+        // ── v0.113.0-only event cards. Absolute upgraded values.
+        // `DingyDagger.cs`: first `OnUpgrade` adds 3 + level(1) = 4 → 11.
+        CardId::DingyDagger => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(11),
+            base_block: None,
+            keywords: None,
+        }),
+        // `MightyWeapon.cs`: `Damage.UpgradeValueBy(5)` 25 → 30.
+        CardId::MightyWeapon => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(30),
+            base_block: None,
+            keywords: None,
+        }),
+        // `MyShinies.cs`: `Gold.UpgradeValueBy(-10)` (20 → 10 gold per hit);
+        // no spec field moves — the handler reads the upgraded flag.
+        CardId::MyShinies => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: None,
+            base_block: None,
+            keywords: None,
+        }),
+        // `MightyShield.cs`: `Block.UpgradeValueBy(5)` 20 → 25.
+        CardId::MightyShield => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: None,
+            base_block: Some(25),
+            keywords: None,
+        }),
         // ── v0.111.0-only cards (GH #793). The ids exist in no v0.107.1
         // state, so these rows cannot move a v0.107.1 upgrade.
         // `Abundance.cs` / `Tutor.cs`: `EnergyCost.UpgradeBy(-1)` 1 → 0.

@@ -378,7 +378,12 @@ fn listener_neows_bones(rs: &mut RunState) -> EffectResult {
             NEOWS_BONES_VALID_POOL_V0111.to_vec()
         }
     };
-    rs.rng.rewards.shuffle(&mut pool);
+    // v0.113.0: `list.UnstableShuffle(PlayerRng.NonCombatGeneration)` (same
+    // Fisher-Yates, new stream).
+    let version = rs.game_version;
+    rs.rng
+        .non_combat_or_rewards()
+        .shuffle_for(version, &mut pool);
 
     // (2) Grant the first 2, ONE AT A TIME. C# `RewardsSet(...).Offer()`
     //     awaits each relic's `AfterObtained` — including any interactive
@@ -487,7 +492,8 @@ const NEOWS_BONES_VALID_POOL_V0111: &[NeowRelic] = &[
 #[must_use]
 pub fn roll_neows_bones_curse(rs: &mut RunState) -> Option<sts2_core::cards::Card> {
     let last = NEOWS_BONES_CURSE_POOL.len().checked_sub(1)?;
-    let idx = rs.rng.niche.next_int(0, last as i32) as usize;
+    // v0.113.0 draws the curse on `PlayerRng.NonCombatGeneration`.
+    let idx = rs.rng.non_combat_or_niche().next_int(0, last as i32) as usize;
     card_pod_from_id(NEOWS_BONES_CURSE_POOL[idx], false)
 }
 
@@ -603,8 +609,9 @@ fn listener_phial_holster(rs: &mut RunState) -> EffectResult {
 
     // (2) Roll 2 random out-of-combat potions on the CombatPotionGeneration
     //     stream and procure each (PhialHolster.cs:29-33).
+    //     v0.113.0 rolls on `PlayerRng.NonCombatGeneration`.
     let potions = create_random_potions_out_of_combat(
-        rs.rng.combat_potion_mut(),
+        rs.rng.non_combat_or_combat_potion(),
         rs.character_id,
         PHIAL_HOLSTER_POTION_COUNT,
     );

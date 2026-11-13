@@ -434,7 +434,11 @@ fn listener_juzu_bracelet(
     if !rs.owns_active_relic(RelicId::JuzuBracelet) {
         return EffectResult::NotImplemented;
     }
-    let removed = room_types.remove(&RoomType::Monster);
+    let mut removed = room_types.remove(&RoomType::Monster);
+    // v0.113.0 also strips Elite (`JuzuBracelet.cs:20`).
+    if rs.game_version >= sts2_core::GameVersion::V0_113_0 {
+        removed |= room_types.remove(&RoomType::Elite);
+    }
     if removed {
         EffectResult::Resolved
     } else {
