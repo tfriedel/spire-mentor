@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -87,75 +88,68 @@ def _arena_cache_path(act1: str) -> str:
     return f"/tmp/ppo-parity-arena.{h.hexdigest()[:16]}.jsonl"
 
 
-#: What to run when the binary is missing or out of date. Named in every
-#: failure message below so the fix never has to be looked up.
+#: What builds `run_arena`. `_ensure_current_arena` runs it before every
+#: session's sweeps; it is also named in the failure messages below.
 REBUILD_CMD = "cargo build --release --bin run_arena   # from sts2-rs/"
 
 RS_ROOT = os.path.join(ROOT, "sts2-rs")
+_BUILD_MUTEX = os.path.join(RS_ROOT, "scripts", "build-mutex.sh")
 
 
 @functools.cache
-def _arena_stale_reason() -> str | None:
-    """Is `run_arena` older than the Rust sources it was built from?
+def _arena_build_problem() -> tuple[str, str] | None:
+    """Build `run_arena` so the sweep always answers for THIS tree.
 
-    `run_arena` is a BUILD ARTIFACT, and nothing in the suite rebuilds it — so
-    it silently rots while the engine moves. Its CLI is part of that rot: on
-    2026-08-26 a two-day-old binary predated `--act1`, so every invocation
-    below exited 2 and all 60 parametrisations blew up as a bare
-    `CalledProcessError` deep inside `subprocess.run`, which reads like an
-    engine regression rather than "your binary is old". Diagnosing that cost
-    more than the real bug sitting next to it.
+    `run_arena` is a build artifact the parity gate shells out to, and a binary
+    left over from an older tree answers with that tree's engine. That rotted
+    twice: on 2026-08-26 a binary that predated `--act1` broke all 60 cases as
+    a bare `CalledProcessError`, and a later mtime guard ("is any `.rs` newer
+    than the binary?") then failed all 60 for a change to
+    `sts2-workbench/src/assets.rs`, a crate `run_arena` does not even link.
 
-    Compares mtimes rather than probing `--help` for specific flags: flag
-    drift is only one way to rot, and "the sources moved and you did not
-    rebuild" covers behaviour changes that keep the same CLI too. Returns the
-    reason as a string, or `None` when the binary is current (or absent — the
-    caller skips on that, which is the long-standing contract for an
-    unbuilt optional artifact).
+    So the test builds it instead of judging it: cargo's fingerprints know the
+    binary's real dependency graph, rebuild exactly when an input changed, and
+    cost a second or two when nothing did. The build goes through
+    `build-mutex.sh`, which serialises it with the wheel builds sharing
+    `target/`; xdist workers each call this, and cargo's own target-dir lock
+    makes all but the first a no-op. Cached per process.
+
+    An ABSENT binary still skips, as it always has: building is opt-in (one
+    `cargo build` here), and the public export's CI runs this file with
+    ``-m "not oracle"``, which replaces the default ``-m 'not slow'``, on a
+    runner that has cargo. Building there would add a release compile and 60
+    full runs to every push. Once a binary exists it is kept current.
+
+    Returns:
+        None when the binary is current, else ("skip" | "fail", message):
+        skip when there is no binary or no cargo; a failed build fails.
     """
-    try:
-        built = pathlib.Path(ARENA).stat().st_mtime
-    except OSError:
-        return None
-    newest, newest_path = 0.0, ""
-    for base, dirs, files in os.walk(RS_ROOT):
-        # `target/` is the artifact itself; dotdirs are VCS/editor scratch.
-        dirs[:] = [d for d in dirs if d != "target" and not d.startswith(".")]
-        for name in files:
-            if not (name.endswith(".rs") or name in ("Cargo.toml", "Cargo.lock")):
-                continue
-            path = os.path.join(base, name)
-            try:
-                mtime = pathlib.Path(path).stat().st_mtime
-            except OSError:
-                continue
-            if mtime > newest:
-                newest, newest_path = mtime, path
-    if newest <= built:
-        return None
-    return (
-        f"{os.path.relpath(newest_path, ROOT)} is newer than the run_arena "
-        f"binary ({newest - built:.0f}s), so the sweep it answers with is not "
-        f"this tree's. Rebuild it:\n    {REBUILD_CMD}"
-    )
+    if not os.path.exists(ARENA):
+        return ("skip", f"run_arena release binary not built (opt-in):\n    {REBUILD_CMD}")
+    if shutil.which("cargo") is None:
+        return (
+            "skip",
+            f"cargo not on PATH, so run_arena cannot be built/checked:\n    {REBUILD_CMD}",
+        )
+    argv = ["cargo", "build", "--release", "--bin", "run_arena"]
+    if os.path.exists(_BUILD_MUTEX):
+        argv = [_BUILD_MUTEX, *argv]
+    proc = subprocess.run(argv, cwd=RS_ROOT, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        tail = "\n".join(proc.stderr.strip().splitlines()[-30:])
+        return ("fail", f"building run_arena failed (exit {proc.returncode}):\n{tail}")
+    return None
 
 
 def _require_current_arena() -> None:
-    """Skip when `run_arena` is absent; FAIL when it is merely out of date.
-
-    The two cases are deliberately different. Absent means the optional
-    artifact was never built and the gate opts out — the long-standing
-    behaviour. Stale means a binary IS there and is answering for a tree that
-    no longer exists, which is a wrong answer wearing a right answer's
-    clothes. Skipping on that would drop 60 cross-engine parity assertions
-    without saying so, and this repo has no CI behind the local gates to
-    notice (see the root CLAUDE.md) — so it fails, loudly and with the fix.
-    """
-    if not os.path.exists(ARENA):
-        pytest.skip(f"run_arena release binary not built:\n    {REBUILD_CMD}")
-    reason = _arena_stale_reason()
-    if reason is not None:
-        pytest.fail(f"stale run_arena binary — {reason}", pytrace=False)
+    """Build `run_arena` if its inputs changed (see `_arena_build_problem`)."""
+    problem = _arena_build_problem()
+    if problem is None:
+        return
+    kind, message = problem
+    if kind == "skip":
+        pytest.skip(message)
+    pytest.fail(message, pytrace=False)
 
 
 def _arena_rows(act1: str) -> dict:
@@ -190,15 +184,13 @@ def _arena_rows(act1: str) -> dict:
             # argument '--act1' found") has already gone to the terminal —
             # and under xdist, into a worker's discarded stream. Surface it in
             # the failure itself, with the rebuild that fixes the likeliest
-            # cause; `_require_current_arena` catches the stale case first,
-            # but not a binary whose mtime lies (a fresh `git checkout` of an
-            # OLD tree restores old contents with a new mtime).
+            # cause. `_require_current_arena` rebuilds the binary first, so
+            # this should now only fire on a genuine engine/CLI problem.
             proc = subprocess.run(argv, capture_output=True, text=True, check=False)
             if proc.returncode != 0:
                 raise AssertionError(
-                    f"run_arena sweep failed (exit {proc.returncode}). If this names "
-                    f"an unknown argument the binary predates the flag — rebuild it:\n"
-                    f"    {REBUILD_CMD}\n"
+                    f"run_arena sweep failed (exit {proc.returncode}); the binary was "
+                    f"just built from this tree, so this is an engine/CLI problem.\n"
                     f"argv: {' '.join(argv)}\n"
                     f"stderr:\n{proc.stderr.strip()}\n"
                     f"stdout:\n{proc.stdout.strip()}"
