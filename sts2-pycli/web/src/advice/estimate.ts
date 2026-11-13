@@ -7,7 +7,7 @@ import type { InstinctEstimate } from "../api";
 const pct = (p: number) => `${Math.round(Math.max(0, Math.min(1, p)) * 100)}%`;
 
 /** `−9 HP`, `+3 HP` (a heal), `±0 HP`: the fight's HP change, signed from the player's side. */
-function hpDelta(loss: number): string {
+export function hpDelta(loss: number): string {
   const v = Math.round(loss);
   if (v === 0) return "±0 HP";
   return v > 0 ? `−${v} HP` : `+${-v} HP`;
@@ -20,11 +20,7 @@ export function estimateText(e: InstinctEstimate | null | undefined): string {
   if (!e || typeof e.p_run !== "number") return "";
   const parts: string[] = [];
   if (e.p_fight != null) parts.push(`fight ${pct(e.p_fight)}`);
-  if (e.hp_loss) {
-    const lo = hpDelta(e.hp_loss.q10);
-    const hi = hpDelta(e.hp_loss.q90);
-    parts.push(lo === hi ? hpDelta(e.hp_loss.q50) : `${hpDelta(e.hp_loss.q50)} (${lo} to ${hi})`);
-  }
+  if (e.hp_loss) parts.push(hpRangeText(e.hp_loss));
   parts.push(`run ${pct(e.p_run)}`);
   return `If Instinct plays on: ${parts.join(" · ")}`;
 }
@@ -41,11 +37,20 @@ export interface ChipPart {
 /** The top bar's "Run 71% · Fight 100%": the run always, the fight in combat.
  *  Bands: a run is good from 60%, bad under 30%; a fight good from 90%, bad
  *  under 60% (most hallway fights sit near 100%, so a fight under 90% is news). */
-export function estimateChip(e: InstinctEstimate | null | undefined): ChipPart[] {
+export function estimateChip(e: Pick<InstinctEstimate, "p_run" | "p_fight"> | null | undefined): ChipPart[] {
   if (!e || typeof e.p_run !== "number") return [];
   const band = (p: number, good: number, bad: number): EstimateTone =>
     p >= good ? "good" : p < bad ? "bad" : "mid";
   const parts: ChipPart[] = [{ label: "Run", text: pct(e.p_run), tone: band(e.p_run, 0.6, 0.3) }];
   if (e.p_fight != null) parts.push({ label: "Fight", text: pct(e.p_fight), tone: band(e.p_fight, 0.9, 0.6) });
   return parts;
+}
+
+/** "−9 HP (−2 HP to −20 HP)": the fight's median HP change and its 10th–90th
+ *  percentile range (left out when both ends round alike); "" outside a fight. */
+export function hpRangeText(hp: { q10: number; q50: number; q90: number } | null | undefined): string {
+  if (!hp) return "";
+  const lo = hpDelta(hp.q10);
+  const hi = hpDelta(hp.q90);
+  return lo === hi ? hpDelta(hp.q50) : `${hpDelta(hp.q50)} (${lo} to ${hi})`;
 }

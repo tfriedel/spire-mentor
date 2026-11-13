@@ -73,6 +73,13 @@ export interface Advice {
   brain?: string | null;
   instinct_unavailable?: string | null;
   source_tag?: string | null;
+  /** Instinct's win estimate (GH #1222): the run and this fight's chances,
+   *  the fight's HP quantiles. Absent from the search and older mods. */
+  estimate?: {
+    p_run: number;
+    p_fight: number | null;
+    hp_loss: { q10: number; q50: number; q90: number } | null;
+  } | null;
   /** The turn's plan in words, step 1 first (older mods: absent). */
   plan?: string[];
   /** The player's "Show engine numbers" setting: Q / W-L-T columns. */

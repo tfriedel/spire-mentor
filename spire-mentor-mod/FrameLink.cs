@@ -669,6 +669,18 @@ internal static class FrameLink
             brain = a.Brain,
             instinct_unavailable = a.InstinctUnavailable,
             source_tag = AdvisorBrainRules.SourceTag(a.Brain, a.InstinctUnavailable),
+            // Instinct's win estimate (GH #1222), null from the search.
+            estimate = a.Estimate == null ? null : new
+            {
+                p_run = a.Estimate.PRun,
+                p_fight = a.Estimate.PFight,
+                hp_loss = a.Estimate.HpQ50 == null ? null : new
+                {
+                    q10 = a.Estimate.HpQ10,
+                    q50 = a.Estimate.HpQ50,
+                    q90 = a.Estimate.HpQ90,
+                },
+            },
             show_numbers = SpireMentorModConfig.ShowNumbers,
             options = a.Options.Select((o, i) => new
             {

@@ -79,7 +79,7 @@ def test_instinct_plans_the_turn_and_draws_the_route_on_live_payloads() -> None:
 
     advisor = ri.InstinctAdvisor()
     cfg = RecommendConfig()
-    plans = routes = lone_routes = 0
+    plans = routes = lone_routes = estimates = 0
     longer = 0
     n = 0
     with gzip.open(CORPUS, "rt", encoding="utf-8") as f:
@@ -99,6 +99,14 @@ def test_instinct_plans_the_turn_and_draws_the_route_on_live_payloads() -> None:
             except ri.InstinctUnavailable:
                 continue
             advice = sanitize_advice(advice, advice_for, msg)
+            # GH #1222: the win estimate rides as a field (the mod draws it as
+            # the panel's headline), not repeated in the note.
+            est = advice.get("estimate")
+            if est is not None:
+                estimates += 1
+                assert 0.0 <= est["p_run"] <= 1.0
+                assert (est["p_fight"] is not None) == (advice_for == "combat_action"), est
+                assert "If Instinct plays on" not in (advice.get("note") or "")
             if advice_for == "combat_action":
                 assert all(
                     o.get("action") in ("play", "potion", "end_turn") for o in advice["options"]
@@ -129,3 +137,4 @@ def test_instinct_plans_the_turn_and_draws_the_route_on_live_payloads() -> None:
                 lone_routes += len(msg.get("nodes") or []) == 1 and len(path) >= 2
     assert plans > 20 and longer > 5
     assert routes > 0 and lone_routes > 0
+    assert estimates > PLAN_REQUESTS // 2

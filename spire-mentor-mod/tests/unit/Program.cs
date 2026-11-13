@@ -560,6 +560,31 @@ Check("a long band is counted, not listed",
     Tie(new() { "A", "B", "C", "D", "E" }, null, null),
     "about equal: A ≈ B ≈ C (+2)");
 
+// InstinctEstimateText: Instinct's win estimate in the advice panel (GH #1222).
+{
+    InstinctEstimate? Est(string json) =>
+        InstinctEstimateText.Parse(System.Text.Json.JsonDocument.Parse(json).RootElement);
+    var fight = Est("{\"estimate\":{\"p_run\":0.712,\"p_fight\":0.55,\"hp_now\":40," +
+                    "\"hp_loss\":{\"q10\":2,\"q25\":5,\"q50\":9.4,\"q75\":14,\"q90\":20}}}");
+    var screen = Est("{\"estimate\":{\"p_run\":0.25,\"p_fight\":null,\"hp_loss\":null,\"hp_now\":40}}");
+    Check("estimate: absent", (Est("{\"note\":\"x\"}") == null).ToString(), "True");
+    Check("estimate: no p_run is none", (Est("{\"estimate\":{\"p_fight\":0.5}}") == null).ToString(), "True");
+    Check("estimate: headline in a fight", InstinctEstimateText.Headline(fight!), "Run 71% · Fight 55%");
+    Check("estimate: headline on a screen", InstinctEstimateText.Headline(screen!), "Run 25%");
+    Check("estimate: hp line", InstinctEstimateText.HpLine(fight!), "This fight: −9 HP (−2 HP to −20 HP)");
+    Check("estimate: no hp line off a fight", InstinctEstimateText.HpLine(screen!), null);
+    Check("estimate: a heal is a plus",
+        InstinctEstimateText.HpLine(new InstinctEstimate(1, 1, -6, -6, -6)), "This fight: +6 HP");
+    Check("estimate: zero", InstinctEstimateText.HpDelta(0.4), "±0 HP");
+    Check("estimate: pct clamps", InstinctEstimateText.Pct(1.2), "100%");
+    Check("estimate: run bands",
+        $"{InstinctEstimateText.RunTone(0.6)} {InstinctEstimateText.RunTone(0.45)} {InstinctEstimateText.RunTone(0.29)}",
+        "Good Mid Bad");
+    Check("estimate: fight bands",
+        $"{InstinctEstimateText.FightTone(0.9)} {InstinctEstimateText.FightTone(0.6)} {InstinctEstimateText.FightTone(0.59)}",
+        "Good Mid Bad");
+}
+
 // BugReportSite.Resolve: where the mod's bug reports go.
 Check("site: setting wins", BugReportSite.Resolve(" https://a.example/ ", "https://b.example"), "https://a.example");
 Check("site: baked when no setting", BugReportSite.Resolve("", "https://b.example"), "https://b.example");

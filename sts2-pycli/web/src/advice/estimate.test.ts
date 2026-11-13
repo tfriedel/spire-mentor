@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateChip, estimateText } from "./estimate";
+import { estimateChip, estimateText, hpRangeText } from "./estimate";
 
 describe("estimateText", () => {
   it("is empty without an estimate", () => {
@@ -30,7 +30,7 @@ describe("estimateChip", () => {
   });
 
   it("gives the run alone outside a fight", () => {
-    expect(estimateChip({ p_run: 0.71, p_fight: null, hp_loss: null, hp_now: 60 })).toEqual([
+    expect(estimateChip({ p_run: 0.71, p_fight: null })).toEqual([
       { label: "Run", text: "71%", tone: "good" },
     ]);
   });
@@ -41,5 +41,16 @@ describe("estimateChip", () => {
       { label: "Run", text: "25%", tone: "bad" },
       { label: "Fight", text: "75%", tone: "mid" },
     ]);
+  });
+});
+
+describe("hpRangeText", () => {
+  it("is empty outside a fight", () => {
+    expect(hpRangeText(null)).toBe("");
+  });
+
+  it("gives the median and the 10–90 range, or the median alone when the ends agree", () => {
+    expect(hpRangeText({ q10: 2, q50: 9.4, q90: 20 })).toBe("−9 HP (−2 HP to −20 HP)");
+    expect(hpRangeText({ q10: -6, q50: -6, q90: -6 })).toBe("+6 HP");
   });
 });

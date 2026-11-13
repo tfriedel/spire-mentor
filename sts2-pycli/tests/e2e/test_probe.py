@@ -112,26 +112,3 @@ def test_export_embeds_the_probe(tmp_path):
     raw = (tmp_path / "plain.e2ew").read_bytes()
     hl = struct.unpack("<I", raw[8:12])[0]
     assert json.loads(raw[12 : 12 + hl])["probe"] is None
-
-
-def test_estimate_text_matches_the_workbench_wording():
-    import realgame_instinct as RI
-
-    assert RI.estimate_text(None) == ""
-    assert RI.estimate_text({"p_run": 0.342, "p_fight": None, "hp_loss": None}) == (
-        "If Instinct plays on: run 34%"
-    )
-    e = {
-        "p_run": 0.34,
-        "p_fight": 0.931,
-        "hp_loss": {"q10": 2, "q25": 5, "q50": 9.4, "q75": 14, "q90": 20},
-    }
-    assert RI.estimate_text(e) == (
-        "If Instinct plays on: fight 93% · −9 HP (−2 HP to −20 HP) · run 34%"
-    )
-    heal = {
-        "p_run": 1.0,
-        "p_fight": 1.0,
-        "hp_loss": {"q10": -6, "q25": -6, "q50": -6, "q75": -6, "q90": -6},
-    }
-    assert RI.estimate_text(heal) == "If Instinct plays on: fight 100% · +6 HP · run 100%"

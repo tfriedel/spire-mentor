@@ -6,6 +6,7 @@ import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState
 import EventLog from "../components/EventLog";
 import { inHost, modAction, openWorkbenchWindow, showNativeMenu, type NativeMenuItem } from "./host";
 import { toTimeline } from "./ledger";
+import { estimateChip, hpRangeText } from "../advice/estimate";
 import {
   inBandLabels,
   rankedOptions,
@@ -440,6 +441,31 @@ function EvalBar({ advice }: { advice: Advice }) {
   );
 }
 
+/** Instinct's headline in place of the search's win chance (GH #1222): the
+ *  run and fight chances side by side, banded, the run as the bar. */
+function EstimateBar({ estimate }: { estimate: NonNullable<Advice["estimate"]> }) {
+  const parts = estimateChip(estimate);
+  const hp = hpRangeText(estimate.hp_loss);
+  const run = Math.max(0, Math.min(1, estimate.p_run));
+  return (
+    <div className="fr-eval" data-testid="frame-estimate">
+      <div className="fr-eval-text">
+        {parts.map((x, i) => (
+          <span key={x.label}>
+            {i > 0 && <span className="fr-dim"> · </span>}
+            {x.label} <b className={`fr-est-${x.tone}`}>{x.text}</b>
+          </span>
+        ))}
+      </div>
+      <div className="fr-eval-bar">
+        <span className={`fr-est-bar-${parts[0].tone}`} style={{ width: `${run * 100}%` }} />
+      </div>
+      {hp && <div className="fr-dim">This fight: {hp}</div>}
+      <div className="fr-dim">if Instinct plays every move from here</div>
+    </div>
+  );
+}
+
 export function AdvicePanel({ state }: { state: FrameState }) {
   const { advice, peek, ui } = state;
   const [expanded, setExpanded] = useState(false);
@@ -461,7 +487,7 @@ export function AdvicePanel({ state }: { state: FrameState }) {
   const plan = advice.plan ?? [];
   return (
     <div className="fr-advice">
-      {advice.p_win != null && <EvalBar advice={advice} />}
+      {advice.p_win != null ? <EvalBar advice={advice} /> : advice.estimate && <EstimateBar estimate={advice.estimate} />}
       {plan.length > 0 && (
         <div className="fr-plan">
           {plan.map((s, i) => (

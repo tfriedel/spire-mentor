@@ -209,6 +209,10 @@ internal sealed class SimAdvice
     /// (Instinct: ...)"), null for a plain search reply.</summary>
     public string? SourceTag => AdvisorBrainRules.SourceTag(Brain, InstinctUnavailable);
 
+    /// <summary>`advice.estimate` (GH #1222): Instinct's win estimate for the
+    /// position, null from the search and from older advisors.</summary>
+    public InstinctEstimate? Estimate;
+
     /// <summary>
     /// `advice.wait_for_ally.max_ms` (co-op): a teammate who has not ended
     /// their turn holds a card that would change this move (Vulnerable before
@@ -257,6 +261,7 @@ internal sealed class SimAdvice
         advice.HandBack = ReadString(el, "hand_back");
         advice.Brain = ReadString(el, "brain");
         advice.InstinctUnavailable = ReadString(el, "instinct_unavailable");
+        advice.Estimate = InstinctEstimateText.Parse(el);
         if (el.TryGetProperty("wait_for_ally", out JsonElement waitEl) && waitEl.ValueKind == JsonValueKind.Object)
         {
             advice.WaitForAllyMs = Math.Max(0, ReadInt(waitEl, "max_ms") ?? 0);
@@ -911,7 +916,8 @@ internal sealed class SimHud
 
         bool hasRanked = advice.Options.Exists(o => o.PWin != null || o.Q != null || o.VisitShare != null);
         bool hasEval = advice.BestQ != null || advice.PWin != null;
-        bool wantPanel = (SpireMentorModConfig.ShowWinBar && hasEval) ||
+        bool hasEstimate = advice.Estimate != null;
+        bool wantPanel = (SpireMentorModConfig.ShowWinBar && (hasEval || hasEstimate)) ||
                          (SpireMentorModConfig.ShowRankedList && hasRanked) ||
                          advice.Pv.Count > 0 || advice.Plan.Count > 0;
         if (!wantPanel || _adviceRows == null || !GodotObject.IsInstanceValid(_adviceRows))
@@ -941,6 +947,12 @@ internal sealed class SimHud
         if (SpireMentorModConfig.ShowWinBar && hasEval)
         {
             _adviceRows.AddChildSafely(BuildEvalBar(advice.BestQ, advice.PWin, advice.LowConfidence));
+        }
+        else if (SpireMentorModConfig.ShowWinBar && advice.Estimate is { } estimate)
+        {
+            // Instinct's headline in place of the search's win chance: the
+            // run and fight chances side by side, the run as the bar.
+            _adviceRows.AddChildSafely(BuildEstimateBar(estimate));
         }
 
         if (SpireMentorModConfig.ShowRankedList && hasRanked)
@@ -1067,6 +1079,64 @@ internal sealed class SimHud
         };
         barBg.AddChild(barFill);
         row.AddChild(barBg);
+        return row;
+    }
+
+    private static Color ToneColor(EstimateTone tone) => tone switch
+    {
+        EstimateTone.Good => new Color(0.45f, 0.85f, 0.5f),
+        EstimateTone.Mid => new Color(0.95f, 0.75f, 0.3f),
+        _ => new Color(0.95f, 0.4f, 0.35f),
+    };
+
+    /// <summary>
+    /// Instinct's headline (GH #1222): "Run 71% · Fight 100%", each number in
+    /// its band's colour, the run chance as the bar, then the fight's HP
+    /// range and what the numbers assume (InstinctEstimateText).
+    /// </summary>
+    private static Control BuildEstimateBar(InstinctEstimate e)
+    {
+        var row = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        row.AddThemeConstantOverride("separation", 2);
+
+        var head = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        head.AddThemeConstantOverride("separation", 0);
+        void Part(string text, Color color)
+        {
+            Label l = SmallLabel(text, color);
+            l.AddThemeFontSizeOverride("font_size", 16);
+            head.AddChild(l);
+        }
+        Part("Run ", Colors.White);
+        Part(InstinctEstimateText.Pct(e.PRun), ToneColor(InstinctEstimateText.RunTone(e.PRun)));
+        if (e.PFight is double fight)
+        {
+            Part("   ·   Fight ", Colors.White);
+            Part(InstinctEstimateText.Pct(fight), ToneColor(InstinctEstimateText.FightTone(fight)));
+        }
+        row.AddChild(head);
+
+        double fill = Math.Clamp(e.PRun, 0.0, 1.0);
+        var barBg = new ColorRect
+        {
+            Color = new Color(0.22f, 0.1f, 0.1f),
+            CustomMinimumSize = new Vector2(0, 8),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        barBg.AddChild(new ColorRect
+        {
+            Color = ToneColor(InstinctEstimateText.RunTone(e.PRun)),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            AnchorRight = (float)fill,
+            AnchorBottom = 1f,
+        });
+        row.AddChild(barBg);
+
+        if (InstinctEstimateText.HpLine(e) is { } hp)
+        {
+            row.AddChild(SmallLabel(hp, new Color(0.85f, 0.85f, 0.9f)));
+        }
+        row.AddChild(SmallLabel(InstinctEstimateText.Caption, new Color(0.6f, 0.6f, 0.65f)));
         return row;
     }
 

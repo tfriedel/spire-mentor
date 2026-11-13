@@ -95,35 +95,6 @@ class InstinctPick:
     """The win probe's read of the position (GH #1222), when the weights carry one."""
 
 
-def _hp_delta(loss: float) -> str:
-    v = round(loss)
-    if v == 0:
-        return "±0 HP"
-    return f"−{v} HP" if v > 0 else f"+{-v} HP"
-
-
-def estimate_text(e: dict[str, Any] | None) -> str:
-    """The win probe's estimate in words (GH #1222), the twin of the
-    workbench's ``advice/estimate.ts``: "If Instinct plays on: fight 93% ·
-    −9 HP (−2 HP to −20 HP) · run 34%"; "" without an estimate."""
-    if not e or not isinstance(e.get("p_run"), (int, float)):
-        return ""
-
-    def pct(p: float) -> str:
-        return f"{round(max(0.0, min(1.0, float(p))) * 100)}%"
-
-    parts = []
-    if e.get("p_fight") is not None:
-        parts.append(f"fight {pct(e['p_fight'])}")
-    hp = e.get("hp_loss")
-    if hp:
-        lo, hi = _hp_delta(hp["q10"]), _hp_delta(hp["q90"])
-        mid = _hp_delta(hp["q50"])
-        parts.append(mid if lo == hi else f"{mid} ({lo} to {hi})")
-    parts.append(f"run {pct(e['p_run'])}")
-    return "If Instinct plays on: " + " · ".join(parts)
-
-
 def default_weights_path() -> Path:
     return runtime_paths.data_root() / WEIGHTS_RELPATH
 
@@ -765,11 +736,9 @@ class InstinctAdvisor:
         if estimate is not None:
             # GH #1222: the position's own estimate (the first one this
             # request evaluated; a turn plan evaluates later positions too).
+            # The mod draws it as the advice panel's headline (SimHud,
+            # InstinctEstimateText), so the note does not repeat it.
             advice["estimate"] = estimate
-            text = estimate_text(estimate)
-            if text:
-                note = advice.get("note") or ""
-                advice["note"] = f"{note} · {text}" if note else text
         if is_coop(state):
             advice["note"] = f"{advice.get('note', '')} · co-op: Instinct trained single-player"
         return advice

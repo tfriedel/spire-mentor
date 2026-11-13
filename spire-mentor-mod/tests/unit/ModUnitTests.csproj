@@ -32,6 +32,7 @@
     <Compile Include="../../EnemyTagText.cs" Link="EnemyTagText.cs" />
     <Compile Include="../../TeammateTargetPick.cs" Link="TeammateTargetPick.cs" />
     <Compile Include="../../TieBandText.cs" Link="TieBandText.cs" />
+    <Compile Include="../../InstinctEstimateText.cs" Link="InstinctEstimateText.cs" />
     <Compile Include="../../RefusalWatch.cs" Link="RefusalWatch.cs" />
     <Compile Include="../../TravelGuard.cs" Link="TravelGuard.cs" />
     <Compile Include="../../BugReportDump.cs" Link="BugReportDump.cs" />

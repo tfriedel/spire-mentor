@@ -668,3 +668,11 @@ body {
   border-color: var(--accent-strong);
   font-weight: 600;
 }
+
+/* Instinct's estimate (GH #1222): the same bands as the workbench's chip. */
+.fr-est-good { color: oklch(72% 0.16 150); }
+.fr-est-mid { color: oklch(76% 0.15 75); }
+.fr-est-bad { color: oklch(66% 0.19 25); }
+.fr-eval-bar > span.fr-est-bar-good { background: oklch(72% 0.16 150); }
+.fr-eval-bar > span.fr-est-bar-mid { background: oklch(76% 0.15 75); }
+.fr-eval-bar > span.fr-est-bar-bad { background: oklch(66% 0.19 25); }
