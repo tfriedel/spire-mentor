@@ -43,6 +43,7 @@ internal static class SimAiPartnerLobby
     private static readonly FieldInfo? NodesField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_nodes");
     private static readonly FieldInfo? ListField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_container");
     private static readonly FieldInfo? InviteField = AccessTools.Field(typeof(NRemoteLobbyPlayerContainer), "_inviteButton");
+    private static readonly PropertyInfo? IsCustomProperty = typeof(StartRunLobby).GetProperty("IsCustom");
 
     /// <summary>Our copies of the Invite button (by instance id), and what a
     /// press does.</summary>
@@ -130,11 +131,14 @@ internal static class SimAiPartnerLobby
     }
 
     /// <summary>The host's service of the container's lobby, when the tiles
-    /// belong there: a Standard lobby this game hosts.</summary>
+    /// belong there: a Standard lobby this game hosts. Not a Custom one: up
+    /// to v0.111.0 that is its own GameMode, since v0.113.0 it is Standard
+    /// with <c>IsCustom</c> set (read by name: older builds lack it).</summary>
     private static NetHostGameService? HostedLobby(NRemoteLobbyPlayerContainer container, out StartRunLobby? lobby)
     {
         lobby = LobbyField?.GetValue(container) as StartRunLobby;
         if (!SimAiPartnerMenu.Enabled || lobby == null || lobby.GameMode != GameMode.Standard
+            || IsCustomProperty?.GetValue(lobby) is true
             || lobby.NetService is not NetHostGameService host || host.Type != NetGameType.Host || !host.IsConnected)
         {
             return null;

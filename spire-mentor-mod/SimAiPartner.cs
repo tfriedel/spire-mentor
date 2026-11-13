@@ -215,17 +215,23 @@ internal sealed class SimAiPartner
         try
         {
             Logger.Log($"[SimAiPartner] {Label} ({NetId}) joining the lobby.");
-            (object flow, INetGameService? service) = CreateJoinFlow();
+            object connector = SimLoopbackConnector.Create(host, NetId);
+            (object flow, INetGameService? service) = CreateJoinFlow(connector);
             _flow = flow;
             MethodInfo begin = flow.GetType().GetMethod("Begin")
                 ?? throw new MissingMethodException("JoinFlow.Begin");
+            // Begin(initializer, tree) up to v0.111.0; v0.113.0 takes the
+            // initializer in the constructor and Begin(tree) alone.
+            object?[] beginArgs = begin.GetParameters().Length == 1
+                ? new object?[] { tree }
+                : new object?[] { connector, tree };
             // JoinFlow runs the service's update loop itself while joining,
             // and turns the network / action / sync log channels up to
             // (very) debug for the rest of the process (it restores them
             // only on failure); put them back after.
             var levels = new Dictionary<GameLogging.LogType, GameLogging.LogLevel>(
                 GameLogging.Logger.logLevelTypeMap);
-            var task = (Task)begin.Invoke(flow, new object?[] { SimLoopbackConnector.Create(host, NetId), tree })!;
+            var task = (Task)begin.Invoke(flow, beginArgs)!;
             try
             {
                 await task;
@@ -280,14 +286,16 @@ internal sealed class SimAiPartner
         Advisor = null;
     }
 
-    /// <summary>v0.111.0: <c>new JoinFlow(new NetClientGameService(
+    /// <summary>v0.113.0: <c>new JoinFlow(service, initializer)</c>;
+    /// v0.111.0: <c>new JoinFlow(new NetClientGameService(
     /// PeerVersionInfo.LocalDefault()))</c>; v0.107.1: <c>new JoinFlow()</c>,
     /// which creates its service in Begin.</summary>
-    private static (object flow, INetGameService? service) CreateJoinFlow()
+    private static (object flow, INetGameService? service) CreateJoinFlow(object connector)
     {
         Type flowType = typeof(JoinFlow);
-        ConstructorInfo? withService = flowType.GetConstructors().FirstOrDefault(c => c.GetParameters().Length == 1);
-        if (withService == null)
+        ConstructorInfo? ctor = flowType.GetConstructors().OrderByDescending(c => c.GetParameters().Length).FirstOrDefault();
+        int arity = ctor?.GetParameters().Length ?? 0;
+        if (ctor == null || arity == 0)
         {
             return (Activator.CreateInstance(flowType)!, null);
         }
@@ -295,7 +303,10 @@ internal sealed class SimAiPartner
         object service = version != null
             ? Activator.CreateInstance(typeof(NetClientGameService), version)!
             : Activator.CreateInstance(typeof(NetClientGameService))!;
-        return (withService.Invoke(new[] { service }), (INetGameService)service);
+        object flow = arity == 1
+            ? ctor.Invoke(new[] { service })
+            : ctor.Invoke(new[] { service, connector });
+        return (flow, (INetGameService)service);
     }
 
     private void ChooseCharacterAndReady()
@@ -620,7 +631,7 @@ internal sealed class SimAiPartnerSession
                 Error err = image.SavePng(shot);
                 Logger.Log($"[SimAiPartner] host menu screenshot -> {shot} ({err}).");
             }
-            if (hostMenu.GetNodeOrNull<NSubmenuButton>("SpireMentorAiPartnersButton") is not { } button)
+            if (SimAiPartnerMenu.Find(hostMenu) is not { } button)
             {
                 Logger.Log("[SimAiPartner] The host menu has no AI-partners button; hosting directly.");
                 return false;

@@ -81,3 +81,17 @@ def test_the_advisor_says_it_is_not_a_ranking() -> None:
     assert "NOT a recommendation" in answer["note"]
     assert answer["hand_back"]
     assert [o["index"] for o in answer["options"] if o["is_best"]] == [2]
+
+
+def test_instinct_hands_the_blitz_merchant_to_the_rule() -> None:
+    # Instinct rebuilt the shop without the wares (none is a card, relic or
+    # potion for sale), saw only Leave, and walked out on three free picks:
+    # the host of a live co-op Blitz run on v0.113.0. It must decline so the
+    # advisor's Blitz rule answers instead.
+    import pytest
+    import realgame_instinct_screens as screens
+    from realgame_instinct import InstinctUnavailable
+
+    state = _shop(_ware(1, "CardUpgrade"), _ware(2, "Relic"))
+    with pytest.raises(InstinctUnavailable, match="Blitz merchant"):
+        screens.shop(None, state, None)  # type: ignore[arg-type]

@@ -17,8 +17,10 @@
 
 using System;
 using System.Collections;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -75,12 +77,12 @@ internal static class SimCoopDummy
         }
         try
         {
-            NCharacterSelectScreen? screen = UiHelper.FindFirst<NCharacterSelectScreen>(tree.Root);
-            if (screen == null || !screen.IsVisibleInTree())
+            Control? screen = LobbyScreen(tree.Root);
+            if (screen == null)
             {
                 return;
             }
-            StartRunLobby? lobby = screen.Lobby;
+            StartRunLobby? lobby = screen.GetType().GetProperty("Lobby")?.GetValue(screen) as StartRunLobby;
             NetGameType? type = lobby?.NetService?.Type;
             if (type != NetGameType.Client && !(type == NetGameType.Host && LobbyPlayerCount(lobby!) >= SimMp.CoopPlayers))
             {
@@ -100,7 +102,45 @@ internal static class SimCoopDummy
         }
     }
 
-    private static async Task EmbarkAsync(NCharacterSelectScreen screen, NClickableControl confirm)
+    /// <summary>The lobby screens a co-op run starts from: character select
+    /// (Standard), and since v0.113.0 NBlitzScreen / NDreadScreen, which are
+    /// not character selects but have the same Lobby, ConfirmButton and
+    /// CharSelectButtons nodes. Those two are reached by name: the mod
+    /// compiles against builds that do not have them. They sit next to
+    /// character select (Screens.Blitz / Screens.Dread), so their names are
+    /// built from its namespace.</summary>
+    private static readonly Type[] LobbyScreenTypes = new[]
+    {
+        typeof(NCharacterSelectScreen),
+        SiblingScreenType("Blitz", "NBlitzScreen"),
+        SiblingScreenType("Dread", "NDreadScreen"),
+    }.OfType<Type>().ToArray();
+
+    private static Type? SiblingScreenType(string folder, string name)
+    {
+        string ns = typeof(NCharacterSelectScreen).Namespace ?? "";
+        int dot = ns.LastIndexOf('.');
+        return dot < 0 ? null : AccessTools.TypeByName($"{ns[..dot]}.{folder}.{name}");
+    }
+
+    /// <summary>The visible lobby screen, if one is open.</summary>
+    private static Control? LobbyScreen(Node node)
+    {
+        if (node is Control control && LobbyScreenTypes.Any(t => t.IsInstanceOfType(node)))
+        {
+            return control.IsVisibleInTree() ? control : null;
+        }
+        foreach (Node child in node.GetChildren())
+        {
+            if (LobbyScreen(child) is { } found)
+            {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private static async Task EmbarkAsync(Control screen, NClickableControl confirm)
     {
         try
         {
@@ -125,7 +165,7 @@ internal static class SimCoopDummy
 
     /// <summary><c>--spire-mentor-character NAME</c>, else the screen's own
     /// preselection.</summary>
-    private static void SelectCharacter(NCharacterSelectScreen screen)
+    private static void SelectCharacter(Control screen)
     {
         string? wanted = SimMp.CharacterOverride;
         if (string.IsNullOrEmpty(wanted))

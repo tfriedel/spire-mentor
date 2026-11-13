@@ -335,10 +335,7 @@ internal sealed class SimAiPartnerChoices
         }
         if (kind.Contains("FromDeck", StringComparison.Ordinal))
         {
-            List<CardModel> deck = me.Deck.Cards.ToList();
-            IEnumerable<CardModel> candidates = kind.EndsWith("FromDeckForUpgrade", StringComparison.Ordinal)
-                ? deck.Where(c => c.IsUpgradable)
-                : deck;
+            IEnumerable<CardModel> candidates = DeckCandidates(me, kind, args);
             // An upgrade is always worth taking (a smith, an event's upgrade);
             // other deck prompts take what they must.
             int count = kind.EndsWith("FromDeckForUpgrade", StringComparison.Ordinal) ? Math.Max(1, minSelect) : minSelect;
@@ -375,6 +372,39 @@ internal sealed class SimAiPartnerChoices
         }
         how = "none (unknown prompt)";
         return PlayerChoiceResult.FromIndex(null);
+    }
+
+    /// <summary>The deck cards a FromDeck* prompt offers, filtered the way
+    /// CardSelectCmd filters them -- an answer outside that set makes the
+    /// host throw (a Defend for Self-Help Book's attack-only Sharp: "Cannot
+    /// enchant CARD.DEFEND_SILENT with ENCHANTMENT.SHARP", live 2026-11-13).
+    /// The prompt is the innermost overload called, so a deck enchantment
+    /// carries its already-filtered card list.</summary>
+    internal static IEnumerable<CardModel> DeckCandidates(Player me, string kind, object?[] args)
+    {
+        if (args.FirstOrDefault() is IReadOnlyList<CardModel> offered)
+        {
+            return offered;
+        }
+        IEnumerable<CardModel> deck = me.Deck.Cards;
+        if (kind.EndsWith("FromDeckForUpgrade", StringComparison.Ordinal))
+        {
+            deck = deck.Where(c => c.IsUpgradable);
+        }
+        else if (kind.EndsWith("FromDeckForTransformation", StringComparison.Ordinal))
+        {
+            deck = deck.Where(c => c.Type != CardType.Quest && c.IsTransformable);
+        }
+        if (args.OfType<EnchantmentModel>().FirstOrDefault() is { } enchantment)
+        {
+            deck = deck.Where(enchantment.CanEnchant);
+        }
+        // FromDeckGeneric's filter, FromDeckForEnchantment's additionalFilter.
+        if (args.OfType<Func<CardModel, bool>>().FirstOrDefault() is { } filter)
+        {
+            deck = deck.Where(filter);
+        }
+        return deck;
     }
 
     /// <summary>A card pick by the advisor, else <paramref name="fallback"/>

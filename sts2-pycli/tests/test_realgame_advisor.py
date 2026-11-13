@@ -777,3 +777,21 @@ class TestRunAgentParity:
     def test_older_mod_below_a10_reads_act_three_as_the_last_boss(self) -> None:
         cfg = ra.fight_search_cfg(ra.RecommendConfig(), self._boss({"ascension": 9}))
         assert (cfg.win_hp_carry, cfg.win_potion_carry) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [
+        ('unknown card id "KI_CHANT"', "the engine has no card KI_CHANT yet"),
+        ('unknown relic id "NEOWS_SACRIFICE"', "the engine has no relic NEOWS_SACRIFICE yet"),
+    ],
+)
+def test_instinct_names_content_the_engine_lacks(message: str, reason: str) -> None:
+    # A v0.113.0 card the engine does not model yet used to read "Instinct
+    # hit an error" in the HUD (live co-op run, 2026-11-13).
+    assert ra.engine_missing_content(ValueError(message)) == reason
+
+
+def test_instinct_still_reports_a_real_error() -> None:
+    assert ra.engine_missing_content(ValueError("index out of range")) is None
+    assert ra.engine_missing_content(KeyError('unknown card id "X"')) is None

@@ -142,6 +142,28 @@ static class GameApiSmoke
             if (concrete.IsAbstract) throw new InvalidOperationException($"{concrete} is still abstract");
             notes.Add($"api_smoke: {name} -> concrete {concrete.Name}");
         }
+
+        // The AI partner's join: JoinFlow's constructor and Begin changed
+        // shape in every build (v0.107.1 (), v0.111.0 (service), v0.113.0
+        // (service, initializer) + Begin(tree)), and the partner builds it by
+        // reflection -- v0.113.0 shipped a partner that could not join at all.
+        Type connectorType = asm.GetType("SpireMentor.SimLoopbackConnector", throwOnError: true)!;
+        object connector = connectorType.GetMethod("Create", Any)!.Invoke(null, new object?[] { null, 7001UL })!;
+        Type initializer = connector.GetType().GetInterfaces().Single(i => i.Name == "IClientConnectionInitializer");
+        if (initializer.GetProperty("Platform") is { } platform)
+        {
+            notes.Add($"api_smoke: connector Platform = {platform.GetValue(connector)}");
+        }
+        Type partner = asm.GetType("SpireMentor.SimAiPartner", throwOnError: true)!;
+        object made = Call(partner, "CreateJoinFlow", connector)!;
+        object flow = made.GetType().GetField("Item1")!.GetValue(made)!;
+        int beginArity = flow.GetType().GetMethod("Begin")!.GetParameters().Length;
+        int ctorArity = flow.GetType().GetConstructors().Max(c => c.GetParameters().Length);
+        if ((beginArity == 1) != (ctorArity == 2))
+        {
+            throw new InvalidOperationException($"api_smoke: JoinFlow ctor takes {ctorArity}, Begin takes {beginArity}");
+        }
+        notes.Add($"api_smoke: JoinFlow built (ctor {ctorArity} args, Begin {beginArity} args)");
     }
 
     static object? Call(Type t, string method, params object[] args)

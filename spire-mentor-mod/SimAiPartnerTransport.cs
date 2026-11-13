@@ -357,7 +357,9 @@ internal sealed class SimLoopbackClient : NetClient
 /// The connection initializer JoinFlow.Begin takes, implemented at run time
 /// against the game's own IClientConnectionInitializer (its Connect takes a
 /// NetClientGameService in v0.107.1 and an INetClientGameService in
-/// v0.111.0; the object passed is a NetClientGameService in both).
+/// v0.111.0; the object passed is a NetClientGameService in both). v0.113.0
+/// adds <c>Platform</c> and <c>GetHostId()</c>, which its JoinFlow reads
+/// only to describe a failed join (JoinFailureExtraInfo).
 /// </summary>
 public class SimLoopbackConnector : DispatchProxy
 {
@@ -375,6 +377,13 @@ public class SimLoopbackConnector : DispatchProxy
 
     protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
     {
+        switch (targetMethod?.Name)
+        {
+            case "get_Platform":
+                return PlatformType.None;
+            case "GetHostId":
+                return (ulong?)_host?.NetId;
+        }
         if (targetMethod?.Name != "Connect" || args is not { Length: > 0 } || args[0] is not NetClientGameService service)
         {
             throw new NotSupportedException($"SimLoopbackConnector.{targetMethod?.Name}");

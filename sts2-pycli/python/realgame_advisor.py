@@ -49,6 +49,7 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 from datetime import UTC, datetime
@@ -879,6 +880,27 @@ def _advisor_builders() -> dict[str, Any]:
 #: `spire-mentor-mod/tools/ascension_climb.py` counts these per run from the
 #: archived advisor-log slice, so keep the two in step.
 UNRANKED_LOG_PREFIX = "unranked fallback"
+
+#: The engine's spelling for content it has no model of (`run_manager.rs`:
+#: ``unknown card id "KI_CHANT"``).
+_ENGINE_UNKNOWN_ID = re.compile(r'unknown (card|relic|potion) id "([A-Za-z0-9_]+)"')
+
+
+def engine_missing_content(exc: BaseException) -> str | None:
+    """The fallback reason when Instinct failed only because the engine lacks
+    a card / relic / potion on the screen, else ``None``.
+
+    A v0.113.0 card the engine does not model yet (The Fool's, offered to
+    another character by a mixed reward) reached Instinct as a bare
+    ``ValueError`` and the HUD said "Instinct hit an error" (live,
+    2026-11-13). It is a known gap, not a crash: name what is missing.
+    """
+    if not isinstance(exc, ValueError):
+        return None
+    m = _ENGINE_UNKNOWN_ID.search(str(exc))
+    if m is None:
+        return None
+    return f"the engine has no {m.group(1)} {m.group(2)} yet"
 
 
 def _unranked(state: dict[str, Any], why: str, trigger: str | None = None) -> dict[str, Any]:
@@ -2168,8 +2190,13 @@ def _handle_advice_request(
                 instinct_reason = str(e)
                 logger.info("instinct unavailable (%s): %s", advice_for, e)
             except Exception as e:
-                instinct_reason = "Instinct hit an error"
-                logger.error("instinct failed: %s", e, exc_info=True)
+                missing = engine_missing_content(e)
+                if missing is not None:
+                    instinct_reason = missing
+                    logger.info("instinct unavailable (%s): %s", advice_for, missing)
+                else:
+                    instinct_reason = "Instinct hit an error"
+                    logger.error("instinct failed: %s", e, exc_info=True)
         if instinct_advice is not None:
             advice = instinct_advice
             if advice_for == "combat_action":

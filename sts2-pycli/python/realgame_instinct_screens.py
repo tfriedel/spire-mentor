@@ -480,9 +480,16 @@ def deck_select(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> di
 
 
 def shop(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str, Any]:
+    import realgame_ppo
+
     options = [o for o in (state.get("options") or []) if isinstance(o, dict)]
     if not options:
         raise InstinctUnavailable("no shop options")
+    # The Blitz merchant's wares are none of the kinds below, so Instinct saw
+    # a shop whose only option was Leave and walked out on three free picks
+    # (live co-op Blitz run, v0.113.0). The advisor's Blitz rule answers it.
+    if realgame_ppo.is_blitz_shop(state):
+        raise InstinctUnavailable("Instinct was not trained on the Blitz merchant")
     usable = [o for o in options if o.get("enabled", True)]
     by_kind: dict[str, list[dict[str, Any]]] = {"buy_card": [], "buy_relic": [], "buy_potion": []}
     for o in usable:

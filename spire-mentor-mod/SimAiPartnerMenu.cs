@@ -21,6 +21,12 @@ namespace SpireMentor;
 internal static class SimAiPartnerMenu
 {
     private const string ButtonName = "SpireMentorAiPartnersButton";
+
+    /// <summary>The entry, once added: next to the Standard card, which is
+    /// the submenu's child up to v0.111.0 and a container's since
+    /// v0.113.0.</summary>
+    internal static NSubmenuButton? Find(NMultiplayerHostSubmenu submenu) =>
+        submenu.FindChild(ButtonName, recursive: true, owned: false) as NSubmenuButton;
     private const string Title = "With AI partners";
     private const string Description = "Co-op on this PC: an AI teammate plays a seat of its own. Pick your character and embark.";
 
@@ -58,12 +64,12 @@ internal static class SimAiPartnerMenu
 
     private static void AddButton(NMultiplayerHostSubmenu submenu)
     {
-        if (!Enabled || submenu.GetNodeOrNull(ButtonName) != null)
+        if (!Enabled || Find(submenu) != null)
         {
             return;
         }
-        NSubmenuButton? standard = submenu.GetNodeOrNull<NSubmenuButton>("StandardButton");
-        NSubmenuButton? custom = submenu.GetNodeOrNull<NSubmenuButton>("CustomRunButton");
+        NSubmenuButton? standard = MenuButton(submenu, "StandardButton");
+        NSubmenuButton? custom = MenuButton(submenu, "CustomRunButton");
         if (standard == null || custom == null || standard.GetParent() is not Node parent)
         {
             Logger.Log("[SimAiPartnerMenu] The host menu has no Standard / Custom button; no entry.");
@@ -88,7 +94,7 @@ internal static class SimAiPartnerMenu
             // apart, centred on 1920 (v0.111.0: Standard at 395, Custom at
             // 1195). A fourth column after Custom would leave the screen, so
             // all four are re-spaced, centred, in the same row.
-            NSubmenuButton? daily = submenu.GetNodeOrNull<NSubmenuButton>("DailyButton");
+            NSubmenuButton? daily = MenuButton(submenu, "DailyButton");
             parent.AddChild(button);
             Control[] row = daily != null
                 ? new Control[] { standard, daily, custom, button }
@@ -113,6 +119,12 @@ internal static class SimAiPartnerMenu
         button.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(_ => OnPressed(submenu)));
         Callable.From(() => SetTexts(button)).CallDeferred();
     }
+
+    /// <summary>One of the host menu's mode cards. Up to v0.111.0 they are the
+    /// submenu's direct children; v0.113.0 (Blitz, Dread) moved them into a
+    /// <c>%ButtonContainer</c> and reaches them by unique name.</summary>
+    private static NSubmenuButton? MenuButton(NMultiplayerHostSubmenu submenu, string name) =>
+        submenu.GetNodeOrNull<NSubmenuButton>(name) ?? submenu.GetNodeOrNull<NSubmenuButton>("%" + name);
 
     private static void SetTexts(NSubmenuButton button)
     {

@@ -36,6 +36,9 @@
 #   ... -BotHost                    the host plays hands-free too (unattended
 #                                   test of every seat; it embarks once all
 #                                   -Players are in the lobby)
+#   ... -Mode blitz                 the run's game mode: standard (default),
+#                                   blitz or dread -- v0.113.0+, whose
+#                                   --fastmp knows host_blitz / host_dread
 
 param(
     [string]$GameDir = $(if ($env:STS2_GAME_DIR) { $env:STS2_GAME_DIR } else { "C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2" }),
@@ -47,6 +50,8 @@ param(
     [double]$Speed = 3.0,
     [string]$LogDir = "",
     [switch]$NoSteamDummy,
+    [ValidateSet("standard", "blitz", "dread")]
+    [string]$Mode = "standard",
     [switch]$BotHost
 )
 
@@ -89,7 +94,7 @@ Set-Content -Path (Join-Path $LogDir "players.txt") -Value "$Players" -Encoding 
 
 Write-Host "Starting host ($Players players)..."
 $speedArg = $Speed.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-$hostArgs = @("--fastmp", "host_standard", "--log-file", "`"$hostLog`"", "--spire-mentor-speed", $speedArg,
+$hostArgs = @("--fastmp", "host_$Mode", "--log-file", "`"$hostLog`"", "--spire-mentor-speed", $speedArg,
     "--spire-mentor-coop-players", "$Players")
 if ($BotHost) { $hostArgs += "--spire-mentor-autoplay" }
 Start-Process -FilePath $exe -WorkingDirectory $GameDir -ArgumentList $hostArgs | Out-Null

@@ -121,16 +121,20 @@ public sealed class SimConfig
     public bool ResumeRun { get; init; } = false;
 
     /// <summary>
-    /// Which singleplayer mode an auto-started run uses: "standard" (default)
-    /// or "blitz" (v0.113.0+: the Blitz screen of the singleplayer submenu,
-    /// the same route as the game's own `BlitzRunLauncher`). Exists so the
-    /// live test lane can play Blitz unattended; on a build without Blitz the
-    /// start fails loudly instead of quietly playing a standard run.
+    /// Which singleplayer mode an auto-started run uses: "standard" (default),
+    /// "blitz" or "dread" (v0.113.0+: that mode's screen of the singleplayer
+    /// submenu, the same route as the game's own `BlitzRunLauncher`). Exists
+    /// so the live test lane can play those modes unattended; on a build
+    /// without them the start fails loudly instead of quietly playing a
+    /// standard run.
     /// </summary>
     public string GameMode { get; init; } = "standard";
 
     /// <summary>True when <see cref="GameMode"/> asks for a Blitz run.</summary>
     public bool IsBlitz => string.Equals(GameMode?.Trim(), "blitz", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when <see cref="GameMode"/> asks for a Dread run.</summary>
+    public bool IsDread => string.Equals(GameMode?.Trim(), "dread", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The game's FastModeType applied at run start: "instant" (skip

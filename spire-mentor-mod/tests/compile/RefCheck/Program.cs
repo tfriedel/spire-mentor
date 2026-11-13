@@ -389,7 +389,14 @@ foreach (MethodDefinitionHandle mh in mod.MethodDefinitions)
             case OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar: il.Offset += 1; break;
             case OperandType.InlineVar: il.Offset += 2; break;
             case OperandType.InlineI8 or OperandType.InlineR: il.Offset += 8; break;
-            case OperandType.InlineSwitch: il.Offset += 4 * il.ReadInt32(); break;
+            case OperandType.InlineSwitch:
+                // Read the target count FIRST: `il.Offset += 4 * il.ReadInt32()`
+                // reads Offset before ReadInt32 advances past the count, lands
+                // 4 bytes short and walks the jump table as opcodes -- silently
+                // skipping later references, or running off the method body.
+                int targets = il.ReadInt32();
+                il.Offset += 4 * targets;
+                break;
             default: il.Offset += 4; break;
         }
     }
