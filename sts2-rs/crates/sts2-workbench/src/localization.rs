@@ -1308,7 +1308,9 @@ mod tests {
 
     // ── test_event_option_loc_keys.py (the localization halves) ────
 
-    #[cfg(workbench_game_data)] // asserts on real game text (see build.rs)
+    // Asserts on real game text and reads the v0.113.0 events.json, which
+    // the public export omits (see build.rs).
+    #[cfg(all(workbench_game_data, workbench_game_data_v0_113_0))]
     #[test]
     fn every_wired_static_event_option_loc_key_names_a_real_row() {
         // The Python gate reads the keys out of the Rust SOURCE (so it also
