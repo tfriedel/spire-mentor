@@ -23968,7 +23968,7 @@ mod tests {
         use crate::GameVersion;
 
         const BOTH: &[GameVersion] = &GameVersion::ALL;
-        const V0111: &[GameVersion] = &[GameVersion::V0_111_0];
+        const V0111: &[GameVersion] = &[GameVersion::V0_111_0, GameVersion::V0_113_0];
         // C# v0.107.1 / v0.111.0 `Monsters/<Class>.cs` property, apply line.
         let rows: &[(MonsterKind, PowerKind, i32, u8, i32, &[GameVersion])] = &[
             // TerrorEel.cs:39,65 ShriekAmount (ToughEnemies, 75, 70)

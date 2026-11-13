@@ -444,7 +444,9 @@ impl CardRarityOdds {
         let uncommon_threshold = match version {
             crate::GameVersion::V0_107_1 => odds.uncommon,
             // v0.111.0: cumulative `rare + uncommon` (decomp CardRarityOdds.cs:129).
-            crate::GameVersion::V0_111_0 => odds.uncommon + odds.rare,
+            crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => {
+                odds.uncommon + odds.rare
+            }
         };
         let result = if roll_val < odds.rare {
             RewardRarity::Rare

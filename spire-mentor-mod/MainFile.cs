@@ -73,6 +73,14 @@ public static class MainFile
             SimReduceEffects.Install(_patcher);
             try
             {
+                SimGameApi.InstallSelectorBridge(_patcher);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"  SKIP: card selector bridge - {ex.Message} (the AI cannot answer card choices)");
+            }
+            try
+            {
                 SimNoSaves.InstallIfRequested(_patcher);
             }
             catch (Exception ex)

@@ -209,6 +209,44 @@ _OSTY_PET_ID = "OSTY"
 _NECROBINDER_CHARACTER_ID = "NECROBINDER"
 
 
+class UnsupportedCharacterError(ValueError):
+    """A board with a character the engine does not simulate yet (v0.113.0's
+    The Fool). ``str(exc)`` is the player-facing HUD note; ``raw`` the id."""
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+        name = _UNSUPPORTED_CHARACTER_NAMES.get(raw, raw.replace("_", " ").title())
+        super().__init__(
+            f"{name} support is coming soon to Spire Mentor. Until then there is no advice "
+            f"for runs with this character (supported: {', '.join(CHARACTER_ID_TO_DISPLAY.values())})."
+        )
+
+
+#: Display names of characters the engine does not simulate yet.
+_UNSUPPORTED_CHARACTER_NAMES = {"FOOL": "The Fool"}
+
+
+def check_supported_characters(msg: dict[str, Any]) -> None:
+    """Refuse a board whose own character or any ally's is unknown.
+
+    Absent / blank ids pass: no run yet, or a producer that does not send the
+    field (the adapter infers the character from card ids then).
+
+    Raises:
+        UnsupportedCharacterError: the first unknown character id.
+    """
+    run_state = msg.get("run_state")
+    ids = [run_state.get("character") if isinstance(run_state, dict) else None]
+    ids += [a.get("character") for a in (msg.get("allies") or []) if isinstance(a, dict)]
+    for cid in ids:
+        if (
+            isinstance(cid, str)
+            and cid.strip()
+            and cid.strip().upper() not in CHARACTER_ID_TO_DISPLAY
+        ):
+            raise UnsupportedCharacterError(cid.strip().upper())
+
+
 def character_display_name(character_id: str | None) -> str | None:
     """Map a bridge ``run_state.character`` id to the adapter's Title-Case form.
 
@@ -1091,7 +1129,9 @@ def _reset_wire_unlock_latch() -> None:
 __all__ = [
     "CHARACTER_ID_TO_DISPLAY",
     "LIVE_LOCKED_EPOCHS",
+    "UnsupportedCharacterError",
     "character_display_name",
+    "check_supported_characters",
     "install_live_unlock_state",
     "install_unlock_state_from_wire",
     "locked_epochs_from_wire",

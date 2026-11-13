@@ -12,7 +12,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 versions=("$@")
-[[ ${#versions[@]} -gt 0 ]] || versions=(v0.107.1 v0.111.0)
+[[ ${#versions[@]} -gt 0 ]] || versions=(v0.107.1 v0.111.0 v0.113.0)
 # The DLL's version const must match the manifest (package.ps1 refuses too).
 manifest_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$HERE/../SpireMentor.json" | head -1)"
 code_version="$(sed -n 's/.*ModVersion = "\([^"]*\)".*/\1/p' "$HERE/../MainFile.cs" | head -1)"

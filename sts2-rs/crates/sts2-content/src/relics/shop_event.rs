@@ -2468,7 +2468,7 @@ const SEAL_OF_GOLD_ENERGY: i32 = 1;
 const fn seal_of_gold_cost(version: sts2_core::GameVersion) -> i32 {
     match version {
         sts2_core::GameVersion::V0_107_1 => SEAL_OF_GOLD_COST,
-        sts2_core::GameVersion::V0_111_0 => 3,
+        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 3,
     }
 }
 
@@ -2580,7 +2580,7 @@ fn listener_signet_ring(rs: &mut RunState) -> EffectResult {
     // v0.111.0: `GoldVar(999)` -> `GoldVar(888)` (decomp SignetRing.cs:13).
     let gold = match rs.game_version {
         sts2_core::GameVersion::V0_107_1 => SIGNET_RING_GOLD,
-        sts2_core::GameVersion::V0_111_0 => 888,
+        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 888,
     };
     rs.gain_gold(gold);
     EffectResult::Resolved
@@ -5508,7 +5508,7 @@ pub const TOY_BOX_RELICS: usize = 4;
 pub const fn toy_box_relics(version: sts2_core::GameVersion) -> usize {
     match version {
         sts2_core::GameVersion::V0_107_1 => TOY_BOX_RELICS,
-        sts2_core::GameVersion::V0_111_0 => 5,
+        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 5,
     }
 }
 
@@ -5706,7 +5706,7 @@ pub const FUR_COAT_COMBATS: usize = 7;
 pub const fn fur_coat_combats(version: sts2_core::GameVersion) -> usize {
     match version {
         sts2_core::GameVersion::V0_107_1 => FUR_COAT_COMBATS,
-        sts2_core::GameVersion::V0_111_0 => 8,
+        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 8,
     }
 }
 

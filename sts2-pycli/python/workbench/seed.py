@@ -124,6 +124,11 @@ def xxh64(data: bytes, seed: int = 0) -> int:
     return h
 
 
+#: Builds with ``ulong`` seeds and the XxHash64 string hash (v0.111.0 on;
+#: v0.113.0 left the seeding unchanged).
+_U64_SEED_BUILDS = frozenset({"v0.111.0", "v0.113.0"})
+
+
 def seed_hash(text: str, game_version: str = "v0.107.1") -> int:
     """``StringHelper.GetDeterministicHashCode(text)`` as the unsigned value
     every seed site mixes in: ``(uint)`` of the 32-bit hash in v0.107.1,
@@ -131,7 +136,7 @@ def seed_hash(text: str, game_version: str = "v0.107.1") -> int:
 
     Mirrors ``sts2_core::GameVersion::seed_hash``.
     """
-    if game_version == "v0.111.0":
+    if game_version in _U64_SEED_BUILDS:
         return xxh64(text.encode("utf-8"), 0)
     return deterministic_hash_code_old(text) & _M32
 
@@ -142,7 +147,7 @@ def run_seed_hash(seed: str, game_version: str = "v0.107.1") -> int:
     v0.111.0 keeps the old 32-bit hash for a save-migrated ``"old"``-prefixed
     seed (``RunRngSet.cs:107``). Mirrors ``GameVersion::run_seed_hash``.
     """
-    if game_version == "v0.111.0" and seed.startswith("old"):
+    if game_version in _U64_SEED_BUILDS and seed.startswith("old"):
         return deterministic_hash_code_old(seed[3:]) & _M32
     return seed_hash(seed, game_version)
 

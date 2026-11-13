@@ -374,7 +374,9 @@ fn listener_neows_bones(rs: &mut RunState) -> EffectResult {
         // v0.111.0: `Neow.AllPossibleOptions` starts with the 10-entry
         // CurseOptions (decomp Neow.cs:96), so the shuffle input grows by
         // DowsingRod + NeowsSacrifice.
-        sts2_core::GameVersion::V0_111_0 => NEOWS_BONES_VALID_POOL_V0111.to_vec(),
+        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => {
+            NEOWS_BONES_VALID_POOL_V0111.to_vec()
+        }
     };
     rs.rng.rewards.shuffle(&mut pool);
 

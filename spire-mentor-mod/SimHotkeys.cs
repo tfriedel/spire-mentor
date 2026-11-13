@@ -172,54 +172,54 @@ public static class SimHotkeys
 
     private static void BindActions(NHotkeyManager manager)
     {
-        manager.PushHotkeyPressedBinding(ActionHelp, SimActions.ToggleHelp);
-        manager.PushHotkeyPressedBinding(ActionToggleHud, SimActions.ToggleHud);
-        manager.PushHotkeyPressedBinding(ActionToggleLog, SimActions.ToggleLog);
-        manager.PushHotkeyPressedBinding(ActionHideAll, SimActions.ToggleHideAll);
-        manager.PushHotkeyPressedBinding(ActionPeek, SimActions.Peek);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionHelp, SimActions.ToggleHelp);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionToggleHud, SimActions.ToggleHud);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionToggleLog, SimActions.ToggleLog);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionHideAll, SimActions.ToggleHideAll);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionPeek, SimActions.Peek);
         // Godot matches an action's modifiers non-exactly, so Shift+F6 also
         // presses the plain-F6 action (and Shift+F7 the plain-F7 one); leave
         // those to partner go and autobattle.
-        manager.PushHotkeyPressedBinding(ActionAiOnce, () =>
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionAiOnce, () =>
         {
             if (!Input.IsKeyPressed(Key.Shift))
             {
                 SimActions.AiOnce("F6 (AI takes this decision)");
             }
         });
-        manager.PushHotkeyPressedBinding(ActionPartnerGo, () => SimActions.PartnersGo("Shift+F6"));
-        manager.PushHotkeyPressedBinding(ActionAiAuto, () =>
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionPartnerGo, () => SimActions.PartnersGo("Shift+F6"));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionAiAuto, () =>
         {
             if (!Input.IsKeyPressed(Key.Shift))
             {
                 SimActions.ToggleAutoplay("F7 (AI plays until you stop)");
             }
         });
-        manager.PushHotkeyPressedBinding(ActionAutobattle, () =>
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionAutobattle, () =>
             SimActions.ToggleAutobattle("Shift+F7 (autobattle: the AI fights, you decide the run)"));
         // Shift+F8 also presses plain F8 (non-exact modifiers, as above):
         // switching the brain must not also turn the AI off.
-        manager.PushHotkeyPressedBinding(ActionToggleAdvisor, () =>
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionToggleAdvisor, () =>
         {
             if (!Input.IsKeyPressed(Key.Shift))
             {
                 SimActions.ToggleAdvisor();
             }
         });
-        manager.PushHotkeyPressedBinding(ActionToggleBrain, () =>
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionToggleBrain, () =>
             SimActions.ToggleBrain("Shift+F8 (advisor brain)"));
-        manager.PushHotkeyPressedBinding(ActionSpeedDown, () => SimActions.StepSpeed(-1));
-        manager.PushHotkeyPressedBinding(ActionSpeedUp, () => SimActions.StepSpeed(1));
-        manager.PushHotkeyPressedBinding(ActionUndoTurn, SimActions.UndoTurn);
-        manager.PushHotkeyPressedBinding(ActionRestartRoom, SimActions.RestartRoom);
-        manager.PushHotkeyPressedBinding(ActionCopyState, SimActions.CopyState);
-        manager.PushHotkeyPressedBinding(ActionReportBug, SimActions.ReportBug);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionSpeedDown, () => SimActions.StepSpeed(-1));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionSpeedUp, () => SimActions.StepSpeed(1));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionUndoTurn, SimActions.UndoTurn);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionRestartRoom, SimActions.RestartRoom);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionCopyState, SimActions.CopyState);
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionReportBug, SimActions.ReportBug);
         // Godot matches an action's modifiers non-exactly: Ctrl+F must stay
         // the game's / the OS's, not "play on".
-        manager.PushHotkeyPressedBinding(ActionWbGo, () => WithFrame(() => SimActions.AiOnce("G (play the recommended move)")));
-        manager.PushHotkeyPressedBinding(ActionWbPeek, () => WithFrame(SimActions.Peek));
-        manager.PushHotkeyPressedBinding(ActionWbHint, () => WithFrame(SimActions.Peek));
-        manager.PushHotkeyPressedBinding(ActionWbPlayOn, () => WithFrame(() => SimActions.ToggleAutoplay("F (the AI plays on until you press F or F7 again)")));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionWbGo, () => WithFrame(() => SimActions.AiOnce("G (play the recommended move)")));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionWbPeek, () => WithFrame(SimActions.Peek));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionWbHint, () => WithFrame(SimActions.Peek));
+        SimGameApi.PushHotkeyPressedBinding(manager, ActionWbPlayOn, () => WithFrame(() => SimActions.ToggleAutoplay("F (the AI plays on until you press F or F7 again)")));
     }
 
     /// <summary>A workbench key: only while a frame is attached (checked at

@@ -287,7 +287,7 @@ pub fn curse_pool_for(version: crate::GameVersion) -> &'static [NeowRelic] {
     match version {
         crate::GameVersion::V0_107_1 => CURSE_POOL,
         // v0.111.0: CurseOptions grew 8 -> 10 (decomp Neow.cs:96).
-        crate::GameVersion::V0_111_0 => CURSE_POOL_V0111,
+        crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => CURSE_POOL_V0111,
     }
 }
 

@@ -198,7 +198,7 @@ fn roll_orobas(
         ),
         // v0.111.0: SandCastle moved from OptionPool1 to the END of
         // OptionPool2 (decomp Orobas.cs:28-39).
-        crate::GameVersion::V0_111_0 => (
+        crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => (
             &[ElectricShrymp, GlassEye, item],
             &[AlchemicalCoffer, Driftwood, RadiantPearl, SandCastle],
         ),
@@ -351,7 +351,7 @@ fn roll_darv(version: crate::GameVersion, rng: &mut Rng, cond: &AncientCondition
         // (each still costs its own `NextItem` read), and PhilosophersStone /
         // VelvetChoker are valid from act 2 on (`CurrentActIndex >= 1`, was
         // `== 2`). Decomp Darv.cs:172-197.
-        crate::GameVersion::V0_111_0 => {
+        crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => {
             if cond.act_index == 1 {
                 sets.push(&[Ectoplasm]);
                 sets.push(&[Sozu]);

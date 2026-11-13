@@ -43,6 +43,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import logging
@@ -66,8 +67,10 @@ from display_names import (
 )
 from enemy_labels import ally_label, enemy_label
 from realgame_adapter import (
+    UnsupportedCharacterError,
     UnsupportedGameVersionError,
     character_display_name,
+    check_supported_characters,
     envelope_game_version,
     run_ascension,
     to_headless_combat_play,
@@ -80,6 +83,7 @@ from realgame_instinct import InstinctAdvisor, InstinctUnavailable
 from realgame_livetree import LiveRunTree
 from realgame_turn_plan import search_plan
 from realgame_workbench_log import WorkbenchRunLogger
+from sts2_client import BETA_GAME_VERSIONS
 from sts2_hint.calibration import calibrated_p_win
 from sts2_hint.recommender import (
     CHANNEL_STABLE_IDX,
@@ -2016,6 +2020,25 @@ def mark_instinct_unavailable(advice: dict[str, Any], reason: str) -> dict[str, 
     return out
 
 
+def mark_beta_build(advice: dict[str, Any], game_version: str | None) -> dict[str, Any]:
+    """Label advice on a partly ported beta build as approximate.
+
+    The engine runs the beta on the previous build's rules wherever it has not
+    ported the beta's changes yet, so the ranking can be off; the player
+    should know. Refusals carry no ranking and stay as they are.
+    """
+    if game_version not in BETA_GAME_VERSIONS:
+        return advice
+    if "unsupported_game_version" in advice or "unsupported_character" in advice:
+        return advice
+    out = dict(advice)
+    label = f"Beta {game_version}: approximate advice"
+    note = out.get("note")
+    out["note"] = label + (f" · {note}" if note else "")
+    out["beta_game_version"] = game_version
+    return out
+
+
 def refusal_advice(exc: UnsupportedGameVersionError) -> dict[str, Any]:
     """The advice for a board from a game build this advisor cannot simulate.
 
@@ -2086,6 +2109,7 @@ def _handle_advice_request(
         # built for it downstream (`to_headless_combat_play` -> `$.game_version`
         # -> `state_from_dict`); an unknown build is refused before any search.
         note_game_version(session, envelope_game_version(msg), mirror)
+        check_supported_characters(msg)
         state = dict(msg)
         state["type"] = advice_for
         is_boss = (state.get("room_type") or "") == "Boss"
@@ -2137,6 +2161,9 @@ def _handle_advice_request(
     except UnsupportedGameVersionError as e:
         logger.error("advice_request refused: %s", e)
         advice = refusal_advice(e)
+    except UnsupportedCharacterError as e:
+        logger.warning("advice_request refused: %s", e)
+        advice = {"note": str(e), "unsupported_character": e.raw}
     except Exception as e:
         # With the traceback: this handler renders "advisor error" into the
         # HUD and moves on, so without one a live failure leaves only a
@@ -2153,6 +2180,9 @@ def _handle_advice_request(
         advice = sanitize_advice(advice, advice_for, msg)
     except Exception as exc:  # the guard must never cost the advice
         logger.warning("advice label guard failed: %s", exc)
+    # An unreadable build was already answered (and refused) above.
+    with contextlib.suppress(UnsupportedGameVersionError):
+        advice = mark_beta_build(advice, envelope_game_version(msg))
     elapsed = time.monotonic() - t0
     reply = {
         "action": "advice",

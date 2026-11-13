@@ -20,7 +20,7 @@ namespace SpireMentor;
 internal static class SimGameVersion
 {
     /// <summary>The game builds this DLL is checked against.</summary>
-    public static readonly string[] Supported = { "v0.107.1", "v0.111.0" };
+    public static readonly string[] Supported = { "v0.107.1", "v0.111.0", "v0.113.0" };
 
     /// <summary>What the protocol assumes when the build is unknown (PROTOCOL.md s1).</summary>
     private const string Fallback = "v0.107.1";

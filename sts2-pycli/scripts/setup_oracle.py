@@ -43,7 +43,7 @@ HARNESS = PYCLI / "src" / "Sts2Headless" / "Sts2Headless.csproj"
 
 # Mirrors sts2_client.SUPPORTED_GAME_VERSIONS and the csproj's version check.
 DEFAULT_VERSION = "v0.107.1"
-SUPPORTED_VERSIONS = ("v0.107.1", "v0.111.0")
+SUPPORTED_VERSIONS = ("v0.107.1", "v0.111.0", "v0.113.0")
 
 # Files the C# harness links against or loads at run time.
 GAME_DLLS = [
@@ -63,6 +63,7 @@ EXTRA_DLLS: dict[str, list[str]] = {
     "v0.107.1": [],
     # sts2.dll v0.111.0 references Sentry.Godot (the Godot Sentry integration).
     "v0.111.0": ["Sentry.Godot.dll"],
+    "v0.113.0": ["Sentry.Godot.dll"],
 }
 
 

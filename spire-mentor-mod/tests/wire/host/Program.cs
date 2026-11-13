@@ -61,6 +61,7 @@ static class Program
         int rc = 0;
         try
         {
+            GameApiSmoke.Run(_asm, notes);
             B.Init(_asm);
             Hooks.Install(_asm, notes);
             bool shim = !argv.Contains("--no-platform-shim");
@@ -101,6 +102,59 @@ static class Program
         int p = ((IPEndPoint)l.LocalEndpoint).Port;
         l.Stop();
         return p;
+    }
+}
+
+/// <summary>
+/// The members the mod reaches by reflection or emits against, checked at run
+/// time against THIS sts2.dll (RefCheck only sees direct IL references): the
+/// SimGameApi static initializer (every drifted member it looks up), the
+/// v0.113.0+ card selector bridge patches, a watchdog, and both concrete
+/// NetHosts SimNetHosts emits. Notes go to meta.json, not the transcript, so
+/// the golden is unchanged; a failure crashes the harness (exit 2).
+/// </summary>
+static class GameApiSmoke
+{
+    const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+    public static void Run(Assembly asm, List<string> notes)
+    {
+        Type api = asm.GetType("SpireMentor.SimGameApi", throwOnError: true)!;
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(api.TypeHandle);
+        notes.Add("api_smoke: SimGameApi initialised");
+
+        Type harmonyType = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(x => x.GetType("HarmonyLib.Harmony"))
+            .FirstOrDefault(t => t != null)
+            ?? Assembly.Load("0Harmony").GetType("HarmonyLib.Harmony", throwOnError: true)!;
+        object harmony = Activator.CreateInstance(harmonyType, "spirementor.wire.apismoke")!;
+        Call(api, "InstallSelectorBridge", harmony);
+        notes.Add("api_smoke: selector bridge installed");
+
+        Call(api, "NewWatchdog");
+        notes.Add("api_smoke: watchdog constructed");
+
+        Type hosts = asm.GetType("SpireMentor.SimNetHosts", throwOnError: true)!;
+        foreach (string name in new[] { "SpireMentor.SimLoopbackHost", "SpireMentor.SimMixedHost" })
+        {
+            var concrete = (Type)Call(hosts, "Build", asm.GetType(name, throwOnError: true)!)!;
+            System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(concrete.TypeHandle);
+            if (concrete.IsAbstract) throw new InvalidOperationException($"{concrete} is still abstract");
+            notes.Add($"api_smoke: {name} -> concrete {concrete.Name}");
+        }
+    }
+
+    static object? Call(Type t, string method, params object[] args)
+    {
+        MethodInfo m = t.GetMethod(method, Any) ?? throw new MissingMethodException(t.Name, method);
+        try
+        {
+            return m.Invoke(null, args);
+        }
+        catch (TargetInvocationException e) when (e.InnerException != null)
+        {
+            throw new InvalidOperationException($"api_smoke: {t.Name}.{method} threw: {e.InnerException}", e.InnerException);
+        }
     }
 }
 

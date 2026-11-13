@@ -29,7 +29,7 @@ pub(crate) fn on_after_side_turn_start_divine_destiny(
 pub(crate) const fn divine_destiny_stars(version: crate::GameVersion) -> i8 {
     match version {
         crate::GameVersion::V0_107_1 => 6,
-        crate::GameVersion::V0_111_0 => 7,
+        crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => 7,
     }
 }
 

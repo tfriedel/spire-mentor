@@ -33,7 +33,10 @@ PROJECT = os.path.join(REPO_ROOT, "src", "Sts2Headless", "Sts2Headless.csproj")
 #: The default build: stable Steam. Moves when the beta goes stable.
 DEFAULT_GAME_VERSION = "v0.107.1"
 #: Every build the oracle can be compiled for (mirrors the csproj check).
-SUPPORTED_GAME_VERSIONS: tuple[str, ...] = ("v0.107.1", "v0.111.0")
+SUPPORTED_GAME_VERSIONS: tuple[str, ...] = ("v0.107.1", "v0.111.0", "v0.113.0")
+#: Steam beta builds whose content the engine has only partly ported: the
+#: advisor answers on them, and labels the answer approximate (GH #1303).
+BETA_GAME_VERSIONS: frozenset[str] = frozenset({"v0.113.0"})
 GAME_VERSION_ENV = "STS2_GAME_VERSION"
 
 

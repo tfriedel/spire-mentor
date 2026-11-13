@@ -445,7 +445,7 @@ public class SimShopRoomHandler : IRoomHandler, IHandler
             Logger.Log($"[SimShop] Agent chose option {choice.OptionIndex}");
             // A purchase can push an overlay (e.g. a relic pickup) that only
             // completes once answered, so it must be awaited with the drain.
-            Task purchase = slot.Entry.OnTryPurchaseWrapper(room.Inventory.Inventory);
+            Task purchase = SimGameApi.Purchase(slot.Entry, room.Inventory.Inventory);
             await SimAutoSlayer.AwaitWithScreenDrainAsync(purchase, ct, "shop purchase of " + ShopEntryId(slot));
             await Task.Delay(PurchaseSettleMs, ct);
 
@@ -975,7 +975,7 @@ public class SimEventRoomHandler : IRoomHandler, IHandler
         await WaitHelper.Until(() => inventory.IsOpen, ct, FakeMerchantProceedWait,
             "FakeMerchant shopfront did not open");
 
-        Task purchase = slot.Entry.OnTryPurchaseWrapper(inventory.Inventory);
+        Task purchase = SimGameApi.Purchase(slot.Entry, inventory.Inventory);
         await SimAutoSlayer.AwaitWithScreenDrainAsync(purchase, ct,
             "FakeMerchant purchase of " + SimShopRoomHandler.ShopEntryId(slot));
         await Task.Delay(FakeMerchantSettleMs, ct);
@@ -1056,7 +1056,7 @@ public class SimEventRoomHandler : IRoomHandler, IHandler
                 // Not clickable yet (line still animating): not a click. Bounded
                 // by the run watchdog like WaitHelper's waits: a hitbox that never
                 // becomes clickable (and no options) dies on the stall limit
-                // (AutoSlayTimeoutException) instead of polling forever.
+                // (a TimeoutException) instead of polling forever.
                 ct.ThrowIfCancellationRequested();
                 SimAutoSlayer.CurrentWatchdog?.Check();
                 await Task.Delay(AncientHitboxPollMs, ct);

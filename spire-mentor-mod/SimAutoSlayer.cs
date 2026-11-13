@@ -400,7 +400,7 @@ public class SimAutoSlayer
 
         _selectorOverride = SimGameApi.UseSelector(new SimCardSelector());
 
-        var watchdog = new Watchdog();
+        var watchdog = SimGameApi.NewWatchdog();
         PublishWatchdog(watchdog);
         StartWatchdogKeepAlive(watchdog, ct);
 
@@ -473,16 +473,14 @@ public class SimAutoSlayer
     /// <summary>Makes every character selectable on the character screen.</summary>
     private static void RevealCharacterEpochs()
     {
-        string[] epochIds =
-        {
-            EpochModel.GetId<Silent1Epoch>(),
-            EpochModel.GetId<Regent1Epoch>(),
-            EpochModel.GetId<Defect1Epoch>(),
-            EpochModel.GetId<Necrobinder1Epoch>(),
-        };
-        foreach (string epochId in epochIds)
-            SaveManager.Instance.ObtainEpochOverride(epochId, EpochState.Revealed);
+        Reveal<Silent1Epoch>();
+        Reveal<Regent1Epoch>();
+        Reveal<Defect1Epoch>();
+        Reveal<Necrobinder1Epoch>();
     }
+
+    private static void Reveal<TEpoch>() where TEpoch : EpochModel =>
+        SaveManager.Instance.ObtainEpochOverride(EpochModel.GetId<TEpoch>(), EpochState.Revealed);
 
     private static string EnteringActivity(RunState runState, RoomType roomType) =>
         $"Entering {roomType} room (Act {runState.CurrentActIndex + 1}, Floor {runState.ActFloor})";
@@ -740,7 +738,7 @@ public class SimAutoSlayer
             {
                 if (++drains > MaxScreenDrainsPerCommand)
                 {
-                    throw new AutoSlayTimeoutException(
+                    throw new TimeoutException(
                         $"{context} kept opening overlay screens ({MaxScreenDrainsPerCommand} drained) without completing");
                 }
                 Logger.Log($"[SimAutoSlayer] {context}: overlay screen opened mid-command, draining it inline");
@@ -1232,8 +1230,6 @@ public class SimAutoSlayer
     }
 
 
-    private static readonly PropertyInfo? GameCurrentWatchdogProperty =
-        typeof(AutoSlayer).GetProperty(nameof(AutoSlayer.CurrentWatchdog), BindingFlags.Public | BindingFlags.Static);
 
     /// <summary>
     /// Points the game's <c>AutoSlayer.CurrentWatchdog</c> at our watchdog.
@@ -1245,12 +1241,12 @@ public class SimAutoSlayer
     {
         try
         {
-            if (GameCurrentWatchdogProperty == null)
+            if (SimGameApi.SharedWatchdogSetter == null)
             {
-                Logger.Log("[SimAutoSlayer] AutoSlayer.CurrentWatchdog not found; game waits will not see our watchdog");
+                Logger.Log("[SimAutoSlayer] the game's shared watchdog not found; game waits will not see our watchdog");
                 return;
             }
-            GameCurrentWatchdogProperty.SetValue(null, watchdog);
+            SimGameApi.SharedWatchdogSetter.Invoke(null, new object?[] { watchdog });
         }
         catch (Exception ex)
         {

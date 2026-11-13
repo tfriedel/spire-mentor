@@ -18,7 +18,7 @@ _WIKI_DATA = _REPO.parent / "sts2-wiki" / "data"
 
 def test_engine_wiki_version_maps_every_supported_build():
     assert localization.DEFAULT_GAME_VERSION == "v0.107.1"
-    assert localization.SUPPORTED_GAME_VERSIONS == ("v0.107.1", "v0.111.0")
+    assert localization.SUPPORTED_GAME_VERSIONS == ("v0.107.1", "v0.111.0", "v0.113.0")
     assert localization.engine_wiki_version() == localization._ENGINE_WIKI_VERSION
     for v in localization.SUPPORTED_GAME_VERSIONS:
         assert localization.engine_wiki_version(v) == v

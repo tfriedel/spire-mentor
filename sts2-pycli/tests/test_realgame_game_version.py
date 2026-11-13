@@ -92,7 +92,9 @@ class TestEnvelopeGameVersion:
             envelope_game_version({"game_version": raw})
         msg = str(info.value)
         assert raw in msg
-        assert "v0.107.1" in msg and "v0.111.0" in msg, "the refusal lists what IS supported"
+        assert "v0.107.1" in msg and "v0.111.0" in msg and "v0.113.0" in msg, (
+            "the refusal lists what IS supported"
+        )
         assert info.value.raw == raw
 
     @pytest.mark.parametrize("raw", [111, 0.111, ["v0.111.0"], True])
@@ -412,3 +414,69 @@ class TestCoachCapability:
         assert msg["request_id"] is None and msg["state_id"] is None
         assert msg["coach"] == logged[0]
         assert msg["coach"]["kind"] == "turn" and msg["coach"]["node_id"] == 3
+
+
+class TestUnsupportedCharacter:
+    """v0.113.0 added The Fool. Until the engine knows a character, a board
+    with one in it is refused with a note the HUD shows -- never searched
+    (the cards and powers are unknown to the engine) and never an
+    "advisor error" on every request."""
+
+    def _refused(self, msg: dict[str, Any], fake_search: list[dict[str, Any]]) -> dict[str, Any]:
+        client, args, log, wlog = _handler_deps()
+        ra._handle_advice_request(
+            client, ra.RecommendConfig(), args, log, wlog, msg, None, session={}, mirror=_Mirror()
+        )
+        assert fake_search == [], "no search may run for a character the engine lacks"
+        (reply,) = client.sent
+        return reply["advice"]
+
+    def test_playing_an_unknown_character_is_refused_by_name(
+        self, fake_search: list[dict[str, Any]]
+    ) -> None:
+        msg = _request(game_version="v0.113.0")
+        msg["run_state"] = {**(msg.get("run_state") or {}), "character": "FOOL"}
+        advice = self._refused(msg, fake_search)
+        assert advice["unsupported_character"] == "FOOL"
+        assert advice["note"].startswith("The Fool support is coming soon")
+        assert "best" not in advice and "options" not in advice
+
+    def test_an_unknown_character_as_ally_is_refused(
+        self, fake_search: list[dict[str, Any]]
+    ) -> None:
+        msg = _request(game_version="v0.113.0")
+        msg["allies"] = [{"hp": 50, "max_hp": 60, "character": "FOOL", "hand": []}]
+        advice = self._refused(msg, fake_search)
+        assert advice["unsupported_character"] == "FOOL"
+
+    def test_a_known_character_still_searches(self, fake_search: list[dict[str, Any]]) -> None:
+        client, args, log, wlog = _handler_deps()
+        ra._handle_advice_request(
+            client,
+            ra.RecommendConfig(),
+            args,
+            log,
+            wlog,
+            _request(game_version="v0.113.0"),
+            None,
+            session={},
+            mirror=_Mirror(),
+        )
+        assert len(fake_search) == 1
+
+
+class TestBetaBuildLabel:
+    def test_beta_build_advice_says_approximate(self) -> None:
+        out = ra.mark_beta_build({"note": "search", "best": {"label": "Strike"}}, "v0.113.0")
+        assert out["note"] == "Beta v0.113.0: approximate advice · search"
+        assert out["beta_game_version"] == "v0.113.0"
+        assert out["best"] == {"label": "Strike"}
+
+    def test_stable_builds_are_untouched(self) -> None:
+        advice = {"note": "search"}
+        for build in ("v0.107.1", "v0.111.0"):
+            assert ra.mark_beta_build(advice, build) is advice
+
+    def test_refusals_are_not_labelled(self) -> None:
+        refusal = {"note": "The Fool support is coming soon", "unsupported_character": "FOOL"}
+        assert ra.mark_beta_build(refusal, "v0.113.0") is refusal

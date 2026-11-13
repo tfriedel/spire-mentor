@@ -1369,7 +1369,7 @@ internal static class SimScreenAdvice
         {
             return false;
         }
-        TaskHelper.RunSafely(slot.Entry.OnTryPurchaseWrapper(room.Inventory.Inventory));
+        TaskHelper.RunSafely(SimGameApi.Purchase(slot.Entry, room.Inventory.Inventory));
         return true;
     }
 

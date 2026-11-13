@@ -82,7 +82,7 @@ LOG = ROOT / "logs" / "import-game.log"
 # (sts2-rs/crates/sts2-workbench/data/game/<ver>/) — GH #801 — plus its display
 # tables: sts2-pycli/web/public/<ver>/{sfx_map,card_text}.json and
 # sts2-pycli/python/workbench/data/<ver>/card_db.json (GH #877).
-SUPPORTED_VERSIONS = ("v0.107.1", "v0.111.0")
+SUPPORTED_VERSIONS = ("v0.107.1", "v0.111.0", "v0.113.0")
 DEFAULT_VERSION = SUPPORTED_VERSIONS[0]
 
 TIERS = ["engine", "oracle", "workbench", "sound"]
@@ -101,10 +101,12 @@ STEAM_DEPOT = "2868841"
 DEPOT_MANIFESTS = {
     "v0.107.1": "4733892780027453168",
     "v0.111.0": "5661886308395090154",
+    "v0.113.0": "5756684179086186957",
 }
 DEPOT_BRANCHES = {
     "v0.107.1": "public",
     "v0.111.0": "public-beta",
+    "v0.113.0": "public-beta",
 }
 # What the import reads from a build; the rest (the ~0.9 GB executable) is skipped.
 DOWNLOAD_FILES = [
@@ -611,8 +613,14 @@ def build_steps(build: Path, version: str) -> list[Step]:
         # what the browser fetches from /assets/vfx/; creature_scales.json
         # (hand-tuned scales + the authored %Bounds boxes) is the table the
         # Python workbench and the bundle build read from the art root.
+        # The art tree is shared by every build and describes the DEFAULT one,
+        # so its table comes from the default build's data whichever build is
+        # being imported (importing v0.113.0 into a fresh worktree once
+        # rewrote it with v0.113.0's bindings).
         (images / "vfx").mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(wiki_data / "vfx_bindings.json", images / "vfx/vfx_bindings.json")
+        default_bindings = WIKI / "data" / DEFAULT_VERSION / "vfx_bindings.json"
+        shutil.copyfile(default_bindings if default_bindings.is_file() else wiki_data / "vfx_bindings.json",
+                        images / "vfx/vfx_bindings.json")
         if not (images / "creature_scales.json").is_file():
             shutil.copyfile(RS / "crates/sts2-workbench/data/game/creature_scales.json", images / "creature_scales.json")
         log("copied vfx_bindings.json and creature_scales.json into the art tree")

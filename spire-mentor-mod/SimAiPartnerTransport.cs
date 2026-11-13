@@ -8,7 +8,12 @@
 // real network (one reliable, ordered channel per direction).
 //
 // Both base classes and both handler interfaces are the same in v0.107.1 and
-// v0.111.0, so one subclass serves both builds. What differs is wired in by
+// v0.111.0, except that v0.113.0 added a `string? debugReason = null` to the
+// abstract NetHost.DisconnectClient. A class can only override the signature
+// it was compiled against, and a concrete class that leaves the other
+// build's abstract slot empty fails to LOAD (TypeLoadException), so the two
+// hosts are abstract here and SimNetHosts emits the concrete subclass at run
+// time against whichever DisconnectClient the game declares. What differs is wired in by
 // reflection: NetHostGameService's private _netHost field (v0.111.0 has
 // StartTestHost, v0.107.1 has nothing), and the connection initializer
 // JoinFlow takes (`Connect(NetClientGameService, ...)` in v0.107.1,
@@ -18,7 +23,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Collections.Concurrent;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer;
@@ -31,8 +38,9 @@ namespace SpireMentor;
 
 internal readonly record struct SimLoopbackPacket(byte[] Bytes, NetTransferMode Mode, int Channel);
 
-/// <summary>The host end. Its handler is the host's NetHostGameService.</summary>
-internal sealed class SimLoopbackHost : NetHost
+/// <summary>The host end. Its handler is the host's NetHostGameService.
+/// Abstract: build one with <see cref="SimNetHosts.Create{T}"/>.</summary>
+public abstract class SimLoopbackHost : NetHost
 {
     /// <summary>The host's net id in a session of its own, as the game's own
     /// fastmp host uses (the null platform names it; SimAiPartnerNames shows
@@ -49,7 +57,7 @@ internal sealed class SimLoopbackHost : NetHost
 
     /// <param name="hostId">The host's net id: <see cref="HostId"/> on its
     /// own, the game's host's (a Steam id) inside a <see cref="SimMixedHost"/>.</param>
-    public SimLoopbackHost(INetHostHandler handler, ulong hostId = HostId)
+    protected SimLoopbackHost(INetHostHandler handler, ulong hostId)
         : base(handler)
     {
         _hostId = hostId;
@@ -108,7 +116,8 @@ internal sealed class SimLoopbackHost : NetHost
         }
     }
 
-    public override void DisconnectClient(ulong peer, NetError why, bool immediately = false)
+    /// <summary><c>DisconnectClient</c> of every build; see <see cref="SimNetHosts"/>.</summary>
+    public void DisconnectClientCore(ulong peer, NetError why, bool immediately)
     {
         if (!_clients.Remove(peer, out SimLoopbackClient? client))
         {
@@ -137,7 +146,7 @@ internal sealed class SimLoopbackHost : NetHost
         }
         foreach (ulong id in _clients.Keys.ToList())
         {
-            DisconnectClient(id, why);
+            DisconnectClientCore(id, why, immediately: false);
         }
         _running = false;
         _connected.Clear();
@@ -190,11 +199,11 @@ internal sealed class SimLoopbackHost : NetHost
 /// same handler (the service), so receiving needs no routing. The platform
 /// stays the game's: names and invites are Steam's as before.
 /// </summary>
-internal sealed class SimMixedHost : NetHost
+public abstract class SimMixedHost : NetHost
 {
     private readonly NetHost _game;
 
-    public SimMixedHost(INetHostHandler handler, NetHost game, SimLoopbackHost partners)
+    protected SimMixedHost(INetHostHandler handler, NetHost game, SimLoopbackHost partners)
         : base(handler)
     {
         _game = game;
@@ -235,15 +244,16 @@ internal sealed class SimMixedHost : NetHost
         Partners.SendMessageToAll(data, count, transfer, lane);
     }
 
-    public override void DisconnectClient(ulong peer, NetError why, bool immediately = false)
+    /// <summary><c>DisconnectClient</c> of every build; see <see cref="SimNetHosts"/>.</summary>
+    public void DisconnectClientCore(ulong peer, NetError why, bool immediately)
     {
         if (Partners.HasPeer(peer))
         {
-            Partners.DisconnectClient(peer, why, immediately);
+            Partners.DisconnectClientCore(peer, why, immediately);
         }
         else
         {
-            _game.DisconnectClient(peer, why, immediately);
+            SimNetHosts.DisconnectClient(_game, peer, why, immediately);
         }
     }
 
@@ -396,7 +406,7 @@ internal static class SimLoopbackHosting
         var service = (NetHostGameService)(version != null
             ? Activator.CreateInstance(typeof(NetHostGameService), version)!
             : Activator.CreateInstance(typeof(NetHostGameService))!);
-        var host = new SimLoopbackHost(service, LocalHostId());
+        var host = SimNetHosts.Create<SimLoopbackHost>(service, LocalHostId());
         NetHostField.SetValue(service, host);
         host.Start();
         return (service, host);
@@ -421,8 +431,8 @@ internal static class SimLoopbackHosting
             case SimLoopbackHost:
                 return null;
             case NetHost game when game.IsConnected:
-                var partners = new SimLoopbackHost(service, game.NetId);
-                NetHostField.SetValue(service, new SimMixedHost(service, game, partners));
+                var partners = SimNetHosts.Create<SimLoopbackHost>(service, game.NetId);
+                NetHostField.SetValue(service, SimNetHosts.Create<SimMixedHost>(service, game, partners));
                 partners.Start();
                 return partners;
             default:
@@ -459,5 +469,115 @@ internal static class SimLoopbackHosting
     {
         Type? versionType = typeof(NetClientGameService).Assembly.GetType(typeof(NetClientGameService).Namespace + ".PeerVersionInfo");
         return versionType?.GetMethod("LocalDefault", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null);
+    }
+}
+
+/// <summary>
+/// Concrete <see cref="SimLoopbackHost"/> / <see cref="SimMixedHost"/> types,
+/// emitted at run time. NetHost.DisconnectClient is
+/// <c>(ulong, NetError, bool now = false)</c> on v0.107.1 / v0.111.0 and
+/// <c>(ulong, NetError, bool now = false, string? debugReason = null)</c> on
+/// v0.113.0 (Multiplayer.Transport/NetHost.cs:74). The emitted subclass
+/// overrides whichever the running game declares and forwards it to the
+/// host's <c>DisconnectClientCore(ulong, NetError, bool)</c>; the extra debug
+/// reason is dropped. Any OTHER abstract member left open means the game
+/// changed NetHost again: Create then throws, which turns off AI partners
+/// only (the caller logs it), instead of a TypeLoadException wherever the
+/// host type is touched.
+/// </summary>
+public static class SimNetHosts
+{
+    private static readonly ConcurrentDictionary<Type, Type> Concrete = new();
+    private static ModuleBuilder? _module;
+
+    /// <summary><c>new T(args)</c> for one of the abstract hosts.</summary>
+    internal static T Create<T>(params object[] args) where T : NetHost =>
+        (T)Activator.CreateInstance(Concrete.GetOrAdd(typeof(T), Build), args)!;
+
+    /// <summary><c>host.DisconnectClient(peer, why, now)</c> on any build.</summary>
+    internal static void DisconnectClient(NetHost host, ulong peer, NetError why, bool now)
+    {
+        MethodInfo m = DisconnectMethod(typeof(NetHost))
+            ?? throw new MissingMethodException(nameof(NetHost), nameof(NetHost.DisconnectClient));
+        ParameterInfo[] p = m.GetParameters();
+        var args = new object?[p.Length];
+        args[0] = peer;
+        args[1] = why;
+        args[2] = now;
+        for (int i = 3; i < p.Length; i++) args[i] = p[i].DefaultValue;
+        try
+        {
+            m.Invoke(host, args);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+        }
+    }
+
+    /// <summary>NetHost's abstract DisconnectClient: (ulong, NetError, bool, optional...).</summary>
+    private static MethodInfo? DisconnectMethod(Type type) =>
+        type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(m =>
+            {
+                ParameterInfo[] p = m.GetParameters();
+                return m.Name == nameof(NetHost.DisconnectClient)
+                    && m.IsAbstract
+                    && p.Length >= 3
+                    && p[0].ParameterType == typeof(ulong)
+                    && p[1].ParameterType == typeof(NetError)
+                    && p[2].ParameterType == typeof(bool)
+                    && p.Skip(3).All(x => x.IsOptional);
+            });
+
+    private static Type Build(Type abstractHost)
+    {
+        _module ??= AssemblyBuilder
+            .DefineDynamicAssembly(new AssemblyName("SpireMentor.NetHosts"), AssemblyBuilderAccess.Run)
+            .DefineDynamicModule("SpireMentor.NetHosts");
+        TypeBuilder tb = _module.DefineType(
+            abstractHost.Name + "Impl",
+            TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Class,
+            abstractHost);
+
+        foreach (ConstructorInfo ctor in abstractHost.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (ctor.IsPrivate)
+                continue;
+            Type[] types = ctor.GetParameters().Select(p => p.ParameterType).ToArray();
+            ConstructorBuilder cb = tb.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, types);
+            ILGenerator il = cb.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            for (int i = 1; i <= types.Length; i++) il.Emit(OpCodes.Ldarg, (short)i);
+            il.Emit(OpCodes.Call, ctor);
+            il.Emit(OpCodes.Ret);
+        }
+
+        MethodInfo core = abstractHost.GetMethod("DisconnectClientCore", new[] { typeof(ulong), typeof(NetError), typeof(bool) })
+            ?? throw new MissingMethodException(abstractHost.Name, "DisconnectClientCore");
+        foreach (MethodInfo open in abstractHost.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                     .Where(m => m.IsAbstract))
+        {
+            if (open != DisconnectMethod(abstractHost))
+            {
+                throw new NotSupportedException(
+                    $"Spire Mentor does not know this game build: NetHost.{open.Name} is abstract and not implemented by {abstractHost.Name}");
+            }
+            Type[] types = open.GetParameters().Select(p => p.ParameterType).ToArray();
+            MethodBuilder mb = tb.DefineMethod(
+                open.Name,
+                MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig,
+                open.ReturnType,
+                types);
+            ILGenerator il = mb.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Call, core);
+            il.Emit(OpCodes.Ret);
+            tb.DefineMethodOverride(mb, open);
+        }
+        return tb.CreateType()!;
     }
 }

@@ -39,7 +39,9 @@
     <GameLibDir Condition="'$(_GameLibIsLegacy)' == 'true'">$(MSBuildThisFileDirectory)..\..\lib\</GameLibDir>
     <OutputPath>bin\$(GameVersion)\$(Configuration)\</OutputPath>
     <IntermediateOutputPath>obj\$(GameVersion)\$(Configuration)\</IntermediateOutputPath>
-    <DefineConstants Condition="'$(GameVersion)' == 'v0.111.0'">$(DefineConstants);GAME_V0111</DefineConstants>
+    <!-- GAME_V0111 = "the v0.111.0 API or later"; GAME_V0113 = v0.113.0 or later. -->
+    <DefineConstants Condition="'$(GameVersion)' == 'v0.111.0' Or '$(GameVersion)' == 'v0.113.0'">$(DefineConstants);GAME_V0111</DefineConstants>
+    <DefineConstants Condition="'$(GameVersion)' == 'v0.113.0'">$(DefineConstants);GAME_V0113</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -50,8 +52,8 @@
   </ItemGroup>
 
   <Target Name="_CheckGameVersion" BeforeTargets="ResolveAssemblyReferences">
-    <Error Condition="'$(GameVersion)' != 'v0.107.1' And '$(GameVersion)' != 'v0.111.0'"
-           Text="Unsupported GameVersion '$(GameVersion)' (supported: v0.107.1, v0.111.0)." />
+    <Error Condition="'$(GameVersion)' != 'v0.107.1' And '$(GameVersion)' != 'v0.111.0' And '$(GameVersion)' != 'v0.113.0'"
+           Text="Unsupported GameVersion '$(GameVersion)' (supported: v0.107.1, v0.111.0, v0.113.0)." />
     <Error Condition="!Exists('$(GameLibDir)sts2.dll')"
            Text="No game DLLs for $(GameVersion): $(GameLibDir)sts2.dll is missing. Stage them with `python scripts/setup_oracle.py --version $(GameVersion) &lt;data_sts2_* dir&gt;` (docs/bring-your-own-game.md)." />
     <Warning Condition="'$(_GameLibIsLegacy)' == 'true'"

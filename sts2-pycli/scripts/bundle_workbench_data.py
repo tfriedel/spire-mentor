@@ -58,7 +58,7 @@ _MONO_ROOT = _REPO_ROOT.parent
 # Keep in lockstep with ``workbench.localization.DEFAULT_GAME_VERSION`` /
 # ``SUPPORTED_GAME_VERSIONS`` (and the Rust ``sts2_core::GameVersion``).
 _ENGINE_WIKI_VERSION = "v0.107.1"
-_VERSIONS = ("v0.107.1", "v0.111.0")
+_VERSIONS = ("v0.107.1", "v0.111.0", "v0.113.0")
 
 _WIKI_ROOT = _MONO_ROOT / "sts2-wiki" / "data"
 _IMAGES = _MONO_ROOT / "sts2-wiki" / "site" / "public" / "images"

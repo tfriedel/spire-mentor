@@ -8415,7 +8415,9 @@ pub(crate) fn history_course_replays(
             card_type,
             crate::cards::CardType::Attack | crate::cards::CardType::Skill
         ),
-        crate::GameVersion::V0_111_0 => card_type == crate::cards::CardType::Attack,
+        crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => {
+            card_type == crate::cards::CardType::Attack
+        }
     }
 }
 

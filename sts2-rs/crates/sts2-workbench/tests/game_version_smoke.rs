@@ -67,11 +67,15 @@ fn advance(wb: &mut Workbench, mut step: Value, steps: usize) -> Value {
 fn capabilities_list_the_supported_builds() {
     let mut wb = new_wb();
     let caps = call(&mut wb, "GET", "/api/capabilities", Value::Null);
-    // A public snapshot has no v0.111.0 bundle, so only the default is offered (#855).
+    // A public snapshot has no non-default bundles, so only the default is
+    // offered there (#855); each build with a bundle is listed, oldest first.
+    #[allow(unused_mut)]
+    let mut want = vec!["v0.107.1"];
     #[cfg(workbench_game_data_v0_111_0)]
-    assert_eq!(caps["game_versions"], json!(["v0.107.1", "v0.111.0"]));
-    #[cfg(not(workbench_game_data_v0_111_0))]
-    assert_eq!(caps["game_versions"], json!(["v0.107.1"]));
+    want.push("v0.111.0");
+    #[cfg(workbench_game_data_v0_113_0)]
+    want.push("v0.113.0");
+    assert_eq!(caps["game_versions"], json!(want));
     assert_eq!(caps["default_game_version"], json!("v0.107.1"));
 }
 

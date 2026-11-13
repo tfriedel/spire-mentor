@@ -38,6 +38,9 @@ using MegaCrit.Sts2.Core.Unlocks;
 #if GAME_V0111
 using MegaCrit.Sts2.Core.Modding;
 #endif
+#if GAME_V0113
+using MegaCrit.Sts2.Core.Multiplayer.Game;
+#endif
 
 namespace Sts2Headless;
 
@@ -570,7 +573,7 @@ public class RunSimulator
             Log("Entered Act 0");
 
             // Register card selector for cards that need player choice
-            CardSelectCmd.UseSelector(_cardSelector);
+            GameApi.UseCardSelector(_cardSelector);
             LocPatches._bundleSimRef = this;
 
             // Now we should be at the map — detect decision point
@@ -761,7 +764,7 @@ public class RunSimulator
         var relics = new List<object?>();
         for (int i = 0; i < count; i++)
         {
-            var relic = MegaCrit.Sts2.Core.Factories.RelicFactory.PullNextRelicFromFront(player);
+            var relic = GameApi.PullNextRewardRelic(player);
             relics.Add(new Dictionary<string, object?> { ["id"] = relic.Id.Entry });
         }
         return new Dictionary<string, object?> { ["type"] = "relic_reward", ["relics"] = relics };
@@ -1862,7 +1865,7 @@ public class RunSimulator
 
             CombatManager.Instance.TurnStarted += _ => _turnStarted.Set();
             CombatManager.Instance.CombatEnded += _ => _combatEnded.Set();
-            CardSelectCmd.UseSelector(_cardSelector);
+            GameApi.UseCardSelector(_cardSelector);
             LocPatches._bundleSimRef = this;
 
             var savedRoom = _runState.CurrentRoom;
@@ -2448,7 +2451,7 @@ public class RunSimulator
                     _syncCtx.Pump();
 
                     // Reset the player ready state and try again with SuppressYield
-                    CombatManager.Instance.UndoReadyToEndTurn(player);
+                    GameApi.UndoReadyToEndTurn(player);
                     _syncCtx.Pump();
 
                     // LAST-INSTANT re-check: the Cancel/Undo pumps above can
@@ -2511,7 +2514,7 @@ public class RunSimulator
                     // Cancel again and undo
                     RunManager.Instance.ActionExecutor.Cancel();
                     _syncCtx.Pump();
-                    CombatManager.Instance.UndoReadyToEndTurn(player);
+                    GameApi.UndoReadyToEndTurn(player);
                     _syncCtx.Pump();
                     Thread.Sleep(50);
 
@@ -2653,8 +2656,8 @@ public class RunSimulator
             return Error("buy_card requires 'card_index'");
 
         var idx = Convert.ToInt32(args["card_index"]);
-        var allEntries = merchantRoom.GetLocalInventory().CharacterCardEntries
-            .Concat(merchantRoom.GetLocalInventory().ColorlessCardEntries).ToList();
+        var allEntries = GameApi.LocalInventory(merchantRoom).CharacterCardEntries
+            .Concat(GameApi.LocalInventory(merchantRoom).ColorlessCardEntries).ToList();
         if (idx < 0 || idx >= allEntries.Count)
             return Error($"Invalid card index {idx}");
 
@@ -2664,7 +2667,7 @@ public class RunSimulator
 
         try
         {
-            entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()).GetAwaiter().GetResult();
+            GameApi.Purchase(entry, merchantRoom).GetAwaiter().GetResult();
             _syncCtx.Pump();
             Log($"Bought card: {entry.CreationResult?.Card?.GetType().Name ?? "?"} for {entry.Cost}g");
         }
@@ -2681,7 +2684,7 @@ public class RunSimulator
             return Error("buy_relic requires 'relic_index'");
 
         var idx = Convert.ToInt32(args["relic_index"]);
-        var entries = merchantRoom.GetLocalInventory().RelicEntries;
+        var entries = GameApi.LocalInventory(merchantRoom).RelicEntries;
         if (idx < 0 || idx >= entries.Count) return Error($"Invalid relic index {idx}");
 
         var entry = entries[idx];
@@ -2709,7 +2712,7 @@ public class RunSimulator
             // selection surfaced, stash the purchase task in `_pendingPurchaseTask`
             // so DoSelectCards (MerchantRoom branch) drives it to completion after
             // the player resolves the selection.
-            var task = RunOnPool(() => entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
+            var task = RunOnPool(() => GameApi.Purchase(entry, merchantRoom));
             WaitUntilOptionTaskSettles(task, "relic-purchase task or selection");
             // A `select_cards` screen (PARITY118's deck card-select) or a card
             // reward (Orrery's 5) parks the task in `_pendingPurchaseTask`;
@@ -2737,7 +2740,7 @@ public class RunSimulator
             return Error("buy_potion requires 'potion_index'");
 
         var idx = Convert.ToInt32(args["potion_index"]);
-        var entries = merchantRoom.GetLocalInventory().PotionEntries;
+        var entries = GameApi.LocalInventory(merchantRoom).PotionEntries;
         if (idx < 0 || idx >= entries.Count) return Error($"Invalid potion index {idx}");
 
         var entry = entries[idx];
@@ -2752,7 +2755,7 @@ public class RunSimulator
         var potionCost = entry.Cost;
         try
         {
-            entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()).GetAwaiter().GetResult();
+            GameApi.Purchase(entry, merchantRoom).GetAwaiter().GetResult();
             _syncCtx.Pump();
             Log($"Bought potion: {potionName} for {potionCost}g");
         }
@@ -2769,14 +2772,14 @@ public class RunSimulator
         if (_runState?.CurrentRoom is not MerchantRoom merchantRoom)
             return Error("Not in a shop");
 
-        var removal = merchantRoom.GetLocalInventory().CardRemovalEntry;
+        var removal = GameApi.LocalInventory(merchantRoom).CardRemovalEntry;
         if (removal == null) return Error("No card removal available");
         if (player.Gold < removal.Cost) return Error("Not enough gold");
 
         try
         {
             // Run on background thread so card selection can pause (same pattern as event options)
-            var task = RunOnPool(() => removal.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
+            var task = RunOnPool(() => GameApi.Purchase(removal, merchantRoom));
             // Wait until the task settles (completes or parks at a selection) rather
             // than on a fixed 1 s budget — see WaitUntilOptionTaskSettles for why a
             // short timeout here drops a still-in-flight task and races its writes.
@@ -3257,7 +3260,7 @@ public class RunSimulator
     private Dictionary<string, object?> DoLeaveRoom(Player player)
     {
         Log("Leaving room");
-        try { RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult(); }
+        try { GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult(); }
         catch { }
         _syncCtx.Pump();
         WaitForActionExecutor();
@@ -3310,7 +3313,7 @@ public class RunSimulator
             }
         }
 
-        RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
+        GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
         WaitForActionExecutor();
         return DetectDecisionPoint();
     }
@@ -4689,7 +4692,7 @@ public class RunSimulator
                 // then a silent skip after the selector's 300 s timeout. The real
                 // game shows the reward screen, so stash the task at the reward
                 // and let select/skip_card_reward drive it on, as for an option.
-                var task = RunOnPool(() => RunManager.Instance.ProceedFromTerminalRewardsScreen());
+                var task = RunOnPool(() => GameApi.ProceedFromTerminalRewardsScreen());
                 WaitUntilOptionTaskSettles(task, "parent event resume or its reward");
                 if (!task.IsCompleted && AnySelectionPending())
                 {
@@ -4937,7 +4940,7 @@ public class RunSimulator
 
         try
         {
-            RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
+            GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
             _syncCtx.Pump();
         }
         catch { }
@@ -4985,7 +4988,7 @@ public class RunSimulator
             Log($"Event {localEvent?.GetType().Name ?? "null"} finished, proceeding");
             try
             {
-                RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
+                GameApi.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
                 _syncCtx.Pump();
             }
             catch { }
@@ -5217,7 +5220,7 @@ public class RunSimulator
 
     private Dictionary<string, object?> ShopState(MerchantRoom merchantRoom, Player player)
     {
-        var inv = merchantRoom.GetLocalInventory();
+        var inv = GameApi.LocalInventory(merchantRoom);
         if (inv == null) { ForceToMap(); return MapSelectState(); }
 
         var cards = inv.CharacterCardEntries.Concat(inv.ColorlessCardEntries)
@@ -5273,7 +5276,7 @@ public class RunSimulator
             return dict;
         }).ToList();
 
-        var removal = merchantRoom.GetLocalInventory().CardRemovalEntry;
+        var removal = GameApi.LocalInventory(merchantRoom).CardRemovalEntry;
 
         return new Dictionary<string, object?>
         {
@@ -8338,7 +8341,7 @@ public class RunSimulator
                     foreach (var (relic, room) in pending)
                     {
                         // Fire-and-forget, exactly as LordsParasol.cs:27 does.
-                        var task = (Task?)ParasolPurchaseEverything!.Invoke(relic, new object[] { room.GetLocalInventory() });
+                        var task = (Task?)ParasolPurchaseEverything!.Invoke(relic, new object[] { GameApi.LocalInventory(room) });
                         if (task != null) TaskHelper.RunSafely(task);
                     }
                 }
@@ -8704,8 +8707,14 @@ public class RunSimulator
                 }
                 foreach (var card in targets)
                 {
+                    // v0.113.0 moved the transform to CombatCardGeneration
+                    // (Models.Powers/EntropyPower.cs:31).
                     await MegaCrit.Sts2.Core.Commands.CardCmd.TransformToRandom(
+#if GAME_V0113
+                        card, player.RunState.Rng.CombatCardGeneration);
+#else
                         card, player.RunState.Rng.CombatCardSelection);
+#endif
                 }
             }
             catch (Exception ex)
@@ -9467,5 +9476,95 @@ internal static class ThreadProbe
             try { File.AppendAllText(_path!, line + "\n"); }
             catch { }
         }
+    }
+}
+
+/// <summary>
+/// Game API calls whose shape differs between the builds this oracle links
+/// against. One call site per operation, so RunSimulator reads the same at
+/// every version.
+/// </summary>
+internal static class GameApi
+{
+    /// <summary>The local player's merchant inventory. v0.113.0 moved it from
+    /// the room to <c>RunManager.MerchantSynchronizer</c>
+    /// (<c>Rooms/MerchantRoom.cs:46</c>, <c>Multiplayer.Game/MerchantSynchronizer.cs:69</c>).</summary>
+    internal static MerchantInventory LocalInventory(MerchantRoom room)
+    {
+#if GAME_V0113
+        return RunManager.Instance.MerchantSynchronizer.GetLocalInventory();
+#else
+        return room.GetLocalInventory();
+#endif
+    }
+
+    /// <summary>The awaitable proceed-from-rewards. v0.113.0 made
+    /// <c>ProceedFromTerminalRewardsScreen</c> fire-and-forget and added the
+    /// <c>…Async</c> twin (<c>Runs/RunManager.cs:1541-1549</c>).</summary>
+    /// <summary>Buy a merchant entry the way the shop UI does. v0.113.0
+    /// routes purchases through <c>MerchantSynchronizer.PurchaseLocalEntry</c>
+    /// (<c>Nodes.Screens.Shops/NMerchantSlot.cs:402</c>), which takes the
+    /// inventory's purchase lock around <c>OnTryPurchaseUnsynchronized</c>;
+    /// v0.111.0 and older call <c>OnTryPurchaseWrapper</c>.</summary>
+    internal static Task<bool> Purchase(MerchantEntry entry, MerchantRoom room)
+    {
+#if GAME_V0113
+        return RunManager.Instance.MerchantSynchronizer.PurchaseLocalEntry(entry);
+#else
+        return entry.OnTryPurchaseWrapper(room.GetLocalInventory());
+#endif
+    }
+
+    /// <summary>Elite/combat relic drop: rarity off <c>PlayerRng.Rewards</c>,
+    /// then the grab-bag front. v0.113.0 renamed the one-arg overload
+    /// <c>PullNextRelicForRewardFromFront</c> (<c>Factories/RelicFactory.cs:29</c>).</summary>
+    internal static RelicModel PullNextRewardRelic(Player player)
+    {
+#if GAME_V0113
+        return MegaCrit.Sts2.Core.Factories.RelicFactory.PullNextRelicForRewardFromFront(player);
+#else
+        return MegaCrit.Sts2.Core.Factories.RelicFactory.PullNextRelicFromFront(player);
+#endif
+    }
+
+#if GAME_V0113
+    private static IDisposable? _cardSelectorScope;
+#endif
+
+    /// <summary>Install the oracle's automated card selector. v0.113.0 replaced
+    /// the static <c>CardSelectCmd</c> selector stack with a per-run
+    /// <c>CardSelectorStack</c> whose fallback, when no player has a pushed
+    /// selector, is the static test selector (<c>CardSelection/CardSelectorStack.cs</c>
+    /// <c>GetSelector</c>). <c>SetTestSelector</c> throws when one is set, so the
+    /// previous scope is disposed first.</summary>
+    internal static void UseCardSelector(MegaCrit.Sts2.Core.TestSupport.ICardSelector selector)
+    {
+#if GAME_V0113
+        _cardSelectorScope?.Dispose();
+        _cardSelectorScope = CardSelectorStack.SetTestSelector(selector);
+#else
+        CardSelectCmd.UseSelector(selector);
+#endif
+    }
+
+    /// <summary>Back a player out of "ready to end turn". v0.113.0 renamed it
+    /// <c>TryUndoReadyToEndTurn</c> and made it a no-op when the player cannot
+    /// un-end the turn (Void Form, Pael's Eye, dead; <c>Combat/CombatManager.cs:1000</c>).</summary>
+    internal static void UndoReadyToEndTurn(Player player)
+    {
+#if GAME_V0113
+        CombatManager.Instance.TryUndoReadyToEndTurn(player);
+#else
+        CombatManager.Instance.UndoReadyToEndTurn(player);
+#endif
+    }
+
+    internal static Task ProceedFromTerminalRewardsScreen()
+    {
+#if GAME_V0113
+        return RunManager.Instance.ProceedFromTerminalRewardsScreenAsync();
+#else
+        return RunManager.Instance.ProceedFromTerminalRewardsScreen();
+#endif
     }
 }

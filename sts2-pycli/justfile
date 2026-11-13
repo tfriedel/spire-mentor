@@ -167,6 +167,7 @@ build-cs ver="v0.107.1":
 build-cs-all:
     @just build-cs v0.107.1
     @just build-cs v0.111.0
+    @just build-cs v0.113.0
 
 # Build the self-contained SimAdvisor.exe (GH #380; Windows only).
 # Dedicated .venv-advisor (no torch), PyInstaller onedir -> dist/SimAdvisor/.

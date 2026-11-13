@@ -42,8 +42,8 @@ for a in "$@"; do
   esac
 done
 case "$VER" in
-  v0.107.1|v0.111.0) ;;
-  *) die "unsupported game version '$VER' (supported: v0.107.1, v0.111.0)" ;;
+  v0.107.1|v0.111.0|v0.113.0) ;;
+  *) die "unsupported game version '$VER' (supported: v0.107.1, v0.111.0, v0.113.0)" ;;
 esac
 
 if [[ -z "${STS2_BINARIES:-}" ]]; then

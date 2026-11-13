@@ -108,8 +108,13 @@ def test_the_default_build_reads_the_v0107_tables(select) -> None:
     assert ST.show_counter_relics() is ST.SHOW_COUNTER_RELICS
 
 
+# Builds the advisor accepts whose e2e tables are not generated yet. The e2e
+# brain does not serve them; GH #1303 tracks generating them.
+PENDING_TABLES = {"v0.113.0"}
+
+
 def test_every_supported_build_has_its_tables() -> None:
-    builds = set(sts2_client.SUPPORTED_GAME_VERSIONS)
+    builds = set(sts2_client.SUPPORTED_GAME_VERSIONS) - PENDING_TABLES
     assert set(ST.CARD_TYPE_BY_VERSION) == builds
     assert set(ST.SHOW_COUNTER_RELICS_BY_VERSION) == builds
     assert set(SN.RELIC_COUNTER_DISPLAY_BY_VERSION) == builds
@@ -117,6 +122,12 @@ def test_every_supported_build_has_its_tables() -> None:
         # A display rule for exactly the relics that build shows a counter on.
         assert set(SN.RELIC_COUNTER_DISPLAY_BY_VERSION[v]) == ST.show_counter_relics(v), v
         assert set(ST.card_types(v).values()) <= set(ST.CARD_TYPES), v
+
+
+def test_pending_builds_are_still_pending() -> None:
+    # Fails once a pending build gets its tables: then drop it from the set.
+    assert set(sts2_client.SUPPORTED_GAME_VERSIONS) >= PENDING_TABLES
+    assert not PENDING_TABLES & set(ST.CARD_TYPE_BY_VERSION)
 
 
 def test_v0111_tables_are_the_audited_diff() -> None:
