@@ -164,11 +164,13 @@ for (const size of ["large", "small"] as PhoneSize[]) {
       const stage = await realBox(page.locator(".gs-arena-stage"));
       expect(stage.height).toBeGreaterThanOrEqual(STAGE_MIN[size].full);
       await checkZoom(page, ZOOM_W[size].full, `${size} landscape`);
-      // touch-action: manipulation on what is tapped twice in a row.
+      // No double-tap zoom on what is tapped twice in a row: `manipulation`,
+      // and `none` on the hand, which also keeps the browser from taking a
+      // thumb drag across the cards as a scroll (drag-browse, 2026-11-13).
       await tapSlot(page, 2);
-      for (const sel of [".gs-handslot-hit", ".gs-zoomcard", ".gs-hud-relic"]) {
+      for (const [sel, want] of [[".gs-handslot-hit", "none"], [".gs-zoomcard", "manipulation"], [".gs-hud-relic", "manipulation"]]) {
         expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).touchAction), sel)
-          .toBe("manipulation");
+          .toBe(want);
       }
     });
   });

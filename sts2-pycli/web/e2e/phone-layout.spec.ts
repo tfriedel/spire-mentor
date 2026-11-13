@@ -415,10 +415,13 @@ for (const size of Object.keys(PHONES) as PhoneSize[]) {
       });
 
       test("the sheet closes when the combat state moves on", async ({ page }) => {
-        await openPreview(page, "enemies=2&enemy=cultists&powers=3&debuff=2500");
+        // The fixture's timer starts with the page, not with the tap: 2.5 s
+        // lost the race to a cold page load (the state moved BEFORE the sheet
+        // opened, which then rightly stayed), so it gets 6 s.
+        await openPreview(page, "enemies=2&enemy=cultists&powers=3&debuff=6000");
         await thing(page).first().tap(T);
         await expect(page.locator(".gs-inspect")).toBeVisible();
-        await expect(page.locator(".gs-inspect")).toHaveCount(0, { timeout: 6000 });
+        await expect(page.locator(".gs-inspect")).toHaveCount(0, { timeout: 10_000 });
       });
 
       test("the same power on another enemy switches the sheet", async ({ page }) => {
