@@ -958,9 +958,17 @@ _SCROLL_BOXES = {
         "ECHO1",
         [["REAVE", "SCOURGE", "LETHALITY"], ["DEFILE", "NEGATIVE_PULSE", "NO_ESCAPE"]],
     ),
+    # Captured from the v0.113.0 C# headless (ECHO1 rolls no Scroll Boxes
+    # there). The engine still rolls v0.111.0's Neow offer on v0.113.0, so the
+    # test is a strict xfail there (`pending_run_level`, tests/conftest.py).
+    "v0.113.0": (
+        "ECHO2",
+        [["GRAVE_WARDEN", "PULL_AGGRO", "DEATHBRINGER"], ["DEFILE", "GRAVEBLAST", "BURY"]],
+    ),
 }
 
 
+@pytest.mark.pending_run_level
 def test_scroll_boxes_renders_bundle_select_and_adds_whole_pack() -> None:
     """Scroll Boxes (Necrobinder Neow, `_SCROLL_BOXES` seed) must surface as a
     ``bundle_select`` (pick 1 of 2 packs), not two single-card rewards.
@@ -1063,20 +1071,30 @@ def _walk_to_chest(g: RustGame, max_steps: int = 400) -> tuple[dict, list[dict]]
     pytest.fail("did not reach a treasure room within the step budget")
 
 
-def test_walking_into_a_chest_reveals_what_it_held() -> None:
+def test_walking_into_a_chest_reveals_what_it_held(run_level_pending: bool) -> None:
+    # A build whose run level is still pending (tests/conftest.py
+    # `PENDING_BUILDS`) has no pin: on v0.113.0 the C# run of this seed already
+    # differs at Neow, so the chest the engine's walk reaches does not exist in
+    # the real game. Every other build must be pinned.
+    version = sts2_client.GAME_VERSION
+    assert (version in _TREASURE_CHEST) != run_level_pending, (
+        f"{version}: pin its chest in _TREASURE_CHEST (or its run level is pending)"
+    )
     g = RustGame()
     g.start(character="Ironclad", seed=TREASURE_SEED, ascension=0)
-    state, _ = _walk_to_chest(g)
+    state, seen = _walk_to_chest(g)
     reveal = state["room_reveal"]
     assert reveal["kind"] == "treasure"
     assert reveal["act"] == 1
-    # Pinned to the seed: at v0.107.1 this chest pays 43 gold and holds Horn Cleat.
-    gold, relic = _TREASURE_CHEST[sts2_client.GAME_VERSION]
-    assert reveal["gold"] == gold
-    assert reveal["relic"]["name"] == relic
-    # The relic really is the player's already — the panel reports, never gates.
+    # The reveal reports what the room really did: the gold the player gained
+    # entering it, and a relic they now own (the panel reports, never gates).
+    gold_before = (seen[-2].get("player") or {}).get("gold")
+    assert (state.get("player") or {}).get("gold") - gold_before == reveal["gold"]
     owned = [r["name"] for r in (state.get("player") or {}).get("relics") or []]
-    assert relic in owned
+    assert reveal["relic"]["name"] in owned
+    # Pinned to the seed: at v0.107.1 this chest pays 43 gold and holds Horn Cleat.
+    if version in _TREASURE_CHEST:
+        assert (reveal["gold"], reveal["relic"]["name"]) == _TREASURE_CHEST[version]
 
 
 def test_only_the_chest_room_reveals() -> None:

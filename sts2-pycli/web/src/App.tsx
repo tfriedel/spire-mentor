@@ -21,6 +21,9 @@ import MapChoices from "./components/MapChoices";
 import DecisionScreen from "./components/DecisionScreen";
 import AutobattlePanel from "./components/AutobattlePanel";
 import GameHud from "./components/GameHud";
+import { InspectProvider } from "./inspect/InspectContext";
+import InspectSheet from "./inspect/InspectSheet";
+import { usePhone } from "./phone";
 import PileViewer from "./components/PileViewer";
 import DeckAnalysis from "./components/DeckAnalysis";
 import RegretReview from "./components/RegretReview";
@@ -173,6 +176,8 @@ function revealKeyOf(state: CombatState | undefined, scope: string): string | nu
 const fetchLiveGameState = () => api.bridge.state().then((s) => JSON.stringify(s));
 
 function AppBody() {
+  // Phone: every screen without a board gets its own inspect host (below).
+  const phone = usePhone();
   const [runs, setRuns] = useState<string[]>([]);
   // Follow mode: poll the loaded run file's size/mtime and reload on change,
   // sticking to the newest step — the "watch a live game write its log" view.
@@ -387,11 +392,14 @@ function AppBody() {
   const analyzeInTopbar = short && mode === "play" && combatState?.decision === "combat_play"
     && (combatState.player?.deck?.length ?? 0) > 0;
   // A phone in landscape (≤520px tall): the top row is a third of the screen
-  // the game does not get. It folds away behind the ≡ button and opens OVER
+  // the game does not get. It folds away behind the Menu button and opens OVER
   // the board as a sheet; nothing in it is needed mid-fight.
   const phoneLandscape = useMediaQuery(PHONE_LANDSCAPE_QUERY);
+  // A short window that is not a phone keeps the ≡ toggle and the sheet; a
+  // phone folds the bar into TopBar's labelled "Menu" button instead.
+  const barSheet = phoneLandscape && phone == null;
   const [chromeOpen, setChromeOpen] = useState(false);
-  const topbarHidden = phoneLandscape && !chromeOpen;
+  const topbarHidden = barSheet && !chromeOpen;
   const [sideOpen, setSideOpen] = useState<boolean | null>(null);
   const sideVisible = sideOpen ?? !narrow;
   const [analysisOpen, setAnalysisOpen] = useState(false);
@@ -560,7 +568,13 @@ function AppBody() {
   const [offCombatBrain, setOffCombatBrain] = useState<OffCombatBrain>("ppo");
   // The e2e student plays only Ironclad on v0.111.0: picking it fixes both,
   // and picking another character while it is chosen falls back to PPO.
+  // Until the user picks a brain, Ironclad's is Instinct wherever the build
+  // has it (owner, 2026-11-12), on the game build it reads; another
+  // character gets PPO and the build that was picked before.
+  const brainPickedRef = useRef(false);
+  const versionBeforeE2eRef = useRef<string | null>(null);
   const pickBrain = (b: OffCombatBrain) => {
+    brainPickedRef.current = true;
     setOffCombatBrain(b);
     if (b === "e2e") {
       setCharacter(E2E_CHARACTER);
@@ -608,8 +622,21 @@ function AppBody() {
   };
   const pickCharacter = (c: string) => {
     setCharacter(c);
-    if (offCombatBrain === "e2e" && c !== E2E_CHARACTER) setOffCombatBrain("ppo");
+    if (offCombatBrain === "e2e" && c !== E2E_CHARACTER) {
+      setOffCombatBrain("ppo");
+      if (!brainPickedRef.current && versionBeforeE2eRef.current) setGameVersionPick(versionBeforeE2eRef.current);
+    }
   };
+  const e2eVersionOffered = gameVersions.includes(E2E_GAME_VERSION);
+  useEffect(() => {
+    if (brainPickedRef.current || !e2eAvailable || !e2eVersionOffered || character !== E2E_CHARACTER) return;
+    if (gameVersionPick !== E2E_GAME_VERSION) {
+      versionBeforeE2eRef.current = gameVersionPick;
+      setGameVersionPick(E2E_GAME_VERSION);
+    }
+    setOffCombatBrain("e2e");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the default, applied when the character or the build's offer changes
+  }, [e2eAvailable, e2eVersionOffered, character]);
   // Per-decision timing of the e2e student over the current autoplay.
   const [e2eTiming, setE2eTiming] = useState<E2eTiming | null>(null);
   // Who made the play-to-end loop's last move (the step's `debug.brain`):
@@ -1589,6 +1616,9 @@ function AppBody() {
       release();
     }
   }
+  /** Undo: the step before the one on screen, on the active path. */
+  const undoPath = liveTimeline?.active_path ?? [];
+  const undoNode = undoPath.length > 1 ? undoPath[undoPath.length - 2] : null;
   async function seekTo(nodeId: number) {
     if (seekBusy) return;
     autoHintedRef.current = false;
@@ -2292,17 +2322,20 @@ function AppBody() {
     <SoundProvider gameVersion={shownGameVersion}>
     <SoundBridge soundRef={soundRef} live={live} mode={mode} />
     <AdviceMarksProvider value={marksValue}>
+    {/* One inspect state for the HUD band (relics) and the Board (sheet). */}
+    <InspectProvider>
     <div className="wb-shell"
       style={{ gridTemplateColumns: sideVisible && !narrow ? "1fr 320px" : "1fr" }}>
       <div className="wb-main">
-        {phoneLandscape && (
+        {barSheet && (
           <button type="button" className="wb-chrome-toggle" onClick={() => setChromeOpen((v) => !v)}
             aria-label="workbench tools" aria-expanded={chromeOpen}
             title={chromeOpen ? "hide the workbench tool row" : "show the workbench tool row"}>
             {chromeOpen ? "✕" : "≡"}
           </button>
         )}
-        <div className={`mono wb-topbar${phoneLandscape ? " wb-topbar--sheet" : ""}`} hidden={topbarHidden}>
+        <div className={`mono wb-topbar${barSheet ? " wb-topbar--sheet" : phone === "landscape" ? " wb-topbar--folded" : ""}`}
+          hidden={topbarHidden}>
         {/* View switch · AI chips · context · Run/Analyze/Tools menus · where.
             What each menu offers is `buildCommands` (topbar/commands.ts); the
             bar itself only lays it out. */}
@@ -2343,6 +2376,14 @@ function AppBody() {
           where={whereLabel}
           whereTitle={mode === "play" ? "the act this run is walking · Act 1 has two models (Overgrowth / Underdocks)" : undefined}
           palette={{ open: paletteOpen, setOpen: setPaletteOpen }}
+          phoneActions={phone ? {
+            undo: mode === "play" && live ? {
+              run: () => { if (undoNode != null) void seekTo(undoNode); },
+              disabledReason: autoRunning ? "the AI is playing" : seekBusy ? "going back…"
+                : undoNode == null ? "nothing to take back yet" : undefined,
+            } : undefined,
+            log: { open: sideVisible, toggle: () => setSideOpen(!sideVisible) },
+          } : undefined}
           trailing={
             /* Outside the scroller, so the way back from a drawer that is covering
                the board is always on screen. On a tablet in landscape the 320px
@@ -2432,7 +2473,7 @@ function AppBody() {
             const where = [autoAct != null ? `A${autoAct}` : null, autoFloor != null ? `floor ${autoFloor}` : null]
               .filter(Boolean).join(" ");
             return (
-              <div className="mono" style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 5,
+              <div className="mono wb-autobar" style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 5,
                 display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                 padding: "5px 12px", borderBottom: "1px solid var(--border)", fontSize: 12,
                 background: "var(--bg)", boxShadow: "0 2px 6px rgba(0,0,0,0.35)" }}>
@@ -2577,6 +2618,11 @@ function AppBody() {
           {/* `position: relative` anchors the room-reveal overlay below to this
               box, so a chest covers the screen you landed on and nothing else. */}
           <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto" }}>
+          {/* Phone: the inspect sheet for a screen with no board (the map,
+              shop, rewards, events), so a relic tap explains the relic
+              everywhere. In combat the Board hosts it on its stage. */}
+          {phone && mode !== "mcts"
+            && (mode === "play" ? live : step)?.decision !== "combat_play" && <InspectSheet screen />}
           {(() => {
             // A treasure room resolves inside the engine, so its reveal rides
             // on the NEXT decision's state — live in play, the viewed step in
@@ -2744,6 +2790,10 @@ function AppBody() {
         )}
       </div>
       <div className={`wb-side${narrow ? " wb-side--overlay" : ""}`} hidden={!sideVisible}>
+        <div className="wb-side-head">
+          <span>Map, history &amp; reasoning</span>
+          <button type="button" onClick={() => setSideOpen(false)}>✕ Close</button>
+        </div>
         {/* Persistent minimap: always on screen (vs the on-demand overlay) so
             the run's position and the path ahead stay visible on every screen.
             Hidden in the MCTS dashboard, which has no single active run. */}
@@ -3058,6 +3108,7 @@ function AppBody() {
           onClose={() => setWpaOpen(false)} />
       )}
     </div>
+    </InspectProvider>
     </AdviceMarksProvider>
     </SoundProvider>
     </EffectsProvider>

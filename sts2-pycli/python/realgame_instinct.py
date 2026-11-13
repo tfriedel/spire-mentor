@@ -66,7 +66,14 @@ WEIGHTS_RELPATH = Path("data/e2e/ironclad_e2e_d2500_avg5_ema0999.e2ew")
 
 #: What this student plays. A tuple per character as more students land.
 INSTINCT_CHARACTER = "Ironclad"
+#: The build the student was trained on. The run graft and the screens' own
+#: runs are built on it, whichever live build asks.
 INSTINCT_GAME_VERSION = "v0.111.0"
+#: The live builds Instinct answers for. The v0.113.0 beta seeds like
+#: v0.111.0 and the engine runs it on v0.111.0's rules wherever its content is
+#: not ported yet (#1303), so the student plays it on its training build; the
+#: advisor labels every beta answer approximate (``mark_beta_build``).
+INSTINCT_GAME_VERSIONS: tuple[str, ...] = ("v0.111.0", "v0.113.0")
 
 
 class InstinctUnavailable(Exception):
@@ -639,7 +646,9 @@ class InstinctAdvisor:
         """``capabilities.instinct``: what this advisor's Instinct plays."""
         if not self.available:
             return []
-        return [{"character": INSTINCT_CHARACTER, "game_version": INSTINCT_GAME_VERSION}]
+        return [
+            {"character": INSTINCT_CHARACTER, "game_version": v} for v in INSTINCT_GAME_VERSIONS
+        ]
 
     # -- per-run state -------------------------------------------------
 
@@ -685,8 +694,9 @@ class InstinctAdvisor:
             version = envelope_game_version(state)
         except Exception:
             version = None
-        if version != INSTINCT_GAME_VERSION:
-            return f"Instinct plays {INSTINCT_GAME_VERSION} only (this game is {version})"
+        if version not in INSTINCT_GAME_VERSIONS:
+            builds = " and ".join(INSTINCT_GAME_VERSIONS)
+            return f"Instinct plays {builds} only (this game is {version})"
         return None
 
     def advise(

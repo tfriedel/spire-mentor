@@ -1,4 +1,5 @@
 import { test, expect, devices, type Page } from "@playwright/test";
+import { reachCombat } from "./phoneHarness";
 import { menuItem } from "./topbarMenu";
 
 /**
@@ -19,50 +20,6 @@ import { menuItem } from "./topbarMenu";
  * mainstream Android tablet in landscape — anything larger has more room.
  */
 test.use({ ...devices["Galaxy Tab S9 landscape"] });
-
-/** Start a cheap run and click through Neow / rewards / the map until the
- *  combat board is up. The workbench's own "best" buttons are not used: the
- *  point is to arrive at a real fight, not to exercise the advisor. */
-async function reachCombat(page: Page): Promise<void> {
-  await page.goto("/");
-  await expect(page.getByLabel("seed", { exact: true })).toBeVisible();
-  await page.getByLabel("seed", { exact: true }).fill("tablet-landscape");
-  // Cheap budgets: a combat step blocks on MCTS, and this test only needs the
-  // first fight to exist.
-  await page.getByLabel("monster combat sims").fill("20");
-  await page.getByLabel("boss combat sims").fill("20");
-  await page.getByRole("button", { name: "Play yourself" }).click();
-  // Starting a run is a blocking engine call, so wait for the first screen to
-  // exist rather than for a fixed delay — a loaded machine takes seconds.
-  await expect(page.locator(".gs-hud")).toBeVisible({ timeout: 90_000 });
-
-  const stage = page.locator(".gs-arena-stage");
-  const choices = [
-    ".gs-event-option:not(:disabled)",
-    ".gs-treasure-hit:not(:disabled)",
-    "g[data-can]", // an act-map node we may move to
-    "button:has-text('Skip'):not(:disabled)",
-  ];
-  // Every screen between Neow and the first fight offers at least one of these.
-  // Wait for whichever appears, take it, repeat.
-  const anyChoice = page.locator(choices.join(", ")).first();
-  for (let i = 0; i < 12 && (await stage.count()) === 0; i++) {
-    await anyChoice.waitFor({ state: "visible", timeout: 90_000 });
-    for (const sel of choices) {
-      const loc = page.locator(sel).first();
-      if ((await loc.count()) > 0) {
-        await loc.click();
-        break;
-      }
-    }
-    await page.waitForTimeout(1500);
-  }
-  await expect(stage, "never reached combat").toBeVisible();
-  // Let the rigs load and the zoom settle before measuring anything.
-  await expect(page.locator(".gs-sprite-wrap").first()).toBeVisible();
-  await expect(page.locator(".gs-handslot").first()).toBeVisible();
-  await page.waitForTimeout(2000);
-}
 
 /** Walk on from the first fight until the card reward for winning it opens.
  *  The workbench's own "play best" button drives the fight — this test is about

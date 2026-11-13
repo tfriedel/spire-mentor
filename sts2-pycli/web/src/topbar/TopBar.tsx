@@ -1,10 +1,11 @@
 import { gameVersionBody } from "../gameVersion";
 import { useMemo, type ReactNode } from "react";
 import Menu, { type MenuItemSpec } from "./Menu";
+import { usePhone } from "../phone";
 import CommandPalette from "./CommandPalette";
 import type { PaletteEntry } from "./paletteEntries";
 import type { Command } from "./commands";
-import MentorBar, { type MentorBarProps, type MentorMode } from "./MentorBar";
+import MentorBar, { MODES, type MentorBarProps, type MentorMode } from "./MentorBar";
 
 /**
  * The workbench's top bar, rebuilt around three questions a user actually
@@ -23,6 +24,9 @@ import MentorBar, { type MentorBarProps, type MentorMode } from "./MentorBar";
  *    job. Items that do not apply right now are disabled with the reason,
  *    not removed, so each menu keeps its shape as the run moves.
  *  - Ctrl+K lists all of it.
+ *  - A phone has no room for the row: held upright the bar is the Mode
+ *    switch and one Menu button whose panel holds everything else; held
+ *    sideways the whole bar folds into the Menu.
  *
  * This component owns layout only. What is offered, and why an item is
  * disabled, is decided by `buildCommands` (commands.ts) in App, so the tests
@@ -77,6 +81,14 @@ export interface TopBarProps {
   whereTitle?: string;
 
   palette: { open: boolean; setOpen: (v: boolean) => void };
+
+  /** A phone's own bar buttons: take the last move back, and open the map
+   *  and history sheet. On the bar itself when held upright, at the top of
+   *  the Menu's panel when held sideways (the bar is folded away there). */
+  phoneActions?: {
+    undo?: { run: () => void; disabledReason?: string };
+    log: { open: boolean; toggle: () => void };
+  };
 
   /** The side-panel toggle sits OUTSIDE the scroller so it is always on
    *  screen; rendered by the caller and passed through. */
@@ -195,9 +207,12 @@ export default function TopBar(p: TopBarProps) {
   }, [p.mode, p.showViewToggle, p.replayCount, p.mentor, p.commands, p.tools.simlabLink, p.tools.debug.on,
     p.tools.engineNumbers.on, p.tools.gameVersion]);
 
-  return (
+  const phone = usePhone();
+  // The bar's contents. `inPanel`: laid out inside the phone's Menu panel
+  // (phone landscape, where the bar itself folds away), whose own sections
+  // already list the Run / Analyze / Tools entries.
+  const barContent = (inPanel: boolean, mentorParts: "all" | "rest" = "all") => (
     <>
-      <div className="wb-topbar-scroll">
         {/* View switch */}
         <span className="wb-segmented" role="group" aria-label="view">
           {p.showViewToggle && (
@@ -214,7 +229,7 @@ export default function TopBar(p: TopBarProps) {
         </span>
 
         {/* The AI's controls: Mode, Brain, this decision, status */}
-        {p.mentor && <MentorBar {...p.mentor} />}
+        {p.mentor && <MentorBar {...p.mentor} parts={mentorParts} />}
 
         {/* Context controls */}
         {p.mode === "replay" && p.replay && (
@@ -251,6 +266,7 @@ export default function TopBar(p: TopBarProps) {
           </span>
         )}
 
+        {!inPanel && (<>
         {/* Menus */}
         {p.mode !== "mcts" && (
           <span className="wb-menus">
@@ -267,11 +283,79 @@ export default function TopBar(p: TopBarProps) {
           </span>
         )}
 
+        </>)}
+
         {p.where && (
           <span className="wb-where" title={p.whereTitle}>{p.where}</span>
         )}
-      </div>
-      {p.trailing}
+    </>
+  );
+
+  // Phone, both orientations: one labelled "Menu" button pinned at the bar's
+  // right edge (outside the scroller), opening every entry as one panel. In
+  // landscape the bar is folded into it as well.
+  const pa = p.phoneActions;
+  // Labelled, tap-size, on the main screen: the owner could find neither
+  // undo nor the log behind an unlabelled icon inside the Menu.
+  const phoneButtons = pa && (
+    <>
+      {pa.undo && (
+        <button type="button" className="wb-phonebtn" onClick={pa.undo.run} disabled={!!pa.undo.disabledReason}
+          title={pa.undo.disabledReason ?? "take the last move back"}>
+          <span aria-hidden="true">↶</span> Undo
+        </button>
+      )}
+      <button type="button" className="wb-phonebtn" onClick={pa.log.toggle} aria-pressed={pa.log.open}
+        title="the map, the history (tap a step to go back to it) and the AI's reasoning">
+        <span aria-hidden="true">▤</span> Log
+      </button>
+    </>
+  );
+  const m = p.mentor;
+  const modeItems: MenuItemSpec[] = m ? MODES.map((x) => ({
+    id: `mode-${x.key}`, label: x.label, title: x.title, checked: m.mode === x.key,
+    disabledReason: x.key === "aiplays" && m.mode !== "aiplays" ? m.aiPlaysDisabled : undefined,
+    onSelect: () => { if (m.mode !== x.key) m.setMode(x.key); },
+  })) : [];
+  const heading = (t: string): MenuItemSpec =>
+    ({ id: `heading-${t}`, label: t, render: <span className="wb-menu-heading">{t}</span> });
+  const phoneItems: (MenuItemSpec | null)[] = [
+    ...(phone
+      ? [{ id: "bar", label: "", render: <div className="wb-phonemenu-bar">
+        {barContent(true, phone === "portrait" && p.mentor ? "rest" : "all")}
+        {phone === "landscape" && phoneButtons}{!p.phoneActions && p.trailing}</div> }]
+      : []),
+    ...(p.mode !== "mcts" && runItems.length > 0 ? [heading("Run"), ...runItems] : []),
+    ...(p.mode !== "mcts" && analyzeItems.length > 0 ? [heading("Analyze"), ...analyzeItems] : []),
+    heading("Tools"), ...toolItems,
+  ];
+
+  return (
+    <>
+      {phone === null && <div className="wb-topbar-scroll">{barContent(false)}</div>}
+      {phone === null && p.trailing}
+      {/* A phone held upright: no scroller. The bar is the Mode switch at tap
+          size (Stop alone while the AI plays) and the Menu button; the view
+          switch, Brain, verbs and status are in the Menu's panel. Without AI
+          controls (replay, MCTS) it says where the user is instead. */}
+      {phone === "portrait" && (
+        <div className="wb-phonebar">
+          {/* The AI's mode as one button that opens the four choices (Stop
+              alone while the AI plays), then Undo and Log. */}
+          {m?.aiPlaying ? <MentorBar {...m} parts="mode" />
+            : m ? (
+              <Menu className={`wb-phonemode wb-phonemode--${m.mode}`} title="what the AI does for you"
+                label={<><span className="wb-phonemode-cap">AI</span> {MODES.find((x) => x.key === m.mode)?.label}</>}
+                items={modeItems} />
+            ) : <span className="wb-phonebar-where">{p.mode === "replay" ? "Replay" : p.mode === "mcts" ? "MCTS Runs" : p.where ?? ""}</span>}
+          {phoneButtons}
+        </div>
+      )}
+      {phone && (
+        <Menu className="wb-phonemenu" caret={false} title="every workbench control: view, AI, run, analyze, tools"
+          label={<><span aria-hidden="true" className="wb-phonemenu-icon">☰</span> Menu</>}
+          items={phoneItems} />
+      )}
       <CommandPalette open={p.palette.open} entries={paletteEntries} onClose={() => p.palette.setOpen(false)} />
     </>
   );

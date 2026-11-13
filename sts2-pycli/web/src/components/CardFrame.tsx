@@ -270,7 +270,7 @@ function renderDesc(
   return <>{out}</>;
 }
 
-export default function CardFrame({ card, width = 112, height, dim = false, unaffordable = false, blocked = false, played = false, onClick, clickable = false, hotkey, winProb, best, mark, step, previewDamage }: {
+export default function CardFrame({ card, width = 112, height, dim = false, unaffordable = false, blocked = false, played = false, onClick, clickable = false, hotkey, winProb, best, mark, step, previewDamage, descFloor }: {
   card: Card; width?: number; height?: number; dim?: boolean;
   /** In hand, and you cannot pay for it right now. The game does NOT fade the
    *  card for this: `NCard.UpdateEnergyCostVisuals` paints the cost numeral
@@ -302,6 +302,12 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
   // Live modified per-hit damage for the target currently being aimed at, when
   // this card is an attack and a target is determined; recolored on the card.
   previewDamage?: number | null;
+  /** The description never renders smaller than this (same px as `width`),
+   *  not even to fit its box. The phone's zoomed card (ZoomCard) uses it to
+   *  hold the 13 real px text floor at 160-170px wide, where the game's 21/300
+   *  ratio gives 11-12; text that no longer fits then scrolls inside its box
+   *  (phone.css, `.gs-zoomcard .gs-card-desc`) instead of shrinking. */
+  descFloor?: number;
 }) {
   // Fixed portrait aspect ratio (card.tscn's 300x422) so cards never resize
   // with content length.
@@ -360,7 +366,7 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
 
       <FitText fitKey={`${desc}|${card.stats?.damage ?? ""}|${previewDamage ?? ""}`
         + `|${card.stats?.block ?? ""}|${card.block_preview ?? ""}`}
-        max={width * DESC_SIZE} min={width * DESC_MIN_SIZE}
+        max={Math.max(width * DESC_SIZE, descFloor ?? 0)} min={Math.max(width * DESC_MIN_SIZE, descFloor ?? 0)}
         className="gs-card-desc" style={{ ...DESCRIPTION, whiteSpace: "pre-line" }}>
         {renderDesc(desc, orb, card, previewDamage)}
       </FitText>

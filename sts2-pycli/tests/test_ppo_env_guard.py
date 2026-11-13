@@ -212,9 +212,16 @@ def test_combat_actions_bypass_the_guard() -> None:
 # on 1/3/14/17/22/37. The cover below has every kind on TWO seeds, so one
 # seed drifting no longer turns the gate red; all of a kind's seeds drifting
 # still does.
+#
+# v0.113.0: same census on the v0.113.0 engine (2026-11-13). Removal on
+# 6/11/16/29, upgrade on 9/16/18, transform on 0/4/14/15/18/19/30/38, enchant
+# on 1/3/14/17/21/22/24/37; seed 12 surfaces nothing there, so the v0.111.0
+# cover would lose its second removal. Re-derive it once the v0.113.0 run
+# level lands (GH #1303): that port moves these seeds.
 _COVER_SEEDS_BY_VERSION = {
     "v0.107.1": (3, 5, 8, 15, 17),
     "v0.111.0": (11, 12, 17, 18, 22),
+    "v0.113.0": (11, 14, 16, 17, 18),
 }
 _COVER_SEEDS = _COVER_SEEDS_BY_VERSION[sts2_client.GAME_VERSION]
 _DECK_MUTATION_KINDS = frozenset(

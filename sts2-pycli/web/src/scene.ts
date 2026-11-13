@@ -492,6 +492,49 @@ export function sceneFramingFor(
   return Math.max(1, Math.floor(lo * 100) / 100);
 }
 
+/** The lowest foot line among `slotYs` (absolute scene y, before the camera)
+ *  and the ground line itself — where the player stands (`placePlayer`), with
+ *  Osty and every row slot at or above it. Authored encounter markers can sit
+ *  below it (`encounterSlots.data.ts`: up to 756 against the ground's 740). */
+export function lowestFootY(slotYs: readonly number[]): number {
+  return Math.max(GROUND_Y, ...slotYs);
+}
+
+/**
+ * The height to fit the scene into so the ground line `groundY` (scene y,
+ * camera applied) lands no lower than `maxGroundY` px down the stage.
+ *
+ * A phone needs room UNDER the fighters that the game's frame does not leave:
+ * a 96px hand strip, and above it the HP bar, nameplate and up to two rows of
+ * 44px power chips that must stay tappable — about 230 real px under the feet,
+ * on a 347-384px landscape stage. So the scene is fitted into the stage's top
+ * part and the room floor fills the rest. In landscape (the fit is bound by
+ * the height) that also draws the fighters smaller; in portrait (bound by the
+ * width) it only lifts them, into the empty sky.
+ *
+ * Returns `stageH` whenever the ground already clears the limit (every stage
+ * that is not a phone), otherwise the largest height that does, floored to a
+ * whole px. The framing is re-derived at each height through
+ * `sceneFramingFor`, exactly as the caller will, so the crown keeps its
+ * headroom.
+ */
+export function sceneFitHeight(
+  stageW: number, stageH: number, framing: number, crownY: number | null | undefined,
+  groundY: number, maxGroundY: number,
+): number {
+  const groundAt = (h: number) => fitScene(stageW, h, sceneFramingFor(stageW, h, framing, crownY)).y(groundY);
+  if (!(stageW > 0) || !(stageH > 0) || groundAt(stageH) <= maxGroundY) return stageH;
+  // The ground line is inside the box it is fitted into, so a box no taller
+  // than the limit always clears it.
+  let lo = Math.max(1, Math.min(stageH, maxGroundY));
+  let hi = stageH;
+  for (let i = 0; i < 40 && hi - lo > 0.25; i++) {
+    const mid = (lo + hi) / 2;
+    if (groundAt(mid) <= maxGroundY) lo = mid; else hi = mid;
+  }
+  return Math.floor(lo);
+}
+
 /**
  * The scale to draw the room canvas at so it still covers the stage.
  *

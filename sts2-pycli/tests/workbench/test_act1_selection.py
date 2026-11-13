@@ -32,6 +32,13 @@ _PINNED_BOSS: dict[str, dict[str, tuple[str, str, str]]] = {
         "underdocks": ("WATERFALL_GIANT_BOSS", "Waterfall Giant", "WaterfallGiant"),
         "overgrowth": ("CEREMONIAL_BEAST_BOSS", "Ceremonial Beast", "CeremonialBeast"),
     },
+    # From the v0.113.0 C# headless. The engine still rolls v0.111.0's bosses
+    # here, so the pin tests are strict xfails on this build
+    # (`pending_run_level`, tests/conftest.py).
+    "v0.113.0": {
+        "underdocks": ("LAGAVULIN_MATRIARCH_BOSS", "Lagavulin Matriarch", "LagavulinMatriarch"),
+        "overgrowth": ("VANTOM_BOSS", "Vantom", "Vantom"),
+    },
 }
 
 #: Each act 1's boss pool (``BossDiscoveryOrder``): a pin outside it is the bug.
@@ -69,6 +76,7 @@ def test_the_state_reports_the_resolved_act_not_the_request() -> None:
     assert state["act1"] in {"overgrowth", "underdocks"}
 
 
+@pytest.mark.pending_run_level
 def test_the_map_boss_matches_the_act_that_was_walked() -> None:
     """The act-1 boss PIN was Overgrowth-only in four places, so an Underdocks
     run displayed `Vantom` while fighting Lagavulin Matriarch — the id came
@@ -85,6 +93,7 @@ def test_the_map_boss_matches_the_act_that_was_walked() -> None:
     assert g.rm.pinned_boss_encounter_id() == boss_id
 
 
+@pytest.mark.pending_run_level
 def test_overgrowth_still_reports_its_own_boss() -> None:
     """The control: the fix must not make every act report Underdocks."""
     g, _ = _start("overgrowth")

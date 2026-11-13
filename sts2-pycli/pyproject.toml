@@ -121,6 +121,8 @@ timeout = 600
 markers = [
   "slow: tests that take significant time (run on demand, not in `just test`)",
   "oracle: needs the C# oracle, i.e. the player's own game assembly in lib/ (skipped when absent; `-m 'not oracle'` is the game-free subset)",
+  "pending_run_level: strict xfail on builds whose run level is not ported yet (tests/conftest.py PENDING_BUILDS)",
+  "pending_e2e_tables: strict xfail on builds with no e2e static tables yet (tests/conftest.py PENDING_BUILDS)",
   "game_data: reads game-derived data (localization_eng/, sts2-wiki/data, card_db.json), training checkpoints or private deploy files; skipped when absent (see tests/conftest.py)",
 ]
 

@@ -56,6 +56,7 @@ def _rust_offers(seed: str) -> list[str]:
     return [_norm((o.get("label") or "").replace(".title", "")) for o in normalize_options(state)]
 
 
+@pytest.mark.pending_run_level
 @pytest.mark.parametrize("seed", SEEDS)
 def test_neow_offers_match_between_engines(seed: str) -> None:
     cs = _csharp_offers(seed)

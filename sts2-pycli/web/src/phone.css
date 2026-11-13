@@ -1,0 +1,429 @@
+/* Phone-only rules (GH phone UX).
+ *
+ * THE RULE: every selector in this file starts with `.gs-phone` (the class
+ * Board puts on its root in phone mode) or sits inside the phone media queries
+ * (PHONE_PORTRAIT_QUERY / PHONE_LANDSCAPE_TOUCH_QUERY in useMediaQuery.ts).
+ * Nothing here may change desktop or tablet rendering.
+ *
+ * Imported LAST in main.tsx and boardpreview.tsx so it wins ties against
+ * game-skin.css and responsive.css.
+ */
+
+/* ---- Touch ----
+ * Two taps on a card play it, which is a double-tap: without this iOS Safari
+ * may zoom the page on the second one. `manipulation` keeps panning and
+ * pinch-zoom and drops only the double-tap zoom (and its tap delay). Not
+ * inherited, hence every element. */
+.gs-phone, .gs-phone * { touch-action: manipulation; }
+/* A long press on a card, a power or an intent is a slow tap, not a request
+   for the image menu, a text selection or a drag. */
+.gs-phone .gs-card, .gs-phone .gs-power, .gs-phone .gs-intent {
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.gs-phone .gs-card img, .gs-phone .gs-power img, .gs-phone .gs-intent img { -webkit-user-drag: none; }
+
+/* ---- Real-size floors inside the stage ----
+ * The stage is drawn in design px and scaled by --gs-k (set on .gs-arena-stage,
+ * 0.42-0.9 on a phone), so a design size renders at size * k on the glass.
+ * `max(<design>, calc(<floor>px / var(--gs-k)))` keeps the desktop size where
+ * it already clears the floor and lifts it to the floor where it does not.
+ * Power icons and their tap boxes are sized in Combatant (React), not here. */
+.gs-phone .gs-power-amt { font-size: max(10px, calc(14px / var(--gs-k, 1))) !important; }
+.gs-phone .gs-hptext { font-size: max(24px, calc(14px / var(--gs-k, 1))); }
+.gs-phone .gs-nameplate { font-size: max(12px, calc(12px / var(--gs-k, 1))); }
+/* Landscape: ONE line, always. The scene is fitted so a two-row power block
+   under a one-line name ends above the hand strip (phone.PHONE_BELOW_GROUND);
+   a name that wrapped pushed its powers ~15px onto the strip. `width: 0;
+   min-width: 100%` takes the creature column's width without letting the
+   unwrapped name widen the column over its neighbour; the full name stays on
+   `title` / `aria-label`. */
+.gs-phone-landscape .gs-nameplate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  width: 0; min-width: 100%; text-align: center; }
+.gs-phone .gs-intent { --gs-intent-size: max(48px, calc(44px / var(--gs-k, 1))); }
+.gs-phone .gs-intent.gs-intent-nodmg { --gs-intent-size: max(58px, calc(44px / var(--gs-k, 1))); }
+.gs-phone .gs-intent-mods .gs-intent-mod-icon {
+  width: max(15px, calc(20px / var(--gs-k, 1))); height: max(15px, calc(20px / var(--gs-k, 1))); }
+.gs-phone .gs-intent-mods .gs-intent-mod-txt { font-size: max(9px, calc(13px / var(--gs-k, 1))); }
+.gs-phone .gs-block {
+  --gs-block-size: max(34px, calc(28px / var(--gs-k, 1)));
+  width: var(--gs-block-size); height: var(--gs-block-size);
+  left: calc(var(--gs-block-size) / -2); margin-top: calc(var(--gs-block-size) / -2); }
+.gs-phone .gs-block-num { font-size: max(17px, calc(14px / var(--gs-k, 1))); }
+.gs-phone .gs-energy {
+  width: max(102px, calc(60px / var(--gs-k, 1))); height: max(102px, calc(60px / var(--gs-k, 1))); }
+.gs-phone .gs-energy .gs-gem-val { font-size: max(26px, calc(14px / var(--gs-k, 1))); }
+.gs-phone .gs-endturn .gs-endturn-art {
+  width: max(188px, calc(124px / var(--gs-k, 1))); min-height: calc(56px / var(--gs-k, 1)); }
+.gs-phone .gs-pileplaque-art {
+  width: max(66px, calc(44px / var(--gs-k, 1))); min-height: calc(44px / var(--gs-k, 1)); }
+.gs-phone .gs-pile-exhaust .gs-pileplaque-art {
+  width: max(46px, calc(44px / var(--gs-k, 1))); min-height: calc(44px / var(--gs-k, 1)); }
+.gs-phone .gs-pileplaque-count { width: max(30px, calc(24px / var(--gs-k, 1))); height: max(26px, calc(21px / var(--gs-k, 1))); }
+.gs-phone .gs-pile-exhaust .gs-pileplaque-count { width: max(26px, calc(24px / var(--gs-k, 1))); height: max(22px, calc(21px / var(--gs-k, 1))); }
+.gs-phone .gs-pileplaque-count span { font-size: max(14px, calc(14px / var(--gs-k, 1))); }
+.gs-phone .gs-pile-exhaust .gs-pileplaque-count span { font-size: max(12px, calc(14px / var(--gs-k, 1))); }
+.gs-phone .gs-power-name { font-size: max(10px, calc(13px / var(--gs-k, 1))) !important; }
+/* Slides a power block into its creature's column, and down under a
+   neighbour's HP bar or name in a staggered row (set by Powers.tsx). */
+.gs-phone .gs-powers { transform: translate(calc(-50% + var(--gs-pshift, 0px)), var(--gs-pdrop, 0px)); }
+/* Landscape, and a portrait split fight in `column` chrome (Board sets
+   `.gs-split` in portrait only): the powers stand in ONE column beside the
+   creature's body, its bottom on the ground line (Powers.tsx `column` places
+   it and sizes it, powerColumn.ts). These are only the defaults until it has
+   measured. */
+.gs-phone-landscape .gs-powers.gs-powers-col, .gs-split .gs-powers.gs-powers-col {
+  top: auto; bottom: 0; left: auto; right: 100%; margin: 0; transform: none; z-index: 4; }
+/* Out in the room rather than under the HP bar, each chip gets the dark
+   backing the HUD sockets have, so an icon reads against any backdrop. */
+.gs-phone-landscape .gs-powers-col .gs-power, .gs-split .gs-powers-col .gs-power { border-radius: 10px;
+  background: rgba(10,14,18,.62); box-shadow: inset 0 0 0 1px rgba(176,204,218,.28); }
+/* In a crowded row (four enemies on a small phone) a column can reach up
+   beside its own intent; the telegraph's numeral stays on top. */
+.gs-phone-landscape .gs-intent, .gs-split .gs-intent { z-index: 5; }
+
+/* ---- Inspect sheet (src/inspect) ----
+ * Text is real px: the sheet sits outside the zoom layer. 14px floor. */
+.gs-phone .gs-inspect { font-size: 14px; }
+.gs-phone .gs-inspect .gs-inspect-desc { font-size: 14px; }
+.gs-phone .gs-inspect .gs-inspect-name { font-size: 15px; }
+/* Taps must reach these even where the desktop skin made them inert. */
+.gs-phone .gs-intent, .gs-phone .gs-power, .gs-phone .gs-block { pointer-events: auto; cursor: pointer; }
+
+/* ---- Potion popover ----
+ * The HUD band sits outside .gs-phone and is not scaled, so use the phone media
+ * queries directly: the description must read at 13px or more. */
+@media (hover: none) and (max-width: 480px), (hover: none) and (max-height: 520px) {
+  .gs-potion-popdesc { font-size: 13px; }
+  .gs-potion-popname { font-size: 14px; }
+  .gs-potion-btn { font-size: 13px; }
+}
+
+/* ---- Chrome floors (HUD band, tool row, top bar) ----
+ * The band, the top bar and the workbench's chrome are NOT scaled by the stage
+ * zoom, so these are real px. Same query as the potion popover above, which
+ * must match the phone definition exactly. Imported after responsive.css, so
+ * equal specificity wins here. Floors: 44 tap targets, 20 HUD numerals, 13
+ * deck badge. */
+@media (hover: none) and (max-width: 480px), (hover: none) and (max-height: 520px) {
+  .gs-hud-relic, .gs-hud-relic img { width: 44px; height: 44px; }
+  .gs-hud-relic-more { font: 700 16px/1 var(--game-font, inherit); color: #eadcb2;
+    border-radius: 10px; background: rgba(8,14,18,.55);
+    box-shadow: inset 0 0 0 1px rgba(176,204,218,.4); text-shadow: 0 1px 2px #000; }
+  .gs-hud-socket { width: 44px; height: 44px; border-radius: 11px; }
+  .gs-hud-socket img { width: 40px; height: 40px; }
+  .gs-hud-potions { padding: 3px 6px; gap: 4px; }
+  /* The tray takes whatever the band leaves it (RelicTray measures that and
+     collapses the overflow into "+N"); a zero basis keeps it on its row. */
+  .gs-hud-relictray { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; gap: 4px; overflow-x: auto; }
+  .gs-hud-plaque { min-width: 44px; min-height: 44px; }
+  .gs-hud-hpnum, .gs-hud-goldnum { font-size: 21px; }
+  .gs-hud-deckcount { min-width: 20px; height: 20px; font-size: 13px; right: -4px; bottom: -2px; }
+  .wb-menu-item { min-height: 44px; padding-top: 4px; padding-bottom: 4px; }
+  /* The chrome outside the board: no double-tap zoom either (see Touch). */
+  .gs-hud, .gs-hud *, .wb-topbar, .wb-topbar *, .wb-chrome-toggle, .wb-menu-item { touch-action: manipulation; }
+}
+@media (hover: none) and (max-height: 520px) {
+  /* The bar folds into the labelled Menu button (TopBar.tsx), pinned over the
+     HUD band's right end; the band leaves it room. */
+  .wb-topbar--folded { display: contents; }
+  .wb-topbar--folded .wb-phonemenu > .wb-menu-trigger { position: fixed; top: 3px; right: 3px; z-index: 46; }
+  .gs-hud { padding-right: 96px; }
+}
+
+/* ---- Menus on a phone (topbar/Menu.tsx, TopBar.tsx) ----
+ * The labelled Menu button, pinned at the bar's right edge outside its
+ * scroller (portrait) or over the HUD band's right end (landscape), and every
+ * dropdown as a fixed panel under the bar: the full width less 8px gutters,
+ * as tall as the viewport allows (Menu.tsx sets top and max-height) with its
+ * own scroll, 44px rows, 14px text. */
+@media (hover: none) and (max-width: 480px), (hover: none) and (max-height: 520px) {
+  .wb-phonemenu { flex: none; }
+  .wb-phonemenu > .wb-menu-trigger {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 44px; min-width: 76px; padding: 0 12px; margin: 0;
+    font: 700 15px/1 var(--font); color: #11171d; background: #f2e4b8;
+    border: 1px solid #fff6d8; border-radius: 9px; box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
+  }
+  .wb-phonemenu > .wb-menu-trigger[aria-expanded="true"] { background: #ffffff; }
+  .wb-phonemenu-icon { font-size: 18px; }
+  .wb-menu-list.wb-menu-list--phone {
+    position: fixed; left: 8px; right: 8px; min-width: 0; z-index: 60;
+    overflow-y: auto; overscroll-behavior: contain; font-size: 14px;
+  }
+  /* A column flexbox with a max-height shrinks its rows; a scrolling panel
+     must keep each at its own height instead. */
+  .wb-menu-list--phone > * { flex-shrink: 0; }
+  .wb-menu-list--phone .wb-menu-item { white-space: normal; }
+  .wb-menu-list--phone .wb-menu-reason { font-size: 14px; white-space: normal; }
+  .wb-menu-list--phone .wb-menu-row { min-height: 44px; }
+  .wb-menu-list--phone .wb-menu-row:has(> .wb-menu-heading) { min-height: 0; }
+  .wb-menu-heading { padding: 10px 4px 2px; font-size: 14px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; }
+  .wb-phonemenu-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
+  .wb-phonemenu-bar .wb-mentor { flex-wrap: wrap; }
+  .wb-phonemenu-bar .wb-mentor-verbs { padding-left: 0; border-left: none; flex-wrap: wrap; gap: 8px; }
+  .wb-phonemenu-bar .wb-mentor-status { font-size: 14px; max-width: none; }
+  /* Upright: the bar is the Mode switch (or Stop) at tap size, filling the
+     width the Menu button leaves; nothing scrolls. */
+  .wb-phonebar { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; }
+  .wb-topbar .wb-phonebtn, .wb-menu-list .wb-phonebtn, .wb-topbar .wb-phonemode > .wb-menu-trigger {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 1 1 0; min-width: 0;
+    min-height: 44px; padding: 0 6px; margin: 0; white-space: nowrap;
+    font: 600 15px/1 var(--font); color: var(--text); background: var(--field-bg);
+    border: 1px solid var(--border); border-radius: 9px;
+  }
+  .wb-phonebtn:disabled { opacity: .4; }
+  .wb-phonebtn[aria-pressed="true"] { background: var(--accent-weak); color: var(--accent-strong); }
+  .wb-phonemode { flex: 1.3 1 0; min-width: 0; display: flex; }
+  .wb-phonemode > .wb-menu-trigger { width: 100%; color: oklch(18% 0.01 265); border-color: transparent; }
+  .wb-phonemode--off > .wb-menu-trigger { background: oklch(70% 0.01 265); }
+  .wb-phonemode--coach > .wb-menu-trigger { background: oklch(78% 0.11 210); }
+  .wb-phonemode--hints > .wb-menu-trigger { background: oklch(78% 0.14 150); }
+  .wb-phonemode--aiplays > .wb-menu-trigger { background: oklch(80% 0.15 75); }
+  .wb-phonemode-cap { font-size: 11px; font-weight: 700; opacity: .65; text-transform: uppercase; letter-spacing: .05em; }
+  .wb-phonemenu-bar .wb-phonebtn { flex: 0 0 auto; padding: 0 14px; }
+  /* The map-and-history sheet: the whole screen, over the Menu's panel, with
+     its own Close. */
+  .wb-side--overlay { width: 100vw; z-index: 70; border-left: none; }
+  .wb-phonebar .wb-mentor { flex: 2.3 1 0; min-width: 0; display: flex; }
+  .wb-phonebar .wb-seg { flex: 1 1 0; min-width: 0; display: flex; border-radius: 9px; }
+  .wb-phonebar .wb-seg-btn { flex: 1 1 auto; min-height: 44px; padding: 0 4px; font-size: 15px; white-space: nowrap; }
+  .wb-phonebar .wb-mentor-stop { flex: 1 1 0; min-height: 44px; font-size: 16px; border-radius: 9px; }
+  .wb-phonebar .wb-mentor-stop kbd { display: none; }
+  .wb-phonebar-where { font: 600 15px/1 var(--font); color: var(--muted); padding-left: 4px; }
+  /* The workbench's own rows under the bar (best / play to end / analyze, the
+     combat tool row, the autoplay progress line) are not shown on a phone:
+     they pushed the game down. Mode "AI plays", Stop and the Menu cover them. */
+  .gs-toolrow, .wb-runbar, .wb-autobar { display: none !important; }
+  .wb-phonemenu-bar button, .wb-phonemenu-bar select { min-height: 44px; font-size: 14px; }
+}
+@media (hover: none) and (max-width: 480px) {
+  /* The 44px Menu button sets the bar's height: trim the bar's own padding
+     so the stage keeps the height it had before the button (51px bar). */
+  .wb-topbar { padding-top: 3px; padding-bottom: 3px; }
+}
+
+/* The combat tool row sits inside the board: one scrolling line of 40px,
+   14px buttons (and its MCTS knobs at the same size). */
+.gs-phone .gs-toolrow { gap: 8px; }
+/* The row is always one 40px line tall, whatever it holds: a row that grew
+   when "select a target…" appeared (the fixture's, which has no buttons)
+   shrank the stage, re-fitted the fighters and moved them under the zoom. A
+   zero-width strut, its gap taken back. */
+.gs-phone .gs-toolrow::before { content: ""; flex: none; width: 0; height: 40px; margin-right: -8px; }
+.gs-phone .gs-toolrow > button { min-height: 40px; padding: 4px 12px; font-size: 14px; }
+.gs-phone .gs-toolrow-adv > .mono { font-size: 14px; }
+.gs-phone .gs-toolrow-adv input, .gs-phone .gs-toolrow-adv select { font-size: 14px; min-height: 32px; }
+
+/* ---- The peeking hand and the chrome around its strip ----
+ * The hand's strip is 96 real px on a phone (Hand.tsx, handFan.handFloors).
+ * The numbers below are real px divided by --gs-k and MUST match
+ * handFan.handInsets / phone.PHONE_PORTRAIT_CHROME.
+ *
+ * Portrait: the fan takes the full width, so the End Turn plate, the piles
+ * and the energy orb stand in one row ON TOP of the strip:
+ *   [draw 8..52][orb 60..120]   ...   [exhaust][discard][End Turn ..8]
+ * 8px between neighbours; the row's bottom (112) stands 12px above the top of
+ * a resting card lifted by the advice pull (96 + 4).
+ * Landscape: the fighters need every px above the strip, so the
+ * plate and the piles stay IN it, beside the fan (left inset 64, right 247:
+ * 12px clear of the piles; the plate stands 7px from the edge, not 8, so ten
+ * cards at 24px strips still fit the small phone), and only the orb goes above
+ * it, at the left edge. */
+.gs-phone-portrait .gs-endturn { right: calc(8px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+.gs-phone-portrait .gs-pile-discard { right: calc(140px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+.gs-phone-portrait .gs-pile-exhaust { right: calc(192px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+.gs-phone-portrait .gs-pile-draw { left: calc(8px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+.gs-phone-portrait .gs-energy { left: calc(60px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+.gs-phone-landscape .gs-endturn { right: calc(7px / var(--gs-k, 1)); bottom: calc(14px / var(--gs-k, 1)); }
+.gs-phone-landscape .gs-pile-discard { right: calc(139px / var(--gs-k, 1)); bottom: calc(14px / var(--gs-k, 1)); }
+.gs-phone-landscape .gs-pile-exhaust { right: calc(191px / var(--gs-k, 1)); bottom: calc(14px / var(--gs-k, 1)); }
+.gs-phone-landscape .gs-pile-draw { left: calc(8px / var(--gs-k, 1)); bottom: calc(14px / var(--gs-k, 1)); }
+.gs-phone-landscape .gs-energy { left: calc(8px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+
+/* ---- Zoom-on-select (ZoomCard.tsx, handSelect.ts) ----
+ * The selected card is drawn large over the stage (placed by zoomPlacement.ts
+ * in real px, laid out in design px inside .gs-stage-scale), above the hand
+ * strip and the corner furniture. Its slot in the fan stays lit. */
+.gs-phone .gs-zoomcard {
+  position: absolute; z-index: 30; pointer-events: none;
+  filter: drop-shadow(0 6px 14px rgba(0,0,0,.6));
+  animation: gs-zoomcard-in .12s ease-out;
+}
+/* Only the hit area takes taps (ZoomCard: in landscape it stops at the hand
+   strip's top edge, so the strip under the card reaches the slots). */
+.gs-phone .gs-zoomcard-hit { pointer-events: auto; cursor: pointer; }
+/* An attack waiting for its target: the player's side of the row overlaps the
+   nearest enemy in a crowded fight, and nothing on it is tappable while a
+   target is being picked, so it lets the tap through. (A tap on the zoom over
+   an enemy is handed on in ZoomCard, `enemyUnder`.) */
+.gs-phone[data-awaits-target] .gs-side-player { pointer-events: none; }
+
+/* The "×" that puts the zoom back (sized in ZoomCard, 44 real px). A dark disc
+   with a light rim, readable on any card frame and any backdrop. */
+.gs-phone .gs-zoomcard-close {
+  pointer-events: auto; cursor: pointer; z-index: 1; padding: 0; margin: 0;
+  display: grid; place-items: center; line-height: 1; border-radius: 50%;
+  color: #fff6dc; background: rgba(12, 16, 22, .88);
+  border: calc(2px / var(--gs-k, 1)) solid rgba(236, 222, 180, .85);
+  box-shadow: 0 calc(2px / var(--gs-k, 1)) calc(6px / var(--gs-k, 1)) rgba(0, 0, 0, .6);
+}
+/* A description long enough to scroll keeps its own touches. */
+.gs-phone .gs-zoomcard-scroll .gs-card-desc { pointer-events: auto; }
+/* Its description never shrinks under the 13px floor (CardFrame `descFloor`);
+   a text too long for the box at that size scrolls inside it. `safe center`
+   keeps the first line reachable when it overflows. */
+.gs-phone .gs-zoomcard .gs-card-desc { overflow-y: auto; place-content: safe center;
+  overscroll-behavior: contain; }
+/* A touch leaves :hover stuck on what it tapped: the desktop's hover lift
+   would raise the zoom off its placement after the first tap. */
+.gs-phone .gs-zoomcard .gs-card:hover { transform: none; }
+@keyframes gs-zoomcard-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+/* No lift transition in the hand on a phone: the selected card rises in one
+   frame (the slot keeps its sideways slide when the fan re-spreads).
+   The owner saw the cards to the RIGHT of a tapped card flicker. Nothing else
+   in the fan moves (e2e "a tap moves only the tapped card"), but a lift that
+   animates for .14s is a composited animation under its right-hand
+   neighbours, which overlap it and carry drop-shadow filters: the browser
+   promotes each of them to its own layer for the length of the transition and
+   drops them back after, re-rastering them twice — the flicker. */
+.gs-phone .gs-handslot-lift { transition: none; }
+/* The selected slot's highlight sits on the lift, not the card: the card's own
+   filter carries the playable rim and the advice glow, and this one adds to
+   them instead of replacing them.
+   The slot keeps its place in the stack (no z-index bump): brought forward it
+   would cover the strips of its right-hand neighbours, which are what you tap
+   to switch the zoom. It rises a little and glows instead. */
+.gs-phone .gs-handslot.gs-selected > .gs-handslot-lift {
+  transform: translateY(calc(var(--fan-y, 0px) - 10px / var(--gs-k, 1)));
+  filter: drop-shadow(0 0 3px #fff6c8) drop-shadow(0 0 7px var(--accent-strong));
+}
+/* The advice's plan cards (`.gs-pulled`): the desktop pulls them most of the
+   way out of the fan, which on a phone stood a card over the energy orb and
+   the draw pile (portrait) or towered over the strip (landscape). Here they
+   stay in the 96px strip, lifted 4px (the orb and the portrait chrome row
+   stand 6px above the strip); the gold ring and the step number on the top
+   edge are the mark. Not while selected: that lift is the zoom's. */
+.gs-phone .gs-handslot.gs-pulled:not(.gs-hovered):not(.gs-selected) > .gs-handslot-lift {
+  transform: translateY(calc(var(--fan-y, 0px) - 4px / var(--gs-k, 1)));
+}
+/* The step number, at 15px on the glass (the card's own `--cw`-relative size
+   comes out at ~13). Not centred on the top edge as on a desktop: there it
+   covered the name, stood under the portrait energy orb, and on a crowded fan
+   sat under the next card. It goes on the card's LEFT edge under the cost gem,
+   in the art, which is inside the 96px band and the strip of the card that no
+   later card covers. */
+.gs-phone .gs-handslot .gs-card .gs-badge.gs-step-tag {
+  min-width: max(26px, calc(28px / var(--gs-k, 1))); height: max(26px, calc(28px / var(--gs-k, 1)));
+  font-size: max(15px, calc(15px / var(--gs-k, 1)));
+  top: calc(50px / var(--gs-k, 1)); left: calc(4px / var(--gs-k, 1)); transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gs-phone .gs-zoomcard { animation: none; }
+}
+
+/* ---- Portrait split: the controls row ----
+ * One row on top of the hand strip, real px from the stage bottom:
+ * [draw][discard][exhaust] ... [energy][End Turn]. The figure stands on it at
+ * the left (Board places it), its status block beside it. */
+/* End Turn at 112 (phase 1's), not the plan's 110: on the small phone a
+   pulled plan card under it came within 9.8 px at 110. */
+.gs-split.gs-phone-portrait .gs-endturn { right: calc(8px / var(--gs-k, 1)); bottom: calc(112px / var(--gs-k, 1)); }
+/* The energy orb sits at 116 with the piles, not the plan's 108: a plan card
+   pulled up out of the hand (`.gs-pulled`) under it came within 7.9 px (large
+   phone, at 108) and 9.8 px (small, at 112) of it, under the 12 px floor
+   (phone-layout "the chrome keeps its distance"). */
+.gs-split.gs-phone-portrait .gs-energy { left: auto; right: calc(140px / var(--gs-k, 1)); bottom: calc(116px / var(--gs-k, 1)); }
+.gs-split.gs-phone-portrait .gs-pile-draw { left: calc(8px / var(--gs-k, 1)); bottom: calc(116px / var(--gs-k, 1)); }
+.gs-split.gs-phone-portrait .gs-pile-discard { right: auto; left: calc(60px / var(--gs-k, 1)); bottom: calc(116px / var(--gs-k, 1)); }
+.gs-split.gs-phone-portrait .gs-pile-exhaust { right: auto; left: calc(112px / var(--gs-k, 1)); bottom: calc(116px / var(--gs-k, 1)); }
+/* One line per name, as in landscape: the split packs a crowded roster into
+   slots narrower than "Shrinker Beetle #2", which wrapped onto three lines
+   under its own HP bar. */
+.gs-split .gs-nameplate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  width: 0; min-width: 100%; text-align: center; }
+/* The band is a box as wide as the stage right of the figure: only what it
+   draws takes a tap, the air around it stays the stage's. */
+.gs-split .gs-actors > .gs-playerband { pointer-events: none; }
+.gs-split .gs-playerband .gs-playerband-status > * { pointer-events: auto; }
+
+/* ---- Portrait split: enemy power chrome ----
+ * Each enemy's powers follow the fight's chrome mode (`data-split`, Board):
+ * `rows` and `compact` are grids under the name sized in Combatant; `column`
+ * shares the landscape column's rules (above). */
+/* Rows and the compact cell hang 6 px under the HP bar on the glass (6
+   design px is ~2.5 real at a crowd's zoom, and the bar's numerals spill
+   over its edge: the "+N" cell sat on them). */
+.gs-split [data-enemy-index] > .gs-powers:not(.gs-powers-col) { margin-top: calc(6px / var(--gs-k, 1)); }
+/* A cramped split on a stage too short for the chrome under the feet
+   (Board `gs-split-bare`): powers and names go, the HP bar stays. */
+.gs-split-bare [data-enemy-index] > .gs-powers,
+.gs-split-bare [data-enemy-index] .gs-nameplate { display: none; }
+/* ... and a small body's tap box no longer hangs under it over the band:
+   its 44 px intent chip, which takes the enemy's tap, stands over it. */
+.gs-split.gs-split-bare [data-enemy-index] { min-height: 0; }
+/* However small the split draws an enemy (a crowd on the small phone), it
+   stays a 44 px tap target on the glass. */
+.gs-split [data-enemy-index] { min-width: calc(44px / var(--gs-k, 1)); min-height: calc(44px / var(--gs-k, 1)); }
+
+/* ---- Portrait split: the player band ----
+ * `.gs-split` is set by Board in phone portrait only, so none of this reaches
+ * landscape, tablet or desktop. `.gs-playerband` is the band Board counter-
+ * scales to REAL px (--gs-k 1 inside it), so every size here is on the glass.
+ * `PlayerBand` draws `.gs-playerband-status`: line 1 the HP bar, line 2 the
+ * orbs then one row of 44 px power cells. No panel and no border: it stands on
+ * the scene like a creature's own bar. */
+.gs-split .gs-playerband .gs-playerband-status { height: 100%; box-sizing: border-box;
+  display: flex; flex-wrap: wrap; align-content: center;
+  align-items: center; row-gap: 8px; column-gap: 4px; }
+.gs-split .gs-playerband .gs-hpwrap { margin: 0; flex: none; }
+/* The shield's 44 px tap area (`.gs-block-hit`) reaches 22 px below the bar's
+   centre, into the second line: over the orbs (z 3, painted later), which are
+   not tap targets, so the shield goes above them. */
+.gs-split .gs-playerband .gs-block { z-index: 4; }
+/* 20 px tall, numerals 17 px INSIDE it (the creature bars' numerals spill
+   over theirs), the stroke thinned to match. */
+.gs-split .gs-playerband .gs-hpbar { height: 20px; }
+.gs-split .gs-playerband .gs-hptext { font-size: 17px; inset: 0; -webkit-text-stroke-width: 3px; }
+/* `--gs-band-orb-gap` is PlayerBand's (`bandOrbRow`): 4 px, closing up when
+   ten orbs need the room. */
+.gs-split .gs-playerband .gs-orbs.gs-orbs-row { position: static; width: auto; height: auto;
+  display: flex; gap: var(--gs-band-orb-gap, 4px); flex: none; }
+/* A card zoomed: the energy orb, which the centred card covers at its own
+   spot, at the right end of the block's last line (44 px, on the glass). */
+.gs-split .gs-playerband .gs-band-energy { flex: none; margin-left: auto; width: 44px; height: 44px; position: relative; }
+.gs-split.gs-phone-portrait .gs-playerband .gs-energy { position: absolute; inset: 0; width: 44px; height: 44px; }
+.gs-split.gs-phone-portrait .gs-playerband .gs-energy .gs-gem-val { font-size: 15px; }
+.gs-split .gs-playerband .gs-powers { position: static; transform: none; margin: 0; width: auto; flex: none; }
+/* The player's damage number lands on the figure and stays in the band: the
+   enemies' chrome stands right above the band top, where the default throw
+   (55 px up, then ~87 more, stage px) would put it. Here it starts 30 real px
+   under the figure's crown and rises 12 real px at the peak of the same arc
+   (`--dmg-vy` scales the arc's 86.6 px peak): measured, its top stays 6-7 px
+   inside the band on both phones, the 2.5x pop included, and the fall (3x
+   the rise) ends inside the 84 px small-phone figure. The per-hit x, tilt and
+   drift jitter stay; only the vertical throw is fixed. `--gs-k` is the stage
+   zoom, so these are real px. */
+.gs-split .gs-side-player .gs-dmg { top: calc(var(--rig-top, 0px) + 30px / var(--gs-k, 1));
+  --dmg-jy: 0px !important; --dmg-vy: calc(12 / 86.6 / var(--gs-k, 1)) !important; }
+
+/* ---- Non-combat screens (shop, treasure, card reward, bundle, map, ...) ----
+ * These live outside the Board (no .gs-phone), so the bare phone query again.
+ * Every tap target is 44x44 real px; the visual design is kept and only the
+ * hit box grows. Guarded by e2e/phone-screens.spec.ts. */
+@media (hover: none) and (max-width: 480px), (hover: none) and (max-height: 520px) {
+  /* The leather tag is clip-pathed, so a pseudo-element hit pad would be
+     clipped away: the tag itself grows. The card above it buys too. */
+  .gs-shop-pricetag { min-height: 44px; min-width: 44px; justify-content: center; }
+  .gs-treasure-dismiss { min-height: 44px; min-width: 44px; }
+  /* The plate art stays; the button around it is padded up to the floor. */
+  .gs-cardreward-skip { min-height: 44px; padding: 4px 0; }
+  .gs-bundle-select, .gs-select-btn { min-height: 44px; }
+}
+
+/* The Decimillipede's three segments carry the same name, cut to
+   "Decimilliped…" in a third of the stage each: the split leaves it out. */
+.gs-split .gs-decimillipede .gs-nameplate { display: none; }
+
+/* The hand strip is browsed by dragging a thumb along it (Hand.tsx): the
+   browser must not turn that drag into a pan or cancel its pointer. */
+.gs-phone .gs-hand, .gs-phone .gs-hand * { touch-action: none; }

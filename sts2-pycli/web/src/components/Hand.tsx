@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Card, Score } from "../api";
 import { cardBoxHeight } from "../cardGeometry";
-import { CARD_ASPECT, HAND_REST_MIN_F, HAND_REST_VISIBLE, fanLayout } from "../handFan";
+import { CARD_ASPECT, HAND_REST_MIN_F, HAND_REST_VISIBLE, fanLayout, handFloors, handInsets } from "../handFan";
+import { atLeast, floorPx, isSmallPhoneScreen, usePhone, useStageZoom, type PhoneMode } from "../phone";
 import { fitScene } from "../scene";
 import CardFrame from "./CardFrame";
 import { useMediaQuery, TOUCH_QUERY } from "../useMediaQuery";
@@ -39,7 +40,9 @@ const CHROME_RESERVE = 200;
  *  column shifted under it. (A ref-callback into state, which is how the element
  *  used to arrive here, costs an extra render and lands the measure ~250ms in —
  *  well after the paint, which is why this has to be a ref.) */
-function useHandMetrics(ref: React.RefObject<HTMLDivElement | null>, framing: number): { cw: number; availW: number; show: number } {
+function useHandMetrics(
+  ref: React.RefObject<HTMLDivElement | null>, framing: number, phone: PhoneMode, k: number,
+): { cw: number; availW: number; show: number } {
   const [m, setM] = useState({ cw: 180, availW: 900, show: Math.round(HAND_REST_VISIBLE) });
   useLayoutEffect(() => {
     // The ZOOM layer, not the stage: the fan is laid out inside it, so it has
@@ -61,12 +64,27 @@ function useHandMetrics(ref: React.RefObject<HTMLDivElement | null>, framing: nu
       // tablet the scene is drawn larger than its fit, and the rest line —
       // scene px through `k` — has to move with it or the fan sits on the
       // enemies' power rows again.
-      const k = fitScene(stage.offsetWidth, stage.offsetHeight, framing).k;
-      const next = {
+      const sceneK = fitScene(stage.offsetWidth, stage.offsetHeight, framing).k;
+      let next = {
         cw,
         availW: Math.max(240, stage.offsetWidth - CHROME_RESERVE * 2),
-        show: Math.round(Math.max(HAND_REST_VISIBLE * k, cardBoxHeight(cw) * HAND_REST_MIN_F)),
+        show: Math.round(Math.max(HAND_REST_VISIBLE * sceneK, cardBoxHeight(cw) * HAND_REST_MIN_F)),
       };
+      // ON A PHONE the card gets a real-px floor (`k` is the stage zoom, so
+      // design px render at `k` on the glass) and the visible band is EXACTLY
+      // the floor's strip: the game's rest line would show ~115 real px of a
+      // 136px card, and in landscape every one of those px comes out of the
+      // room the fighters' power rows need above the strip. The fan spreads
+      // across the stage less the chrome's insets (see `handInsets`).
+      const floors = handFloors(phone, isSmallPhoneScreen());
+      const insets = handInsets(phone);
+      if (floors && insets) {
+        next = {
+          cw: Math.round(atLeast(cw, floors.cardW, k)),
+          availW: stage.offsetWidth - floorPx(insets.left + insets.right, k),
+          show: Math.ceil(floorPx(floors.showH, k)),
+        };
+      }
       // Object identity, so bail out by value or every observer tick re-renders
       // the whole fan (the old single-number state got that for free).
       setM((prev) => (prev.cw === next.cw && prev.availW === next.availW && prev.show === next.show
@@ -76,9 +94,12 @@ function useHandMetrics(ref: React.RefObject<HTMLDivElement | null>, framing: nu
     const ro = new ResizeObserver(measure);
     ro.observe(stage);
     return () => ro.disconnect();
-  }, [ref, framing]);
+  }, [ref, framing, phone, k]);
   return m;
 }
+
+/** Real px a touch travels along the strip before it browses instead of taps. */
+const BROWSE_SLOP = 10;
 
 export default function Hand({
   cards,
@@ -87,6 +108,9 @@ export default function Hand({
   scores,
   previewDamageFor,
   framing = 1,
+  selectedIndex = null,
+  onCardTap,
+  onCardBrowse,
 }: {
   cards: Card[];
   playedIndex?: number;
@@ -96,16 +120,29 @@ export default function Hand({
   previewDamageFor?: (card: Card) => number | null;
   /** Board's compact framing (stageZoom.ts); 1 on a monitor. */
   framing?: number;
+  /** PHONE: the card Board has selected (shown zoomed, see ZoomCard). */
+  selectedIndex?: number | null;
+  /** PHONE: every tap on a card goes here, and the selection lives in Board
+   *  (handSelect.ts) — the hand keeps no raise state of its own. Absent on a
+   *  desktop or a touch tablet, which keep the hover / two-tap raise below. */
+  onCardTap?: (card: Card) => void;
+  /** PHONE: a thumb dragged along the strip browses the hand — called with
+   *  the card under it each time that changes (Board selects it, so it is
+   *  shown zoomed, and never plays it). */
+  onCardBrowse?: (card: Card) => void;
 }) {
   const n = cards.length;
   const root = useRef<HTMLDivElement>(null);
-  const { cw, availW, show } = useHandMetrics(root, framing);
+  const phone = usePhone();
+  const k = useStageZoom();
+  const { cw, availW, show } = useHandMetrics(root, framing, phone, k);
+  const insets = handInsets(phone);
   // Held by CARD index, not fan position: a card can be played out from under
   // the pointer, and a stale position would spread the fan around whichever
   // card slid into that slot.
   const [hoverId, setHoverId] = useState<number | null>(null);
-  const hover = hoverId == null ? -1 : cards.findIndex((c) => c.index === hoverId);
-  const slots = fanLayout(n, cw, availW, hover);
+  const hover = onCardTap || hoverId == null ? -1 : cards.findIndex((c) => c.index === hoverId);
+  const slots = fanLayout(n, cw, availW, hover, { flat: phone != null });
   // TWO-TAP PLAY ON A TOUCHSCREEN. The fan is deliberately cropped by the
   // stage's bottom edge — the game crops it too — and raising a card is what
   // lets you read it in full. A tablet has no hover, so the hand was a row of
@@ -117,6 +154,44 @@ export default function Hand({
   // The advice's marks (advice/marks.ts): which cards to play, numbered. The
   // engine's own win % rides along only with "engine numbers" on.
   const { marks, showNumbers } = useAdviceMarks();
+  // BROWSING BY DRAG (phone). A touch that travels `BROWSE_SLOP` px along the
+  // strip stops being a tap: from then on the card under the finger's X is
+  // the selected one, whatever its Y (the thumb drifts up over the zoom). A
+  // touch pointer stays captured by the slot it went down on, so its moves
+  // keep bubbling here. The click a browsing touch may still end in is
+  // swallowed, or it would play the card the touch began on.
+  const browse = useRef<{ id: number; x: number; on: boolean; last: number | null } | null>(null);
+  const swallowClick = useRef(false);
+  const cardAtX = (x: number): Card | null => {
+    const hits = Array.from(root.current?.querySelectorAll(".gs-handslot-hit") ?? []).map((h) => h.getBoundingClientRect());
+    if (!hits.length || hits.length !== cards.length) return null;
+    let i = 0;
+    while (i < hits.length - 1 && x >= hits[i + 1].left) i++;
+    return cards[i];
+  };
+  const browseHandlers = onCardBrowse ? {
+    onPointerDown: (e: React.PointerEvent) => {
+      swallowClick.current = false;
+      browse.current = e.pointerType === "touch" ? { id: e.pointerId, x: e.clientX, on: false, last: null } : null;
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const b = browse.current;
+      if (!b || b.id !== e.pointerId) return;
+      if (!b.on && Math.abs(e.clientX - b.x) < BROWSE_SLOP) return;
+      b.on = true;
+      swallowClick.current = true;
+      const c = cardAtX(e.clientX);
+      if (c && c.index !== b.last) { b.last = c.index; onCardBrowse(c); }
+    },
+    onPointerUp: () => { browse.current = null; },
+    onPointerCancel: () => { browse.current = null; },
+    onClickCapture: (e: React.MouseEvent) => {
+      if (!swallowClick.current) return;
+      swallowClick.current = false;
+      e.stopPropagation();
+      e.preventDefault();
+    },
+  } : {};
   return (
     // `--gs-handmin` RESERVES the strip's height for the card boxes whether or
     // not any are in it. The hand is the arena's flex sibling and the arena is
@@ -125,9 +200,13 @@ export default function Hand({
     // strip from a card's height (157-295px) to the CSS floor, which dropped the
     // player and the enemies ~150px down the screen mid-turn (and re-fitted every
     // oversized rig with them, since `maxBodyH` is measured off the arena).
-    <div className="gs-hand" ref={root}
+    <div className="gs-hand" ref={root} {...browseHandlers}
       style={{ "--gs-handmin": `${cardBoxHeight(cw)}px`,
-               "--gs-handshow": `${show}px` } as React.CSSProperties}>
+               "--gs-handshow": `${show}px`,
+               // The fan centres in the room the chrome leaves it, which on a
+               // phone in landscape is not the middle of the stage.
+               ...(insets ? { paddingLeft: floorPx(insets.left, k), paddingRight: floorPx(insets.right, k) } : {}),
+             } as React.CSSProperties}>
       {cards.map((c, i) => {
         const sc = showNumbers ? scores?.find((s) => s.stable_idx === c.index) : undefined;
         const mark = marks.get(cardKey(c.index)) ?? null;
@@ -143,6 +222,7 @@ export default function Hand({
         // Desktop plays on the single click it always had. On a touchscreen
         // the first tap only raises the card; the second commits it.
         const activate = () => {
+          if (onCardTap) { onCardTap(c); return; }
           if (touch && i !== hover) { setHoverId(c.index); return; }
           if (touch) setHoverId(null);
           if (clickable) onCardClick!(c);
@@ -151,7 +231,8 @@ export default function Hand({
           <div
             key={c.index}
             className={`gs-handslot${clickable ? " gs-playable" : ""}`
-              + `${i === hover ? " gs-hovered" : ""}${pulled ? " gs-pulled" : ""}`}
+              + `${i === hover ? " gs-hovered" : ""}${pulled ? " gs-pulled" : ""}`
+              + `${onCardTap && c.index === selectedIndex ? " gs-selected" : ""}`}
             // Hover is React state rather than CSS `:hover` because the fan
             // reacts to it as a WHOLE (the neighbours step aside), and because
             // the state has to be read off the hitbox, not off the card that
@@ -164,7 +245,7 @@ export default function Hand({
             onPointerEnter={touch ? undefined : () => setHoverId(c.index)}
             onPointerLeave={touch ? undefined
               : () => setHoverId((h) => (h === c.index ? null : h))}
-            onClick={touch || clickable ? activate : undefined}
+            onClick={onCardTap || touch || clickable ? activate : undefined}
             style={{
               marginLeft: -overlap,
               "--fan-x": `${dx.toFixed(1)}px`,

@@ -49,3 +49,14 @@ export const SHORT_QUERY = "(max-height: 800px)";
  *  and the HUD and tool rows shrink to a sliver. Kept in sync with the
  *  `max-height: 520px` block in responsive.css BY HAND, like the others. */
 export const PHONE_LANDSCAPE_QUERY = "(max-height: 520px)";
+
+/** A phone held upright: touch and a narrow viewport (360–412 CSS px wide).
+ *  Together with PHONE_LANDSCAPE_TOUCH_QUERY these define "phone mode"; a touch
+ *  tablet (1024x640 and up) matches neither. Kept in sync with the phone media
+ *  queries in phone.css BY HAND, like the others. */
+export const PHONE_PORTRAIT_QUERY = "(hover: none) and (max-width: 480px)";
+
+/** A phone on its side: touch and a short viewport. The `(hover: none)` guard
+ *  is what separates it from PHONE_LANDSCAPE_QUERY above, which also matches a
+ *  short desktop window. Kept in sync with phone.css BY HAND. */
+export const PHONE_LANDSCAPE_TOUCH_QUERY = "(hover: none) and (max-height: 520px)";

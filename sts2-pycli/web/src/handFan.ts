@@ -1,4 +1,5 @@
 import { CARD_H, CARD_W } from "./cardGeometry";
+import { PHONE_HAND_SHOW, type PhoneMode } from "./phone";
 
 /** The fan the held hand is laid out as: where each card sits at rest, and how
  *  the fan reacts when one of them is hovered.
@@ -51,8 +52,17 @@ export type FanSlot = { overlap: number; dx: number; rot: number; drop: number }
  *  card holds its ground while its neighbours step aside. That asymmetry is
  *  load-bearing, not cosmetic — a fan that can move a card TOWARD the pointer
  *  can flicker. */
-export function fanLayout(n: number, cw: number, availW: number, hover: number): FanSlot[] {
-  const { overlapF, rotStep, liftF } = fanParams(n);
+export function fanLayout(
+  n: number, cw: number, availW: number, hover: number, opts?: { flat?: boolean },
+): FanSlot[] {
+  const params = fanParams(n);
+  const { overlapF } = params;
+  // A FLAT fan (a phone): no tilt, no arc. The resting card shows only its top
+  // half, and a tilted name banner on a 124px half-card is the part you cannot
+  // read. Flat also means no shear between neighbours, so the spread below
+  // gets the whole overlap.
+  const rotStep = opts?.flat ? 0 : params.rotStep;
+  const liftF = opts?.flat ? 0 : params.liftF;
   const mid = (n - 1) / 2;
   // The fan is `cw + (n - 1) * step` wide and `.gs-hand` is `nowrap`, so a big
   // hand at a narrow viewport spills past the stage. It is painted ABOVE the
@@ -87,8 +97,8 @@ export function fanLayout(n: number, cw: number, availW: number, hover: number):
     return {
       overlap: i === 0 ? 0 : overlap,
       dx: away * spread * (1 - Math.min(1, Math.abs(i - hover) / SPREAD_REACH)),
-      rot: Math.max(-14, Math.min(14, off * rotStep)),
-      drop: Math.min(cw * 0.3, off * off * liftF * cw),
+      rot: rotStep === 0 ? 0 : Math.max(-14, Math.min(14, off * rotStep)),
+      drop: liftF === 0 ? 0 : Math.min(cw * 0.3, off * off * liftF * cw),
     };
   });
 }
@@ -126,3 +136,41 @@ export const HAND_REST_VISIBLE = (CARD_H * 0.8) / 2 + 50;
  *  shrinks the scene without shrinking the design-px card. The game shows 65%
  *  of its own card box at rest; never show less than this. */
 export const HAND_REST_MIN_F = 0.55;
+
+/** The resting hand's floors on a phone, in REAL px (see `phone.atLeast`): how
+ *  wide a resting card is drawn and how much of it stands above the stage's
+ *  bottom edge. `null` off a phone, where the hand keeps its desktop sizing.
+ *
+ *  The visible band is the card's top half or so — cost gem, name banner and
+ *  the top of the art — and 96px is what that takes at these widths. On the
+ *  small phone (`phone.isSmallPhone`, an iPhone SE) held upright the card
+ *  drops to 108px: tap targets and text outrank the hand's size, and ten 124px
+ *  cards on 375px leave less than the 24px uncovered strip a finger needs. */
+export function handFloors(mode: PhoneMode, small: boolean): { cardW: number; showH: number } | null {
+  if (mode === "portrait") return { cardW: small ? 108 : 124, showH: PHONE_HAND_SHOW };
+  if (mode === "landscape") return { cardW: 136, showH: PHONE_HAND_SHOW };
+  return null;
+}
+
+/** Landscape strip chrome (real px): draw pile 8 + 44 + 12 on the left; End
+ *  Turn 7 + 124, discard 8 + 44, exhaust 8 + 44, + 12 on the right (12px of
+ *  air between a pile and the nearest card, 8 between the controls).
+ *  Must match the `.gs-phone-landscape` pile / End Turn `left`/`right` in phone.css. */
+const PHONE_LS_LEFT = 64;
+const PHONE_LS_RIGHT = 247;
+
+/** Horizontal room, in REAL px, the in-scene chrome owns at each end of the
+ *  hand strip on a phone (`null` off a phone: the desktop reserve applies).
+ *
+ *  Portrait moves the End Turn plate, the piles and the energy orb into a row
+ *  ABOVE the strip (phone.css), so the fan gets the stage width less a 16px
+ *  gutter. Landscape has no height to spare for that row — the fighters'
+ *  power rows sit right above the strip — so the plate and the piles stay IN
+ *  the strip: the draw pile at the left end, and the discard pile, the exhaust
+ *  pile and the End Turn plate at the right. Those positions live in phone.css
+ *  and must match these numbers. */
+export function handInsets(mode: PhoneMode): { left: number; right: number } | null {
+  if (mode === "portrait") return { left: 16, right: 16 };
+  if (mode === "landscape") return { left: PHONE_LS_LEFT, right: PHONE_LS_RIGHT };
+  return null;
+}

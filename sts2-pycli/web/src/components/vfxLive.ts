@@ -73,7 +73,10 @@ export function badgeRect(target: TargetRef, arena: HTMLElement): DOMRect | null
   if (!sel) return null;
   const creature = arena.querySelector(sel);
   if (!creature) return null;
-  const badge = creature.querySelector("[data-block-badge]");
+  // The portrait split draws the player's figure bare (`noChrome`): its block
+  // shield is the band's, beside it (`PlayerBand`), not inside the figure.
+  const badge = creature.querySelector("[data-block-badge]")
+    ?? (target.side === "player" ? arena.querySelector('[data-block-badge-for="player"]') : null);
   return badge ? (badge as HTMLElement).getBoundingClientRect() : null;
 }
 

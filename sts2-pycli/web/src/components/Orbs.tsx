@@ -37,8 +37,12 @@ function EmptySlot({ style }: { style: CSSProperties }) {
  *  the rig's feet — the creature's root. The arc itself is centred ABOVE that
  *  root (see `ORB_CENTRE_TO_BODY`), the way the game hangs `NOrbManager` off a
  *  marker rather than off the root — see `Combatant`. */
-export default function Orbs({ orbs, slots, bodyH, size }: {
+export default function Orbs({ orbs, slots, bodyH, size, row }: {
   orbs?: Orb[];
+  /** A plain left-to-right row of `size` px slots (`.gs-orbs-row`) instead of
+   *  the arc: the phone-portrait player band, which has no body to hang the
+   *  belt around. */
+  row?: boolean;
   slots?: number;
   /** The owner's rendered body height in px; the belt scales with it. */
   bodyH?: number | null;
@@ -54,7 +58,7 @@ export default function Orbs({ orbs, slots, bodyH, size }: {
   const body = bodyH && bodyH > 0 ? bodyH : GAME_BODY_H;
   const px = size ?? Math.round(body * ORB_TO_BODY);
   const pts = orbArc(capacity, body);
-  const slot = (i: number): CSSProperties => ({
+  const slot = (i: number): CSSProperties => row ? { position: "relative", width: px, height: px, flex: "none" } : ({
     position: "absolute",
     left: pts[i].x,
     top: pts[i].y,
@@ -65,7 +69,7 @@ export default function Orbs({ orbs, slots, bodyH, size }: {
     transform: "translate(-50%, -50%)",
   });
   return (
-    <div className="gs-orbs" data-combatant="orbs">
+    <div className={`gs-orbs${row ? " gs-orbs-row" : ""}`} data-combatant="orbs">
       {filled.map((o, i) => (
         <div key={o.index} style={slot(i)}
           title={`${o.name}${o.passive != null ? ` — passive ${o.passive}, evoke ${o.evoke}` : ""}`}>

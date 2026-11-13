@@ -1,6 +1,7 @@
 import Combatant from "./Combatant";
 import SpineSprite from "./SpineSprite";
 import type { CrabArm } from "./KaiserCrabGroup";
+import { partHpWidth, type PartChrome } from "./partChrome";
 import { mirroredBox } from "./decimillipedeLayout";
 
 /**
@@ -32,8 +33,13 @@ export const SEGMENT_SCALE = 0.45;
 /** Draw order, back of the animal first, so the head sits nearest the camera. */
 const ORDER = ["back", "middle", "front"];
 
-export default function DecimillipedeGroup({ segments, pxPerScene = 1, locStrings }: {
+export default function DecimillipedeGroup({ segments, pxPerScene = 1, locStrings, split, drop = 0 }: {
   segments: CrabArm[];
+  /** Phone portrait: each segment's split power chrome (`PartChrome`). */
+  split?: PartChrome;
+  /** Phone portrait: stage px the legs reach below the shared root. The
+   *  HP bars, names and powers hang under the legs there, not across them. */
+  drop?: number;
   /** Stage px per SCENE px (`scene.fitScene().k`). */
   pxPerScene?: number;
   /** Forwarded straight to each segment's `<Combatant>` — see that prop's
@@ -80,13 +86,14 @@ export default function DecimillipedeGroup({ segments, pxPerScene = 1, locString
       {ordered.map((s, i) => {
         const b = mirroredBox(s.c.rig);
         const cx = b ? ((b.left + b.right) / 2) * k : 0;
-        const spacerH = Math.max(48, Math.round((b ? b.h + b.bottom : 400) * k));
+        const spacerH = Math.max(48, Math.round((b ? b.h + b.bottom : 400) * k)) + drop;
         // Keep neighbouring readouts from colliding: a segment overlay is at
         // most as wide as the gap to the next segment's centre.
         const overlayW = Math.max(90, Math.min(170, Math.abs(b ? b.w * k : 150) * 0.5));
         return (
           <div key={`ov-${s.dataIndex}`}
-            style={{ position: "absolute", left: cx, bottom: 0, transform: "translateX(-50%)",
+            data-split-slot={split ? split.slotReal.toFixed(1) : undefined}
+            style={{ position: "absolute", left: cx, bottom: -drop, transform: "translateX(-50%)",
               zIndex: 10 + i }}>
             <Combatant
               c={s.c}
@@ -94,6 +101,9 @@ export default function DecimillipedeGroup({ segments, pxPerScene = 1, locString
               dataIndex={s.dataIndex}
               label={s.label}
               noSprite={{ w: overlayW, h: spacerH }}
+              hpWidth={partHpWidth(undefined, s.c.max_hp, split)}
+              powerChrome={split?.chrome}
+              powerCells={split?.cells}
               hotkey={s.hotkey}
               onClick={s.onClick}
               onHoverChange={s.onHoverChange}

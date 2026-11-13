@@ -511,6 +511,7 @@ def test_transport_parity_with_1081_messages(compact, buckets):
     assert rep["ok"], rep
 
 
+@pytest.mark.pending_e2e_tables
 def test_codec_parity_on_game_decisions():
     from ppo.e2e.serve.sample import game_decisions
 

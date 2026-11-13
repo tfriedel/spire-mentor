@@ -5,6 +5,7 @@ import { markFor, useAdviceMarks } from "../advice/useAdviceMarks";
 import { useHints } from "../hints/useHints";
 import "../skins/map.css";
 import { nodeMeta, bossArt } from "./mapArt";
+import { usePhone } from "../phone";
 
 const coordKey = (c: { col: number; row: number }) => `${c.col},${c.row}`;
 /** Undirected edge key so the plan-route highlight matches drawn edges. */
@@ -271,7 +272,7 @@ function InkDefs({ fid }: { fid: string }) {
  *
  * ``rich`` (the parchment map screen / overlay) draws the act boss as a large
  * ink silhouette at the top of the scroll instead of a small node stamp. */
-function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1, showPlan = true, rich = false }: {
+function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1, colScale, showPlan = true, rich = false }: {
   fm: FullMap;
   selectable?: Set<string>;
   onSelect?: (col: number, row: number) => void;
@@ -280,6 +281,9 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
   jumpTargets?: Map<string, { idx: number; floor: number | null }>;
   onJump?: (idx: number) => void;
   scale?: number;
+  /** The column pitch's own scale, where it differs from `scale` (a narrow
+   *  phone: the columns close up to the sheet, the rows keep their scale). */
+  colScale?: number;
   /** Draw the run-AI's planned route to the boss. Off during unadvised live
    *  play — see {@link MapView}. */
   showPlan?: boolean;
@@ -290,10 +294,14 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
   const fid = useId().replace(/[^a-zA-Z0-9]/g, "");
   // The run policy's mark on the node to pick next (advice/marks.ts).
   const { marks } = useAdviceMarks();
-  const COL = (rich ? RICH_COLW : COLW) * scale;
+  const COL = (rich ? RICH_COLW : COLW) * (colScale ?? scale);
   const ROW = (rich ? RICH_ROWH : ROWH) * scale;
   const R = (rich ? RICH_R : R_BASE) * scale;
   const fs = (px: number) => px * scale;
+  // On a phone the lattice sits at its narrow fit floor, where the hit disc
+  // (R + 9) comes out ~32 px across. The disc is invisible, so it is padded up
+  // to a 44 px diameter; the narrowest pitch (44 px, `MIN_COL_FIT`) keeps neighbours apart.
+  const phone = usePhone() !== null;
   const nodes: FullMapNode[] = (fm.rows || []).flat();
   if (fm.boss && !nodes.some((n) => n.row === fm.boss!.row && n.col === fm.boss!.col)) {
     nodes.push({ ...fm.boss, children: [] });
@@ -537,7 +545,7 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
             {canSelect && <title>Go to {n.type ?? "node"} ({n.col},{n.row}){skipHere ? " — keeps an elite-skip option" : ""}</title>}
             {jump && <title>Jump to floor {jump.floor ?? "?"}</title>}
             {/* larger transparent hit target for easier clicking */}
-            {(canSelect || jump) && <circle r={R + 9 * scale} fill="transparent" />}
+            {(canSelect || jump) && <circle data-hit r={Math.max(R + 9 * scale, phone && rich ? 22 : 0)} fill="transparent" />}
             {/* visited/current nodes are lassoed in ink — a heavy hand-drawn
                 brush loop, the game's own marking. The shipped map_ping.png is
                 a hairline WHITE ring: on parchment it read as a pale glow halo,
@@ -708,11 +716,15 @@ const LEGEND: { label: string; rel: string; coin?: boolean }[] = [
 const PARCH_PAD_X = 46;
 
 /** The smallest the lattice is drawn. 0.6 keeps the stamps legible on a sheet
- *  that has the width for it; on a phone-width sheet (< 760px) 0.5 — the act
- *  still overhangs and scrolls sideways, but by a short pan rather than a
- *  screen's worth. */
+ *  that has the width for it; on a phone-width sheet (< 760px) 0.5, and there
+ *  the COLUMNS close up further (`MIN_COL_FIT`) so the act fits the paper
+ *  and never scrolls sideways. */
 const MIN_FIT = 0.6;
 const MIN_FIT_NARROW = 0.5;
+/** The tightest column pitch on a phone-width sheet, as a scale of
+ *  `RICH_COLW`: 44 px, one tap disc (`FullMapGraph`'s 22 px radius). Only a
+ *  sheet under ~7 x 44 px of paper still scrolls sideways. */
+const MIN_COL_FIT = 44 / RICH_COLW;
 
 /** Mirrors `--gsm-sheet-inset` in map.css: the parchment layers are 1920 px
  *  wide but the hide itself starts this far in on each side, so the paper the
@@ -785,6 +797,7 @@ export default function MapView({ rows, graphs, currentIdx, selectable, onSelect
   // torn deckle. Quantised to 1/50 so a resize can't oscillate and so a
   // replay capture at a given viewport renders identically every time.
   const [fit, setFit] = useState(1);
+  const [colFit, setColFit] = useState<number | undefined>(undefined);
   const natW = graph?.full_map ? richExtent(graph.full_map).w : 0;
   useLayoutEffect(() => {
     if (compact || !natW) return;
@@ -796,7 +809,11 @@ export default function MapView({ rows, graphs, currentIdx, selectable, onSelect
       const avail = el.clientWidth * (1 - 2 * SHEET_INSET) - padX * 2;
       if (avail <= 0) return;
       const floor = el.clientWidth < 760 ? MIN_FIT_NARROW : MIN_FIT;
-      setFit(Math.max(floor, Math.min(1.12, Math.round((avail / natW) * 50) / 50)));
+      const next = Math.max(floor, Math.min(1.12, Math.round((avail / natW) * 50) / 50));
+      setFit(next);
+      // A narrow sheet at the floor: the columns alone close up to the paper.
+      const narrow = el.clientWidth < 760 && avail / natW < next;
+      setColFit(narrow ? Math.max(MIN_COL_FIT, Math.floor((avail / natW) * 200) / 200) : undefined);
     };
     measure();
     window.addEventListener("resize", measure);
@@ -900,7 +917,7 @@ export default function MapView({ rows, graphs, currentIdx, selectable, onSelect
           <div ref={bodyRef} className="gsm-parch-body">
             {graph
               ? <FullMapGraph fm={graph.full_map} selectable={selectable} onSelect={onSelect}
-                  jumpTargets={jumpTargets} onJump={onJump} scale={fit} showPlan={showPlan} rich />
+                  jumpTargets={jumpTargets} onJump={onJump} scale={fit} colScale={colFit} showPlan={showPlan} rich />
               : <ReconstructedRows rows={rows} currentIdx={currentIdx} onJump={onJump} />}
           </div>
           {/* … and its two torn deckle edges pinned OVER it, so an act taller

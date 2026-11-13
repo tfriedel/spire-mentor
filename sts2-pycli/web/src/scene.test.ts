@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GROUND_Y, INTENT_HEADROOM_PX, MIN_EDGE, SCENE_CX, SCENE_CY,
-  aspectFit, fitScene, placeEnemies, placePlayer, rowHalfWidths, sceneFramingFor,
+  aspectFit, fitScene, placeEnemies, placePlayer, rowHalfWidths, lowestFootY, sceneFitHeight, sceneFramingFor,
 } from "./scene";
 import { MAX_FRAMING } from "./stageZoom";
 
@@ -120,5 +120,48 @@ describe("sceneFramingFor", () => {
       expect(f).toBeLessThanOrEqual(prev);
       prev = f;
     }
+  });
+});
+
+describe("sceneFitHeight", () => {
+  it("keeps the stage height when the ground already clears the limit", () => {
+    expect(sceneFitHeight(1600, 800, 1, null, GROUND_Y, 800)).toBe(800);
+  });
+  it("lifts the ground line to the limit on a short wide stage (phone landscape)", () => {
+    const [w, h, framing] = [1830, 768, MAX_FRAMING];
+    const limit = 320;
+    const fitH = sceneFitHeight(w, h, framing, 300, GROUND_Y, limit);
+    expect(fitH).toBeLessThan(h);
+    const g = fitScene(w, fitH, sceneFramingFor(w, fitH, framing, 300)).y(GROUND_Y);
+    expect(g).toBeLessThanOrEqual(limit);
+    expect(g).toBeGreaterThan(limit - 4); // the largest box that clears it
+  });
+  it("in portrait only shifts the scene up, at the same scale", () => {
+    const [w, h] = [896, 1928];
+    const limit = fitScene(w, h, 1).y(GROUND_Y) - 100;
+    const fitH = sceneFitHeight(w, h, 1, null, GROUND_Y, limit);
+    expect(fitScene(w, fitH, 1).k).toBeCloseTo(fitScene(w, h, 1).k);
+    expect(fitScene(w, fitH, 1).y(GROUND_Y)).toBeLessThanOrEqual(limit);
+  });
+});
+
+describe("lowestFootY", () => {
+  it("is the ground line when nothing stands lower", () => {
+    expect(lowestFootY([])).toBe(GROUND_Y);
+    expect(lowestFootY([715, 737])).toBe(GROUND_Y);
+  });
+  it("is an authored marker below the ground line (Exoskeletons' second slot)", () => {
+    expect(lowestFootY([700, 756])).toBe(756);
+  });
+  it("a creature on a low marker still lands above the phone limit", () => {
+    const [w, h, framing] = [1830, 768, MAX_FRAMING];
+    const limit = 320;
+    const foot = lowestFootY([756]);
+    const fitH = sceneFitHeight(w, h, framing, 300, foot, limit);
+    const fitFor = (fh: number) => fitScene(w, fh, sceneFramingFor(w, fh, framing, 300));
+    expect(fitFor(fitH).y(foot)).toBeLessThanOrEqual(limit);
+    // Fitting the ground line alone would have left that creature below it.
+    const groundOnly = sceneFitHeight(w, h, framing, 300, GROUND_Y, limit);
+    expect(fitFor(groundOnly).y(foot)).toBeGreaterThan(limit);
   });
 });

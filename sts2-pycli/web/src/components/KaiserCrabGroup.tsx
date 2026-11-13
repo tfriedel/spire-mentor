@@ -3,6 +3,7 @@ import type { Enemy } from "../api";
 import type { DissolveEffect } from "../effects/manifest";
 import Combatant from "./Combatant";
 import KaiserCrab, { type ArmAction, type CrabMeasure } from "./KaiserCrab";
+import { partHpWidth, type PartChrome } from "./partChrome";
 
 /**
  * One targetable arm of the Kaiser Crab — the per-enemy render info Board would
@@ -90,6 +91,7 @@ export default function KaiserCrabGroup({
   arms,
   locStrings,
   onRigEvent,
+  split,
 }: {
   rig: string;
   /** Rendered px per rig unit — the crab's authored scene scale (0.5) times the
@@ -117,6 +119,8 @@ export default function KaiserCrabGroup({
    *  through rather than handled here because the effect sink lives in
    *  Board.tsx, the same place every other `sink.play` call is made. */
   onRigEvent?: ComponentProps<typeof KaiserCrab>["onRigEvent"];
+  /** Phone portrait: each arm's split power chrome (`PartChrome`). */
+  split?: PartChrome;
 }) {
   const [m, setM] = useState<CrabMeasure | null>(null);
 
@@ -145,11 +149,14 @@ export default function KaiserCrabGroup({
       {arms.map((arm) => {
         const at = armAt[arm.part];
         const box = m?.claw[arm.part];
-        const w = Math.max(OVERLAY_W, at?.hpW ?? 0);
+        const hpW = partHpWidth(at?.hpW, arm.c.max_hp, split);
+        const w = Math.max(OVERLAY_W, hpW ?? 0);
         const cx = at?.x ?? box?.cx ?? fallback[arm.part] ?? 0;
         // Keep the readout on screen when its marker is not — the game's own
         // frame always shows both, a narrower stage may not.
-        const margin = w / 2 + 12;
+        // In the split, the arm's power rows span its whole slot: that
+        // stays on screen too.
+        const margin = Math.max(w, split?.slot ?? 0) / 2 + 12;
         const x = Math.max(clampX.min + margin, Math.min(clampX.max - margin, cx));
         // The spacer is the creature's body: its feet up to its IntentPos, so
         // the HP bar sits under the feet and the intent where the game hangs it.
@@ -160,6 +167,7 @@ export default function KaiserCrabGroup({
         const feetY = at?.y ?? 0;
         return (
           <div key={arm.dataIndex} data-crab-arm={arm.part}
+            data-split-slot={split ? split.slotReal.toFixed(1) : undefined}
             style={{ position: "absolute", left: x, top: feetY - spacerH,
               transform: "translateX(-50%)",
               // Hidden (and untargetable) until the rig has been measured, then
@@ -177,7 +185,9 @@ export default function KaiserCrabGroup({
               dataIndex={arm.dataIndex}
               label={arm.label}
               noSprite={{ w, h: spacerH }}
-              hpWidth={at?.hpW}
+              hpWidth={hpW}
+              powerChrome={split?.chrome}
+              powerCells={split?.cells}
               hotkey={arm.hotkey}
               onClick={arm.onClick}
               onHoverChange={arm.onHoverChange}

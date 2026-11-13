@@ -116,8 +116,8 @@ def test_no_potion_offer_shows_placeholder(content):
 
 
 #: Signet Ring's ``GoldVar`` per game build (``SignetRing.cs``: 999 at v0.107.1,
-#: 888 at v0.111.0).
-_SIGNET_RING_GOLD = {"v0.107.1": "999", "v0.111.0": "888"}
+#: 888 at v0.111.0 and v0.113.0).
+_SIGNET_RING_GOLD = {"v0.107.1": "999", "v0.111.0": "888", "v0.113.0": "888"}
 
 
 def test_signet_ring_offer_shows_gold_number(content):

@@ -29,9 +29,13 @@ export interface MentorBarProps {
   status: { text: string; state: MentorState; title?: string };
   aiPlaying: boolean;
   onStop: () => void;
+  /** A phone held upright splits the bar: `mode` is the bar itself (the
+   *  Mode switch at tap size, or Stop alone while the AI plays), `rest`
+   *  the Menu panel's share (Brain, this decision's verbs, the status). */
+  parts?: "all" | "mode" | "rest";
 }
 
-const MODES: { key: MentorMode; label: string; title: string }[] = [
+export const MODES: { key: MentorMode; label: string; title: string }[] = [
   { key: "off", label: "Off", title: "The AI stays quiet: no hints, no grades. H, P and the reviews still answer when asked." },
   {
     key: "coach",
@@ -52,13 +56,16 @@ const BRAINS: { key: Brain; label: string; title: string }[] = [
 ];
 
 export default function MentorBar(p: MentorBarProps) {
+  const parts = p.parts ?? "all";
+  const rest = parts !== "mode";
   return (
-    <span className={`wb-mentor wb-mentor--${p.mode}${p.aiPlaying ? " wb-mentor--ai" : ""}`}>
-      {p.aiPlaying && (
+    <span className={`wb-mentor wb-mentor--${p.mode}${p.aiPlaying ? " wb-mentor--ai" : ""}${parts === "mode" ? " wb-mentor--phonebar" : ""}`}>
+      {p.aiPlaying && parts !== "rest" && (
         <button type="button" className="wb-mentor-stop" onClick={p.onStop} title="Stop the AI (Esc)">
           ■ Stop AI <kbd>Esc</kbd>
         </button>
       )}
+      {(parts === "all" || (parts === "mode" && !p.aiPlaying)) && (
       <span className="wb-seg" role="radiogroup" aria-label="Mode">
         {MODES.map((m) => {
           const disabled = m.key === "aiplays" && !!p.aiPlaysDisabled && p.mode !== "aiplays";
@@ -72,7 +79,8 @@ export default function MentorBar(p: MentorBarProps) {
           );
         })}
       </span>
-      {p.brain && (
+      )}
+      {rest && p.brain && (
         <span className="wb-seg" role="radiogroup" aria-label="Brain">
           {BRAINS.map((b) => (
             <button key={b.key} type="button" role="radio" aria-checked={p.brain!.value === b.key}
@@ -83,7 +91,7 @@ export default function MentorBar(p: MentorBarProps) {
           ))}
         </span>
       )}
-      {(p.onPeek || p.letAiPick || p.autobattle) && (
+      {rest && (p.onPeek || p.letAiPick || p.autobattle) && (
         <span className="wb-mentor-verbs" role="group" aria-label="This decision">
           {p.onPeek && (
             <button type="button" onClick={p.onPeek} title="Peek at the AI's pick for this decision (P)">
@@ -105,10 +113,12 @@ export default function MentorBar(p: MentorBarProps) {
           )}
         </span>
       )}
+      {rest && (
       <span className="wb-mentor-status" title={p.status.title ?? p.status.text} data-testid="mentor-status">
         <span className={`wb-mentor-dot wb-mentor-dot--${p.status.state}`} aria-hidden="true" />
         {p.status.text}
       </span>
+      )}
     </span>
   );
 }

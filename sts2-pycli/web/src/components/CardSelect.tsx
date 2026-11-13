@@ -142,13 +142,28 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
   const focusIdx = hovered ?? picked[picked.length - 1] ?? chosen[0] ?? null;
   const focus = focusIdx == null ? undefined : cards.find((c) => c.index === focusIdx);
 
+  // NO CONFIRM BUTTON where the pick itself can say "done" (owner, 2026-11-13;
+  // a mis-tap is taken back with Undo / the history):
+  //  - one card to pick: the tap picks it. On a touchscreen an upgrade's
+  //    before/after preview can only be seen by tapping, so there the first
+  //    tap shows it and a second tap on the same card commits;
+  //  - exactly N cards: the N-th tap commits;
+  //  - a RANGE (up to N): only the player knows when they are done, so that
+  //    one keeps a button ("Done").
+  const needsDone = max > 1 && min < max;
+  const previewFirst = max === 1 && isUpgrade && touch;
   const toggle = (idx: number) => {
     if (!onChoose) return;
-    setPicked((cur) => {
-      if (cur.includes(idx)) return cur.filter((i) => i !== idx);
-      if (max === 1) return [idx];
-      return cur.length < max ? [...cur, idx] : cur;
-    });
+    const cur = picked;
+    if (max === 1) {
+      if (previewFirst && !cur.includes(idx)) { setPicked([idx]); return; }
+      setPicked([idx]);
+      void submit([idx]);
+      return;
+    }
+    const next = cur.includes(idx) ? cur.filter((i) => i !== idx) : cur.length < max ? [...cur, idx] : cur;
+    setPicked(next);
+    if (!needsDone && next.length === max) void submit(next);
   };
   // The engine's ``select_cards`` verb treats a SINGLE submitted index on a
   // sequential multi-pick choice (max > 1) as an incremental accumulate step
@@ -157,7 +172,7 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
   // look stuck (the dialog never closes). Follow up with ``skip_select``
   // (finalize with whatever's accumulated so far) to complete it. 0 or 2+
   // checked cards already resolve in one shot (true skip / atomic multi-select).
-  const submit = async () => {
+  const submit = async (picked: number[]) => {
     if (!onChoose) return;
     if (picked.length === 0) {
       await onChoose("skip_select", {});
@@ -257,10 +272,15 @@ export default function CardSelect({ step, onChoose }: { step: Step; onChoose?: 
       </div>
       {onChoose && (
         <div style={{ display: "flex", gap: 12 }}>
-          <button disabled={picked.length < min} onClick={submit}>Confirm ({picked.length})</button>
+          {needsDone && (
+            <button className="gs-select-btn" disabled={picked.length < min} onClick={() => void submit(picked)}>Done ({picked.length})</button>
+          )}
+          {previewFirst && picked.length === 1 && (
+            <span style={{ alignSelf: "center", color: "var(--muted)", fontFamily: "var(--game-font)" }}>tap the card again to {context === "upgrade" ? "upgrade it" : "choose it"}</span>
+          )}
           {skippable && (
             <div style={{ textAlign: "center" }}>
-              <button className={markClass(skipMark).trim() || undefined} style={{ position: "relative" }}
+              <button className={`gs-select-btn ${markClass(skipMark).trim()}`.trim()} style={{ position: "relative" }}
                 onClick={() => onChoose("skip_select", {})}>
                 <MarkBadge mark={skipMark} />
                 Skip

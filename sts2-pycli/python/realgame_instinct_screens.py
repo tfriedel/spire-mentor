@@ -35,7 +35,14 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from display_names import card_name, display_name, potion_swap_label, shop_option_label
-from realgame_instinct import InstinctPick, InstinctUnavailable, graft_run, is_coop, note_for
+from realgame_instinct import (
+    INSTINCT_GAME_VERSION,
+    InstinctPick,
+    InstinctUnavailable,
+    graft_run,
+    is_coop,
+    note_for,
+)
 
 if TYPE_CHECKING:
     from realgame_instinct import InstinctAdvisor
@@ -644,7 +651,7 @@ def event(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str
     if norm_id(event_id) == "NEOW":
         snap_rs = state.get("run_state") or {}
         rm = sts2_rs.RunManager(
-            game_version="v0.111.0",
+            game_version=INSTINCT_GAME_VERSION,
             string_seed=str(state.get("seed")),
             character="Ironclad",
             ascension_level=int(snap_rs.get("ascension") or 0),

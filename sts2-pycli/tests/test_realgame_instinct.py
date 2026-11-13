@@ -233,13 +233,52 @@ class TestInstinct:
         with pytest.raises(ri.InstinctUnavailable, match="Ironclad"):
             advisor.advise(msg, "map_select")
         msg = {"run_state": {"character": "IRONCLAD"}, "game_version": "v0.107.1"}
-        with pytest.raises(ri.InstinctUnavailable, match=r"v0.111.0"):
+        with pytest.raises(ri.InstinctUnavailable, match=r"v0.111.0 and v0.113.0 only"):
             advisor.advise(msg, "map_select")
+
+    @pytest.mark.parametrize("build", ["v0.111.0", "v0.113.0"])
+    def test_ironclad_is_eligible_on_the_builds_it_plays(self, build: str) -> None:
+        msg = {"run_state": {"character": "IRONCLAD"}, "game_version": build}
+        assert ri.InstinctAdvisor(WEIGHTS).eligibility(msg) is None
 
     def test_capabilities_name_what_instinct_plays(self) -> None:
         assert ri.InstinctAdvisor(WEIGHTS).capabilities() == [
-            {"character": "Ironclad", "game_version": "v0.111.0"}
+            {"character": "Ironclad", "game_version": "v0.111.0"},
+            {"character": "Ironclad", "game_version": "v0.113.0"},
         ]
+
+    def test_a_beta_envelope_gets_the_training_builds_answer(self, student: Any) -> None:
+        """The v0.113.0 beta seeds like v0.111.0, so a beta envelope grafts
+        onto the student's own training build and sees what the native
+        student sees there."""
+        rm = _campaign_run(SEED)
+        driver = sts2_rs.E2eDriver(rm.seed)
+
+        maps = 0
+
+        def second_map(peek: Any) -> bool:
+            nonlocal maps
+            if peek.decision["decision_type"] != "MAP":
+                return False
+            maps += 1
+            return maps == 2
+
+        peek = _play_to(student, rm, driver, second_map)
+        native = student.decide(driver.copy(), peek, rm)
+        cols = [c["actions"][0]["col"] for c in peek.decision["classes"]]
+
+        msg = _envelope(rm, SEED, "map_select")
+        msg["game_version"] = "v0.113.0"
+        children = {(c["col"], c["row"]) for c in _children_of(msg)}
+        msg["nodes"] = [
+            {"index": i, "col": col, "row": row, "type": "Monster"}
+            for i, (col, row) in enumerate(sorted(children))
+        ]
+        advice = ri.InstinctAdvisor(WEIGHTS).advise(msg, "map_select", session={})
+        by_col = {o["col"]: o["prob"] for o in advice["options"]}
+        assert sorted(by_col) == sorted(cols)
+        for ci, col in enumerate(cols):
+            assert by_col[col] == pytest.approx(native["probs"][ci], abs=2e-3)
 
 
 def _children_of(msg: dict[str, Any]) -> list[dict[str, Any]]:

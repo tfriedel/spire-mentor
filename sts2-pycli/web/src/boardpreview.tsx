@@ -5,8 +5,12 @@ import { createRoot } from "react-dom/client";
 import "./theme.css";
 import "./game-skin.css";
 import Board from "./components/Board";
+import { InspectProvider } from "./inspect/InspectContext";
 import { HintsFixture } from "./hints/HintsContext";
+import { AdviceMarksCtx } from "./advice/useAdviceMarks";
+import { cardKey, type Mark } from "./advice/marks";
 import type { Step } from "./api";
+import "./phone.css";
 
 const P = "/preview";
 const card = (index: number, name: string, cost: number, type: string, description: string, art: string, rarity?: string) =>
@@ -47,11 +51,17 @@ const ENEMIES: Record<string, { name: string; rig: string; rig_scale: number; ri
   //   ln -s ../../../../sts2-wiki/site/public/images/monster_rigs/bygone_effigy \
   //         public/preview-rig/bygone_effigy
   bygone_effigy: { name: "Bygone Effigy", rig: "/preview-rig/bygone_effigy/bygone_effigy", rig_scale: 0.32, rig_bounds_h: 600 },
+  // The widest single rig (773 scene px of Bounds): the portrait split's
+  // one-enemy column case with a body wider than it is tall. Symlink:
+  //   ln -s ../../../../sts2-wiki/site/public/images/monster_rigs/lagavulin_matriarch \
+  //         public/preview-rig/lagavulin_matriarch
+  lagavulin_matriarch: { name: "Lagavulin Matriarch", rig: "/preview-rig/lagavulin_matriarch/lagavulin_matriarch", rig_scale: 0.3, rig_bounds_h: 526 },
 };
 const enemyKey = new URLSearchParams(location.search).get("enemy") ?? "shrinker_beetle";
 const E = ENEMIES[enemyKey] ?? ENEMIES.shrinker_beetle;
 
-// ?powers=<n> stacks N fake buffs on BOTH sides so the multi-row-effects layout
+// ?powers=<n> stacks N fake buffs on BOTH sides (every enemy, the `?scene=`
+// bosses' parts too) so the multi-row-effects layout
 // (does the character stay put as rows are added? does anything in the room
 // reach down over them?) can be eyeballed / screenshotted.
 const nPowers = Math.max(0, Number(new URLSearchParams(location.search).get("powers") ?? 0) | 0);
@@ -95,12 +105,12 @@ function sceneEnemies(): Record<string, unknown>[] {
       { index: 0, name: "Crusher", kind: "Crusher", hp: 44, max_hp: 70, block: 0,
         intents: [{ type: "Attack", damage: 16, hits: 1, intent_image: `${P}/intent_attack_4.png` }],
         ...common, image: `${P}/kaiser_crab.png`,
-        powers: [{ name: "Strength", amount: 2, image: `${P}/pow_vuln.png` }],
+        powers: nPowers ? previewPowers : [{ name: "Strength", amount: 2, image: `${P}/pow_vuln.png` }],
         ...(shared ? { rig_group: "kaiser_crab", rig_part: "left" } : {}) },
       { index: 1, name: "Rocket", kind: "Rocket", hp: 52, max_hp: 70, block: 9,
         intents: [{ type: "Buff", intent_image: null }],
         ...common, image: `${P}/kaiser_crab.png`,
-        powers: [],
+        powers: nPowers ? previewPowers : [],
         ...(shared ? { rig_group: "kaiser_crab", rig_part: "right" } : {}) },
     ];
   }
@@ -111,7 +121,7 @@ function sceneEnemies(): Record<string, unknown>[] {
       index, name: "Decimillipede", hp, max_hp: 40, block: 0,
       intents: [{ type: "Attack", damage: 7, hits: 1, intent_image: `${P}/intent_attack_4.png` }],
       rig: `/preview-rig/decimillipede_segment_${part}/decimillipede_segment_${part}`,
-      rig_scale: null, rig_bounds_h: null, image: `${P}/decimillipede.png`, powers: [],
+      rig_scale: null, rig_bounds_h: null, image: `${P}/decimillipede.png`, powers: nPowers ? previewPowers : [],
       rig_group: "decimillipede", rig_part: part,
     });
     return [seg(0, "front", 40), seg(1, "middle", 33), seg(2, "back", 28)];
@@ -119,7 +129,9 @@ function sceneEnemies(): Record<string, unknown>[] {
   // ?enemies=<n> repeats the preview rig n times. A single enemy is auto-
   // targeted, so aiming — the targeting arrow, the hover snap, the enemy tint —
   // has no repro at all without at least two.
-  const n = Math.min(4, Math.max(1, Number(new URLSearchParams(location.search).get("enemies") ?? 1) | 0));
+  // Up to 8: the portrait split's crowded rosters (6-8 enemies on the large
+  // phone, drawn ~11 px tall) still owe every enemy a 44 px tap box.
+  const n = Math.min(8, Math.max(1, Number(new URLSearchParams(location.search).get("enemies") ?? 1) | 0));
   // ?stolen=<n> gives each enemy n cards held hostage (the Thieving Hopper's
   // SwipePower), so the card pinned on the thief can be eyeballed against the
   // creature it hangs on — does it clear the HP bar, the intent, the neighbour?
@@ -131,9 +143,16 @@ function sceneEnemies(): Record<string, unknown>[] {
   // what `deathFade` joins on, so it is the difference between a preview death
   // that dissolves and one that (correctly) does not — see `?die=`.
   const kind = new URLSearchParams(location.search).get("kind");
+  const intentType = new URLSearchParams(location.search).get("intent");
   return Array.from({ length: n }, (_, index) => ({
     index, name: E.name, ...(kind ? { kind } : {}), hp: 30 - index * 6, max_hp: 72, block: 0,
-    intents: [{ type: "Attack", damage: 21, hits: 1, intent_image: `${P}/intent_attack_4.png` }],
+    // `?mods=1` hangs one listener icon under the intent (the phone floor on it).
+    // `?intent=<IntentType>` swaps the attack for a numberless kind with no
+    // breakdown (DebuffStrong, Buff), as the engine sends it.
+    intents: intentType ? [{ type: intentType, intent_image: null }]
+      : [{ type: "Attack", damage: 21, hits: 1, intent_image: `${P}/intent_attack_4.png`,
+      ...(new URLSearchParams(location.search).get("mods") ? { base_damage: 15, modifiers: [
+        { name: "STRENGTH", kind: "power", side: "enemy", title: "Strength", image: `${P}/pow_vuln.png`, add: 6 }] } : {}) }],
     rig: E.rig, rig_scale: E.rig_scale, rig_bounds_h: E.rig_bounds_h,
     powers: nPowers ? previewPowers
       : [{ name: "Vulnerable", amount: 2, image: `${P}/pow_vuln.png` }],
@@ -159,6 +178,15 @@ const actName = params.get("act") ?? undefined;
 const bossSlug = params.get("boss");
 const previewFloor = Number(params.get("floor") ?? 3) | 0;
 
+/** `?relics=<n>` shows exactly n relics, repeating the four fixtures when n is
+ *  more than four (the relic bar's wrap/scroll is what a long row is for). */
+function previewRelics<T extends { name: string }>(base: T[]): T[] {
+  const raw = new URLSearchParams(location.search).get("relics");
+  if (raw == null) return base;
+  const n = Math.max(0, Number(raw) | 0);
+  return Array.from({ length: n }, (_, i) => base[i % base.length]);
+}
+
 const step = {
   idx: 0, decision: "combat_play", source: "log", pv: null, chosen_action: null,
   meta: { turn: 3, step_no: 0, act_name: actName, act: 1, floor: previewFloor },
@@ -167,24 +195,65 @@ const step = {
     decision: "combat_play", round: 3, energy: 3, max_energy: 3,
     draw_pile_count: 9, discard_pile_count: 4, exhaust_pile_count: 1,
     energy_image: `${P}/energy_icon.png`,
-    player: { name: "The Ironclad", hp: 58, max_hp: 72, block: 12, gold: 62,
+    // `?pblock=<n>` sets the player's block (default 12; 0 hides the shield).
+    player: { name: "The Ironclad", hp: 58, max_hp: 72, block: previewBlock(), gold: 62,
       image: `${P}/player_cutout.png`, rig: "/preview-rig/ironclad", rig_scale: 0.28, rig_bounds_h: 278,
-      relics: [
+      ...previewCharacter(),
+      relics: previewRelics([
         { name: "Akabeko", description: "Your first Attack each combat deals 8 additional damage.", image: `${P}/relic_akabeko.png` },
         { name: "Anchor", description: "Start each combat with 10 Block.", image: `${P}/relic_anchor.png` },
         { name: "Bag of Marbles", description: "At the start of combat, apply 1 Vulnerable to ALL enemies.", image: `${P}/relic_bag_of_marbles.png` },
         { name: "Vajra", description: "At the start of combat, gain 1 Strength.", image: `${P}/relic_vajra.png` },
-      ],
+      ]),
       potions: [], max_potion_slot_count: 3 },
     // `?orbs=<filled>[,<capacity>]` hangs a Defect orb belt on the player —
     // the belt is scaled to the CREATURE, so it can only be eyeballed against
     // a real rig.
     ...previewOrbs(),
-    player_powers: previewPowers,
+    player_powers: previewPlayerPowers(),
+    ...previewOsty(),
     enemies: sceneEnemies(),
     hand: previewHand(),
   },
 } as unknown as Step;
+
+/** `?pblock=<n>`: the player's block, 12 when absent. */
+function previewBlock(): number {
+  const raw = new URLSearchParams(location.search).get("pblock");
+  return raw == null ? 12 : Math.max(0, Number(raw) | 0);
+}
+
+/** `?ppowers=<n>`: the PLAYER's buff count, apart from `?powers` (which sets
+ *  both sides). Absent, the player gets the same `?powers` stack. */
+function previewPlayerPowers() {
+  const raw = new URLSearchParams(location.search).get("ppowers");
+  if (raw == null) return previewPowers;
+  const n = Math.max(0, Number(raw) | 0);
+  return Array.from({ length: n }, (_, i) => ({
+    name: `Buff ${i + 1}`, amount: i + 1, description: "preview", image: `${P}/pow_vuln.png`,
+  }));
+}
+
+/** `?char=necrobinder|defect|silent|regent` swaps the player's rig (default the Ironclad).
+ *  The rigs live in the wiki, symlinked under public/preview-rig/ like the
+ *  enemy rigs above. */
+function previewCharacter() {
+  const c = new URLSearchParams(location.search).get("char");
+  if (c === "necrobinder") {
+    return { name: "The Necrobinder", rig: "/preview-rig/necrobinder/necrobinder", rig_scale: 0.27, rig_bounds_h: 270 };
+  }
+  if (c === "defect") return { name: "The Defect", rig: "/preview-rig/defect/defect", rig_scale: 0.125, rig_bounds_h: 260 };
+  if (c === "silent") return { name: "The Silent", rig: "/preview-rig/silent/silent", rig_scale: 0.29, rig_bounds_h: 244 };
+  if (c === "regent") return { name: "The Regent", rig: "/preview-rig/regent/regent", rig_scale: 0.29, rig_bounds_h: 335 };
+  return {};
+}
+
+/** `?osty=1` stands the Necrobinder's Osty beside the player. */
+function previewOsty() {
+  if (!new URLSearchParams(location.search).get("osty")) return {};
+  return { osty: { name: "Osty", alive: true, hp: 14, max_hp: 20, block: 0,
+    rig: "/preview-rig/osty/osty", rig_scale: 0.26, rig_bounds_h: 204 } };
+}
 
 /** `?orbs=2` → 2 channelled orbs in a 3-slot queue; `?orbs=2,5` sets the
  *  capacity too. Absent, the board has no orb belt at all (the Ironclad's). */
@@ -217,33 +286,80 @@ function previewHand() {
   // `?cards=0` is the EMPTY hand (the moment the last card is played), not the
   // default: it is what reproduces the strip-collapse the reserve in
   // `.gs-hand`'s min-height exists to stop. Only an absent param means "5".
-  const raw = new URLSearchParams(location.search).get("cards");
-  if (raw == null) return faces;
+  // `?hand=<n>` is the phone harness's spelling of the same thing, clamped to
+  // 1-10 (a real hand); `?cards=` wins when both are given.
+  const q = new URLSearchParams(location.search);
+  const handN = q.get("hand");
+  const raw = q.get("cards") ?? (handN == null ? null : String(Math.min(10, Math.max(1, Number(handN) | 0))));
+  // `?longcard=1` gives card 1 (a Skill) a five-line text: the zoomed card's
+  // description has a 13px floor and must scroll rather than shrink under it.
+  // Fixture text, not a real card.
+  if (q.get("longcard")) {
+    faces[1] = { ...faces[1], name: "Long Fixture",
+      description: "Gain 8 Block. Draw 2 cards.\nWhenever you play a Skill this turn, gain 3 Block and deal 4 damage to ALL enemies.\nAt the end of your turn, discard your hand and add a Wound into your draw pile.\nExhaust." };
+  }
+  // `?unplayable=<i>` makes hand card i unaffordable (the not-enough-energy
+  // case: it zooms on a phone but never arms or plays).
+  const unplayable = q.get("unplayable");
+  // `?stars=<i>` gives hand card i a Regent star cost of 2: the star icon
+  // stands 36/300 of the card's width proud of its left edge, further out
+  // than the energy gem.
+  const stars = q.get("stars");
+  const mark = <T extends { index: number }>(cs: T[]) => cs
+    .map((c) => (unplayable != null && c.index === Number(unplayable) ? { ...c, can_play: false, unplayable_reason: "energy" } : c))
+    .map((c) => (stars != null && c.index === Number(stars) ? { ...c, star_cost: 2 } : c));
+  if (raw == null) return mark(faces);
   const n = Number(raw) | 0;
   if (n < 1) return [];
-  return Array.from({ length: n }, (_, i) => ({ ...faces[i % faces.length], index: i }));
+  return mark(Array.from({ length: n }, (_, i) => ({ ...faces[i % faces.length], index: i })));
 }
 
 /** `?debuff=<ms>` / `?buff=<ms>` — the second step of a two-step preview, so the
  *  power surfaces that only exist ON A TRANSITION can be eyeballed headlessly.
  *  `Board` derives `powerAdd` by diffing consecutive steps (`combatDiff.ts`), so
  *  a single static step can never show the applied panel, its burst, or
- *  `AnimShake`. The debuff arm is the one that wobbles the creature. */
-function stepWithPower(name: string, amount: number): Step {
-  const st = step.state as unknown as { player_powers: unknown[] };
+ *  `AnimShake`. The debuff arm is the one that wobbles the creature.
+ *
+ *  Every timed transition here (`?die`, `?hit`, `?summon`, `?buff`,
+ *  `?debuff`) is applied to the CURRENT step, so they compose: a summon then a
+ *  buff keeps the summoned enemy, and a play keeps its card out of the hand. */
+function stepWithPower(cur: Step, name: string, amount: number): Step {
+  const st = cur.state as unknown as { player_powers: unknown[] };
   return {
-    ...step,
-    idx: 1,
+    ...cur,
+    idx: cur.idx + 1,
     state: {
-      ...step.state,
+      ...cur.state,
       player_powers: [...st.player_powers, { name, amount, description: "preview", image: `${P}/pow_vuln.png` }],
     },
   } as unknown as Step;
 }
 
-/** The second step of a death preview: the board with no enemies left. */
-function stepWithNoEnemies(): Step {
-  return { ...step, idx: 1, state: { ...step.state, enemies: [] } } as unknown as Step;
+/** The second step of a death preview: the board with no enemies left, or
+ *  (`?dying=<i>`) without enemy i only — the others live on. */
+function stepWithNoEnemies(cur: Step): Step {
+  const raw = new URLSearchParams(location.search).get("dying");
+  const enemies = raw == null ? []
+    : (cur.state.enemies as { index: number }[]).filter((e) => e.index !== Number(raw));
+  return { ...cur, idx: cur.idx + 1, state: { ...cur.state, enemies } } as unknown as Step;
+}
+
+/** `?hit=<ms>`: the player takes a 20-damage hit — the block (12 by default)
+ *  breaks and the rest comes off HP — so the hurt flash, the damage number and
+ *  the block-break play on the player. */
+function stepWithPlayerHit(cur: Step): Step {
+  const pl = cur.state.player as unknown as { hp: number; block: number };
+  const through = Math.max(0, 20 - pl.block);
+  return { ...cur, idx: cur.idx + 1, state: { ...cur.state,
+    player: { ...cur.state.player, block: 0, hp: Math.max(1, pl.hp - through) } } } as unknown as Step;
+}
+
+/** `?summon=<ms>`: one never-seen enemy (uid and index 99) joins the fight. */
+function stepWithSummon(cur: Step): Step {
+  const es = cur.state.enemies;
+  const base = es[es.length - 1];
+  return { ...cur, idx: cur.idx + 1, state: { ...cur.state,
+    enemies: [...es, { ...base, uid: 99, index: 99, name: "Summoned", hp: 12, max_hp: 12, block: 0 }] } } as unknown as Step;
 }
 
 function Demo() {
@@ -252,6 +368,8 @@ function Demo() {
   const debuffDelay = Number(params.get("debuff"));
   const buffDelay = Number(params.get("buff"));
   const dieDelay = Number(params.get("die"));
+  const hitDelay = Number(params.get("hit"));
+  const summonDelay = Number(params.get("summon"));
   const enemyAnim = params.get("anim") ?? undefined;  // loop e.g. "hurt" to check framing
   const [attack, setAttack] = useState<{ target: number; nonce: number } | undefined>(undefined);
   const [shown, setShown] = useState<Step>(step);
@@ -269,19 +387,29 @@ function Demo() {
     // `?die=1600&kind=SoulNexus` is the "should not dissolve" case and the same
     // URL without `kind` is the control.
     if (!dieDelay) return;
-    const t = setTimeout(() => setShown(stepWithNoEnemies()), dieDelay);
+    const t = setTimeout(() => setShown(stepWithNoEnemies), dieDelay);
     return () => clearTimeout(t);
   }, [dieDelay]);
+  useEffect(() => {
+    if (!hitDelay) return;
+    const t = setTimeout(() => setShown(stepWithPlayerHit), hitDelay);
+    return () => clearTimeout(t);
+  }, [hitDelay]);
+  useEffect(() => {
+    if (!summonDelay) return;
+    const t = setTimeout(() => setShown(stepWithSummon), summonDelay);
+    return () => clearTimeout(t);
+  }, [summonDelay]);
   useEffect(() => {
     // "Vulnerable" is typed Debuff and "Strength" Buff in the real
     // `sfx_map.json`, so these take the two branches of `GetTypeForAmount`
     // without the preview needing a valence override.
     if (debuffDelay) {
-      const t = setTimeout(() => setShown(stepWithPower("Vulnerable", 2)), debuffDelay);
+      const t = setTimeout(() => setShown((cur) => stepWithPower(cur, "Vulnerable", 2)), debuffDelay);
       return () => clearTimeout(t);
     }
     if (buffDelay) {
-      const t = setTimeout(() => setShown(stepWithPower("Strength", 2)), buffDelay);
+      const t = setTimeout(() => setShown((cur) => stepWithPower(cur, "Strength", 2)), buffDelay);
       return () => clearTimeout(t);
     }
   }, [debuffDelay, buffDelay]);
@@ -292,15 +420,39 @@ function Demo() {
   // bottom-align slack (which used to shove the hero up as buffs stacked) is
   // reproducible headlessly without a tall enemy rig.
   const minh = Number(params.get("minh") ?? 0) | 0;
+  // `?replay=1` renders the board the way a recorded run does: no play or
+  // end-turn callbacks, so nothing on it is live.
+  const replay = params.get("replay") === "1";
+  // `?pulled=1` marks the advice's plan on the hand: Bash (2) to play first,
+  // Iron Wave (0) second — the numbered, gold-ringed cards the mod pulls part
+  // way out of the fan (`.gs-pulled`).
+  const pulledMarks = { showNumbers: false, marks: new Map<string, Mark>(params.get("pulled") === "1"
+    ? [[2, 1], [0, 2]].map(([i, order]) => [cardKey(i), { key: cardKey(i), tier: order === 1 ? "best" : "good",
+        order, targetIndex: null, label: "", share: null, q: null }] as [string, Mark])
+    : []) };
+  // A live play is recorded on the page (`data-last-play` on #root's first
+  // child, "card" or "card>target") and the card leaves the hand, so an e2e
+  // test can see both that a play happened and what follows it.
+  const [lastPlay, setLastPlay] = useState("");
+  // End Turn presses, counted the same way (`data-end-turns`).
+  const [endTurns, setEndTurns] = useState(0);
+  const playCard = (card: number, target?: number) => {
+    setLastPlay(target == null ? `${card}` : `${card}>${target}`);
+    setShown((st) => ({ ...st, idx: st.idx + 1,
+      state: { ...st.state, hand: st.state.hand.filter((c) => c.index !== card) } }) as Step);
+  };
   return (
     <>
     {minh > 0 && <style>{`.gs-arena{min-height:${minh}px}`}</style>}
-    <div style={{ display: "grid", gridTemplateColumns: showPanel ? "1fr 320px" : "1fr", height: "100vh" }}>
+    <div data-last-play={lastPlay} data-end-turns={endTurns} style={{ display: "grid", gridTemplateColumns: showPanel ? "1fr 320px" : "1fr", height: "100vh" }}>
       <div style={{ overflow: "auto", ...(showPanel ? { borderRight: "1px solid var(--border)" } : {}) }}>
         {/* A rendering preview: show the full board incl. the MCTS score
             badges, which live play hides behind the hints switch. */}
         <HintsFixture on>
-          <Board step={shown} onEndTurn={() => {}} onPlayCard={() => {}} scores={step.scores} attack={attack} enemyAnim={enemyAnim} />
+          <AdviceMarksCtx.Provider value={pulledMarks}>
+          <InspectProvider><Board step={shown} onEndTurn={replay ? undefined : () => setEndTurns((n) => n + 1)}
+            onPlayCard={replay ? undefined : playCard} scores={step.scores} attack={attack} enemyAnim={enemyAnim} /></InspectProvider>
+          </AdviceMarksCtx.Provider>
         </HintsFixture>
       </div>
       {showPanel && <div style={{ background: "var(--panel)" }} />}

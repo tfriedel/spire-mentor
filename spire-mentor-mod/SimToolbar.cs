@@ -507,7 +507,7 @@ internal sealed class SimToolbar
             "Search thinks ahead: a search over the fight, the run net for the screens (Shift+F8 switches)",
             () => SetBrain(AdvisorBrainRules.Search), SetHint);
         _brainInstinct = SimUiKit.MakeButton("Instinct",
-            "Instinct is the end-to-end net, no search: every decision on gut feel (Ironclad on v0.111.0 " +
+            "Instinct is the end-to-end net, no search: every decision on gut feel (Ironclad on v0.111.0 and the v0.113.0 beta " +
             "for now). Hints, Let AI pick, autoplay and Autobattle all follow it (Shift+F8 switches)",
             () => SetBrain(AdvisorBrainRules.Instinct), SetHint);
         _brainControls.AddChild(_brainSearch);

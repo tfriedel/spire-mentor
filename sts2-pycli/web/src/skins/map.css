@@ -274,6 +274,11 @@
 @media (max-width: 760px) {
   .gsm-parch-body { padding-left: 16px; padding-right: 16px; }
 }
+/* A phone held upright: the act's seven columns have to fit the paper
+   (MapView's `colFit`), so the gutters give them every px they can. */
+@media (max-width: 480px) {
+  .gsm-parch-body { padding-left: 4px; padding-right: 4px; }
+}
 /* Phone landscape: the scene's 480px floor is taller than the whole screen,
    which put the Proceed banner — pinned to the scene's bottom — below the
    fold of the outer scroller. The sheet is the screen; let it be short. */

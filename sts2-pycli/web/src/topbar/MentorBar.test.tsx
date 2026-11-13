@@ -61,4 +61,27 @@ describe("mentorStatus", () => {
       text: "AI playing · step 12", state: "ai" });
     expect(mentorStatus({ ...base, mode: "coach" }).text).toMatch(/your call/);
   });
+
+  it("phone bar: only the Mode switch, or Stop alone while the AI plays", () => {
+    const full = { brain: { value: "search" as const, set: vi.fn() }, letAiPick: { run: vi.fn() } };
+    const { unmount } = render(<MentorBar {...props(full)} parts="mode" />);
+    expect(screen.getByRole("radiogroup", { name: "Mode" })).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Brain" })).toBeNull();
+    expect(screen.queryByText(/Let AI pick/)).toBeNull();
+    expect(screen.queryByTestId("mentor-status")).toBeNull();
+    unmount();
+    render(<MentorBar {...props({ ...full, mode: "aiplays", aiPlaying: true })} parts="mode" />);
+    expect(screen.getByRole("button", { name: /Stop AI/ })).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Mode" })).toBeNull();
+  });
+
+  it("phone menu panel: Brain, the verbs and the status, without the Mode switch or Stop", () => {
+    render(<MentorBar {...props({ brain: { value: "search", set: vi.fn() }, letAiPick: { run: vi.fn() }, aiPlaying: true })}
+      parts="rest" />);
+    expect(screen.queryByRole("radiogroup", { name: "Mode" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Stop AI/ })).toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "Brain" })).toBeInTheDocument();
+    expect(screen.getByText(/Let AI pick/)).toBeInTheDocument();
+    expect(screen.getByTestId("mentor-status")).toBeInTheDocument();
+  });
 });

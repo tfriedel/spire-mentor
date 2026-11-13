@@ -870,7 +870,7 @@ title (then it is a display name, and passes through as is).
 
 ### Advisor brain (v5.2) -- additive
 
-Instinct is the e2e PPO net (today the Ironclad one, v0.111.0) answering
+Instinct is the e2e PPO net (today the Ironclad one, on v0.111.0 and the v0.113.0 beta) answering
 every decision with no search; Search is everything above. The player picks
 one; the default stays Search.
 

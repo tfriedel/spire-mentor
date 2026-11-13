@@ -50,6 +50,11 @@
    the board, so the game keeps the full width. Same DOM either way — the run
    history, the minimap and the reasoning panel are all still live, they are
    just on top of the board instead of beside it. */
+/* The drawer's own way out (the toggle that opened it may be under it). */
+.wb-side-head { display: none; }
+.wb-side--overlay > .wb-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex: none; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--border); font: 600 14px/1 var(--font); }
+.wb-side-head button { min-height: 44px; padding: 0 16px; font: 600 15px/1 var(--font); border-radius: 9px; }
 .wb-side--overlay {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 40;
   width: min(320px, 88vw);
@@ -81,9 +86,12 @@
 /* Without this the buttons squash toward zero width instead of overflowing. */
 .wb-topbar-scroll > * { flex: 0 0 auto; }
 /* A row that overflows in one axis clips in the other, which would cut the
-   dropdowns off at the bar's bottom edge. Only clip when actually scrolling. */
-.wb-topbar-scroll:not(:has(.wb-menu-list)) { overflow-y: hidden; }
-.wb-topbar-scroll:has(.wb-menu-list) { overflow: visible; }
+   dropdowns off at the bar's bottom edge. Only clip when actually scrolling.
+   A phone's list is `position: fixed` (.wb-menu-list--phone, phone.css),
+   which the scroller does not clip: there the row keeps scrolling (dropping
+   its overflow would snap it back to its start). */
+.wb-topbar-scroll:not(:has(.wb-menu-list:not(.wb-menu-list--phone))) { overflow-y: hidden; }
+.wb-topbar-scroll:has(.wb-menu-list:not(.wb-menu-list--phone)) { overflow: visible; }
 
 .wb-segmented, .wb-chips, .wb-context, .wb-menus { display: inline-flex; align-items: center; gap: 4px; }
 .wb-menus { gap: 6px; }
@@ -283,9 +291,11 @@
    workbench and 246 to the game, and the scene sat on its zoom floor. Here
    the workbench gets out of the way:
 
-     - the top row FOLDS AWAY. `.wb-chrome-toggle` (App.tsx) is the one
-       control that stays, pinned over the HUD's right end; the row opens
-       over the board as a sheet and takes no height of its own.
+     - the top row FOLDS AWAY. On a phone the labelled Menu button
+       (TopBar.tsx, phone.css) is the one control that stays; a short window
+       that is not a phone keeps `.wb-chrome-toggle` (App.tsx), pinned over
+       the HUD's right end. Either way the row opens over the board as a
+       sheet and takes no height of its own.
      - the HUD band and the combat tool row shrink to a sliver (40px / 30px),
        every part scaled off the band's height like the compact rules do.
 

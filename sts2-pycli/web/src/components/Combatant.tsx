@@ -4,11 +4,18 @@ import type { DissolveEffect } from "../effects/manifest";
 import CardFrame from "./CardFrame";
 import Orbs from "./Orbs";
 import Powers from "./Powers";
+import HealthBar from "./HealthBar";
+import { powerItem } from "../inspect/powerItem";
+import { useInspect } from "../inspect/useInspect";
+import { atLeast, usePhone, useStageZoom } from "../phone";
 import SpineSprite from "./SpineSprite";
 import { monsterSkin } from "../monsterSkins";
 import { describeIntent, intentDirection } from "../intentBreakdown";
+import { intentInfo, intentName } from "../intentNames";
 import { boundsWidth, instanceScale } from "../scene";
-import { POWER_BOX_MARGIN } from "../powerRow";
+import type { PowerChrome } from "../portraitSplit";
+import { POWER_BOX_MARGIN, powerFit } from "../powerRow";
+import { inspectTrigger } from "../inspect/trigger";
 import { ANIM_SHAKE_AMPLITUDE, ANIM_SHAKE_DURATION, animShakeKeyframes } from "../effects/animShake";
 import {
   nameplateText,
@@ -16,12 +23,11 @@ import {
   spriteBodyH,
   FALLBACK_BODY_H,
   hpBarWidth,
-  doomAmount,
   bodyScale,
   dyingChromeFadeSeconds,
 } from "./combatantMetrics";
 
-interface PlayerLike {
+export interface PlayerLike {
   name: string; hp: number; max_hp: number; block: number;
   image?: string | null;
   rig?: string | null;
@@ -62,7 +68,48 @@ const INTENT_ART: Record<string, string> = {
 // own "unknown" disc — never raw enum text in the scene.
 const INTENT_ART_FALLBACK = "intent_atlas/intent_unknown.png";
 
-export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChange, hotkey, anchor, animation, actionAnim, actionAnimCandidates, actionNonce, holdLast, dying, dissolve, deathAnimSeconds, effects, noSprite, hpWidth, maxBodyH, pxPerScene = 1, orbs, orbSlots, locStrings, label, reticle }: {
+/** A creature's one-shot effects for this render: damage numbers, flashes,
+ *  the block shield's pop and shatter, power pops. */
+export type CombatantEffects = { dmgs?: { amount: number; nonce: number }[]; dmgKind?: "hp" | "block"; flash?: boolean;
+    /** `NCreature.AnimShake` — the creature's own 1 s wobble, fired when a
+     *  DEBUFF lands (`NCreature.cs:895-902`). The value is the fx nonce, not a
+     *  flag: two debuffs in a row must retrigger, and a boolean staying `true`
+     *  across them would not. `undefined` means no shake pending.
+     *
+     *  It used to be a damage tier, which was wrong twice over — the game's
+     *  amplitude is fixed, and damage is the one case `AnimShake` explicitly
+     *  refuses (`!Visuals.IsPlayingHurtAnimation()`). See `effects/animShake.ts`
+     *  for the full reading; the whole-screen punch that the old wobble was
+     *  really standing in for lives in `effects/screenShake.ts` and fires from
+     *  `Board.tsx`. */
+    shake?: number;
+    blockPop?: boolean; blockShatter?: boolean;
+    /** A hit landed and block ate all of it — `vfx_blocked_text.tscn`'s
+     *  floating "Blocked" label (`NDamageBlockedVfx.cs`). Replaces the old
+     *  `fullyBlocked` no-op: that event used to drive only the hit-punch
+     *  flash (`flash` above), with nothing telling the player block was the
+     *  reason no number appeared. */
+    blocked?: boolean;
+    /** A power being gained or lost, faithfully split into the game's own
+     *  TWO panels rather than one invented chip:
+     *  - `mode: "applied"` == `power_applied_vfx.tscn` (icon over a
+     *    green/red-by-`kind` name) — `kind` only exists here because
+     *    `NPowerRemovedVfx` has no `_isBuff` field at all (Task 12
+     *    addendum #3); a removal cannot carry a colour the game itself
+     *    never assigns it.
+     *  - `mode: "removed"` == `power_removed_vfx.tscn` (icon beside the
+     *    name AND a second "Wears Off" label).
+     *  `icon` is the same `p.image` field `Powers.tsx` renders — `null`
+     *  when the power has no art, same fallback as that component's own
+     *  chip path. No `amount`: `NPowerAppliedVfx` stores one but never
+     *  reads it back (only `_power.Title`), and `NPowerRemovedVfx.Create`
+     *  doesn't even take one — showing a count here would be exactly the
+     *  invented-chip mistake this task exists to delete. */
+    powerPop?: { power: string; icon: string | null } &
+      ({ mode: "applied"; kind: "buff" | "debuff" } | { mode: "removed" });
+    nonce?: number };
+
+export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChange, hotkey, anchor, animation, actionAnim, actionAnimCandidates, actionNonce, holdLast, dying, dissolve, deathAnimSeconds, effects, noSprite, noChrome, onCrown, powerChrome, powerCells, hpWidth, bodyDx = 0, maxBodyH, pxPerScene = 1, orbs, orbSlots, locStrings, label, reticle }: {
   c: PlayerLike; isEnemy: boolean; dataIndex?: number; onClick?: () => void;
   /** The advice's target: the enemy the plan's first targeted move aims at
    *  (advice/marks.ts). Gold targeting brackets around the creature, as the
@@ -89,10 +136,31 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
   // spacer reserves the rig's footprint so the HP bar sits below it and the
   // intent above it.
   noSprite?: { w: number; h: number };
+  /** The body alone: no HP bar, nameplate or powers under the feet. The
+   *  phone-portrait player figure, whose status block (`PlayerBand`) stands
+   *  beside it instead. */
+  noChrome?: boolean;
+  /** Reports how far the DRAWN body reaches above the feet, in scene px (the
+   *  rig's measured head, not its authored box), once the rig has measured
+   *  and again on every re-fit. A caller drawing a creature at a fixed height
+   *  on the glass scales by this. */
+  onCrown?: (sceneCrown: number) => void;
+  /** Phone portrait (the split, portraitSplit.ts): how this enemy's powers
+   *  hang off it, the fight's chrome mode. `rows`: two rows of `powerCells`
+   *  44 px cells under the name; `column`: the landscape column on the
+   *  body's left; `compact`: one cell (a lone power, or "+N" listing them
+   *  all) and no nameplate. Absent: today's rules (rows measured off the
+   *  stage in portrait, the column in landscape). */
+  powerChrome?: PowerChrome;
+  /** `rows` only: cells across, from the solver's slot width. */
+  powerCells?: number;
   /** The HP bar's width in px, where the game's own is known (the Kaiser Crab
    *  arms: their `Bounds` width + 24, see crabMount.ts). Absent, the bar
    *  follows `hpBarWidth`'s max-HP curve. */
   hpWidth?: number;
+  /** Design px the drawn body stands right of its box's centre (phone
+   *  portrait: the rig's ink is centred in its slot, the chrome stays put). */
+  bodyDx?: number;
   /** Tallest rig body the arena has room for — see SpineSprite's `maxBodyH`.
    *  The arena does NOT set this (the game has no such clamp; it shrinks the
    *  whole row instead — see `scene.aspectFit`); the preview harnesses do. */
@@ -134,46 +202,16 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
    *  fallback note there for why a literal is still correct to keep, not a
    *  stopgap this component quietly depends on. */
   locStrings?: Record<string, string>;
-  effects?: { dmgs?: { amount: number; nonce: number }[]; dmgKind?: "hp" | "block"; flash?: boolean;
-    /** `NCreature.AnimShake` — the creature's own 1 s wobble, fired when a
-     *  DEBUFF lands (`NCreature.cs:895-902`). The value is the fx nonce, not a
-     *  flag: two debuffs in a row must retrigger, and a boolean staying `true`
-     *  across them would not. `undefined` means no shake pending.
-     *
-     *  It used to be a damage tier, which was wrong twice over — the game's
-     *  amplitude is fixed, and damage is the one case `AnimShake` explicitly
-     *  refuses (`!Visuals.IsPlayingHurtAnimation()`). See `effects/animShake.ts`
-     *  for the full reading; the whole-screen punch that the old wobble was
-     *  really standing in for lives in `effects/screenShake.ts` and fires from
-     *  `Board.tsx`. */
-    shake?: number;
-    blockPop?: boolean; blockShatter?: boolean;
-    /** A hit landed and block ate all of it — `vfx_blocked_text.tscn`'s
-     *  floating "Blocked" label (`NDamageBlockedVfx.cs`). Replaces the old
-     *  `fullyBlocked` no-op: that event used to drive only the hit-punch
-     *  flash (`flash` above), with nothing telling the player block was the
-     *  reason no number appeared. */
-    blocked?: boolean;
-    /** A power being gained or lost, faithfully split into the game's own
-     *  TWO panels rather than one invented chip:
-     *  - `mode: "applied"` == `power_applied_vfx.tscn` (icon over a
-     *    green/red-by-`kind` name) — `kind` only exists here because
-     *    `NPowerRemovedVfx` has no `_isBuff` field at all (Task 12
-     *    addendum #3); a removal cannot carry a colour the game itself
-     *    never assigns it.
-     *  - `mode: "removed"` == `power_removed_vfx.tscn` (icon beside the
-     *    name AND a second "Wears Off" label).
-     *  `icon` is the same `p.image` field `Powers.tsx` renders — `null`
-     *  when the power has no art, same fallback as that component's own
-     *  chip path. No `amount`: `NPowerAppliedVfx` stores one but never
-     *  reads it back (only `_power.Title`), and `NPowerRemovedVfx.Create`
-     *  doesn't even take one — showing a count here would be exactly the
-     *  invented-chip mistake this task exists to delete. */
-    powerPop?: { power: string; icon: string | null } &
-      ({ mode: "applied"; kind: "buff" | "debuff" } | { mode: "removed" });
-    nonce?: number };
+  effects?: CombatantEffects;
 }) {
-  const pct = Math.max(0, Math.min(100, (c.hp / c.max_hp) * 100));
+  // Phone: power icons never render under 28px on the glass, in a 44px tap box
+  // (the stage is scaled by `--gs-k`, so that is `atLeast` in design px). The
+  // block is capped at two rows of whatever fits the creature's width; the rest
+  // hides behind a "+N" chip. Desktop passes nothing and keeps the game's rule.
+  const phone = usePhone();
+  const stageK = useStageZoom();
+  const powerSize = phone ? atLeast(26, 28, stageK) : undefined;
+  const powerHit = phone ? atLeast(26, 44, stageK) : undefined;
   // The box the power row is laid out against: `NPowerContainer
   // .SetCreatureBounds` takes the creature's `%Bounds` control and sizes the
   // container to `Bounds.Size.X * Bounds.Scale.X + 25`. Ours is the same
@@ -186,16 +224,11 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
     (boundsWidth({ rig: c.rig, rigScale: c.rig_scale,
       boundsH: c.rig_bounds_h, boundsW: c.rig_bounds_w }) + POWER_BOX_MARGIN)
     * (pxPerScene ?? 1));
-  // Doom: the kill line painted on the bar (see doomAmount). A lethal Doom
-  // takes the whole remaining bar; otherwise the band stops at doom/maxHp but
-  // never runs past the live fill (a Doom above current HP IS lethal, and a
-  // band overhanging an empty track would read as phantom health). The 4% floor
-  // mirrors the game's own 12px minimum width, scaled to our shorter bar, so a
-  // 1-point Doom on a 200 HP boss is still visible.
-  const doom = c.hp > 0 ? doomAmount(c.powers) : 0;
-  const doomLethal = doom > 0 && doom >= c.hp;
-  const doomPct = doomLethal ? pct : Math.min(pct, Math.max(4, (doom / c.max_hp) * 100));
   const intent = c.intents?.[0];
+  const inspect = useInspect();
+  // Distinguishes this creature's sheet entries from another's (toggle-closes
+  // only the SAME entry).
+  const inspectId = `${anchor ?? ""}${dataIndex ?? ""}${c.name}`;
   // Server image first (it knows the exact per-enemy variant), then the kind's
   // own atlas art, then the generic disc — always a painted icon.
   // Why this telegraph reads what it reads. `intentMods` drops the residual
@@ -239,6 +272,16 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
     ro.observe(el);
     return () => ro.disconnect();
   }, [wantOrbs, rigHeadTop, maxBodyH, c.rig, c.image]);
+
+  // Reported from the rig's own measurement callback, not from an effect on
+  // `pxPerScene`: the head it measured belongs to the scale it drew at, and a
+  // new scale reaching here before the rig has re-measured would pair the old
+  // head with it.
+  const authoredCrown = spriteBodyH(c, isEnemy);
+  const onRigMeasure = (headTop: number | null) => {
+    setRigHeadTop(headTop);
+    if (headTop != null && pxPerScene > 0) onCrown?.(authoredCrown - headTop / pxPerScene);
+  };
 
   const shakeAnimRef = useRef<Animation | null>(null);
   const shakeNonce = effects?.shake;
@@ -303,17 +346,6 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
   const rigTop = scale === 1
     ? `${rigHeadTop ?? 0}px`
     : `calc(100% - (100% - ${rigHeadTop ?? 0}px) * ${scale})`;
-  const blocked = c.block > 0;
-  // `AnimateInBlock` returns early unless `oldBlock == 0`: only a shield that
-  // was not showing drops in; topping up an existing one just changes the
-  // number. `blockPop` fires on every gain, so remember which kind this was
-  // (React's "state from the previous render" pattern, no effect lag).
-  const [prevBlock, setPrevBlock] = useState(c.block);
-  const [blockFromZero, setBlockFromZero] = useState(false);
-  if (c.block !== prevBlock) {
-    setPrevBlock(c.block);
-    setBlockFromZero(prevBlock <= 0 && c.block > 0);
-  }
   return (
     <div
       className={`gs-combatant${onClick ? " gs-clickable" : ""}${dying ? " gs-dying" : ""}${dyingSpriteDissolves ? " gs-dissolving" : ""}`}
@@ -348,7 +380,19 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
              a 48px StatusCard chip reads as an unresolved grey blob. Layout
              lives in .gs-intent (game-skin.css). */
           <div className={`gs-intent${intent.damage == null ? " gs-intent-nodmg" : ""}`}
-            title={intentTip}>
+            title={intentTip}
+            // Phone: a tap shows the same explanation `title` carries on
+            // desktop, plus one row per modifier.
+            // Phone only (desktop gets nothing): a named button, Enter / Space
+            // open it too.
+            {...inspectTrigger(inspect.enabled, `Intent: ${intentTip ?? intentInfo(intent).name}`, () => {
+              // The breakdown's arithmetic when there is one (it is what the
+              // desktop tooltip shows); the kind's own name otherwise, never
+              // the raw enum id. Either way the game's sentence under it.
+              inspect.open({ key: `intent:${inspectId}:${intent.type}:${intent.damage ?? ''}:${intentMods.map((m) => m.name).join(',')}`, icon: intentArt,
+                name: intentTip ?? intentInfo(intent).name, description: intentInfo(intent).description,
+                list: intentMods.map((m) => ({ key: m.name, icon: m.image, name: m.title || m.name })) });
+            })}>
             {intent.damage != null && (
               /* `data-mod` says the number is NOT the move's own: down = the
                  board is reducing it (Weak/Shrink), up = raising it
@@ -375,7 +419,7 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
               </div>
             )}
             {intentArt && (
-              <img className="gs-intent-img" src={intentArt} alt={intent.type} title={intent.type} />
+              <img className="gs-intent-img" src={intentArt} alt={intentName(intent.type)} title={intentName(intent.type)} />
             )}
           </div>
         )}
@@ -455,7 +499,8 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
             and its ground shadow but none of the chrome riding on the wrap.
             Unset at 1 rather than `scale: 1`, which would still open a
             stacking context and lift the ground shadow's `z-index: -1`. */}
-        <div className="gs-sprite-body" style={scale === 1 ? undefined : { scale: String(scale) }}>
+        <div className="gs-sprite-body" style={scale === 1 && !bodyDx ? undefined
+          : { ...(scale === 1 ? {} : { scale: String(scale) }), ...(bodyDx ? { left: bodyDx } : {}) }}>
           {/* Ground-contact shadow (skipped for noSprite spacers — their shared
               rig draws one body elsewhere and per-arm ellipses would tile). */}
           {!noSprite && !rigLoading && <div className="gs-groundshadow" aria-hidden="true" />}
@@ -482,7 +527,7 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
                   fallbackHeight={(isEnemy ? FALLBACK_BODY_H.enemy : FALLBACK_BODY_H.player) * pxPerScene}
                   fallback={c.image} alt={c.name}
                   actionAnim={actionAnim} actionAnimCandidates={actionAnimCandidates}
-                  actionNonce={actionNonce} holdLast={holdLast} dissolve={dissolve} onMeasure={setRigHeadTop} />
+                  actionNonce={actionNonce} holdLast={holdLast} dissolve={dissolve} onMeasure={onRigMeasure} />
               : c.image
                 ? <img className={`gs-sprite ${isEnemy ? "gs-enemy" : "gs-player"}`} src={c.image} alt={c.name} />
                 : <div className="gs-sprite-fallback" />}
@@ -495,83 +540,43 @@ export default function Combatant({ c, isEnemy, dataIndex, onClick, onHoverChang
           LENGTH tracks the creature — r3 gave a 13-HP and a 27-HP slime the
           same 150px, which both critics flagged. sqrt keeps small enemies
           distinguishable without making a boss's bar span the arena. */}
-      {/* `gs-hp-blocked`: NHealthBar.RefreshBlockUi — while the creature has
-          block the bar shows `%BlockOutline`, the fill is modulated to
-          `#3B6FA3` and the HP numerals take the `#1B3045` outline
-          (RefreshText). */}
-      <div className={`gs-hpwrap${blocked ? " gs-hp-blocked" : ""}`}
-        style={{ "--gs-hpw": `${hpWidth ?? hpBarWidth(c.max_hp)}px` } as React.CSSProperties}>
-        <div className="gs-hpbar">
-          <div className="gs-hptrack">
-            {/* Doom band. The game draws it from the bar's LOW end out to
-                `doom/maxHp` of the track, under the red fill, so the stretch of
-                health that will not save you is a different colour; once Doom
-                reaches the current HP the red fill is hidden outright and the
-                whole remaining bar is the Doom colour (NHealthBar
-                .RefreshForeground). Same here.
-
-                The lethality test upstream is `doom >= hp - poisonNextTurn`.
-                Poison's next-turn total is a hook-modified sum the wire does
-                not carry (PoisonPower.CalculateTotalDamageNextTurn), so this
-                uses the poison-free form: exact whenever the creature is not
-                poisoned, and one turn late when it is. */}
-            {doom > 0 && (
-              <div className={`gs-hpdoom${doomLethal ? " gs-hpdoom-lethal" : ""}`}
-                style={{ width: `${doomPct}%` }} />
-            )}
-            {!doomLethal && <div className="gs-hpfill" style={{ width: `${pct}%` }} />}
-          </div>
-        </div>
-        <span className={`gs-hptext${doomLethal ? " gs-hptext-doomed" : ""}`}>{c.hp}/{c.max_hp}</span>
-        {/* `%BlockContainer`: the game's shield (ui/combat/block.png) with the
-            count on it, centred on the bar's LEFT end (`SetCreatureBounds`
-            puts its centre on the creature box's left edge, which is where
-            the bar starts) — part of the health bar, not floating by the head.
-
-            `data-block-badge`: `VfxLayer`'s anchor for `vfx_block_broken`
-            (`NHealthBar.cs:575`: `_blockContainer.GlobalPosition +
-            _blockContainer.Size * 0.5`). ALWAYS MOUNTED — never gated on
-            `c.block > 0` — and only its NUMBER/visibility toggle with it.
-            That mirrors Godot's own `Control.Visible`: a hidden `Control`
-            stays in the scene tree with a valid `GlobalPosition`, it just
-            doesn't draw. It is also load-bearing for TIMING: the `blockBreak`
-            event that plays `vfx_block_broken` fires from a `useEffect` that
-            runs AFTER `c.block` has already committed to 0 in this same
-            render pass — gating the DIV itself on `c.block > 0` would unmount
-            the anchor before the VFX ever got a position to query (verified: a
-            `blockShatter`-flag gate looked like a fix but READS THE SAME
-            POST-COMMIT DOM, one render too late). Keeping the container
-            always-present and toggling only its CONTENTS/opacity sidesteps the
-            race entirely.
-
-            `gs-block-pop` is `AnimateInBlock`: on a 0 -> n gain the shield
-            fades in while dropping 20px into place (0.5 s, Back ease). */}
-        <div
-          className={`gs-block${effects?.blockPop && blockFromZero ? " gs-block-pop" : ""}`}
-          style={blocked ? undefined : { opacity: 0, pointerEvents: "none" }}
-          title={`block ${c.block}`}
-          data-block-badge="true"
-        >
-          <img className="gs-block-icon" src={assetUrl("ui/combat/block.png")} alt="" aria-hidden="true" draggable={false} />
-          {blocked ? <span className="gs-block-num">{c.block}</span> : null}
-        </div>
-        {effects?.blockShatter && <div key={`bs${effects.nonce}`} className="gs-block-shatter" />}
-      </div>
+      {!noChrome && <HealthBar c={c} widthPx={hpWidth ?? hpBarWidth(c.max_hp)} effects={effects} inspectId={inspectId} />}
       {/* Name at reduced at-rest weight (hover brightens — see .gs-nameplate);
           the exact-HP numerals on the bar above stay always-visible. Debug
           size suffixes ("Twig Slime (M)") stay OFF the scene — display the
           bare name; the full name (with the tag) lives on the tooltip and
           the accessible label so nothing is lost. */}
-      {(() => {
+      {!noChrome && powerChrome !== "compact" && (() => {
         const { text, full } = nameplateText(c.name, label);
         return (
           <div className="gs-nameplate" title={full}
             aria-label={full}>{text}</div>
         );
       })()}
-      {c.powers && c.powers.length > 0 && (
-        <div className="gs-powers"><Powers powers={c.powers} boxWidth={powerBoxW} /></div>
-      )}
+      {!noChrome && c.powers && c.powers.length > 0 && (() => {
+        // Phone landscape, and a `column` split fight: a column BESIDE the
+        // creature (powerColumn.ts), so nothing but the HP bar and the name
+        // hangs under the feet and the fighters can be drawn as tall as the
+        // short stage allows.
+        const column = powerChrome ? powerChrome === "column" : phone === "landscape";
+        // A split fight's rows and compact cell take their count across from
+        // the solver's slot, never from measuring the stage.
+        const cells = powerChrome === "compact" ? 1
+          : powerChrome === "rows" ? Math.max(1, powerCells ?? 1) : undefined;
+        return (
+          <div className={`gs-powers${column ? " gs-powers-col" : ""}`}>
+            <Powers powers={c.powers} boxWidth={powerBoxW} size={powerSize} hitSize={powerHit}
+              column={column}
+              cells={cells}
+              maxShown={cells != null ? (powerChrome === "compact" ? 1 : 2 * cells)
+                : powerHit ? 2 * powerFit(powerBoxW, powerHit) : undefined}
+              minShown={cells != null ? (powerChrome === "compact" ? 1 : 2 * cells) : undefined}
+              inspectScope={inspectId}
+              onOverflow={(hidden) => inspect.open({ key: `powers:${inspectId}`, name: "More powers",
+                list: hidden.map((p) => powerItem(p, inspectId)) })} />
+          </div>
+        );
+      })()}
     </div>
   );
 }

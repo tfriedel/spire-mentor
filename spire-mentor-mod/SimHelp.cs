@@ -173,7 +173,7 @@ internal static class SimHelp
         Row(sb, "Shift+F6", "co-op: a waiting AI partner plays its turn now");
         Row(sb, "F7", "let the AI keep playing until you stop it (press again to stop)");
         Row(sb, "Shift+F7", "autobattle: the AI plays the fights, you make every run-level decision, with a note on what changed since your last one; 1x becomes 2x (again to stop)");
-        Row(sb, "Shift+F8", $"advisor brain: Search (thinks ahead) / Instinct (the end-to-end net, no search; Ironclad on v0.111.0 for now)  (now {AdvisorBrainRules.Label(SimAdvisor.CurrentBrain)})");
+        Row(sb, "Shift+F8", $"advisor brain: Search (thinks ahead) / Instinct (the end-to-end net, no search; Ironclad on v0.111.0 and the v0.113.0 beta for now)  (now {AdvisorBrainRules.Label(SimAdvisor.CurrentBrain)})");
         Row(sb, "F4", "show / hide the HUD");
         Row(sb, "Ctrl+L", "action log — what was played, and what was advised at the time (drag its header to move it; right-click it to put it back under the advice)");
         Row(sb, "Ctrl+H", "hide everything but the Spire Mentor badge for a quick look; again (or click the badge) to show it");

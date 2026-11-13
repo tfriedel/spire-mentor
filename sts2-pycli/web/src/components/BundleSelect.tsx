@@ -19,7 +19,7 @@ export default function BundleSelect({ step, onChoose }: { step: Step; onChoose?
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", maxWidth: 360 }}>
               {(b.cards ?? []).map((c, i) => <CardFrame key={i} card={c} width={92} />)}
             </div>
-            <button disabled={!onChoose} onClick={() => onChoose?.("select_bundle", { bundle_index: b.index })}>
+            <button className="gs-bundle-select" disabled={!onChoose} onClick={() => onChoose?.("select_bundle", { bundle_index: b.index })}>
               Select this pack
             </button>
           </div>

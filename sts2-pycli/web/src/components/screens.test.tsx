@@ -151,8 +151,9 @@ describe("CardSelect", () => {
       ],
     });
     render(<CardSelect step={s} onChoose={onChoose} />);
+    // One card to pick: the tap is the pick, with no Confirm button.
+    expect(screen.queryByRole("button", { name: /Confirm|Done/ })).toBeNull();
     fireEvent.click(screen.getByText("A").closest("div[data-played], div") as HTMLElement);
-    fireEvent.click(screen.getByRole("button", { name: /Confirm/ }));
     expect(onChoose).toHaveBeenCalledWith("select_cards", { indices: "0" });
   });
 
@@ -177,7 +178,7 @@ describe("CardSelect", () => {
       const onChoose = vi.fn();
       render(<CardSelect step={multiPickStep()} onChoose={onChoose} />);
       fireEvent.click(screen.getByText("Inferno").closest("div[data-played], div") as HTMLElement);
-      fireEvent.click(screen.getByRole("button", { name: /Confirm/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Done/ }));
       expect(onChoose.mock.calls[0]).toEqual(["select_cards", { indices: "0" }]);
       await waitFor(() => expect(onChoose.mock.calls[1]).toEqual(["skip_select", {}]));
       expect(onChoose).toHaveBeenCalledTimes(2);
@@ -188,7 +189,7 @@ describe("CardSelect", () => {
       render(<CardSelect step={multiPickStep()} onChoose={onChoose} />);
       fireEvent.click(screen.getByText("Inferno").closest("div[data-played], div") as HTMLElement);
       fireEvent.click(screen.getByText("Strike").closest("div[data-played], div") as HTMLElement);
-      fireEvent.click(screen.getByRole("button", { name: /Confirm/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Done/ }));
       await Promise.resolve();
       expect(onChoose).toHaveBeenCalledTimes(1);
       expect(onChoose).toHaveBeenCalledWith("select_cards", { indices: "0,2" });
@@ -197,10 +198,27 @@ describe("CardSelect", () => {
     it("routes a 0-card confirm through skip_select", async () => {
       const onChoose = vi.fn();
       render(<CardSelect step={multiPickStep()} onChoose={onChoose} />);
-      fireEvent.click(screen.getByRole("button", { name: /Confirm/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Done/ }));
       await waitFor(() => expect(onChoose).toHaveBeenCalledWith("skip_select", {}));
       expect(onChoose).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("CardSelect, exactly N cards", () => {
+  it("commits on the N-th tap, with no button", () => {
+    const onChoose = vi.fn();
+    const s = step("card_select", {
+      min_select: 2, max_select: 2,
+      cards: ["A", "B", "C"].map((name, index) => ({ index, id: name, name, type: "Skill", cost: 1, image: null, description: "" })),
+    });
+    render(<CardSelect step={s} onChoose={onChoose} />);
+    expect(screen.queryByRole("button", { name: /Confirm|Done/ })).toBeNull();
+    fireEvent.click(screen.getByText("A").closest("div[data-played], div") as HTMLElement);
+    expect(onChoose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("C").closest("div[data-played], div") as HTMLElement);
+    expect(onChoose).toHaveBeenCalledTimes(1);
+    expect(onChoose).toHaveBeenCalledWith("select_cards", { indices: "0,2" });
   });
 });
 

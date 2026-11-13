@@ -830,3 +830,23 @@ button.gs-shop-pricetag:disabled { opacity: 1; }
   .gs-shop-cardstand .gs-card,
   button.gs-shop-pricetag { transition: none; }
 }
+
+/* ---- a ware's sheet (touch) -------------------------------------------------
+   No hover on a touchscreen: the first tap on a relic or potion opens this
+   sheet with what it does, and its button buys. */
+.gs-shop-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 80;
+  display: grid; grid-template-columns: 64px 1fr; gap: 10px 14px; align-items: center;
+  padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: oklch(20% 0.02 60 / 0.97); border-top: 2px solid #6b552c;
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.6);
+  color: #f6e6c4; font-family: var(--game-font);
+}
+.gs-shop-sheetart img { width: 64px; height: 64px; object-fit: contain; display: block; }
+.gs-shop-sheettext { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 16px; line-height: 1.35; }
+.gs-shop-sheettext b { font-size: 20px; color: var(--gold); }
+.gs-shop-sheetbtns { grid-column: 1 / -1; display: flex; gap: 10px; }
+.gs-shop-sheetbtns button { min-height: 48px; padding: 0 16px; border-radius: 8px; font: 700 17px/1 var(--game-font); cursor: pointer; }
+.gs-shop-sheetbuy { flex: 1 1 auto; background: oklch(62% 0.13 85); color: #1c1407; border: 1px solid oklch(80% 0.12 88); }
+.gs-shop-sheetbuy:disabled { background: oklch(32% 0.02 60); color: oklch(70% 0.02 60); border-color: transparent; cursor: default; }
+.gs-shop-sheetclose { flex: none; background: oklch(28% 0.03 70); color: #f6e6c4; border: 1px solid #6b552c; }

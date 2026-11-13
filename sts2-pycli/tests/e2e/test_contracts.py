@@ -1633,6 +1633,7 @@ def _check_combat_tokens(
 
 
 @needs_rs
+@pytest.mark.pending_e2e_tables
 def test_live_walk_maps_every_decision(monkeypatch: pytest.MonkeyPatch) -> None:
     """>= 5 full v0.111.0 A10 runs (invincible random policy) through
     PpoRunEnv(combat='yield'): every decision has a live decision type, every

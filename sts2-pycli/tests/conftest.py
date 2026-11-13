@@ -198,9 +198,53 @@ def _needs(nodeid: str) -> str | None:
     return None
 
 
+#: What the engine has not ported yet for a supported game build, by marker.
+#: GH #1303 tracks the v0.113.0 port. A test carrying ``pending_<name>`` is a
+#: STRICT xfail on a build listed here: it must fail there, and the first run in
+#: which it passes goes red (XPASS), which is the cue to drop the build. The
+#: values are (builds, reason, the only exception a pass may fail with or None).
+#:
+#: * ``run_level`` -- the engine still rolls the previous build's run level on
+#:   these builds (Neow offer, act-1 boss), so a C#-captured golden cannot
+#:   match yet.
+#: * ``e2e_tables`` -- the e2e brain's static tables are not generated for
+#:   these builds (``tests/e2e/test_e2e_static_tables.py`` ``PENDING_TABLES``).
+PENDING_BUILDS: dict[str, tuple[frozenset[str], str, type[BaseException] | None]] = {
+    "run_level": (
+        frozenset({"v0.113.0"}),
+        "run level (Neow offer, act rolls) not ported to this build yet (GH #1303)",
+        None,
+    ),
+    "e2e_tables": (
+        frozenset({"v0.113.0"}),
+        "e2e static tables not generated for this build yet (GH #1303)",
+        KeyError,
+    ),
+}
+
+
+@pytest.fixture
+def run_level_pending() -> bool:
+    """Whether the active build's run level is still pending (`PENDING_BUILDS`)."""
+    return sts2_client.GAME_VERSION in PENDING_BUILDS["run_level"][0]
+
+
+@pytest.fixture
+def pending_builds() -> dict[str, frozenset[str]]:
+    """`PENDING_BUILDS` as {name: builds}."""
+    return {name: builds for name, (builds, _, _) in PENDING_BUILDS.items()}
+
+
+def _mark_pending(item: pytest.Item) -> None:
+    for name, (builds, reason, raises) in PENDING_BUILDS.items():
+        if item.get_closest_marker(f"pending_{name}") and sts2_client.GAME_VERSION in builds:
+            item.add_marker(pytest.mark.xfail(strict=True, reason=reason, raises=raises))
+
+
 def pytest_collection_modifyitems(items):
     oracle_skip = _oracle_skip_reason()
     for item in items:
+        _mark_pending(item)
         if "game" in getattr(item, "fixturenames", ()):
             item.add_marker(pytest.mark.oracle)
         if oracle_skip and item.get_closest_marker("oracle"):

@@ -1,7 +1,9 @@
 import { MarkBadge } from "../advice/AdviceContext";
 import { markClass, markFor, useAdviceMarks } from "../advice/useAdviceMarks";
 import type { Mark } from "../advice/marks";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { useMediaQuery, TOUCH_QUERY } from "../useMediaQuery";
 import type { Step, ChooseHandler, Card, Relic, Potion } from "../api";
 import { assetUrl } from "../api";
 import CardFrame from "./CardFrame";
@@ -131,6 +133,16 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
   // this task's brief) is a passive display with no activation click of its
   // own — see the Task 10 report for the full judgement call.
   const sound = useSound();
+  // TOUCH: there is no hover, so a ware's effect text could not be read before
+  // buying it (a tap bought it). On a touchscreen the first tap opens the
+  // ware's sheet instead (name, what it does, price) and the sheet's button
+  // buys. Every ware is tappable for that, sold or too dear included.
+  const touch = useMediaQuery(TOUCH_QUERY);
+  const [ware, setWare] = useState<{
+    key: string; kind: "relic" | "potion"; name: string; image: string | null | undefined;
+    description: string | undefined; cost: number | undefined; soldOut: boolean; affordable: boolean;
+    buy: () => void;
+  } | null>(null);
 
   // The run policy's marks (advice/marks.ts): on the ware, the card, the
   // removal service (the policy names the card to remove, so any removal pick
@@ -200,11 +212,15 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
       (soldOut ? " is-soldout" : "") +
       (!affordable ? " is-unaffordable" : "") +
       markClass(b.mark ?? null);
+    const inspectFirst = touch && !!onChoose;
+    const open = () => setWare({ key: `${kind}:${name}:${cost}`, kind, name, image, description, cost, soldOut, affordable,
+      buy: b.onClick });
     return (
       <button
         className={cls}
-        disabled={b.disabled}
-        onClick={b.onClick}
+        disabled={inspectFirst ? false : b.disabled}
+        aria-disabled={inspectFirst && b.disabled ? true : undefined}
+        onClick={inspectFirst ? open : b.onClick}
         title={(description ? `${name} — ${description}` : name)
           + (soldOut ? " (sold out)" : !affordable ? " (too expensive)" : "")}
       >
@@ -473,6 +489,27 @@ export default function Shop({ step, onChoose }: { step: Step; onChoose?: Choose
         </div>
       </div>
 
+      {/* In the body: the scene is a stacking context whose grade layers
+          would paint over a sheet left inside it. */}
+      {ware && onChoose && createPortal(
+        <div className="gs-shop-sheet" role="dialog" aria-label={ware.name}>
+          <span className="gs-shop-sheetart" aria-hidden="true">
+            {ware.image ? <img src={ware.image} alt="" /> : <span className="gs-shop-noart">{ware.name.charAt(0)}</span>}
+          </span>
+          <div className="gs-shop-sheettext">
+            <b>{ware.name}</b>
+            <span>{ware.description ?? (ware.kind === "relic" ? "A relic." : "A potion.")}</span>
+          </div>
+          <div className="gs-shop-sheetbtns">
+            <button type="button" className="gs-shop-sheetbuy" disabled={ware.soldOut || !ware.affordable}
+              onClick={() => { const buyIt = ware.buy; setWare(null); buyIt(); }}>
+              {ware.soldOut ? "Sold out" : !ware.affordable ? `Too expensive (${ware.cost} gold)` : `Buy for ${ware.cost} gold`}
+            </button>
+            <button type="button" className="gs-shop-sheetclose" onClick={() => setWare(null)}>✕ Close</button>
+          </div>
+        </div>,
+        document.body,
+      )}
       {/* Air, then grade, then the near plane — everything from here down is
           painted OVER the props, which is what makes them sit IN the tent
           instead of being pasted on it at full brightness. */}

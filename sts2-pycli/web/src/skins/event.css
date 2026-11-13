@@ -560,3 +560,30 @@
 }
 .gs-event--neow .gs-event-col { width: calc(min(660px, 55%) + 2 * var(--ev-gutter)); margin-right: auto; }
 .gs-event--neow .gs-event-col.is-solo { width: calc(min(920px, 62%) + 2 * var(--ev-gutter)); }
+
+/* ---- a phone held upright ---------------------------------------------------
+   The desktop column is half the frame (the painting gets the rest); on a
+   412 px screen that left 225 px plates whose advice glow the scroller cut
+   flat on both sides, and long option lists that had to be scrolled. Here the
+   column is the frame: the plates run nearly edge to edge with larger type,
+   the glow's cut falls on the screen's own edge, and less of the painting
+   shows (owner feedback, 2026-11-12). */
+@media (hover: none) and (max-width: 480px) {
+  .gs-event-col, .gs-event--neow .gs-event-col, .gs-event--neow .gs-event-col.is-solo {
+    --ev-gutter: 24px;
+    box-sizing: border-box;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  .gs-event-col { gap: 12px; padding-top: 20px; padding-bottom: 28px; }
+  .gs-event--neow .gs-event-col { padding-top: 0; }
+  .gs-event-options { gap: 18px; }
+  .gs-event-option { min-height: 84px; padding: 12px 26px; }
+  .gs-event-option-name { font-size: 21px; }
+  .gs-event-option-desc { font-size: 16px; }
+  .gs-event-option-icon { width: 52px; height: 52px; }
+  .gs-event-body { font-size: 16px; line-height: 1.45; gap: 10px; }
+  /* The plaque would sit under the full-width plates. */
+  .gs-neow-lockup { display: none; }
+}

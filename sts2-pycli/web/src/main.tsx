@@ -4,6 +4,7 @@ import App from './App.tsx'
 import { registerWorkbenchServiceWorker } from './pwa'
 import { installArtPlaceholder } from './artPlaceholder'
 import { currentAssetsBase } from './api'
+import './phone.css'
 
 registerWorkbenchServiceWorker()
 // A checkout without extracted game art (see docs/bring-your-own-game.md)

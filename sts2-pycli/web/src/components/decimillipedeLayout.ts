@@ -24,3 +24,9 @@ export function decimillipedeSpan(rigs: (string | null | undefined)[]): { left: 
   }
   return any ? { left, right } : { left: -600, right: 600 };
 }
+
+/** How far the animal's legs reach below the shared root, rig units (0 when
+ *  no rig has measured bounds). */
+export function decimillipedeDrop(rigs: (string | null | undefined)[]): number {
+  return Math.max(0, ...rigs.map((rig) => -(mirroredBox(rig)?.bottom ?? 0)));
+}

@@ -921,7 +921,7 @@ internal sealed class SimAdvisor
             {
                 SimActionLog.Note(InstinctPlaysThisRun()
                     ? "Advisor brain: Instinct -- the end-to-end net plays every decision, no search."
-                    : "Advisor brain: Instinct -- it plays Ironclad on v0.111.0 for now; in other runs the search answers.");
+                    : "Advisor brain: Instinct -- it plays Ironclad on v0.111.0 and the v0.113.0 beta for now; in other runs the search answers.");
             }
             else
             {

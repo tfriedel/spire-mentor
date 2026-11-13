@@ -39,3 +39,10 @@ export function powerColumns(count: number, boxWidth: number, size: number): num
   const fit = Math.floor((boxWidth + POWER_GAP) / (size + POWER_GAP));
   return Math.max(1, Math.ceil(count / 2), fit);
 }
+
+/** Phone: whole tap-box cells that fit `boxWidth`, never fewer than 2 (so three
+ *  powers and the "+N" chip always fit as 2x2). Only that clamp lets a block
+ *  run wider than a very narrow creature's box. */
+export function powerFit(boxWidth: number, cell: number): number {
+  return Math.max(2, Math.floor((boxWidth + POWER_GAP) / (cell + POWER_GAP)));
+}

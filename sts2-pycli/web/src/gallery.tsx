@@ -13,6 +13,8 @@ import "./theme.css";
 // the document instead. The gallery rendered that way for its whole life and
 // it read as the SCREENS being broken.
 import "./game-skin.css";
+// Last, as in main.tsx: the phone floors win by source order.
+import "./phone.css";
 import type { Step } from "./api";
 import Board from "./components/Board";
 import Shop from "./components/Shop";
@@ -23,6 +25,8 @@ import CardSelect from "./components/CardSelect";
 import BundleSelect from "./components/BundleSelect";
 import CardReward from "./components/CardReward";
 import MapChoices from "./components/MapChoices";
+import MapView from "./components/MapView";
+import type { FullMapNode } from "./api";
 import GameOver from "./components/GameOver";
 import combatFixture from "./components/__tests__/fixture-step.json";
 
@@ -75,6 +79,27 @@ function defectCombat(orbs: unknown[], slots: number, rig = true): Step {
 
 const ORB = (index: number, type: string, passive: number, evoke: number) =>
   ({ index, type, name: type, passive, evoke, image: `/assets/orb_atlas/${type.toLowerCase()}.png` });
+
+/** A full 7-column act map with the first row selectable: the live-run map
+ *  screen (App.tsx renders MapView as the picker). Four neighbouring first
+ *  steps is the tightest the game offers, so it is the case where tap targets
+ *  could collide. */
+function actMap(): { rows: FullMapNode[][] } {
+  const types = ["Monster", "Event", "Shop", "Rest", "Elite", "Treasure", "Monster"];
+  const rows: FullMapNode[][] = [];
+  for (let r = 0; r < 7; r++) {
+    const row: FullMapNode[] = [];
+    for (let c = 0; c < 7; c++) {
+      if (r === 0 && (c < 2 || c > 5)) continue;
+      row.push({
+        col: c, row: r, type: types[(c + r * 3) % types.length],
+        children: r < 6 ? [{ col: c, row: r + 1 }, ...(c < 6 ? [{ col: c + 1, row: r + 1 }] : [])] : [],
+      });
+    }
+    rows.push(row);
+  }
+  return { rows };
+}
 
 const screens: { label: string; node: React.ReactNode; height?: number; wide?: boolean }[] = [
   // A Board is a full-height scene (parallax stack, arena, hand strip); without
@@ -236,6 +261,22 @@ const screens: { label: string; node: React.ReactNode; height?: number; wide?: b
     })} />,
   },
   {
+    // Disabled wares: too expensive (gold 10) and sold out. A disabled price
+    // tag still has to hold its size so the shelf does not shift.
+    label: "Shop (unaffordable and sold out)",
+    height: 700,
+    node: <Shop onChoose={() => {}} step={mkStep("shop", {
+      player: { name: "Ironclad", gold: 10 },
+      cards: [
+        { ...card(0, "Anger", "Attack"), cost: 42, card_cost: 0, is_stocked: true },
+        { ...card(1, "Inflame", "Power", 1), cost: 110, card_cost: 1, is_stocked: false },
+      ],
+      relics: [{ index: 0, name: "Akabeko", cost: 75, is_stocked: true, image: "/assets/relic_atlas/akabeko.png" }],
+      potions: [{ index: 0, name: "Fire Potion", cost: 48, is_stocked: false, image: "/assets/potion_atlas/attack_potion.png" }],
+      card_removal_cost: 75,
+    })} />,
+  },
+  {
     label: "Event (real illustration)",
     node: <EventScreen onChoose={() => {}} step={mkStep("event_choice", {
       event_name: "Abyssal Baths",
@@ -374,6 +415,15 @@ const screens: { label: string; node: React.ReactNode; height?: number; wide?: b
         { col: 4, row: 5, type: "Event" }, { col: 5, row: 5, type: "Rest" },
       ],
     })} />,
+  },
+  {
+    label: "Map (live run, selectable nodes)",
+    height: 820,
+    node: <MapView rows={[]} currentIdx={0} live
+      graphs={[{ idx: 0, act: 1, act_name: "Act 1", floor: 1, full_map: {
+        ...actMap(), boss: { col: 3, row: 7, type: "Boss", name: "The Guardian" }, current_coord: null,
+      } }]}
+      selectable={new Set(["2,0", "3,0", "4,0", "5,0"])} onSelect={() => {}} />,
   },
   { label: "Game over (victory)", node: <GameOver step={mkStep("game_over", { victory: true, ascension: 15, player: { name: "Ironclad", hp: 34, max_hp: 80 } })} /> },
 ];

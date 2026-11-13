@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { usePhone } from "../phone";
 
 /**
  * A top-bar dropdown: one trigger button, a popover of `role="menuitem"` rows.
@@ -13,6 +14,13 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
  * focus to the trigger; Tab closes (focus moves on naturally). A click
  * outside closes. Disabled items stay in the tab ring's visual list but are
  * skipped by arrow navigation and carry their reason as `title`.
+ *
+ * On a phone (`usePhone()`) the list is a `position: fixed` panel instead:
+ * under the top bar (or under the trigger when no bar is showing), the full
+ * width less 8px gutters, as tall as the viewport allows with its own scroll.
+ * Fixed, it escapes the bar's sideways scroller without that scroller having
+ * to drop its `overflow` (which snapped the bar back to its start), and a
+ * trigger scrolled to the bar's far end no longer opens a list off the glass.
  */
 
 export interface MenuItemSpec {
@@ -41,10 +49,15 @@ export interface MenuProps {
   /** Accent the trigger (a menu whose contents carry live state). */
   active?: boolean;
   className?: string;
+  /** The ▾ after the label (default on). */
+  caret?: boolean;
 }
 
-export default function Menu({ label, title, items, active, className }: MenuProps) {
+export default function Menu({ label, title, items, active, className, caret = true }: MenuProps) {
   const [open, setOpen] = useState(false);
+  const phone = usePhone() != null;
+  // Phone: the fixed panel's top edge, in viewport px.
+  const [panelTop, setPanelTop] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -52,7 +65,7 @@ export default function Menu({ label, title, items, active, className }: MenuPro
 
   const close = useCallback((refocus = false) => {
     setOpen(false);
-    if (refocus) trigger.current?.focus();
+    if (refocus) trigger.current?.focus({ preventScroll: true });
   }, []);
 
   useEffect(() => {
@@ -68,13 +81,28 @@ export default function Menu({ label, title, items, active, className }: MenuPro
     };
   }, [open, close]);
 
+  useLayoutEffect(() => {
+    if (!open || !phone) return;
+    function place() {
+      const t = trigger.current;
+      if (!t) return;
+      const bar = t.closest(".wb-topbar")?.getBoundingClientRect();
+      const tb = t.getBoundingClientRect();
+      setPanelTop(Math.round((bar && bar.height > 0 ? Math.max(bar.bottom, tb.bottom) : tb.bottom) + 4));
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open, phone]);
+
   function enabledItems(): HTMLElement[] {
     return Array.from(list.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemcheckbox"]:not([aria-disabled="true"])') ?? []);
   }
   function focusAt(i: number) {
     const els = enabledItems();
     if (!els.length) return;
-    els[((i % els.length) + els.length) % els.length].focus();
+    // preventScroll: focusing a row must not scroll the bar's scroller.
+    els[((i % els.length) + els.length) % els.length].focus({ preventScroll: true });
   }
   function openAndFocus(i: number) {
     setOpen(true);
@@ -111,10 +139,12 @@ export default function Menu({ label, title, items, active, className }: MenuPro
         className={active ? "wb-menu-trigger wb-menu-trigger--active" : "wb-menu-trigger"}
         onClick={() => (open ? close() : setOpen(true))}
         onKeyDown={onTriggerKey}>
-        {label} <span aria-hidden="true" className="wb-menu-caret">▾</span>
+        {label}{caret && <> <span aria-hidden="true" className="wb-menu-caret">▾</span></>}
       </button>
       {open && (
-        <div ref={list} id={id} role="menu" className="mono wb-menu-list" onKeyDown={onListKey}>
+        <div ref={list} id={id} role="menu" onKeyDown={onListKey}
+          className={phone ? "mono wb-menu-list wb-menu-list--phone" : "mono wb-menu-list"}
+          style={phone ? { top: panelTop, maxHeight: `calc(100dvh - ${panelTop + 8}px)` } : undefined}>
           {items.map((it, i) => {
             if (it === null) return <div key={`sep-${i}`} role="separator" className="wb-menu-sep" />;
             if (it.render) {
