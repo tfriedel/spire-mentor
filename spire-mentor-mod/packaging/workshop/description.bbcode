@@ -2,7 +2,7 @@
 
 Spire Mentor rates your options while you play: a score on every card in hand, a ranked list of the moves the AI considered, a win-chance bar, and the map route it likes. Combat advice comes from a Monte Carlo tree search over a full simulation of the fight; map, card-reward, shop, event and rest-site advice comes from a trained run policy. It can also take a single decision for you, or play on by itself until you stop it.
 
-[b]Instinct[/b] (new): for Ironclad on game v0.111.0 and v0.113.0 the advice comes by default from one trained network that makes every decision of the run, fights included, without a search. Switch between Search and Instinct in the badge or with [b]Shift+F8[/b].
+[b]Instinct[/b]: for Ironclad on game v0.111.0 and v0.113.0 the advice comes by default from one trained network that makes every decision of the run, fights included, with no search. Switch between Search and Instinct in the badge or with [b]Shift+F8[/b].
 
 It has two styles, picked in the badge's [b]Mode[/b] switch:
 [list]
@@ -15,7 +15,7 @@ It has two styles, picked in the badge's [b]Mode[/b] switch:
 [h2]Requirements[/h2]
 [list]
 [*][b]Windows only.[/b] The AI runs as a bundled Windows program (SimAdvisor.exe). On Mac or Linux the mod loads but the coach cannot start.
-[*][b]Game builds v0.107.1, v0.111.0 and v0.113.0 (public beta).[/b] On v0.113.0 the advice is approximate and The Fool is not supported yet. Blitz plays through, but no trained advice covers its merchant: the AI takes its wares by a simple rule (skipping cursed ones) and says so. Dread is untested. A game update can break the mod until a new version is out.
+[*][b]Game builds v0.107.1, v0.111.0 and v0.113.0 (public beta).[/b] On v0.113.0 the advice is approximate, The Fool is not supported yet, and no trained advice covers the Blitz merchant (the AI takes uncursed wares by a simple rule). A game update can break the mod until a new version is out.
 [*][b]BaseLib[/b] (by Alchyr), which Steam installs alongside this mod as a required item.
 [/list]
 
@@ -47,16 +47,16 @@ Settings: [b]Panels → Settings[/b] on the toolbar (works mid-run), or Main men
 [h2]Co-op[/h2]
 The coach also works in co-op runs, as host or as a client, and your teammates do not need the mod. It advises you only, but its combat search sees the whole party: your teammates' cards, block, powers and orbs, and what their cards do to you. Undo and rewind are off in co-op, since they would roll back everyone's game.
 
-[b]AI partners (new, experimental):[/b] play co-op with AI teammates instead of, or next to, your friends. Each partner plays its own seat, character and deck with its own copy of the coach.
+[b]AI partners (experimental):[/b] play co-op with AI teammates instead of, or next to, your friends. Each partner plays its own seat, character and deck with its own copy of the coach.
 [list]
 [*]Multiplayer → Host shows a [b]With AI partners[/b] entry: a co-op run on your PC alone.
 [*]A lobby you host gets [b]Add AI partner[/b] / [b]Remove AI partner[/b] tiles (up to three). Friends join as usual and do not need the mod.
 [*][b]Click an AI partner in the lobby[/b] to change its character (right-click goes back). Each partner seat remembers its last pick.
-[*]Save and continue work: loading the run brings the partners back.
+[*]Loading a saved run brings the partners back.
 [*]When a partner's best move needs your setup (your Vulnerable on its target, your block on it), it waits up to 10 seconds for it; the settings ([i]Co-op AI partners[/i]) change that (0-60 s) and can make it wait for your first play, or until you end your turn, before it moves.
 [*]Done setting up? The toolbar's [b]Partner go[/b] (or [b]Shift+F6[/b]) makes a waiting partner play now.
 [/list]
-Each partner runs one more advisor process while the run lasts, so expect more CPU use. It is new: if a partner gets stuck or acts strangely, please send a bug report (Ctrl+Shift+B).
+Each partner runs its own advisor process, so expect more CPU use. If a partner gets stuck or acts strangely, please send a bug report (Ctrl+Shift+B).
 
 [h2]The workbench[/h2]
 The toolbar's [b]Workbench → Open workbench[/b] opens a page in your browser that follows your run as you play: every decision with what the AI advised, regret reviews and search trees, the run tree (click a save point to rewind the real game), replays and a combat sandbox. [b]Workbench → Copy state[/b] (or Ctrl+Shift+C) puts the current position on the clipboard; paste it into the workbench's [b]Import state[/b] to try other lines. It runs entirely on your machine ([i]127.0.0.1:8079[/i]).
@@ -78,7 +78,7 @@ How the AI works and how well it plays: [url=https://tfriedel.github.io/spire-me
 Open source under the MIT license: [url=https://github.com/tfriedel/spire-mentor]github.com/tfriedel/spire-mentor[/url].
 
 [h2]Reporting a bug[/h2]
-Press [b]Ctrl+Shift+B[/b] (or [b]Panels → Report a bug[/b]) the moment something goes wrong, say what happened in one line, and press [b]Send report[/b]. The report carries the position, the room's save, the coach's run log and the last lines of the logs (your Windows user name is removed), so the bug can be replayed exactly. Nothing is sent until you press Send. You get a link on your clipboard; paste it into a comment here or a GitHub issue. [b]Save to file only[/b] writes the same report to [i]%LOCALAPPDATA%\SpireMentor\bugreports\[/i] and sends nothing.
+Press [b]Ctrl+Shift+B[/b] (or [b]Panels → Report a bug[/b]) the moment something goes wrong, say what happened in one line, and press [b]Send report[/b]. The report carries the position, the room's save, the coach's run log and the last log lines (your Windows user name is removed), so the bug can be replayed. Nothing is sent until you press Send. You get a link on your clipboard; paste it into a comment here or a GitHub issue. [b]Save to file only[/b] writes the same report to [i]%LOCALAPPDATA%\SpireMentor\bugreports\[/i] and sends nothing.
 
 Spire Mentor is an unofficial fan project, not affiliated with or endorsed by Mega Crit. Slay the Spire 2 and the art and sound shown in the workbench are © Mega Crit.
 
