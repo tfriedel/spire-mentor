@@ -1002,7 +1002,9 @@ class InstinctAdvisor:
             state, cfg, sims, picker=picker, picker_note="Instinct (e2e net, no search) · choice"
         )
         if advice is None:
-            raise InstinctUnavailable(failed[0] if failed else "the fight mirror cannot stand on this choice")
+            raise InstinctUnavailable(
+                failed[0] if failed else "the fight mirror cannot stand on this choice"
+            )
         if first:
             _annotate_choice_probs(advice, first)
         return advice

@@ -291,11 +291,16 @@ class TestInstinct:
 
     def test_the_two_builds_draw_different_maps(self) -> None:
         """Why the build matters: the same seed is another map on v0.113.0."""
-        assert _map_shape(_campaign_run(SEED, "v0.111.0")) != _map_shape(_campaign_run(SEED, "v0.113.0"))
+        assert _map_shape(_campaign_run(SEED, "v0.111.0")) != _map_shape(
+            _campaign_run(SEED, "v0.113.0")
+        )
 
 
 def _map_shape(rm: Any) -> list[tuple[int, int, str]]:
-    return sorted((n["col"], n["row"], str(n["type"])) for row in rm.full_map()["rows"] for n in row)
+    return sorted(
+        (n["col"], n["row"], str(n["type"])) for row in rm.full_map()["rows"] for n in row
+    )
+
 
 def _children_of(msg: dict[str, Any]) -> list[dict[str, Any]]:
     cur = msg["map"]["current"]
@@ -334,7 +339,9 @@ def test_an_in_fight_pick_instinct_cannot_make_says_why(monkeypatch: pytest.Monk
     monkeypatch.setattr(ri, "graft_run", no_run)
 
     class Mirror:
-        def answer_card_select(self, state: Any, cfg: Any, sims: Any, picker: Any = None, picker_note: Any = None) -> Any:
+        def answer_card_select(
+            self, state: Any, cfg: Any, sims: Any, picker: Any = None, picker_note: Any = None
+        ) -> Any:
             try:
                 picker(object(), n_options=3, min_select=1, max_select=1)
             except Exception:
