@@ -66,14 +66,29 @@ WEIGHTS_RELPATH = Path("data/e2e/ironclad_e2e_d5250_ema0999.e2ew")
 
 #: What this student plays. A tuple per character as more students land.
 INSTINCT_CHARACTER = "Ironclad"
-#: The build the student was trained on. The run graft and the screens' own
-#: runs are built on it, whichever live build asks.
+#: The build the student was trained on.
 INSTINCT_GAME_VERSION = "v0.111.0"
-#: The live builds Instinct answers for. The v0.113.0 beta seeds like
-#: v0.111.0 and the engine runs it on v0.111.0's rules wherever its content is
-#: not ported yet (#1303), so the student plays it on its training build; the
-#: advisor labels every beta answer approximate (``mark_beta_build``).
+#: The live builds Instinct answers for. The student plays each on that
+#: build's own rules (:func:`engine_game_version`), as it already did in a
+#: fight: the fight mirror always ran the live build.
 INSTINCT_GAME_VERSIONS: tuple[str, ...] = ("v0.111.0", "v0.113.0")
+
+
+def engine_game_version(state: dict[str, Any]) -> str:
+    """The build a live run is rebuilt on: the one the game is playing.
+
+    Not the training build. v0.113.0 generates its maps differently (the
+    rest-site row, the room-type queue, the path pruning; ported in #1319),
+    so a v0.113.0 run rebuilt on v0.111.0 has another map: the player's
+    room was missing from it ("the map does not match this run"), and every
+    screen that rebuilds the run -- the map, the rewards, an in-fight card
+    offer -- fell back to the search.
+    """
+    try:
+        version = envelope_game_version(state)
+    except Exception:
+        return INSTINCT_GAME_VERSION
+    return version if version in INSTINCT_GAME_VERSIONS else INSTINCT_GAME_VERSION
 
 
 class InstinctUnavailable(Exception):
@@ -152,7 +167,7 @@ def graft_run(state: dict[str, Any]) -> tuple[Any, list[str]]:
     def new_run(spoils: bool) -> Any:
         try:
             rm = sts2_rs.RunManager(
-                game_version=INSTINCT_GAME_VERSION,
+                game_version=engine_game_version(state),
                 string_seed=snap.seed,
                 character=snap.character,
                 ascension_level=snap.ascension,
@@ -938,8 +953,19 @@ class InstinctAdvisor:
             raise InstinctUnavailable("no fight mirror to stand on this choice")
         room = _room_kind(state.get("combat") or {})
         first: dict[str, Any] = {}
+        #: Why Instinct itself could not pick. The mirror swallows a picker's
+        #: exception into a bare None (it counts it as a decline), so without
+        #: this the player only ever read "cannot stand on this choice".
+        failed: list[str] = []
 
         def picker(fork: Any, *, n_options: int, min_select: int, max_select: int) -> list[int]:
+            try:
+                return pick(fork, max_select)
+            except InstinctUnavailable as exc:
+                failed.append(str(exc))
+                raise
+
+        def pick(fork: Any, max_select: int) -> list[int]:
             rm, _notes = graft_run(state)
             rm.debug_enter_combat(fork.state.clone(), room)
             probe = self._driver_for(state, rm).copy()
@@ -976,7 +1002,7 @@ class InstinctAdvisor:
             state, cfg, sims, picker=picker, picker_note="Instinct (e2e net, no search) · choice"
         )
         if advice is None:
-            raise InstinctUnavailable("the fight mirror cannot stand on this choice")
+            raise InstinctUnavailable(failed[0] if failed else "the fight mirror cannot stand on this choice")
         if first:
             _annotate_choice_probs(advice, first)
         return advice

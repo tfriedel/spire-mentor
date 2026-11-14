@@ -337,6 +337,8 @@ public class SimTreasureRoomHandler : IRoomHandler, IHandler
     private const int ChestOpenSettleMs = 1000;
     private const int RelicPickSettleMs = 500;
     private static readonly TimeSpan ProceedWait = TimeSpan.FromSeconds(5);
+    // Co-op: the round ends only once every player has voted.
+    private static readonly TimeSpan RoundWait = TimeSpan.FromMinutes(10);
 
     public RoomType[] HandledTypes => new[] { RoomType.Treasure };
 
@@ -353,10 +355,12 @@ public class SimTreasureRoomHandler : IRoomHandler, IHandler
         await UiHelper.Click(chest);
         await Task.Delay(ChestOpenSettleMs, ct);
 
-        List<NTreasureRoomRelicHolder> holders = UiHelper.FindAll<NTreasureRoomRelicHolder>(room)
-            .Where(h => h.IsEnabled && h.Visible)
-            .ToList();
-        if (holders.Count > 0)
+        // Usually one pick. A solo Blitz chest (v0.113.0+) holds two relics and
+        // both are taken, one round each (TreasureRoomRelicSynchronizer
+        // `_roundsLeft`): between rounds the holders are disabled while the
+        // first relic flies to the bar, then the other comes back enabled.
+        List<NTreasureRoomRelicHolder> holders = OfferedHolders(room);
+        while (holders.Count > 0)
         {
             List<Dictionary<string, object>> options = holders
                 .Select((h, i) => SimRelicOptions.Option(i, NonCombatBridgeProtocol.CollectTreasureAction, h.Relic.Model))
@@ -374,6 +378,14 @@ public class SimTreasureRoomHandler : IRoomHandler, IHandler
             Logger.Log($"[SimTreasure] Agent chose relic {chosen.Relic.Model.Id.Entry}");
             await UiHelper.Click(chosen);
             await Task.Delay(RelicPickSettleMs, ct);
+
+            // Next round's relics, or the end of picking. A SKIP button does
+            // not count: the room enables it 2.5 s after opening, and
+            // pressing it would throw the second relic away.
+            await WaitHelper.Until(
+                () => RealProceed(room) || OfferedHolders(room) is { Count: > 0 } next && !next.Contains(chosen),
+                ct, RoundWait, "Treasure room: neither another relic nor Proceed after the pick");
+            holders = RealProceed(room) ? new List<NTreasureRoomRelicHolder>() : OfferedHolders(room);
         }
 
         await WaitHelper.Until(() => room.ProceedButton.IsEnabled, ct, ProceedWait,
@@ -381,6 +393,18 @@ public class SimTreasureRoomHandler : IRoomHandler, IHandler
         Logger.Log("[SimTreasure] Clicking proceed");
         await UiHelper.Click(room.ProceedButton);
     }
+
+    /// <summary>The relics up for picking now. Since v0.113.0 the holders
+    /// sit in one layout per relic count, all but one hidden, so the holder's
+    /// own Visible flag says nothing; and those never shown have no relic.</summary>
+    private static List<NTreasureRoomRelicHolder> OfferedHolders(NTreasureRoom room) =>
+        UiHelper.FindAll<NTreasureRoomRelicHolder>(room)
+            .Where(h => GodotObject.IsInstanceValid(h) && h.IsEnabled && h.IsVisibleInTree() && h.Relic?.Model != null)
+            .ToList();
+
+    private static bool RealProceed(NTreasureRoom room) =>
+        room.ProceedButton is { } proceed && GodotObject.IsInstanceValid(proceed) &&
+        proceed.IsEnabled && !proceed.IsSkip;
 }
 
 /// <summary>Boss / Ancient "choose a relic" overlay: the agent picks one.</summary>

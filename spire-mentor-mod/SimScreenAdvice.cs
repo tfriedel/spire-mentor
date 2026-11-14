@@ -465,9 +465,11 @@ internal static class SimScreenAdvice
 
         // A holder whose relic is not filled in yet is scenery, not an offer:
         // the room builds them up front and `InitializeRelics` only runs once
-        // the chest animation is done (NTreasureRoom.OpenChest).
+        // the chest animation is done (NTreasureRoom.OpenChest). Since v0.113.0
+        // the holders sit in one layout per relic count, all but one hidden,
+        // so only IsVisibleInTree says whether a holder is on screen.
         var holders = UiHelper.FindAll<NTreasureRoomRelicHolder>(room)
-            .Where(h => GodotObject.IsInstanceValid(h) && h.IsEnabled && h.Visible)
+            .Where(h => GodotObject.IsInstanceValid(h) && h.IsEnabled && h.IsVisibleInTree())
             .Where(h => SafeRelicModel(h.Relic) != null)
             .ToList();
 
@@ -548,10 +550,22 @@ internal static class SimScreenAdvice
             Signature = "treasure:" + string.Join("|", labels),
             Screen = room,
             ScreenName = nameof(NTreasureRoom),
-            OptionNodes = holders.Select(h => (Control?)h).ToList(),
+            OptionNodes = holders.Select(ChestRelicFrame).ToList(),
             Choose = index => ClickHolder(holders, index),
         };
     }
+
+    /// <summary>
+    /// What the advice frame goes around: the relic's icon, not its holder.
+    /// The holder is only the click area, and since v0.113.0 it builds its
+    /// NRelic at runtime at 2x from (68, 68), so the 240px icon sits off the
+    /// 136px holder rect (the frame used to circle empty space top-left of it).
+    /// </summary>
+    private static Control? ChestRelicFrame(NTreasureRoomRelicHolder holder) =>
+        holder.Relic is { } relic && GodotObject.IsInstanceValid(relic) &&
+        relic.Icon is { } icon && GodotObject.IsInstanceValid(icon)
+            ? icon
+            : holder;
 
     /// <summary>
     /// The chest button. `NTreasureRoom` binds it by unique name

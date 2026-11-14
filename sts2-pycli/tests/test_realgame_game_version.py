@@ -475,21 +475,33 @@ class TestUnsupportedCharacter:
 
 
 class TestBetaBuildLabel:
-    def test_beta_build_advice_says_approximate(self) -> None:
-        out = ra.mark_beta_build({"note": "search", "best": {"label": "Strike"}}, "v0.113.0")
-        assert out["note"] == "Beta v0.113.0: approximate advice · search"
-        assert out["beta_game_version"] == "v0.113.0"
+    """The label is for a beta the engine has only partly ported. None is
+    listed now; the tests list one to pin the mechanism."""
+
+    @pytest.fixture
+    def beta(self, monkeypatch: pytest.MonkeyPatch) -> str:
+        monkeypatch.setattr(ra, "BETA_GAME_VERSIONS", frozenset({"v0.999.0"}))
+        return "v0.999.0"
+
+    def test_v0113_is_no_longer_labelled_approximate(self) -> None:
+        advice = {"note": "search"}
+        assert ra.mark_beta_build(advice, "v0.113.0") is advice
+
+    def test_beta_build_advice_says_approximate(self, beta: str) -> None:
+        out = ra.mark_beta_build({"note": "search", "best": {"label": "Strike"}}, beta)
+        assert out["note"] == f"Beta {beta}: approximate advice · search"
+        assert out["beta_game_version"] == beta
         assert out["best"] == {"label": "Strike"}
 
-    def test_stable_builds_are_untouched(self) -> None:
+    def test_stable_builds_are_untouched(self, beta: str) -> None:
         advice = {"note": "search"}
-        for build in ("v0.107.1", "v0.111.0"):
+        for build in ("v0.107.1", "v0.111.0", "v0.113.0"):
             assert ra.mark_beta_build(advice, build) is advice
 
-    def test_advisor_errors_are_not_labelled(self) -> None:
+    def test_advisor_errors_are_not_labelled(self, beta: str) -> None:
         err = {"note": "advisor error: boom", "hand_back": "the advisor hit an error"}
-        assert ra.mark_beta_build(err, "v0.113.0") is err
+        assert ra.mark_beta_build(err, beta) is err
 
-    def test_refusals_are_not_labelled(self) -> None:
+    def test_refusals_are_not_labelled(self, beta: str) -> None:
         refusal = {"note": "The Fool support is coming soon", "unsupported_character": "FOOL"}
-        assert ra.mark_beta_build(refusal, "v0.113.0") is refusal
+        assert ra.mark_beta_build(refusal, beta) is refusal

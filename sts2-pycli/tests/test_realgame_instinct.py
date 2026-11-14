@@ -35,10 +35,10 @@ def student() -> Any:
     return sts2_rs.E2eStudent(str(WEIGHTS))
 
 
-def _campaign_run(seed: str) -> Any:
+def _campaign_run(seed: str, build: str = ri.INSTINCT_GAME_VERSION) -> Any:
     """The student's campaign run, at a STRING seed (as live runs have)."""
     return sts2_rs.RunManager(
-        game_version=ri.INSTINCT_GAME_VERSION,
+        game_version=build,
         string_seed=seed,
         character="Ironclad",
         ascension_level=10,
@@ -247,11 +247,17 @@ class TestInstinct:
             {"character": "Ironclad", "game_version": "v0.113.0"},
         ]
 
-    def test_a_beta_envelope_gets_the_training_builds_answer(self, student: Any) -> None:
-        """The v0.113.0 beta seeds like v0.111.0, so a beta envelope grafts
-        onto the student's own training build and sees what the native
-        student sees there."""
-        rm = _campaign_run(SEED)
+    @pytest.mark.parametrize("build", ["v0.111.0", "v0.113.0"])
+    def test_a_run_is_rebuilt_on_the_build_it_is_played_on(self, student: Any, build: str) -> None:
+        """A live run is grafted onto its own build's engine, map and all.
+
+        v0.113.0 generates maps differently from v0.111.0, the student's
+        training build. Grafted onto v0.111.0, a v0.113.0 run got another
+        map, the player's room was missing from it ("the map does not match
+        this run"), and every Instinct screen that rebuilds the run -- an
+        in-fight Skill Potion offer included -- fell back to the search.
+        """
+        rm = _campaign_run(SEED, build)
         driver = sts2_rs.E2eDriver(rm.seed)
 
         maps = 0
@@ -268,7 +274,10 @@ class TestInstinct:
         cols = [c["actions"][0]["col"] for c in peek.decision["classes"]]
 
         msg = _envelope(rm, SEED, "map_select")
-        msg["game_version"] = "v0.113.0"
+        msg["game_version"] = build
+        grafted, _notes = ri.graft_run(msg)
+        assert _map_shape(grafted) == _map_shape(rm)
+
         children = {(c["col"], c["row"]) for c in _children_of(msg)}
         msg["nodes"] = [
             {"index": i, "col": col, "row": row, "type": "Monster"}
@@ -280,6 +289,13 @@ class TestInstinct:
         for ci, col in enumerate(cols):
             assert by_col[col] == pytest.approx(native["probs"][ci], abs=2e-3)
 
+    def test_the_two_builds_draw_different_maps(self) -> None:
+        """Why the build matters: the same seed is another map on v0.113.0."""
+        assert _map_shape(_campaign_run(SEED, "v0.111.0")) != _map_shape(_campaign_run(SEED, "v0.113.0"))
+
+
+def _map_shape(rm: Any) -> list[tuple[int, int, str]]:
+    return sorted((n["col"], n["row"], str(n["type"])) for row in rm.full_map()["rows"] for n in row)
 
 def _children_of(msg: dict[str, Any]) -> list[dict[str, Any]]:
     cur = msg["map"]["current"]
@@ -302,3 +318,37 @@ def test_unavailable_instinct_is_marked_on_the_search_answer() -> None:
     assert advice["brain"] == "search"
     assert advice["instinct_unavailable"] == "Instinct plays Ironclad only"
     assert advice["note"].startswith("Search (Instinct: Instinct plays Ironclad only)")
+
+
+def test_an_in_fight_pick_instinct_cannot_make_says_why(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mirror swallows a picker's exception into None; Instinct still names it.
+
+    A Skill Potion's offer read "the fight mirror cannot stand on this choice"
+    whenever Instinct's own pick failed, while the search then answered the
+    same screen -- so the mirror could stand on it, and the note hid the cause.
+    """
+
+    def no_run(state: dict[str, Any]) -> Any:
+        raise ri.InstinctUnavailable("the map does not match this run")
+
+    monkeypatch.setattr(ri, "graft_run", no_run)
+
+    class Mirror:
+        def answer_card_select(self, state: Any, cfg: Any, sims: Any, picker: Any = None, picker_note: Any = None) -> Any:
+            try:
+                picker(object(), n_options=3, min_select=1, max_select=1)
+            except Exception:
+                return None  # as AdvisorMirror.answer_card_select does
+            raise AssertionError("the picker should have failed")
+
+    with pytest.raises(ri.InstinctUnavailable, match="the map does not match this run"):
+        ri.InstinctAdvisor()._advise_combat_select({"combat": {}}, object(), Mirror(), 8)
+
+
+def test_a_mirror_that_declines_on_its_own_keeps_the_old_reason() -> None:
+    class Mirror:
+        def answer_card_select(self, *args: Any, **kwargs: Any) -> Any:
+            return None
+
+    with pytest.raises(ri.InstinctUnavailable, match="cannot stand on this choice"):
+        ri.InstinctAdvisor()._advise_combat_select({"combat": {}}, object(), Mirror(), 8)
