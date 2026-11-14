@@ -1133,10 +1133,11 @@ _PLAYER_ANIM_SFX: dict[str, str] = {"Attack": "attack", "Cast": "cast", "PowerUp
 
 # `CharacterModel.cs:200-206` builds all three from `Id.Entry` — there is no
 # per-character override anywhere in v0.107.1, so the events are derived from
-# the class name (an override a later build declares is parsed, below). That derivation is SELF-CHECKING: every
-# candidate goes through `_resolve`, so a class whose `Id.Entry` is not its
-# own name (or that has no rendered audio at all — Deprived, RandomCharacter,
-# DeprecatedCharacter) drops out instead of shipping a path that 404s.
+# the class name (an override a later build declares is parsed, below). That
+# derivation is SELF-CHECKING: every candidate goes through `_resolve`, so a
+# class whose `Id.Entry` is not its own name (or that has no rendered audio at
+# all — Deprived, RandomCharacter, DeprecatedCharacter) drops out instead of
+# shipping a path that 404s.
 _CHARACTER_SFX_SLOTS: tuple[str, ...] = ("attack", "cast", "die")
 # v0.113.0 made `DeathSfx` virtual, and the Fool overrides it with a sound
 # another character's folder holds (`Fool.cs`: `DeathSfx =>

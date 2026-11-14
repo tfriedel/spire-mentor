@@ -311,7 +311,7 @@ def extract_beta_card_portraits(pck_index, read_pck_file, output_dir: str) -> in
     for pck_file_path in pck_index:
         if not (pck_file_path.startswith(prefix) and pck_file_path.endswith(".png.import")):
             continue
-        parts = pck_file_path[len(prefix):].removesuffix(".png.import").split("/")
+        parts = pck_file_path[len(prefix) :].removesuffix(".png.import").split("/")
         if len(parts) != 3 or parts[1] != "beta":
             continue
         pool, _, card_id = parts

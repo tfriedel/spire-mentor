@@ -270,7 +270,11 @@ def new_rigs(rigs, old_index):
     would also pick up every alias slug an older extraction never wrote, and
     every extra atlas page of a rig the shared tree packs differently.
     """
-    return {key: (skel, atlas) for key, (skel, atlas) in rigs.items() if not _find(old_index, skel, "spskel")}
+    return {
+        key: (skel, atlas)
+        for key, (skel, atlas) in rigs.items()
+        if not _find(old_index, skel, "spskel")
+    }
 
 
 def extract_all(pck_path, images_root, force=False, new_since=None):

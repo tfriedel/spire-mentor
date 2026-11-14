@@ -284,7 +284,10 @@ def extract(pck_path: Path, images_root: Path) -> int:
     frame_mat = "materials/cards/frames/card_frame_{}_mat.tres"
     frame_mats = {
         color: read_hsv_material(pck, frame_mat.format(color))
-        for color in (*FRAME_COLORS, *(c for c in LATER_FRAME_COLORS if pck.has(frame_mat.format(c))))
+        for color in (
+            *FRAME_COLORS,
+            *(c for c in LATER_FRAME_COLORS if pck.has(frame_mat.format(c))),
+        )
     }
     for card_type in FRAME_TYPES:
         base = sprite(f"card_frame_{card_type}_s")
