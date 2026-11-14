@@ -212,6 +212,15 @@ class AssetResolver:
                 self._scales = json.loads(scales_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 self._scales = {}
+        # The creatures the overlay's build added (import_game's art overlay
+        # step writes their rows there); a shared row is never replaced.
+        own_scales = self.root / overlay / "creature_scales.json" if overlay else None
+        if own_scales is not None and own_scales.is_file():
+            try:
+                added = json.loads(own_scales.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                added = {}
+            self._scales = {**added, **self._scales}
 
     def _rel_if_exists(self, rel: str) -> str | None:
         if self._overlay is not None:
@@ -454,9 +463,8 @@ class AssetResolver:
             character: Character name (e.g. "Ironclad" or "The Ironclad").
         """
         slug = slugify(character)
-        if self._rel_if_exists(f"character_rigs/{slug}/{slug}.skel"):
-            return f"character_rigs/{slug}/{slug}"
-        return None
+        skel = self._rel_if_exists(f"character_rigs/{slug}/{slug}.skel")
+        return skel.removesuffix(".skel") if skel else None
 
     def monster(self, name: str) -> str | None:
         """Resolve a monster name to its sprite image path.
@@ -513,8 +521,9 @@ class AssetResolver:
                 used to disambiguate segments that share one display name.
         """
         for slug in self._rig_slugs(name, kind):
-            if self._rel_if_exists(f"monster_rigs/{slug}/{slug}.skel"):
-                return f"monster_rigs/{slug}/{slug}"
+            skel = self._rel_if_exists(f"monster_rigs/{slug}/{slug}.skel")
+            if skel:
+                return skel.removesuffix(".skel")
         return None
 
     def monster_rig_group(self, name: str, kind: str | None = None) -> dict[str, str] | None:

@@ -23,7 +23,8 @@ source the extractors and the mechanics work read plus real art
 ## Prerequisites
 
 - **Slay the Spire 2** installed through Steam. The engine supports builds
-  **v0.107.1** (stable, the default) and **v0.111.0** (beta); `import-game`
+  **v0.107.1** (stable, the default), **v0.111.0** and **v0.113.0** (betas;
+  v0.113.0 adds the Fool); `import-game`
   refuses any other build unless you pass `--allow-version-mismatch` (the
   oracle and the extracted data would then describe a different game). A
   v0.111.0 install gets only its version-keyed outputs — its oracle
@@ -130,12 +131,22 @@ directly (no bash, so the same on every platform):
    and room rig), `render_portraits` (renders each creature rig's idle pose
    to the still `monsters/*.png` and `character_sprites/*.png` the game does
    not ship, through `tools/spine-renderer`), and `build_sfx_map`.
-   A non-default build (v0.111.0) runs none of these art steps; it gets an
-   art overlay instead: its sprite atlases, kept where the shared tree has
-   no file (new cards, relics, potions and powers, and the final art of cards
-   v0.107.1 ships only as `beta/` sketches), into `images/<version>/`, which
-   that build's runs read before the shared tree. It does get its own
-   `build_sfx_map` (into `sts2-pycli/web/public/<version>/sfx_map.json`).
+   A non-default build (v0.111.0, v0.113.0) writes none of these into the
+   shared tree; it gets an art overlay instead, `images/<version>/`, which
+   that build's runs read before the shared tree. Every extractor above runs
+   on its pck into a scratch tree and the files the shared tree lacks are
+   kept: new cards, relics, potions and powers (with the sketch art
+   v0.113.0 ships only as `packed/card_portraits/<pool>/beta/`), card-frame
+   tints and energy icons (the Fool's yellow frame), rooms, events and HUD
+   art, and the rigs that build ADDED (`extract_rig --new-since <default
+   pck>`: the Fool, Aeonglass, Byrdine, Wuppy) with the portraits rendered
+   from them. `images/<version>/creature_scales.json` holds the new
+   creatures' scale rows; the bundle and the Python resolver merge it. A file
+   the shared tree has stays shared, even where the build redrew it. It does
+   get its own `build_sfx_map` (into
+   `sts2-pycli/web/public/<version>/sfx_map.json`), and its `sound` tier
+   renders its banks and copies only the events the shared audio tree lacks
+   (the Fool's voice) before rebuilding that map.
 4. `sts2-pycli`: `synergy.gen_card_text`, `workbench.build_card_db`,
    `scripts/build_asset_manifest.py`, `scripts/bundle_workbench_data.py`
    (= `just workbench-data`, the bundle the browser workbench embeds). A

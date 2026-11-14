@@ -120,6 +120,11 @@ export const RIG_BOUNDS: Record<string, RigBox> = {
   treasure_act_1: { x: 541, y: -2401, w: 3767, h: 2386 },
   treasure_act_2: { x: 886, y: -2356, w: 3475, h: 2340 },
   treasure_act_3: { x: 946, y: -2341, w: 3173, h: 2326 },
+  aeonglass: { x: -808, y: 560, w: 4181, h: 1878 },
+  byrdine: { x: -414, y: -27, w: 754, h: 678 },
+  byrdine_monster: { x: -414, y: -27, w: 754, h: 678 },
+  wuppy: { x: -371, y: 517, w: 745, h: 472 },
+  fool: { x: -223, y: -26, w: 575, h: 863 },
 };
 
 /** The rig slug for a rig base URL (`.../monster_rigs/nibbit/nibbit` -> `nibbit`). */

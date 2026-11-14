@@ -19,6 +19,7 @@ export default function MapOverlay({
   onJump,
   onClose,
   live = false,
+  gameVersion,
 }: {
   rows: MapRow[];
   graphs: MapGraph[];
@@ -29,6 +30,8 @@ export default function MapOverlay({
   onClose: () => void;
   /** Live run: the AI's planned route follows the hints switch (see MapView). */
   live?: boolean;
+  /** Game build of the shown run (boss art overlay, see `bossArt`). */
+  gameVersion?: string | null;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -54,7 +57,7 @@ export default function MapOverlay({
           <div style={{ padding: 24, color: "var(--muted)", fontFamily: "var(--game-font, Georgia, serif)" }}>loading map…</div>
         ) : (
           <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-            <MapView rows={rows} graphs={graphs} currentIdx={currentIdx} onJump={onJump} live={live} />
+            <MapView rows={rows} graphs={graphs} currentIdx={currentIdx} onJump={onJump} live={live} gameVersion={gameVersion} />
           </div>
         )}
         {/* The game's red back wedge, bottom-left — here it is the overlay's

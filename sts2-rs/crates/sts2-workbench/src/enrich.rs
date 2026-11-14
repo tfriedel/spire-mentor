@@ -66,6 +66,7 @@ pub fn frame_color(
         "defect" => "blue",
         "necrobinder" => "pink",
         "regent" => "orange",
+        "fool" => "yellow",
         _ => "colorless",
     }
 }

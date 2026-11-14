@@ -107,10 +107,18 @@ function measure(base) {
 }
 
 const rows = new Map();
-for (const dir of DIRS) {
+// The shared tree, then each later build's art overlay (`v0.113.0/…`, the rigs
+// that build added), whose rows follow; a slug the shared tree has keeps its
+// row, as the backends' resolvers keep the shared rig.
+const overlays = fs.existsSync(IMAGES)
+  ? fs.readdirSync(IMAGES).filter((d) => /^v\d/.test(d)).sort()
+  : [];
+const roots = [...DIRS.map((d) => d), ...overlays.flatMap((o) => DIRS.map((d) => path.join(o, d)))];
+for (const dir of roots) {
   const root = path.join(IMAGES, dir);
   if (!fs.existsSync(root)) continue;
   for (const slug of fs.readdirSync(root).sort()) {
+    if (rows.has(slug)) continue;
     const sub = path.join(root, slug);
     if (!fs.statSync(sub).isDirectory()) continue;
     const skel = fs.readdirSync(sub).find((f) => f.endsWith(".skel"));

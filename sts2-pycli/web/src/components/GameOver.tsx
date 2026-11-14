@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Step } from "../api";
 import { assetUrl } from "../api";
-import { characterKey } from "../characters";
+import { characterArt, characterKey } from "../characters";
 import "../skins/runend.css";
 
 type Tone = "victory" | "defeat" | "ended";
@@ -53,7 +53,7 @@ export function RunEndScene({ step, heading, tone, primaryAction, secondaryActio
   const floor = s.floor ?? meta.floor;
   const name = s.player?.name;
   const spriteKey = characterKey(name);
-  const sprite = spriteKey ? assetUrl(`character_sprites/${spriteKey}.png`) : null;
+  const sprite = spriteKey ? assetUrl(characterArt(spriteKey, `character_sprites/${spriteKey}.png`)) : null;
   // Neutral, data-backed epitaph — character + act, no invented lore. The
   // floor number is deliberately NOT repeated here: it already lives in the
   // tally row and the metadata caption.

@@ -110,3 +110,33 @@ def test_only_a_non_default_build_gets_an_overlay_step(ig, tmp_path):
         assert steps[i].versioned and steps[i].tier == "workbench"
         # Before the bundle step, which lists the overlay in that build's art manifest.
         assert i < next(j for j, s in enumerate(steps) if s.name.startswith("workbench bundle"))
+
+
+def test_new_creature_scales_keep_every_shared_row(ig, tmp_path: Path) -> None:
+    """A later build's creature_scales.json carries only the creatures it added.
+
+    The shared table's rows win even where the build's scene differs: three of
+    them hold hand-overridden scales the scene does not author.
+    """
+    fresh, shared, out = (
+        tmp_path / "fresh.json",
+        tmp_path / "shared.json",
+        tmp_path / "v/creature_scales.json",
+    )
+    fresh.write_text(
+        json.dumps(
+            {
+                "fool": {"scale": 0.34, "bounds_w": 285.0, "bounds_h": 327.0},
+                "mawler": {"scale": 1.0, "bounds_w": 1.0, "bounds_h": 1.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    shared.write_text(
+        json.dumps({"mawler": {"scale": 0.5, "bounds_w": 9.0, "bounds_h": 9.0}}), encoding="utf-8"
+    )
+
+    assert ig.write_new_creature_scales(fresh, shared, out) == 1
+    assert json.loads(out.read_text(encoding="utf-8")) == {
+        "fool": {"scale": 0.34, "bounds_w": 285.0, "bounds_h": 327.0},
+    }

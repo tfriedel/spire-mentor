@@ -21,6 +21,7 @@ export default function MiniMap({
   onToggleCollapsed,
   onExpand,
   live = false,
+  gameVersion,
 }: {
   graphs: MapGraph[];
   currentIdx: number;
@@ -30,6 +31,8 @@ export default function MiniMap({
   onExpand: () => void;
   /** Live run: the AI's planned route follows the hints switch (see MapView). */
   live?: boolean;
+  /** Game build of the shown run (boss art overlay, see `bossArt`). */
+  gameVersion?: string | null;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -114,7 +117,7 @@ export default function MiniMap({
       </div>
       {!collapsed && (
         <div ref={bodyRef} style={{ maxHeight: "34vh", overflow: "auto", padding: "0 4px 6px" }}>
-          <MapView rows={[]} graphs={graphs} currentIdx={currentIdx} scale={0.5} compact live={live} />
+          <MapView rows={[]} graphs={graphs} currentIdx={currentIdx} scale={0.5} compact live={live} gameVersion={gameVersion} />
         </div>
       )}
     </div>

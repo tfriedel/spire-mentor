@@ -318,6 +318,12 @@ def _build_version(out_dir: Path, version: str) -> dict[str, int]:
     if not scales_src.is_file():
         raise SystemExit(f"error: {scales_src} not found")
     scales = json.loads(scales_src.read_text(encoding="utf-8"))
+    for overlay in overlays:
+        # The creatures that build added (import_game's art overlay step).
+        own_scales = _IMAGES / overlay / "creature_scales.json"
+        if own_scales.is_file():
+            scales = {**scales, **json.loads(own_scales.read_text(encoding="utf-8"))}
+            scales = {k: scales[k] for k in sorted(scales)}
 
     # The deck analyzer's two tables (`workbench/deck_analysis.py`), copied
     # as-is: the Rust twin reads the same keys off the same JSON. Per build

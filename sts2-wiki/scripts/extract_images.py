@@ -289,6 +289,49 @@ def extract_power_big_icons(
     return written
 
 
+# Every card_atlas sprite is this size (the card's portrait window).
+CARD_ATLAS_SIZE = (250, 190)
+
+
+def extract_beta_card_portraits(pck_index, read_pck_file, output_dir: str) -> int:
+    """Sketch art for cards the atlas has no sprite for -> ``card_atlas/<pool>/beta/<id>.png``.
+
+    Up to v0.111.0 a card without final art had a ``card_atlas.sprites/<pool>/
+    beta/<id>.tres`` atlas sprite, which the atlas pass above writes to that
+    path. From v0.113.0 the beta atlas sprites are gone and the sketch ships
+    only as ``packed/card_portraits/<pool>/beta/<id>.png`` (``CardModel.
+    BetaPortraitPngPath``) — every Fool card but its Strike and Defend. The
+    workbench's card resolver already tries ``<pool>/beta/`` after ``<pool>/``,
+    so the packed PNG lands where the atlas sprite used to, scaled to the
+    atlas sprites' ``CARD_ATLAS_SIZE`` (the packed PNG is the same 1.32:1 frame
+    at ~2.7x). A file the atlas pass wrote is kept.
+    """
+    prefix = "images/packed/card_portraits/"
+    count = 0
+    for pck_file_path in pck_index:
+        if not (pck_file_path.startswith(prefix) and pck_file_path.endswith(".png.import")):
+            continue
+        parts = pck_file_path[len(prefix):].removesuffix(".png.import").split("/")
+        if len(parts) != 3 or parts[1] != "beta":
+            continue
+        pool, _, card_id = parts
+        dst = Path(output_dir) / "card_atlas" / pool / "beta" / f"{card_id}.png"
+        if dst.exists():
+            continue
+        import_data = read_pck_file(pck_file_path)
+        ctex_path = _ctex_path(import_data) if import_data else None
+        ctex_data = read_pck_file(ctex_path) if ctex_path else None
+        img = decode_ctex(ctex_data) if ctex_data else None
+        if img is None:
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if img.size != CARD_ATLAS_SIZE:
+            img = img.resize(CARD_ATLAS_SIZE, Image.Resampling.LANCZOS)
+        img.save(dst, "PNG")
+        count += 1
+    return count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extract images from Godot PCK")
     parser.add_argument("pck_path", help="Path to the .pck file")
@@ -494,6 +537,11 @@ def main() -> None:
     if portrait_count:
         print(f"  Extracted {portrait_count} card portraits")
         total += portrait_count
+
+    beta_count = extract_beta_card_portraits(pck_index, read_pck_file, output_dir)
+    if beta_count:
+        print(f"  Extracted {beta_count} beta card portraits into card_atlas/<pool>/beta/")
+        total += beta_count
 
     print(f"\nTotal: {total} images extracted to {output_dir}")
 

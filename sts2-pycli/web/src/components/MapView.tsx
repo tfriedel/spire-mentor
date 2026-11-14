@@ -272,7 +272,7 @@ function InkDefs({ fid }: { fid: string }) {
  *
  * ``rich`` (the parchment map screen / overlay) draws the act boss as a large
  * ink silhouette at the top of the scroll instead of a small node stamp. */
-function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1, colScale, showPlan = true, rich = false }: {
+function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1, colScale, showPlan = true, rich = false, gameVersion }: {
   fm: FullMap;
   selectable?: Set<string>;
   onSelect?: (col: number, row: number) => void;
@@ -288,6 +288,8 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
    *  play — see {@link MapView}. */
   showPlan?: boolean;
   rich?: boolean;
+  /** Game build: picks the boss art overlay (see `bossArt`). */
+  gameVersion?: string | null;
 }) {
   // Filter ids are document-global; namespace them so the map screen and the
   // docked minimap (both mounted at once) each own their own definitions.
@@ -477,7 +479,7 @@ function FullMapGraph({ fm, selectable, onSelect, jumpTargets, onJump, scale = 1
           // WHICH boss stands here: at A10 the node one row above the act boss
           // is the second boss, a different encounter with its own art.
           const b = bossFor(n);
-          const art = bossArt(b, n.icon);
+          const art = bossArt(b, n.icon, gameVersion);
           const second = sameCoord(fm.second_boss, n);
           const role = second ? "the act's second boss" : "the act boss";
           return (
@@ -754,7 +756,7 @@ function regionFor(actName: string | null): string {
   return "overgrowth";
 }
 
-export default function MapView({ rows, graphs, currentIdx, selectable, onSelect, onJump, scale = 1, compact = false, live = false }: {
+export default function MapView({ rows, graphs, currentIdx, selectable, onSelect, onJump, scale = 1, compact = false, live = false, gameVersion }: {
   rows: MapRow[]; graphs: MapGraph[]; currentIdx: number;
   selectable?: Set<string>; onSelect?: (col: number, row: number) => void;
   /** Replay: seek the timeline to a map decision step (click a visited node / floor row). */
@@ -767,6 +769,9 @@ export default function MapView({ rows, graphs, currentIdx, selectable, onSelect
    *  about a decision you have not made yet and follows the hints switch.
    *  Replay is review of a finished run — its route always renders. */
   live?: boolean;
+  /** Game build the map belongs to: a later build's new bosses draw from
+   *  its art overlay (see `bossArt`). */
+  gameVersion?: string | null;
 }) {
   // The ⤳ route is the run-AI telling you which way to go: unprompted
   // advice on the map screen, and just as much of a spoiler as the policy
@@ -874,7 +879,7 @@ export default function MapView({ rows, graphs, currentIdx, selectable, onSelect
       <div className="gs-map gs-map--compact" style={{ padding: 8, ...parchVars }}>
         {graph
           ? <FullMapGraph fm={graph.full_map} selectable={selectable} onSelect={onSelect}
-              jumpTargets={jumpTargets} onJump={onJump} scale={scale} showPlan={showPlan} />
+              jumpTargets={jumpTargets} onJump={onJump} scale={scale} showPlan={showPlan} gameVersion={gameVersion} />
           : <ReconstructedRows rows={rows} currentIdx={currentIdx} onJump={onJump} />}
       </div>
     );
@@ -917,7 +922,7 @@ export default function MapView({ rows, graphs, currentIdx, selectable, onSelect
           <div ref={bodyRef} className="gsm-parch-body">
             {graph
               ? <FullMapGraph fm={graph.full_map} selectable={selectable} onSelect={onSelect}
-                  jumpTargets={jumpTargets} onJump={onJump} scale={fit} colScale={colFit} showPlan={showPlan} rich />
+                  jumpTargets={jumpTargets} onJump={onJump} scale={fit} colScale={colFit} showPlan={showPlan} rich gameVersion={gameVersion} />
               : <ReconstructedRows rows={rows} currentIdx={currentIdx} onJump={onJump} />}
           </div>
           {/* … and its two torn deckle edges pinned OVER it, so an act taller

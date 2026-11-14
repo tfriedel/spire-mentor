@@ -262,13 +262,28 @@ def find_rigs(index, pck_path):
     return rigs
 
 
-def extract_all(pck_path, images_root, force=False):
+def new_rigs(rigs, old_index):
+    """The subset of ``rigs`` whose skeleton ``old_index`` (an older build's pck) lacks.
+
+    A later build's art overlay carries only the rigs that build ADDED (v0.113.0:
+    the Fool, the Aeonglass, Byrdine, Wuppy). Comparing slug folders instead
+    would also pick up every alias slug an older extraction never wrote, and
+    every extra atlas page of a rig the shared tree packs differently.
+    """
+    return {key: (skel, atlas) for key, (skel, atlas) in rigs.items() if not _find(old_index, skel, "spskel")}
+
+
+def extract_all(pck_path, images_root, force=False, new_since=None):
     """Write every rig ``find_rigs`` names under ``images_root``; returns the failures.
 
     Idempotent: a rig whose ``<slug>.skel`` exists is skipped unless ``force``.
+    ``new_since`` (an older build's pck) keeps only the rigs that build lacks
+    (:func:`new_rigs`).
     """
     index = read_pck_index(pck_path)
     rigs = find_rigs(index, pck_path)
+    if new_since:
+        rigs = new_rigs(rigs, read_pck_index(new_since))
     written = skipped = 0
     failures = []
     for (category, slug), (skel, atlas) in sorted(rigs.items()):
@@ -302,9 +317,14 @@ def main():
     ap.add_argument(
         "--force", action="store_true", help="with --all: rewrite rigs that already exist"
     )
+    ap.add_argument(
+        "--new-since",
+        metavar="OLD_PCK",
+        help="with --all: only the rigs whose skeleton OLD_PCK (an older build) lacks",
+    )
     a = ap.parse_args()
     if a.all:
-        sys.exit(1 if extract_all(a.pck, a.all, a.force) else 0)
+        sys.exit(1 if extract_all(a.pck, a.all, a.force, a.new_since) else 0)
     if not (a.name and a.out_root):
         ap.error("name and out_root are required without --all")
     try:

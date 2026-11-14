@@ -1,6 +1,7 @@
 // Map node glyphs and boss art lookup — kept out of the component file so it
 // exports only the component (react-refresh/only-export-components).
 import { assetUrl, type BossNode } from "../api";
+import { DEFAULT_GAME_VERSION } from "../gameVersion";
 
 /** Fallback glyphs/colors for nodes without server-resolved stamp art —
  *  muted dyed-ink tones that sit on parchment, not neon accents. */
@@ -56,7 +57,11 @@ const slugifyStripped = (s: string) => slugify(s).replace(/^the_/, "");
  * into its alpha — r4's "floating on a blurred ellipse" stag. The boss
  * filter's alpha threshold cuts that shadow, which is why it can lead here.
  */
-export function bossArt(b: BossNode | null | undefined, nodeIcon?: string | null) {
+export function bossArt(
+  b: BossNode | null | undefined,
+  nodeIcon?: string | null,
+  gameVersion?: string | null,
+) {
   const name = b?.name ?? b?.id ?? null;
   const slug = name ? slugify(name) : null;
   const stripped = name ? slugifyStripped(name) : null;
@@ -68,11 +73,20 @@ export function bossArt(b: BossNode | null | undefined, nodeIcon?: string | null
   // every boss whose display name IS its id minus `_BOSS`, so dedupe — the
   // load-error walk should not retry a URL it just gave up on.
   const id = b?.id ? b.id.toLowerCase() : null;
+  // A later build's new bosses (v0.113's Aeonglass) live only in its art
+  // overlay (`images/<version>/…`, see `import_game.py` art_overlay), so a
+  // non-default build tries its overlay first and the shared tree second —
+  // without it the new boss falls through to the server's small map stamp.
+  const art = (rel: string) => [
+    ...(gameVersion && gameVersion !== DEFAULT_GAME_VERSION
+      ? [assetUrl(`${gameVersion}/${rel}`)] : []),
+    assetUrl(rel),
+  ];
   const candidates = [
-    id ? assetUrl(`boss_icons/${id}_icon.png`) : null,
-    slug ? assetUrl(`boss_icons/${slug}_boss_icon.png`) : null,
-    slug ? assetUrl(`monsters/${slug}.png`) : null,
-    stripped && stripped !== slug ? assetUrl(`monsters/${stripped}.png`) : null,
+    ...(id ? art(`boss_icons/${id}_icon.png`) : []),
+    ...(slug ? art(`boss_icons/${slug}_boss_icon.png`) : []),
+    ...(slug ? art(`monsters/${slug}.png`) : []),
+    ...(stripped && stripped !== slug ? art(`monsters/${stripped}.png`) : []),
     b?.icon ?? nodeIcon,
     id ? assetUrl(`run_history/${id}.png`) : null,
     slug ? assetUrl(`run_history/${slug}_boss.png`) : null,

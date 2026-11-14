@@ -23,6 +23,8 @@ POOL_MAP: dict[str, str] = {
     "DefectCardPool": "Defect",
     "NecrobinderCardPool": "Necrobinder",
     "RegentCardPool": "Regent",
+    # v0.113.0's new character; an older decomp simply has no such pool.
+    "FoolCardPool": "Fool",
     "ColorlessCardPool": "Colorless",
     "CurseCardPool": "Curse",
     "StatusCardPool": "Status",
@@ -56,6 +58,7 @@ def build_card_pool_map(decompiled_dir: str) -> dict[str, str]:
                 "Defect",
                 "Necrobinder",
                 "Regent",
+                "Fool",
                 "Colorless",
             ):
                 card_to_char[card_class] = character

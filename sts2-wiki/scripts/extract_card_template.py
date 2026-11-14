@@ -52,6 +52,9 @@ logger = logging.getLogger(__name__)
 #   *CardPool.cs      -> CardFrameMaterialPath => "card_frame_<colour>"
 FRAME_TYPES = ("attack", "skill", "power", "ancient", "quest")
 FRAME_COLORS = ("red", "green", "blue", "pink", "orange", "colorless", "curse", "quest")
+# Colours a later build added (v0.113.0's Fool: `card_frame_yellow`). Baked only
+# when the pck has the material, so an older pck extracts exactly as before.
+LATER_FRAME_COLORS = ("yellow",)
 
 # Banners are keyed by card *rarity* (CardModel.cs:275-282). "common" is the
 # fallback arm, so it also covers None/Basic/Token.
@@ -76,6 +79,10 @@ ENERGY_CHARACTERS = (
     "colorless",
     "quest",
 )
+# Characters a later build added (v0.113.0's Fool). `EnergyIconHelper.GetPath`
+# tries the ui_atlas sprite, then `packed/energy_icons/energy_<prefix>.png` —
+# the Fool ships only the latter. Skipped when the pck has neither.
+LATER_ENERGY_CHARACTERS = ("fool",)
 
 # Loose (non-atlas) textures card.tscn references directly, shipped untinted.
 LOOSE_TEXTURES = {
@@ -101,6 +108,10 @@ class Pck:
         self._fh = path.open("rb")
         self._index: dict[str, tuple[int, int]] = {}
         self._read_index()
+
+    def has(self, res_path: str) -> bool:
+        """Whether the pck carries ``res_path``."""
+        return res_path.removeprefix("res://") in self._index
 
     def _read_index(self) -> None:
         f = self._fh
@@ -270,9 +281,10 @@ def extract(pck_path: Path, images_root: Path) -> int:
         )
 
     # --- frames: one source per card type x one tint per character colour ---
+    frame_mat = "materials/cards/frames/card_frame_{}_mat.tres"
     frame_mats = {
-        color: read_hsv_material(pck, f"materials/cards/frames/card_frame_{color}_mat.tres")
-        for color in FRAME_COLORS
+        color: read_hsv_material(pck, frame_mat.format(color))
+        for color in (*FRAME_COLORS, *(c for c in LATER_FRAME_COLORS if pck.has(frame_mat.format(c))))
     }
     for card_type in FRAME_TYPES:
         base = sprite(f"card_frame_{card_type}_s")
@@ -315,6 +327,17 @@ def extract(pck_path: Path, images_root: Path) -> int:
     # --- cost icons + misc chrome ---
     for character in ENERGY_CHARACTERS:
         _save(sprite(f"energy_{character}"), out / "energy" / f"{character}.png")
+        written += 1
+    for character in LATER_ENERGY_CHARACTERS:
+        atlas = f"images/atlases/ui_atlas.sprites/card/energy_{character}.tres"
+        packed = f"images/packed/energy_icons/energy_{character}.png"
+        if pck.has(atlas):
+            icon = sprite(f"energy_{character}")
+        elif pck.has(packed + ".import"):
+            icon = pck.load_texture(packed)
+        else:
+            continue
+        _save(icon, out / "energy" / f"{character}.png")
         written += 1
     _save(sprite("card_unplayable_icon"), out / "unplayable.png")
     written += 1

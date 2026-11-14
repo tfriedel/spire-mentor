@@ -2722,6 +2722,7 @@ function AppBody() {
                       currentIdx={0}
                       selectable={selectable}
                       onSelect={(col, row) => { emitUi("mapSelect"); liveAction("select_map_node", { col, row }); }}
+                      gameVersion={liveGameVersion}
                       live
                     />
                   );
@@ -2747,7 +2748,7 @@ function AppBody() {
               {step && step.decision === "combat_play" && (
                 <Board step={step} />
               )}
-              {step && step.decision === "map_select" && <MapView rows={mapRows} graphs={mapGraphs} currentIdx={idx} onJump={(i) => setIdx(i)} />}
+              {step && step.decision === "map_select" && <MapView rows={mapRows} graphs={mapGraphs} currentIdx={idx} onJump={(i) => setIdx(i)} gameVersion={shownGameVersion} />}
               {step && !["combat_play", "map_select"].includes(step.decision) && (
                 <DecisionScreen step={step} />
               )}
@@ -2809,6 +2810,7 @@ function AppBody() {
             onToggleCollapsed={() => setMinimapCollapsed((v) => !v)}
             onExpand={openMap}
             live={mode === "play"}
+            gameVersion={shownGameVersion}
           />
         )}
         {mode === "mcts" ? (
@@ -3015,6 +3017,7 @@ function AppBody() {
           onJump={mode === "replay" ? (i) => { setIdx(Math.max(0, Math.min(count - 1, i))); setMapOpen(false); } : undefined}
           onClose={() => setMapOpen(false)}
           live={mode === "play"}
+          gameVersion={shownGameVersion}
         />
       )}
       {deckOpen && (

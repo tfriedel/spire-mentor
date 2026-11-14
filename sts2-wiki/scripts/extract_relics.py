@@ -22,6 +22,8 @@ POOL_MAP: dict[str, str] = {
     "DefectRelicPool": "Defect",
     "NecrobinderRelicPool": "Necrobinder",
     "RegentRelicPool": "Regent",
+    # v0.113.0's new character; an older decomp simply has no such pool.
+    "FoolRelicPool": "Fool",
     "SharedRelicPool": "Shared",
     "EventRelicPool": "Event",
     "DeprecatedRelicPool": "Deprecated",
@@ -137,7 +139,7 @@ def main() -> None:
             relic["sources"] = sources
 
         # Character lock
-        if relic["pool"] in ("Ironclad", "Silent", "Defect", "Necrobinder", "Regent"):
+        if relic["pool"] in ("Ironclad", "Silent", "Defect", "Necrobinder", "Regent", "Fool"):
             relic["character"] = relic["pool"]
 
         relics.append(relic)

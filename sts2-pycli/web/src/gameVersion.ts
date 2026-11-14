@@ -1,7 +1,8 @@
 /**
  * Which game build a run plays (GH #801).
  *
- * The engine runs either the stable v0.107.1 content or the v0.111.0 beta. The
+ * The engine runs the stable v0.107.1 content or a later beta (v0.111.0,
+ * v0.113.0 — the build that adds the Fool). The
  * server advertises what it can run in `GET /api/capabilities`
  * (`game_versions` / `default_game_version`); the launcher sends the pick as
  * `game_version` on start / start-faithful / import-state. Every reader treats
@@ -15,6 +16,7 @@ export const DEFAULT_GAME_VERSION = "v0.107.1";
 const LABELS: Record<string, string> = {
   "v0.107.1": "game v0.107.1 (stable)",
   "v0.111.0": "v0.111.0 (beta)",
+  "v0.113.0": "v0.113.0 (beta, + the Fool)",
 };
 
 export function gameVersionLabel(v: string): string {

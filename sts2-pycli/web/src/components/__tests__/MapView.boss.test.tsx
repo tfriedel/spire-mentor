@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import MapView from "../MapView";
 import { bossArt } from "../mapArt";
+import { DEFAULT_GAME_VERSION } from "../../gameVersion";
 import { HintsFixture } from "../../hints/HintsContext";
 import type { FullMap, MapGraph } from "../../api";
 
@@ -151,5 +152,22 @@ describe("the boss silhouette's art chain", () => {
     // lives at `monsters/kin.png` and never at `monsters/the_kin.png`.
     const art = bossArt({ col: 0, row: 1, type: "Boss", id: "THE_KIN_BOSS", name: "The Kin" });
     expect(art.candidates.some((u) => u.endsWith("monsters/kin.png"))).toBe(true);
+  });
+
+  it("looks in a later build's art overlay before the shared tree", () => {
+    // v0.113's Aeonglass ships only in `images/v0.113.0/` (the import's art
+    // overlay); without the overlay candidates its map node fell through to
+    // the server's small stamp.
+    const node = { col: 0, row: 1, type: "Boss", id: "AEONGLASS_BOSS", name: "Aeonglass" };
+    const art = bossArt(node, null, "v0.113.0");
+    expect(art.candidates[0]).toContain("v0.113.0/boss_icons/aeonglass_boss_icon.png");
+    expect(art.candidates[1]).toContain("/boss_icons/aeonglass_boss_icon.png");
+    expect(art.candidates[1]).not.toContain("v0.113.0/");
+    expect(art.candidates).toContainEqual(expect.stringContaining("v0.113.0/monsters/aeonglass.png"));
+  });
+
+  it("adds no overlay candidates for the default build", () => {
+    const node = { col: 0, row: 1, type: "Boss", id: "QUEEN_BOSS", name: "Queen" };
+    expect(bossArt(node, null, DEFAULT_GAME_VERSION)).toEqual(bossArt(node));
   });
 });

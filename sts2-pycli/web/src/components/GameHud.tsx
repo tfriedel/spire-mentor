@@ -1,7 +1,7 @@
 import { assetUrl, type CombatState, type Score } from "../api";
 import RelicTray from "./RelicTray";
 import PotionTray from "./PotionTray";
-import { characterKey } from "../characters";
+import { characterArt, characterKey } from "../characters";
 
 /**
  * The in-viewport game HUD band — the drawn top bar every game screen carries,
@@ -109,7 +109,7 @@ export default function GameHud({
   const p = state.player;
   if (!p || p.hp == null) return null;
   const slug = characterKey(p.name);
-  const charIcon = slug ? assetUrl(`ui/top_panel/character_icon_${slug}.png`) : null;
+  const charIcon = slug ? assetUrl(characterArt(slug, `ui/top_panel/character_icon_${slug}.png`)) : null;
   const potions = p.potions ?? [];
   // Show every socket the belt has (empty ones read as dark recessed slots in
   // the tray, like the game); fall back to just the owned potions when the

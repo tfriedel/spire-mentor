@@ -459,9 +459,8 @@ impl AssetResolver {
     #[must_use]
     pub fn character_rig(&self, character: &str) -> Option<String> {
         let slug = slugify(character);
-        self.manifest
-            .contains(&format!("character_rigs/{slug}/{slug}.skel"))
-            .then(|| format!("character_rigs/{slug}/{slug}"))
+        self.rel_if_exists(format!("character_rigs/{slug}/{slug}.skel"))
+            .map(|skel| skel.trim_end_matches(".skel").to_string())
     }
 
     /// A monster name's sprite image path.
@@ -509,15 +508,10 @@ impl AssetResolver {
     /// wire `MonsterKind`, either spelling) wins over `name`.
     #[must_use]
     pub fn monster_rig(&self, name: &str, kind: Option<&str>) -> Option<String> {
-        for slug in Self::rig_slugs(name, kind) {
-            if self
-                .manifest
-                .contains(&format!("monster_rigs/{slug}/{slug}.skel"))
-            {
-                return Some(format!("monster_rigs/{slug}/{slug}"));
-            }
-        }
-        None
+        Self::rig_slugs(name, kind).into_iter().find_map(|slug| {
+            self.rel_if_exists(format!("monster_rigs/{slug}/{slug}.skel"))
+                .map(|skel| skel.trim_end_matches(".skel").to_string())
+        })
     }
 
     /// `{"group", "part"}` for a multi-part monster, or None.
@@ -1341,6 +1335,64 @@ mod tests {
             beta.relic("Dowsing Rod").as_deref(),
             Some("v0.111.0/relic_atlas/dowsing_rod.png")
         );
+    }
+
+    #[test]
+    fn a_rig_only_the_overlay_has_resolves_to_the_overlay() {
+        // The Fool and the v0.113.0 monsters ship their rigs in the overlay
+        // only. Mutation caught: the rig lookups checking the shared path
+        // alone (no rig at all) or returning it bare (a URL that 404s).
+        let manifest = [
+            "v0.113.0/character_rigs/fool/fool.skel",
+            "v0.113.0/monster_rigs/wuppy/wuppy.skel",
+            "monster_rigs/nibbit/nibbit.skel",
+        ];
+        let base = AssetResolver::from_manifest(manifest);
+        let new = base.clone().with_overlay("v0.113.0");
+        assert_eq!(base.character_rig("Fool"), None);
+        assert_eq!(
+            new.character_rig("Fool").as_deref(),
+            Some("v0.113.0/character_rigs/fool/fool")
+        );
+        assert_eq!(
+            new.monster_rig("Wuppy", None).as_deref(),
+            Some("v0.113.0/monster_rigs/wuppy/wuppy")
+        );
+        assert_eq!(
+            new.monster_rig("Nibbit", None).as_deref(),
+            Some("monster_rigs/nibbit/nibbit")
+        );
+    }
+
+    #[cfg(workbench_game_data_v0_113_0)] // the bundled v0.113.0 art manifest
+    #[test]
+    fn the_v0_113_bundle_draws_the_fool_and_its_new_monsters() {
+        use sts2_core::GameVersion;
+        let old = AssetResolver::embedded_for(GameVersion::V0_107_1);
+        let new = AssetResolver::embedded_for(GameVersion::V0_113_0);
+        assert_eq!(old.character_rig("Fool"), None);
+        assert_eq!(
+            new.character_rig("Fool").as_deref(),
+            Some("v0.113.0/character_rigs/fool/fool")
+        );
+        assert_eq!(
+            new.character_sprite("Fool").as_deref(),
+            Some("v0.113.0/character_sprites/fool.png")
+        );
+        assert_eq!(
+            new.energy("Fool").as_deref(),
+            Some("v0.113.0/sprite_fonts/fool_energy_icon.png")
+        );
+        assert!(new.character_rig_scale("Fool").is_some());
+        // Every Fool card but Strike/Defend ships only as sketch art.
+        assert_eq!(
+            new.card("Fool", "CARD.ALL_IS_WELL", "All Is Well", Some("Fool"))
+                .as_deref(),
+            Some("v0.113.0/card_atlas/fool/beta/all_is_well.png")
+        );
+        for monster in ["Aeonglass", "Wuppy"] {
+            assert!(new.monster_rig(monster, None).is_some(), "{monster}");
+        }
     }
 
     #[cfg(workbench_game_data_v0_111_0)] // the bundled v0.111.0 art manifest

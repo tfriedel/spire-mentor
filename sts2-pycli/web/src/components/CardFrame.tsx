@@ -1,5 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { assetUrl, type Card } from "../api";
+import { characterArt } from "../characters";
 // card.tscn's card box, in the scene's own units, plus the width→height rule.
 // Shared so callers that reserve space for a card get the same number it uses.
 import { CARD_H, CARD_W, cardBoxHeight } from "../cardGeometry";
@@ -79,7 +80,7 @@ const TITLE_OUTLINE: Record<string, string> = {
 // orb. Keyed by the frame colour so it needs no extra field.
 const ORB_BY_COLOR: Record<string, string> = {
   red: "ironclad", green: "silent", blue: "defect",
-  pink: "necrobinder", orange: "regent", quest: "quest",
+  pink: "necrobinder", orange: "regent", yellow: "fool", quest: "quest",
 };
 
 function frameType(type: string | undefined): string {
@@ -105,7 +106,7 @@ function bannerRarity(rarity: string | undefined): string {
  * construction (`card_atlas/<pool>/<slug>.png`). */
 const POOL_COLOR: Record<string, string> = {
   ironclad: "red", silent: "green", defect: "blue",
-  necrobinder: "pink", regent: "orange", curse: "curse", quest: "quest",
+  necrobinder: "pink", regent: "orange", fool: "yellow", curse: "curse", quest: "quest",
 };
 
 function frameColor(card: Card): string {
@@ -190,7 +191,7 @@ function renderMarkup(text: string, orb: string): ReactNode[] {
     if (m[3]) {
       const src = m[3] === "star"
         ? assetUrl("card_template/energy_star.png")
-        : assetUrl(`card_template/energy/${orb}.png`);
+        : assetUrl(characterArt(orb, `card_template/energy/${orb}.png`));
       for (let i = 0; i < Number(m[4]); i++) {
         out.push(
           <img key={out.length} className="gs-card-inline-icon" src={src}
@@ -362,7 +363,7 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
 
       {/* Frame: tinted by pool. Also paints the description panel behind the text. */}
       <img className="gs-card-layer" alt="" aria-hidden="true"
-        src={assetUrl(`card_template/frames/${frameType(card.type)}_${color}.png`)} />
+        src={assetUrl(characterArt(orb, `card_template/frames/${frameType(card.type)}_${color}.png`))} />
 
       <FitText fitKey={`${desc}|${card.stats?.damage ?? ""}|${previewDamage ?? ""}`
         + `|${card.stats?.block ?? ""}|${card.block_preview ?? ""}`}
@@ -402,7 +403,7 @@ export default function CardFrame({ card, width = 112, height, dim = false, unaf
       </div>
 
       <div className={`gs-card-energy${costShift}`} style={ENERGY_ICON}>
-        <img src={assetUrl(`card_template/energy/${orb}.png`)} alt="" aria-hidden="true" />
+        <img src={assetUrl(characterArt(orb, `card_template/energy/${orb}.png`))} alt="" aria-hidden="true" />
         <span style={{ fontSize: `calc(var(--cw) * ${ENERGY_SIZE})` }}>{card.cost}</span>
       </div>
 

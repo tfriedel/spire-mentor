@@ -260,6 +260,7 @@ _POOL_FRAME_COLOR = {
     "defect": "blue",
     "necrobinder": "pink",
     "regent": "orange",
+    "fool": "yellow",
 }
 
 

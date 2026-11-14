@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { assetUrl, type Card, type CombatLogRow, type Enemy, type MctsConfig, type Score, type Step } from "../api";
+import { characterArt } from "../characters";
 import Combatant from "./Combatant";
 import { DEFAULT_DYING_FADE_SECONDS, hpBarWidth, spriteBodyH } from "./combatantMetrics";
 import KaiserCrabGroup, { type ArmAt, type CrabArm } from "./KaiserCrabGroup";
@@ -157,7 +158,7 @@ function PilePlaque({ label, count, kind, onClick }: {
 
 /** Characters with extracted layered energy-orb art under
  *  ui/combat/energy_counters/<char>/. */
-const ORB_CHARACTERS = new Set(["ironclad", "silent", "defect", "regent", "necrobinder"]);
+const ORB_CHARACTERS = new Set(["ironclad", "silent", "defect", "regent", "necrobinder", "fool"]);
 
 /** Derive the orb-art character from the backend's energy icon path
  *  (`sprite_fonts/<char>_energy_icon.png`) — the step payload carries no
@@ -2151,7 +2152,7 @@ export default function Board({
         const ch = orbCharacter(s.energy_image);
         return [1, 2, 3, 4, 5].map((n) => (
           <img key={n} className="gs-orb-layer" alt="" aria-hidden="true" draggable={false}
-            src={assetUrl(`ui/combat/energy_counters/${ch}/${ch}_orb_layer_${n}.png`)} />
+            src={assetUrl(characterArt(ch, `ui/combat/energy_counters/${ch}/${ch}_orb_layer_${n}.png`))} />
         ));
       })()}
       <span className="gs-gem-val">{s.energy}/{s.max_energy}</span>

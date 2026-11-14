@@ -1133,11 +1133,19 @@ _PLAYER_ANIM_SFX: dict[str, str] = {"Attack": "attack", "Cast": "cast", "PowerUp
 
 # `CharacterModel.cs:200-206` builds all three from `Id.Entry` — there is no
 # per-character override anywhere in v0.107.1, so the events are derived from
-# the class name rather than parsed. That derivation is SELF-CHECKING: every
+# the class name (an override a later build declares is parsed, below). That derivation is SELF-CHECKING: every
 # candidate goes through `_resolve`, so a class whose `Id.Entry` is not its
 # own name (or that has no rendered audio at all — Deprived, RandomCharacter,
 # DeprecatedCharacter) drops out instead of shipping a path that 404s.
 _CHARACTER_SFX_SLOTS: tuple[str, ...] = ("attack", "cast", "die")
+# v0.113.0 made `DeathSfx` virtual, and the Fool overrides it with a sound
+# another character's folder holds (`Fool.cs`: `DeathSfx =>
+# "event:/sfx/characters/fugitive/fugitive_die"`). An override, when a
+# character declares one, wins over the derived name.
+_CHARACTER_SFX_OVERRIDE = re.compile(
+    r'public override string (?P<prop>Attack|Cast|Death)Sfx\s*=>\s*"(?P<event>event:[^"]+)"'
+)
+_CHARACTER_SFX_OVERRIDE_SLOT = {"Attack": "attack", "Cast": "cast", "Death": "die"}
 
 _TRIGGER_ANIM_ON_OWNER = re.compile(
     r"CreatureCmd\.TriggerAnim\(\s*base\.Owner\.Creature\s*,\s*"
@@ -1201,9 +1209,14 @@ def load_character_sfx(
     out: dict[str, dict[str, str]] = {}
     for cs in sorted((decomp_root / "MegaCrit.Sts2.Core.Models.Characters").glob("*.cs")):
         slug = cs.stem.lower()
+        overrides = {
+            _CHARACTER_SFX_OVERRIDE_SLOT[m["prop"]]: m["event"]
+            for m in _CHARACTER_SFX_OVERRIDE.finditer(cs.read_text(encoding="utf-8"))
+        }
         entry: dict[str, str] = {}
         for slot in _CHARACTER_SFX_SLOTS:
-            event = _resolve(f"event:/sfx/characters/{slug}/{slug}_{slot}", audio_root)
+            derived = f"event:/sfx/characters/{slug}/{slug}_{slot}"
+            event = _resolve(overrides.get(slot, derived), audio_root)
             if event:
                 entry[slot] = event
         if entry:

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import { assetUrl, type Advisor } from "../api";
 import { e2eAdvisable } from "../advisor";
-import { characterKey } from "../characters";
+import { characterArt, characterInBuild, characterKey } from "../characters";
 import { ASCENSION_LEVELS, ascensionLevel, ascensionModifiers } from "../ascension";
 import { canonicalizeSeed, generateSeed } from "../seed";
 import { DEFAULT_GAME_VERSION, gameVersionLabel } from "../gameVersion";
@@ -10,8 +10,9 @@ import RichText from "./RichText";
 import "../skins/runend.css";
 import "../skins/launcher.css";
 
-/** The five playable characters, in the game's roster order. */
-export const CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"] as const;
+/** The playable characters, in the game's roster order. The Fool is
+ *  v0.113.0-only: the launcher offers it only for a build that has it. */
+export const CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder", "Fool"] as const;
 
 const ENGINE_LABELS: Record<string, string> = { rust: "Rust", csharp: "C#" };
 
@@ -98,6 +99,12 @@ export default function RunLauncher({
 
   const canonical = canonicalizeSeed(seed);
   const slug = characterKey(character);
+  // The build this run would play (the version select shows the same value):
+  // a character it lacks is not offered, and a pick it lacks falls back.
+  const runVersion = backend === "rust" ? gameVersion : DEFAULT_GAME_VERSION;
+  useEffect(() => {
+    if (!characterInBuild(slug, runVersion)) onCharacter(CHARACTERS[0]);
+  }, [slug, runVersion, onCharacter]);
   const level = ascensionLevel(ascension);
   const stacked = ascensionModifiers(ascension);
   const [heroOk, setHeroOk] = useState(true);
@@ -117,7 +124,7 @@ export default function RunLauncher({
             <section className="gs-launch-field">
               <h2 className="gs-launch-label" id={`${ids}-char`}>Character</h2>
               <div className="gs-launch-chars" role="radiogroup" aria-labelledby={`${ids}-char`}>
-                {CHARACTERS.map((ch) => {
+                {CHARACTERS.filter((ch) => characterInBuild(characterKey(ch), runVersion)).map((ch) => {
                   const k = characterKey(ch);
                   const on = ch === character;
                   return (
@@ -128,7 +135,7 @@ export default function RunLauncher({
                     >
                       <span className="gs-launch-charface">
                         {k
-                          ? <img src={assetUrl(`ui/top_panel/character_icon_${k}.png`)} alt="" draggable={false} />
+                          ? <img src={assetUrl(characterArt(k, `ui/top_panel/character_icon_${k}.png`))} alt="" draggable={false} />
                           : <b>{ch[0]}</b>}
                       </span>
                       <span className="gs-launch-charname">{ch}</span>
@@ -208,7 +215,7 @@ export default function RunLauncher({
             {slug && heroOk && (
               <img
                 key={slug}
-                src={assetUrl(`character_sprites/${slug}.png`)}
+                src={assetUrl(characterArt(slug, `character_sprites/${slug}.png`))}
                 alt="" draggable={false}
                 onError={() => setHeroOk(false)}
               />

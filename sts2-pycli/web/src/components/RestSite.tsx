@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import type { Step, ChooseHandler, RestOption } from "../api";
 import { assetUrl } from "../api";
 import SpineSprite from "./SpineSprite";
-import { characterKey } from "../characters";
+import { characterArt, characterKey } from "../characters";
 import "../skins/rest.css";
 
 /** Per-region campfire scene layers under `rooms/rest_sites/<region>/`.
@@ -156,10 +156,10 @@ export default function RestSite({ step, onChoose }: { step: Step; onChoose?: Ch
         {charKey && heroH > 60 && (
           <div className="gs-rest-hero">
             <SpineSprite
-              rigBase={assetUrl(`character_rigs/${charKey}/${charKey}`)}
+              rigBase={assetUrl(characterArt(charKey, `character_rigs/${charKey}/${charKey}`))}
               animation={REST_CLIP}
               fallbackHeight={heroH}
-              fallback={assetUrl(`character_sprites/${charKey}.png`)}
+              fallback={assetUrl(characterArt(charKey, `character_sprites/${charKey}.png`))}
               alt=""
             />
           </div>

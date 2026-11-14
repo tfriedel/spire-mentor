@@ -2,7 +2,7 @@
 
 import unittest
 
-from scripts.extract_rig import _page_sizes
+from scripts.extract_rig import _page_sizes, new_rigs
 from scripts.extract_rooms import aliases_for, output_for
 
 
@@ -53,3 +53,17 @@ class TestRoomOutputs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNewRigs(unittest.TestCase):
+    def test_keeps_only_rigs_whose_skeleton_the_older_build_lacks(self):
+        # A later build's overlay carries the rigs it ADDED. `axe_bot` is an
+        # alias folder for a skeleton the older build already has: a folder
+        # diff would wrongly call it new.
+        rigs = {
+            ("character_rigs", "fool"): ("fool", "fool"),
+            ("monster_rigs", "axe_bot"): ("axebot", "axebot"),
+            ("monster_rigs", "axebot"): ("axebot", "axebot"),
+        }
+        old_index = {".godot/imported/axebot.skel-0123abcd.spskel": (0, 10)}
+        self.assertEqual(new_rigs(rigs, old_index), {("character_rigs", "fool"): ("fool", "fool")})

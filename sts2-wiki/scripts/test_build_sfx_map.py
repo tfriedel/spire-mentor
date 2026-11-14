@@ -1543,6 +1543,20 @@ class TestLoadCharacterSfx(unittest.TestCase):
         self.assertIn("Deprived", load_character_sfx(DECOMP_ROOT, None))
 
 
+V0113_DECOMP = Path(__file__).resolve().parents[1] / "decompiled" / "v0.113.0"
+
+
+@unittest.skipUnless(V0113_DECOMP.is_dir(), "needs the v0.113.0 decompilation")
+class TestCharacterSfxOverride(unittest.TestCase):
+    def test_a_declared_death_sfx_wins_over_the_derived_name(self):
+        # v0.113.0's Fool dies with the Fugitive's sound (`Fool.cs`:
+        # `public override string DeathSfx => "event:/sfx/characters/fugitive/fugitive_die"`).
+        # Mutation caught: deriving `fool/fool_die`, an event the banks lack.
+        fool = load_character_sfx(V0113_DECOMP, None)["Fool"]
+        self.assertEqual(fool["die"], "event:/sfx/characters/fugitive/fugitive_die")
+        self.assertEqual(fool["attack"], "event:/sfx/characters/fool/fool_attack")
+
+
 @needs_decomp
 class TestLoadCharacterAnimFallbacks(unittest.TestCase):
     def test_reads_both_halves_from_the_real_decomp(self):
