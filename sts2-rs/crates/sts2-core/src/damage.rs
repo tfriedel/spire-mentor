@@ -1322,6 +1322,7 @@ fn finish_hit_tail_body(state: &mut CombatState, tail: &HitTail) {
                 dealer: dealer_uid,
                 target: target_uid,
                 damage: final_damage,
+                total_damage: total,
                 props,
                 was_block_broken,
             };

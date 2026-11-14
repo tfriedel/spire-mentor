@@ -104,6 +104,40 @@ pub const fn relic_is_tradable(id: RelicId) -> bool {
         RelicId::MysticLighter | RelicId::NinjaScroll | RelicId::RingingTriangle |
         RelicId::RunicCapacitor | RelicId::ScreamingFlagon | RelicId::SlingOfCourage |
         RelicId::TheAbacus | RelicId::Toolbox | RelicId::UndyingSigil |
-        RelicId::VitruvianMinion | RelicId::WingCharm
+        RelicId::VitruvianMinion | RelicId::WingCharm |
+        // v0.113.0 The Fool's non-starter relics (`FoolRelicPool`): Common
+        // ExerciseMat, Uncommon Ocarina / WhittlingKnife, Rare ConductorsBaton
+        // / Fertilizer / Twine, Shop BizarreLamp; none has an upon-pickup
+        // effect or spawns pets. They exist in no earlier run.
+        RelicId::ExerciseMat | RelicId::Ocarina | RelicId::WhittlingKnife |
+        RelicId::ConductorsBaton | RelicId::Fertilizer | RelicId::Twine |
+        RelicId::BizarreLamp
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// v0.113.0 `RelicModel.IsTradable` over The Fool's relics: the seven
+    /// Common/Uncommon/Rare/Shop ones qualify; the two Starters (`SongBow.cs:15`,
+    /// `Storyteller.cs:20`) do not. Missing them shrank `RelicTrader`'s
+    /// `GetValidRelics` before its `StableShuffle`, so a Fool holding Ocarina
+    /// was offered a different trade (Fool:1000 act3 event@1007).
+    #[test]
+    fn fool_relics_follow_is_tradable() {
+        for id in [
+            RelicId::ExerciseMat,
+            RelicId::Ocarina,
+            RelicId::WhittlingKnife,
+            RelicId::ConductorsBaton,
+            RelicId::Fertilizer,
+            RelicId::Twine,
+            RelicId::BizarreLamp,
+        ] {
+            assert!(relic_is_tradable(id), "{id:?}");
+        }
+        assert!(!relic_is_tradable(RelicId::SongBow));
+        assert!(!relic_is_tradable(RelicId::Storyteller));
+    }
 }

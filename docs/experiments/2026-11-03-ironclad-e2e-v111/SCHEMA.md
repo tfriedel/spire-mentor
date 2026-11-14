@@ -554,7 +554,8 @@ weights of every reserved continuous column and the ID-table rows of every
 registry block no live column references at launch (encounters, moves), so a
 fill at a restart preserves the function (the identity rule). Fill events:
 `WP-ENG-1` (telegraph, `peek_intents(3)`, encounter id, true top-k draw),
-`content-prior`, `D9`, `#1069`.
+`content-prior`, `D9`, `#1069`, and `chars` (the other characters' mechanics,
+section 13; it takes spare slots, so the tables above still list them as spare).
 
 A launch whose rows already carry a fill event declares it (`--filled`; GH
 #1097 A4: `["WP-ENG-1"]` on the W2 wheel). Its fresh net inits that event's
@@ -1218,3 +1219,131 @@ Each has a recommended answer; G-schema confirms or overrides it.
     `TF_POOLED` on all five SUM_* tokens (it does). Its reads of
     `rm.master_deck_enchantments`, `rm.ascension_level` and
     `rm.pending_enchantment` are now in `POLICY_CALLS`.
+
+## 13. Other characters: the "chars" fill event (GH #1373)
+
+The schema was frozen for Ironclad. This section says what a row of another
+character's run carries, and why an Ironclad row, fixture and checkpoint does
+not change.
+
+### 13.1 The rule
+
+- **A row carries the event or it does not; `X_CHAR` says which.** Every row
+  of a Silent, Defect, Regent or Necrobinder run carries it. An Ironclad row
+  carries it only in a launch that declares the event. Without the
+  declaration an Ironclad row has `X_CHAR` 0, no `ALLY` or `ORB` token and
+  `E_DOOMED` 0: it is bit for bit what it was (section 13.4), which is what
+  the trained Ironclad net and its fixtures need.
+- **A declared Ironclad launch shows orbs and Doom.** An Ironclad can hold
+  orbs (Potion of Capacity, Essence of Darkness, Infused Core, Runic
+  Capacitor) and face Doom (Potion of Doom, Undying Sigil). With "chars" in
+  `--filled` its rows carry `X_CHAR` 1, the `ORB` tokens and `E_DOOMED` like
+  any other character's.
+- **It takes reserved slots under alias names.** No table grows: `cat` stays
+  `[T, 32]`, `cont` `[T, 210]`, the section table 64 rows. The hashed tables
+  keep the reserved names (`RES_44`, `RES_45`, `X_RES0`, `X_C_RES0`-`X_C_RES2`),
+  so `schema_sha256` does not move. `contracts.SEC`, `XC` and `XF` resolve the
+  aliases; `contracts.SECTION_LIVE` is the frozen table plus the event's
+  columns, and the hash reads the frozen one.
+- **The identity rule holds.** A net that does not declare the event starts
+  the two sections' embedding rows, `X_CHAR`'s rows and the three columns'
+  stem weights at zero, as for every reserved input. An Ironclad checkpoint
+  loads unchanged. `E2ENet(filled=[..., "chars"])` inits them live.
+- **Declaring it.** A learner for another character sets
+  `STS2_E2E_CHARACTER=<name>` (`factory.CHARACTER`; the workers inherit it) and
+  passes `--character <name> --filled '["WP-ENG-1", "chars"]'`. An Ironclad
+  learner passes "chars" in `--filled` to opt in. The learner refuses a
+  character that disagrees with the process and another character without
+  "chars"; it sets `STS2_E2E_CHARS` for its workers from `--filled`
+  (`factory.set_fill_chars`), and the Rust training env takes the same flag.
+  The fill check (`fillcheck.check`) holds the rows to the declaration. A
+  resume may add the event to an Ironclad checkpoint (the identity rule).
+- **Serving.** The Rust hosts that load a net (`sts2_rs` student runs, the
+  workbench brain's playout) read the event from the weight file's `filled`
+  (`E2eNet::fills("chars")`). The per-position drivers (`E2eDriver`,
+  `E2eState`) do not hold a net: a host that serves a declared Ironclad net
+  through them calls `TokCache::set_chars` itself. Python evaluation of such
+  a net needs `STS2_E2E_CHARS=1` in the evaluating process.
+
+### 13.2 What the event adds
+
+| Alias | Reserved name | Where | Meaning |
+|---|---|---|---|
+| `X_CHAR` | `X_RES0` (cat 28) | `RUNCTX` | the run's character: 1 Ironclad, 2 Silent, 3 Defect, 4 Regent, 5 Necrobinder, 6 Fool (v0.113.0 on); 0 = the row carries no "chars" data |
+| `ALLY` | `RES_44` (section 44) | combat head | the player's pet, one token while the run has one: Necrobinder's Osty, alive or dead. `X_ID_MAIN` = the monster id; `E_HPF`, `E_HP`, `E_MAXHP`, `E_ALIVE` as on `ENEMY` |
+| `ORB` | `RES_45` (section 45) | combat head | one token per orb slot in belt order, at most 10. `X_ID_MAIN` = the orb id (`EMPTY` for an empty slot), `X_POS` = 1 + slot |
+| `C_ORB_PASSIVE` | `X_C_RES0` (cont 202) | `ORB` | passive value with Focus / 10 |
+| `C_ORB_EVOKE` | `X_C_RES1` (cont 203) | `ORB` | evoke value with Focus / 20 |
+| `E_DOOMED` | `X_C_RES2` (cont 204) | `ENEMY` | flag: Doom >= hp, so the enemy dies at the end of its turn (`DoomPower.IsOwnerDoomed`) |
+
+The `ALLY` and `ORB` tokens sit between the `BOSS` tokens and the S_ctx block,
+in that order, so `sctx_lo` = 6 + bosses + their count. The S_ctx block and
+the teacher slice do not change. They never occur out of combat. Their source
+is `state_to_dict(bv)["player"]` (`osty`, `orbs`, `orb_slots`), a policy read;
+the character is `rm.character`, which the event adds to the run facade
+(`contracts.FILL_POLICY_CALLS`).
+
+`S_HP_LOSS_END` keeps its meaning (the HP the player loses if the turn ended
+now) and gains two terms that are zero for Ironclad:
+
+- the block the Frost orbs' passives add at the end of the player's turn
+  (`OrbQueue.BeforeTurnEnd`, `FrostOrb.Passive`), taken off the incoming damage
+  with the player's block;
+- the HP of a living Osty, taken off what is left: Osty takes the unblocked
+  damage of an attack on its owner, and the overkill passes on to the owner
+  (`DieForYouPower.ModifyUnblockedDamageTarget`, `CreatureCmd.Damage`).
+
+### 13.3 Coverage per character
+
+Checked against the v0.111.0 decompilation. "Covered" means the policy row
+holds it.
+
+| Character | Mechanic | Row | Covered |
+|---|---|---|---|
+| all | the character | `X_CHAR` | yes (0 on an undeclared Ironclad row) |
+| Necrobinder | Osty: alive, HP, max HP | `ALLY` | yes |
+| Necrobinder | Osty soaks unblocked attack damage | `S_HP_LOSS_END` | yes |
+| Necrobinder | Osty's attacks (Poke, Unleash, ...) | hand `DMG_PREV`, `E_MAXDMG`, `E_KILLABLE` | yes: `card_damage_preview` prices an Osty attack from Osty as the dealer |
+| Necrobinder | Osty's block | - | not needed: a hit on Osty spends its owner's block (`CreatureCmd.Damage`), which `STATE` has |
+| Necrobinder | powers on Osty | - | not needed: the only one is Die For You, which every Osty has (GH #760's finding); no card, potion or monster move puts another on it |
+| Necrobinder | Doom on an enemy | `EPOWER` (amount), `E_DOOMED` | yes |
+| Necrobinder | Souls and other generated cards | card tokens | yes |
+| Defect | orb belt: kinds, order, passive, evoke, empty slots | `ORB` | yes |
+| Defect | Focus | `PPOWER` | yes (and inside the orb numbers) |
+| Defect | Frost block at the end of the turn | `S_HP_LOSS_END` | yes |
+| Defect | Lightning and Glass passive damage at the end of the turn | `ORB` only | not in `E_MAXDMG` or `E_KILLABLE`: the targets are random |
+| Defect | orb-slot choices (`orb_slot` choice kind) | `ACT_CHOOSE`, `STATE` | yes (S_ctx) |
+| Regent | stars | `STATE` `STARS` | yes (S_ctx) |
+| Regent | forge / Sovereign Blade | the Sovereign Blade card's own tokens | as that card's numbers only; no forge total on `STATE` (not audited further here) |
+| Silent | Shivs, Sly, poison | card and power tokens | yes |
+| Ironclad | orbs and Doom from shared potions and relics | `ORB`, `E_DOOMED` | yes in a launch that declares "chars"; else unchanged |
+
+Left for later, on purpose:
+
+- **The content prior's `POOL_IRONCLAD` column** still means the Ironclad
+  pool; another character's own cards read `POOL_OTHER`. A per-character prior
+  has another `prior_sha256`, which `check_stamps` refuses for an Ironclad
+  checkpoint.
+- **The Rust serving helpers** (`sts2_e2e::env::new_run_at`, the workbench
+  brain) build Ironclad runs only. The tokenizer and the training env take any
+  character's run.
+- **No combat teacher** exists for another character, so such a launch runs
+  without one (GH #1197).
+
+### 13.4 Evidence
+
+- `tests/e2e/test_contracts.py::test_schema_sha256_golden`: the hash is the
+  one this document quotes.
+- Ironclad rows before and after the event, same wheel: 2,330 rows of six
+  random A10 runs, every policy and PRIV array hashed, equal sha256 on the
+  tokenizer of befdab54 and on this one.
+- `tests/e2e/test_e2e_chars.py`: the slots and the frozen tables; an
+  undeclared Ironclad row carries none of the event, and a declared one shows
+  an orb belt and Doom; each other character's rows validate, are
+  compact-lossless and hold the tokens their `state_to_dict(bv)` implies; the
+  tactical terms against hand-computed values of the decomp's rules; a net
+  that does not declare the event keeps its inputs at zero and its logits do
+  not move with `X_CHAR` or `E_DOOMED`; the fill check; and
+  `rsenv_lockstep` on each other character (the Rust training env's rows
+  equal the Python env's, PRIV included).
+- Not measured: learning. No lane has trained on these rows yet.

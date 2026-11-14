@@ -137,6 +137,10 @@ pub struct TokCache {
     /// Shared, so a host can snapshot a cache per position for the price of
     /// a reference count (the workbench keeps one per node).
     stat: Option<std::sync::Arc<Static>>,
+    /// Whether an Ironclad run's rows carry the "chars" fill event
+    /// (`factory.fill_chars()`): true for a net whose launch declared it.
+    /// Another character's rows always carry it.
+    chars: bool,
 }
 
 impl TokCache {
@@ -144,6 +148,11 @@ impl TokCache {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Declare (or drop) the "chars" fill event for Ironclad rows.
+    pub fn set_chars(&mut self, on: bool) {
+        self.chars = on;
     }
 
     /// Drop the run-static reads (`tokens.clear_cache()` at a run start).
@@ -343,6 +352,20 @@ impl<'a> Run<'a> {
         self.rm.run_state.act_index
     }
 
+    /// `run_char(run)`: X_CHAR, or 0 when the row carries no "chars" data
+    /// (SCHEMA.md section 13): an Ironclad run unless the launch declares
+    /// the event (`ironclad_chars`, [`TokCache::set_chars`]).
+    fn char_id(&self, ironclad_chars: bool) -> i16 {
+        let name = self.og("character").map_or_else(
+            || sts2_wire::emit::names::character_str(self.rm.character_id).to_owned(),
+            py_str,
+        );
+        if name == schema::CHARACTERS[0] && !ironclad_chars {
+            return 0;
+        }
+        schema::char_id(&name).unwrap_or(0)
+    }
+
     fn floor(&self) -> i32 {
         self.rm.run_state.total_floor
     }
@@ -456,9 +479,11 @@ fn runctx(
     sel: &Selection,
     room: Option<&str>,
     encounter: Option<&str>,
+    char: i16,
 ) {
     let t = buf.new_tok(const { schema::sec("RUNCTX") }, 0);
     buf.c(t, const { xc("X_DTYPE") }, i16::from(d.dtype));
+    buf.c(t, const { xc("X_CHAR") }, char);
     if d.dtype == dt::EVENT || d.dtype == dt::NEOW {
         let ev = event_name(d, run);
         buf.c(
@@ -638,6 +663,56 @@ fn pile_summary(counted: &[Value], singles: &[&[Value]]) -> (Members, i64, i64) 
     (m, n_upg, n_ench)
 }
 
+/// `_chars_tokens(buf, player)`: the "chars" tokens of a combat row, after the
+/// BOSS tokens: the pet (`ALLY`: Osty, alive or dead) and the orb belt (`ORB`,
+/// one per slot).
+#[allow(clippy::cast_precision_loss)]
+fn chars_tokens(buf: &mut Buf, player: &Value) {
+    if let Some(o) = get(player, "osty").filter(|o| truthy(o)) {
+        let t = buf.new_tok(const { schema::sec("ALLY") }, 0);
+        buf.c(
+            t,
+            const { xc("X_ID_MAIN") },
+            vid_s(Reg::Monster, Some("Osty")),
+        );
+        let hp = ff(get(o, "hp"));
+        let mhp = ff(get(o, "max_hp")).max(1.0);
+        buf.f(t, const { schema::sc("E_HPF") }, hp / mhp);
+        buf.f(t, const { schema::sc("E_HP") }, hp / 200.0);
+        buf.f(t, const { schema::sc("E_MAXHP") }, mhp / 200.0);
+        let alive = get(o, "alive").is_some_and(truthy);
+        buf.f(
+            t,
+            const { schema::sc("E_ALIVE") },
+            f64::from(u8::from(alive)),
+        );
+    }
+    let orbs = list_or_empty(player, "orbs");
+    let cap = get(player, "orb_slots")
+        .filter(|v| truthy(v))
+        .and_then(py_int)
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0);
+    let slots = cap.max(orbs.len()).min(schema::MAX_ORB_TOKENS);
+    for i in 0..slots {
+        let t = buf.new_tok(const { schema::sec("ORB") }, 0);
+        buf.c(t, const { xc("X_POS") }, pos(i as i64));
+        if let Some(o) = orbs.get(i) {
+            buf.c(t, const { xc("X_ID_MAIN") }, vid(Reg::Orb, get(o, "type")));
+            buf.f(
+                t,
+                const { xf("C_ORB_PASSIVE") },
+                ff(get(o, "passive")) / 10.0,
+            );
+            buf.f(t, const { xf("C_ORB_EVOKE") }, ff(get(o, "evoke")) / 20.0);
+        } else {
+            buf.c(t, const { xc("X_ID_MAIN") }, vid_s(Reg::Orb, Some("Empty")));
+        }
+    }
+}
+
+/// `_head`: `player` is `state_to_dict(bv)["player"]` on a combat row of
+/// another character's run, else `None`.
 fn head(
     d: &Decision,
     run: &Run<'_>,
@@ -645,6 +720,7 @@ fn head(
     snap: Option<&Value>,
     room: Option<&str>,
     encounter: Option<&str>,
+    player: Option<&Value>,
 ) -> (Buf, std::sync::Arc<Static>) {
     let mut buf = Buf::new(if d.is_combat() { 8 } else { 64 });
     let st = static_of(cache, run).clone();
@@ -657,6 +733,7 @@ fn head(
         &d.sel,
         room,
         encounter,
+        run.char_id(cache.chars),
     );
     if let Some(snap) = snap {
         let (m, u, e) = pile_summary(
@@ -710,6 +787,9 @@ fn head(
         #[allow(clippy::cast_precision_loss)]
         buf.f(t, const { xf("B_ORDER") }, k as f64);
         buf.f(t, const { xf("B_ACT") }, act / 3.0);
+    }
+    if let Some(p) = player {
+        chars_tokens(&mut buf, p);
     }
     (buf, st)
 }
@@ -915,7 +995,19 @@ fn encode_combat(
     let acts = &d.obs_actions;
     let run = Run::new(rm, None);
     let picked = combat_picks(snap, acts);
-    let (hb, _fm) = head(d, &run, cache, Some(snap), Some(cv.room), cv.encounter_id);
+    // The row carries the "chars" fill event.
+    let no_player = Value::Object(serde_json::Map::new());
+    let player =
+        (run.char_id(cache.chars) != 0).then(|| get(&cv.d_bv, "player").unwrap_or(&no_player));
+    let (hb, _fm) = head(
+        d,
+        &run,
+        cache,
+        Some(snap),
+        Some(cv.room),
+        cv.encounter_id,
+        player,
+    );
     let rl2 = Rl2::of(bv);
     let tk = sctx::tokens(snap, acts, &rl2)?;
     let tele = sts2_wire::emit::combat::enemy_telegraphs(bv).map_err(|e| e.to_string())?;
@@ -1051,7 +1143,16 @@ fn encode_combat(
         }
     }
     // Tactical and intent columns per enemy.
-    let (md, kill, loss) = tactical::tactical(snap, acts);
+    let (md, kill, loss) = match player {
+        None => tactical::tactical(snap, acts),
+        Some(p) => tactical::tactical_with(
+            snap,
+            acts,
+            tactical::end_turn_block(p),
+            tactical::ally_hp_of(p),
+        ),
+    };
+    let doomed = player.map_or_else(Vec::new, |_| tactical::doomed(snap));
     let em: Vec<usize> = (0..a0)
         .filter(|&i| tk.sec[i] == const { schema::sec("ENEMY") })
         .collect();
@@ -1059,6 +1160,9 @@ fn encode_combat(
         xcont[ti * fw + const { xf("E_MAXDMG") } - fo] =
             md.get(j).map_or(0.0, |m| (m / 50.0) as f32);
         xcont[ti * fw + const { xf("E_KILLABLE") } - fo] = kill.get(j).map_or(0.0, |k| *k as f32);
+        if let Some(x) = doomed.get(j) {
+            xcont[ti * fw + const { xf("E_DOOMED") } - fo] = *x as f32;
+        }
         let dead = enemies
             .get(j)
             .is_some_and(|e| get(e, "is_dead").is_some_and(truthy));
@@ -1744,7 +1848,7 @@ fn encode_ooc(d: &Decision, rm: &RunManager, cache: &mut TokCache) -> Result<Tok
         .as_ref()
         .ok_or("ooc decision without a run observation")?;
     let run = Run::new(rm, Some(&ov.run_obs));
-    let (mut buf, fm) = head(d, &run, cache, None, None, None);
+    let (mut buf, fm) = head(d, &run, cache, None, None, None, None);
     deck_tokens(&mut buf, &run);
     for r in &run.relics {
         let t = buf.new_tok(const { schema::sec("RELIC") }, 0);

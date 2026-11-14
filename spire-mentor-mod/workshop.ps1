@@ -80,7 +80,11 @@ if ((Get-Item $image).Length -ge 1MB) { throw "$image is 1 MB or more; Steam rej
 Copy-Item $image (Join-Path $workspace "image.png")
 
 $config = Get-Content (Join-Path $source "workshop.json") -Raw | ConvertFrom-Json
-$description = (Get-Content (Join-Path $source "description.bbcode") -Raw).TrimEnd()
+# UTF-8 explicitly: Windows PowerShell 5.1 reads a BOM-less file as ANSI and
+# turns every arrow into mojibake (3 chars, 6+ bytes). LF explicitly: a
+# core.autocrlf checkout has CRLF, which adds a byte per line. This measures
+# what tests/test_workshop_description.py measures, and what Steam is sent.
+$description = (Get-Content (Join-Path $source "description.bbcode") -Raw -Encoding UTF8).Replace("`r`n", "`n").TrimEnd()
 # Steam rejects a longer one at the very end of the upload (k_EResultInvalidParam),
 # after the item is created and the content is sent.
 $descriptionBytes = [Text.Encoding]::UTF8.GetByteCount($description)

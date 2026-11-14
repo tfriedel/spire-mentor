@@ -200,6 +200,7 @@ class RsE2EEnv:
             f9_rate=float(cfg.f9_p),
             priv_=True,
             rare=rare,
+            chars=factory.fill_chars(),
             caps={
                 "run_steps": int(cfg.max_run_steps),
                 "fight_turns": int(cfg.max_fight_turns),

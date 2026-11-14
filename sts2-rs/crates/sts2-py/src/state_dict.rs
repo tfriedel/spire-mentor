@@ -1906,6 +1906,24 @@ mod tests {
     }
 
     #[test]
+    fn card_any_adds_the_later_builds_cards_to_the_frozen_vocab() {
+        // `card` is the PPO vocab (v0.111.0, embedding rows): it must not
+        // grow. `card_any` is every build's, for checking a carried id.
+        let vocab = list_registry_names_impl("card").unwrap();
+        let any = list_registry_names_impl("card_any").unwrap();
+        assert!(!vocab.iter().any(|s| s == "MY_SHINIES"));
+        assert!(any.iter().any(|s| s == "MY_SHINIES"));
+        assert!(any.iter().any(|s| s == "DEEP_STRETCH"));
+        assert!(vocab.iter().all(|s| any.contains(s)));
+        for name in &any {
+            assert!(
+                sts2_wire::state_dict::card_id_from_python_name(name).is_some(),
+                "{name} is listed but the wire parser rejects it"
+            );
+        }
+    }
+
+    #[test]
     fn list_registry_names_known_entries() {
         // Spot-check one canonical name per registry.
         let relics = list_registry_names_impl("relic").unwrap();

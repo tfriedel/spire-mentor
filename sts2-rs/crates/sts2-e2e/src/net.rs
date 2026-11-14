@@ -570,6 +570,17 @@ impl E2eNet {
         Ok(net)
     }
 
+    /// Whether the net's launch declared fill event `event` (the header's
+    /// `filled`), e.g. "chars": its rows must then carry the event too
+    /// ([`crate::tokens::TokCache::set_chars`]).
+    #[must_use]
+    pub fn fills(&self, event: &str) -> bool {
+        self.header()
+            .filled
+            .as_ref()
+            .is_some_and(|f| f.iter().any(|e| e == event))
+    }
+
     /// The parsed header (stamps: `schema_sha256`, `vocab_sha256`,
     /// `prior_sha256`, `game_version`, `variant`, `filled`; net config; layout).
     pub fn header(&self) -> &E2ewHeader {

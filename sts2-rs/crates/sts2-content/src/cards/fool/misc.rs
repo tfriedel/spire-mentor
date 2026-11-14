@@ -47,13 +47,19 @@ pub(crate) fn play_the_hanged_man(
 }
 
 /// `SelfDeprecate.cs` (multiplayer-only): one Sadness to the owner's hand,
-/// then 2 (+1) Joy to each living teammate, which a single-player combat
-/// does not have.
+/// then 2 (+1) Joy to the hand of each other living player
+/// (`GetTeammatesOf(...).Where(c => c.IsAlive && c.IsPlayer && c.Player !=
+/// Owner)`), in player order. Solo there is nobody else.
 pub(crate) fn play_self_deprecate(
     state: &mut CombatState,
     _t: Option<CreatureUid>,
 ) -> EffectResult {
+    // Read before the seats move: the played card stays with its owner.
+    let joy = var(state, 2, 3);
     generate_into_hand(state, CardId::Sadness, 1);
+    sts2_core::coop::each_other_player(state, |state| {
+        generate_into_hand(state, CardId::Joy, joy);
+    });
     EffectResult::Resolved
 }
 

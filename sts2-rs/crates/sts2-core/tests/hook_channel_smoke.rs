@@ -196,6 +196,7 @@ fn make_damage_given_ctx(f: &HookSmokeFixture) -> DamageGivenCtx {
         dealer: f.player_uid,
         target: f.enemy_uid,
         damage: 6,
+        total_damage: 6,
         props: ValueProps::NONE,
         was_block_broken: false,
     }

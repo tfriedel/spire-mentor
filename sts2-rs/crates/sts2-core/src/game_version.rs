@@ -62,6 +62,15 @@ impl GameVersion {
         }
     }
 
+    /// The build a NEW run gets when the caller names none: a workbench
+    /// start request, the launcher's first pick. Moves when a newer build
+    /// becomes the one worth playing (2026-11-14: v0.111.0).
+    ///
+    /// Not [`GameVersion::default()`], which is v0.107.1 and never moves: that
+    /// is what a stored artefact with no `game_version` IS, and what every
+    /// golden, digest and fixture predating this enum was recorded on.
+    pub const NEW_RUN_DEFAULT: GameVersion = GameVersion::V0_111_0;
+
     /// Whether this is the default build ([`GameVersion::V0_107_1`]).
     ///
     /// Digests and wire emitters use it to leave the default build's bytes

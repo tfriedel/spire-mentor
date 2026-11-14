@@ -101,9 +101,9 @@ def test_v0107_tables_are_unchanged(how: str, select) -> None:
     assert _sha(consts) == PINS_V107["consts"]
 
 
-def test_the_default_build_reads_the_v0107_tables(select) -> None:
-    select(sts2_client.DEFAULT_GAME_VERSION)
-    assert sts2_client.DEFAULT_GAME_VERSION == V107
+def test_the_legacy_build_reads_the_v0107_tables(select) -> None:
+    select(sts2_client.LEGACY_GAME_VERSION)
+    assert sts2_client.LEGACY_GAME_VERSION == V107
     assert ST.card_types() is ST.CARD_TYPE
     assert ST.show_counter_relics() is ST.SHOW_COUNTER_RELICS
 

@@ -19,8 +19,12 @@ from ppo.net_policy import NetPolicy
 
 CKPT = "data/ppo/ppo_fullrun_it350.pt"
 ONNX = Path("data/ppo/ppo_fullrun_it350.onnx")
-A2_SEEDS = list(range(12))
-C_SEEDS = list(range(20))
+# `PARITY_SEEDS` caps both sweeps (the knob tests/test_ppo_env_parity.py reads
+# too). Unset is the full sweep; the per-PR gate (`just test-slow-pr`) sets a
+# smaller one, because every seed checks the same invariant.
+_MAX_SEEDS = int(os.environ.get("PARITY_SEEDS", "20"))
+A2_SEEDS = list(range(min(12, _MAX_SEEDS)))
+C_SEEDS = list(range(min(20, _MAX_SEEDS)))
 
 # Every test here walks a full PPO run (Python AND Rust) per seed, so the file
 # costs ~2200 CPU-seconds across its 40 parametrizations — ~40% of the entire
@@ -187,7 +191,9 @@ def test_workbench_rust_backend_matches_python(seed):
     assert checked > 0
 
 
-@pytest.mark.parametrize("seed", [0, 3])
+# Seed 3 is `soak`: its run is twice as long as seed 0's (240 s, the second
+# longest slow test), and seed 0 already walks the benchmark path per PR.
+@pytest.mark.parametrize("seed", [0, pytest.param(3, marks=pytest.mark.soak)])
 def test_ppo_brain_benchmark_run_completes(seed, tmp_path):
     """The workbench run-mode stepper with brain=ppo + Benchmark budget runs a
     PPO 'as trained' session to completion without error.

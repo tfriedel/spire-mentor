@@ -262,6 +262,14 @@ impl RunPolicy for HeuristicPolicy {
         self.last_scores = None;
         let view = VisibleRunView::from_run_manager(rm);
 
+        // Claws' optional "up to 6 into Maul" select (GH #1353): take the
+        // first offered card until the cap, then confirm — the first six
+        // candidates in deck order, the pick the engine made before the
+        // select surfaced. The confirm is always last, so index 0 is the
+        // next card while any is offered and the confirm once none is.
+        if actions.last() == Some(&RunAction::ConfirmDeckSelection) {
+            return Some(0);
+        }
         // Phase-agnostic deck-mutation preempts come first (they replace
         // the whole action list — see get_available_actions).
         if matches!(

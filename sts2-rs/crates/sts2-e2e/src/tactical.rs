@@ -78,6 +78,14 @@ pub fn attack_total(i: &Value) -> f64 {
 /// `hp_loss(snap)`: unblocked incoming attack damage if the turn ended now.
 #[must_use]
 pub fn hp_loss(snap: &Value) -> f64 {
+    hp_loss_with(snap, 0.0, 0.0)
+}
+
+/// `hp_loss(snap, end_block=..., ally_hp=...)`: the HP the player loses to
+/// attack intents if the turn ended now, less the block the orbs add first
+/// ([`end_turn_block`]) and the HP of a living Osty ([`ally_hp_of`]).
+#[must_use]
+pub fn hp_loss_with(snap: &Value, end_block: f64, ally_hp: f64) -> f64 {
     let mut inc = 0.0;
     for m in list_or_empty(snap, "enemies") {
         if get(m, "is_dead").is_some_and(truthy) {
@@ -87,7 +95,60 @@ pub fn hp_loss(snap: &Value) -> f64 {
     }
     let block = get(snap, "player").and_then(|p| get(p, "block"));
     let block = block.filter(|b| truthy(b)).map_or(0.0, |b| fnum(Some(b)));
-    (inc - block).max(0.0)
+    let unblocked = (inc - block - end_block).max(0.0);
+    (unblocked - ally_hp).max(0.0)
+}
+
+/// `end_turn_block(player)`: the block the Frost orbs' passives add at the end
+/// of the player's turn (`player` = `state_to_dict(bv)["player"]`).
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub fn end_turn_block(player: &Value) -> f64 {
+    list_or_empty(player, "orbs")
+        .iter()
+        .filter(|o| get(o, "type").and_then(Value::as_str) == Some("Frost"))
+        .map(|o| int_or0(get(o, "passive")))
+        .sum::<i64>() as f64
+}
+
+/// `ally_hp_of(player)`: the HP of the player's living Osty, else 0.
+#[must_use]
+pub fn ally_hp_of(player: &Value) -> f64 {
+    let Some(o) = get(player, "osty").filter(|o| truthy(o)) else {
+        return 0.0;
+    };
+    if !get(o, "alive").is_some_and(truthy) {
+        return 0.0;
+    }
+    get(o, "hp")
+        .filter(|v| truthy(v))
+        .map_or(0.0, |v| fnum(Some(v)))
+}
+
+/// `doomed(snap)`: per enemy, 1.0 if it is alive and its Doom is at least
+/// its HP (`DoomPower.IsOwnerDoomed`).
+#[must_use]
+pub fn doomed(snap: &Value) -> Vec<f64> {
+    list_or_empty(snap, "enemies")
+        .iter()
+        .map(|m| {
+            let doom = pysum(
+                list_or_empty(m, "powers")
+                    .iter()
+                    .filter(|p| get(p, "name").and_then(Value::as_str) == Some("DOOM"))
+                    .map(|p| {
+                        get(p, "amount")
+                            .filter(|v| truthy(v))
+                            .map_or(0.0, |v| fnum(Some(v)))
+                    }),
+            );
+            let hp = get(m, "hp")
+                .filter(|v| truthy(v))
+                .map_or(0.0, |v| fnum(Some(v)));
+            let alive = !get(m, "is_dead").is_some_and(truthy);
+            f64::from(u8::from(alive && hp > 0.0 && doom >= hp))
+        })
+        .collect()
 }
 
 fn int_or0(v: Option<&Value>) -> i64 {
@@ -177,6 +238,17 @@ pub fn max_damage(snap: &Value, playable: &[i64]) -> Vec<f64> {
 /// `tactical(snap, actions)`: `(max_damage, killable, hp_loss)`, unscaled.
 #[must_use]
 pub fn tactical(snap: &Value, actions: &[Value]) -> (Vec<f64>, Vec<f64>, f64) {
+    tactical_with(snap, actions, 0.0, 0.0)
+}
+
+/// `tactical(snap, actions, end_block=..., ally_hp=...)`.
+#[must_use]
+pub fn tactical_with(
+    snap: &Value,
+    actions: &[Value],
+    end_block: f64,
+    ally_hp: f64,
+) -> (Vec<f64>, Vec<f64>, f64) {
     let playable: Vec<i64> = actions
         .iter()
         .filter(|a| get(a, "action").and_then(Value::as_str) == Some("play"))
@@ -198,7 +270,7 @@ pub fn tactical(snap: &Value, actions: &[Value]) -> (Vec<f64>, Vec<f64>, f64) {
             f64::from(u8::from(alive && ehp > 0.0 && md[j] >= ehp))
         })
         .collect();
-    (md, kill, hp_loss(snap))
+    (md, kill, hp_loss_with(snap, end_block, ally_hp))
 }
 
 #[cfg(test)]
@@ -210,5 +282,72 @@ mod tests {
         assert_eq!(hits_of("STRIKE_IRONCLAD"), 1);
         assert_eq!(hits_of("TWIN_STRIKE"), 2);
         assert_eq!(hits_of("NO_SUCH_CARD"), 1);
+    }
+
+    fn snap(block: i64, enemies: Value) -> Value {
+        serde_json::json!({"player": {"block": block, "energy": 0}, "hand": [], "enemies": enemies})
+    }
+
+    fn attacker(hp: i64, dmg: i64, times: i64, powers: Value) -> Value {
+        serde_json::json!({
+            "hp": hp, "block": 0, "is_dead": false, "powers": powers,
+            "intents": [{"kind": "Attack", "amount": dmg, "effective_amount": dmg, "times": times}],
+        })
+    }
+
+    /// `CreatureCmd.Damage`: the owner's block first, then a living Osty takes
+    /// the unblocked damage and the overkill passes on to the owner.
+    #[test]
+    fn osty_takes_the_unblocked_damage_first() {
+        let s = snap(
+            5,
+            serde_json::json!([attacker(30, 6, 3, serde_json::json!([]))]),
+        );
+        assert!((hp_loss(&s) - 13.0).abs() < 1e-9);
+        let alive = serde_json::json!({"osty": {"alive": true, "hp": 8, "max_hp": 10}});
+        let dead = serde_json::json!({"osty": {"alive": false, "hp": 0, "max_hp": 10}});
+        assert!((ally_hp_of(&alive) - 8.0).abs() < 1e-9);
+        assert!(ally_hp_of(&dead).abs() < 1e-9);
+        assert!((hp_loss_with(&s, 0.0, ally_hp_of(&alive)) - 5.0).abs() < 1e-9);
+        assert!((hp_loss_with(&s, 0.0, 20.0)).abs() < 1e-9);
+    }
+
+    /// `FrostOrb.Passive` at `OrbQueue.BeforeTurnEnd`: block before the enemies act.
+    #[test]
+    fn frost_passives_block_before_the_enemies_act() {
+        let p = serde_json::json!({"orbs": [
+            {"type": "Frost", "passive": 2, "evoke": 5},
+            {"type": "Lightning", "passive": 3, "evoke": 8},
+            {"type": "Frost", "passive": 4, "evoke": 7},
+        ]});
+        assert!((end_turn_block(&p) - 6.0).abs() < 1e-9);
+        let s = snap(
+            5,
+            serde_json::json!([attacker(30, 6, 3, serde_json::json!([]))]),
+        );
+        assert!((hp_loss_with(&s, end_turn_block(&p), 0.0) - 7.0).abs() < 1e-9);
+    }
+
+    /// `DoomPower.IsOwnerDoomed`: `CurrentHp <= Amount`.
+    #[test]
+    fn doomed_is_doom_at_least_hp() {
+        let doom = |n: i64| serde_json::json!([{"name": "DOOM", "amount": n}]);
+        let mut dead = attacker(9, 1, 1, doom(50));
+        dead["is_dead"] = Value::Bool(true);
+        let s = snap(
+            0,
+            serde_json::json!([
+                attacker(10, 1, 1, doom(10)),
+                attacker(10, 1, 1, doom(9)),
+                attacker(
+                    10,
+                    1,
+                    1,
+                    serde_json::json!([{"name": "WEAK", "amount": 99}])
+                ),
+                dead,
+            ]),
+        );
+        assert_eq!(doomed(&s), vec![1.0, 0.0, 0.0, 0.0]);
     }
 }

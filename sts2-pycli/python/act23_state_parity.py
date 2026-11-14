@@ -79,7 +79,7 @@ import random
 import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -304,6 +304,63 @@ def _is_err(view: Any) -> bool:
     return isinstance(view, dict) and (view.get("error") or view.get("type") == "error")
 
 
+# The Fake Merchant (GH #1294) is a SHOP in the C# host and the real game: no
+# event buttons, a merchant page over its six fake relics, Proceed to the map.
+# The Rust engine keeps the option model the run policy was trained on
+# (``act2_hive.rs`` ``FAKE_MERCHANT_OPTIONS``: buy the first stocked relic,
+# throw a Foul Potion, leave), which the live bridge maps onto the real page
+# (``SimNonCombatRoomHandlers.RunFakeMerchantAsync``). The lockstep maps it the
+# same way, instead of reporting the presentation as a ``cs=shop rs=event``
+# split.
+_FAKE_MERCHANT_OPTION_IDS = frozenset({"buy", "throw_foul", "leave"})
+
+
+def _fake_merchant_pair(cs_view: dict[str, Any], rs_view: dict[str, Any]) -> bool:
+    """C# shows the Fake Merchant's shop while Rust shows its option-model event."""
+    if (cs_view.get("decision") or cs_view.get("type")) != "shop":
+        return False
+    if cs_view.get("event_name") != "FAKE_MERCHANT":
+        return False
+    # A disabled option (no Foul Potion, too little gold) is not listed.
+    ids = {o.get("option_id") for o in rs_view.get("options") or []}
+    return (
+        Snap.of(rs_view, "rs").phase == "event"
+        and "leave" in ids
+        and ids <= _FAKE_MERCHANT_OPTION_IDS
+    )
+
+
+def _fake_merchant_option(rs_view: dict[str, Any], option_id: str) -> dict[str, Any] | None:
+    return next((o for o in rs_view.get("options") or [] if o.get("option_id") == option_id), None)
+
+
+def _fake_merchant_choices(
+    cs_view: dict[str, Any], rs_view: dict[str, Any]
+) -> list[tuple[str, dict[str, Any], tuple[str, dict[str, Any]]]]:
+    """The C# shop moves the Rust option model can mirror, each with its Rust move.
+
+    Rust's ``buy`` takes the FIRST stocked relic at its own rolled price, so
+    only that C# slot is mirrored (the next diff compares the relic and the
+    gold paid). ``leave_room`` is ``leave``. Throwing a Foul Potion is a
+    ``use_potion`` the shop enumeration never offers.
+    """
+    out: list[tuple[str, dict[str, Any], tuple[str, dict[str, Any]]]] = []
+    buy = _fake_merchant_option(rs_view, "buy")
+    first = next((r for r in cs_view.get("relics") or [] if r.get("is_stocked", True)), None)
+    if buy is not None and not buy.get("is_locked") and first is not None:
+        out.append(
+            (
+                "buy_relic",
+                {"relic_index": first["index"]},
+                ("choose_option", {"option_index": buy["index"]}),
+            )
+        )
+    leave = _fake_merchant_option(rs_view, "leave")
+    if leave is not None:
+        out.append(("leave_room", {}, ("choose_option", {"option_index": leave["index"]})))
+    return out
+
+
 # Cards the walk plays whenever they are legal, because pinned HP can't save
 # the run otherwise. The Insatiable (act-2 boss) applies Sandpit, which
 # force-kills its target when it counts down to 0 (``SandpitPower.cs:121``,
@@ -332,26 +389,24 @@ def _survival_choice(
 
 
 # Claws (Tanx Ancient relic) opens a min-0/max-6 ``FromDeckForTransformation``
-# select (``Claws.cs:22-29``). Rust surfaces no select: ``listener_claws``
-# transforms the first 6 candidates in deck order, with C#'s candidate filter
-# (not Quest, not Eternal). C# lists exactly those candidates in deck order, so
-# Rust's pick is C# indices ``0..min(6, n)``. The generic first-legal pick
-# (``select_cards "0"``) transforms ONE card and splits the deck one step
-# later. Both picks are legal in the real game; this only makes the two
-# engines pick the same cards.
+# select (``Claws.cs:22-29``), and Rust surfaces it too (GH #1353), so the walk
+# picks for both engines. ``enumerate_choices`` offers one card per
+# ``select_cards`` plus ``skip_select``; these add the multi-card picks (the
+# first k candidates, k = 2..max), so a walk also transforms several cards at
+# once and checks the order their Mauls join the deck in.
 CLAWS_PROMPT = "CLAWS.selectionScreenPrompt"
-CLAWS_CARDS = 6
 
 
-def claws_atomic_choice(cs_view: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """The C# ``select_cards`` matching Rust's automatic Claws pick, or ``[]``."""
+def claws_multi_choices(cs_view: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Extra ``select_cards`` picks of 2..max cards on Claws' select, else ``[]``."""
     if cs_view.get("prompt_key") != CLAWS_PROMPT:
         return []
     cards = cs_view.get("cards") or []
-    n = min(CLAWS_CARDS, int(cs_view.get("max_select") or CLAWS_CARDS), len(cards))
-    if n == 0:
-        return []
-    return [("select_cards", {"indices": ",".join(str(c["index"]) for c in cards[:n])})]
+    top = min(int(cs_view.get("max_select") or 0), len(cards))
+    return [
+        ("select_cards", {"indices": ",".join(str(c["index"]) for c in cards[:k])})
+        for k in range(2, top + 1)
+    ]
 
 
 def _cs_alone_select(cs_phase: str, rs_phase: str) -> bool:
@@ -828,7 +883,7 @@ def run_one_invincible(
             # rs=combat only) / `sts2-rs-RP28` (generalized to any non-select Rust
             # phase: ForegoneConclusion → card_reward, Amalgamator removal → map).
             if _cs_alone_select(cs_snap.phase, rs_snap.phase):
-                cs_choices = claws_atomic_choice(cs_view) or enumerate_choices(g, cs_view)
+                cs_choices = enumerate_choices(g, cs_view)
                 if cs_choices:
                     verb, kw = cs_choices[0]
                     nxt_cs = g.act(verb, **kw)
@@ -910,6 +965,12 @@ def run_one_invincible(
             # inventory shuffle uses a private ``FAKE_MERCHANT`` stream. A
             # genuine "Rust a room behind" desync still surfaces in the
             # subsequent map/nav diff. Bead sts2-rs-1hiht.
+            # Fake Merchant: C#'s shop page is Rust's option-model event (see
+            # ``_fake_merchant_pair``). Same room, so compare everything else.
+            fake_merchant = _fake_merchant_pair(cs_view, rs_view)
+            if fake_merchant:
+                rs_snap = replace(rs_snap, phase=cs_snap.phase)
+
             if rs_snap.phase == "event" and cs_snap.phase == "map":
                 leave = next(
                     (
@@ -1071,6 +1132,8 @@ def run_one_invincible(
                         f"cs_choices={enumerate_choices(g, cs_view)[:4]} "
                         f"rs_dec={rs_view.get('decision') or rs_view.get('type')!r}"
                     )
+                if verbose:
+                    res.trace.append(f"       relics: cs={cs_snap.relics} rs={rs_snap.relics}")
                 res.divergence = Divergence(
                     step,
                     cs_snap.phase,
@@ -1145,7 +1208,7 @@ def run_one_invincible(
                 )
                 res.terminal = "combat_round_cap"
                 return out
-            choices = enumerate_choices(g, cs_view)
+            choices = enumerate_choices(g, cs_view) + claws_multi_choices(cs_view)
             if not choices:
                 res.divergence = Divergence(
                     step, cs_snap.phase, [f"no choices for cs decision {cs_dec!r}"], "harness"
@@ -1196,6 +1259,11 @@ def run_one_invincible(
             # Pick a choice; on a both-reject (benign illegal move) drop it and
             # re-pick so one bad enumerated move doesn't truncate the run.
             pool = list(choices)
+            rust_move: dict[str, tuple[str, dict[str, Any]]] = {}
+            if fake_merchant:
+                mirrored = _fake_merchant_choices(cs_view, rs_view)
+                pool = [(verb, kw) for verb, kw, _ in mirrored]
+                rust_move = {_canon([verb, kw]): rmove for verb, kw, rmove in mirrored}
             if invincible and survival_policy:
                 pool = _survival_pool(pool, cs_view)
             advanced = False
@@ -1205,8 +1273,13 @@ def run_one_invincible(
                 sidx = _survival_choice(pool, cs_view) if invincible and survival_policy else None
                 idx = sidx if sidx is not None else rng.randrange(len(pool))
                 verb, kw = pool.pop(idx)
+                rs_verb, rs_kw = rust_move.get(_canon([verb, kw]), (verb, kw))
                 nxt_cs = g.act(verb, **kw)
-                nxt_rs = r.act(verb, **kw)
+                nxt_rs = r.act(rs_verb, **rs_kw)
+                if fake_merchant and verb == "buy_relic" and not _is_err(nxt_cs):
+                    # Rust's ``buy`` ends the event; the C# page stays open
+                    # until Proceed, which the purchase already decided.
+                    nxt_cs = g.act("leave_room")
                 cs_err, rs_err = _is_err(nxt_cs), _is_err(nxt_rs)
                 if cs_err and rs_err:
                     out.repicks += 1
@@ -1218,6 +1291,8 @@ def run_one_invincible(
                         out.cs_stack = nxt_cs["stack_trace"]
                         if verbose:
                             res.trace.append(f"C# stack_trace:\n{out.cs_stack}")
+                    if verbose:
+                        res.trace.append(f"       relics: cs={cs_snap.relics} rs={rs_snap.relics}")
                     res.divergence = Divergence(
                         step,
                         cs_snap.phase,

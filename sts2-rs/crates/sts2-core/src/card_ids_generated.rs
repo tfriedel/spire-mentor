@@ -1244,6 +1244,10 @@ pub enum CardId {
     /// v0.113.0 event Skill (`Cards/MightyShield.cs`), from Shrine of the
     /// Warlord: 1 cost, 20 block, 3 Dazed into the draw pile.
     MightyShield,
+    /// v0.113.0 event Skill (`Cards/GodByrd.cs`), from Byrdpip's evolution
+    /// into Byrdine (`Relics/Byrdine.cs` transforms every ByrdSwoop): 0 cost,
+    /// apply `GodByrdPower(30)` (40 upgraded).
+    GodByrd,
     /// v0.113.0 Rare colorless Attack (`Cards/MyShinies.cs`): 1 damage
     /// `floor(Gold / 20)` times (`/ 10` upgraded). After MindBlast in
     /// `ColorlessCardPool`.
@@ -2090,6 +2094,7 @@ impl CardId {
             Self::DingyDagger => "DINGY_DAGGER",
             Self::MightyWeapon => "MIGHTY_WEAPON",
             Self::MightyShield => "MIGHTY_SHIELD",
+            Self::GodByrd => "GOD_BYRD",
             Self::MyShinies => "MY_SHINIES",
             Self::AllIsWellCard => "ALL_IS_WELL_CARD",
             Self::Anguish => "ANGUISH",
@@ -2820,10 +2825,11 @@ impl CardId {
     ];
 
     /// Cards that exist only from game build v0.113.0 on.
-    pub const V0113_ONLY: [CardId; 119] = [
+    pub const V0113_ONLY: [CardId; 120] = [
         Self::DingyDagger,
         Self::MightyWeapon,
         Self::MightyShield,
+        Self::GodByrd,
         Self::MyShinies,
         Self::AllIsWellCard,
         Self::Anguish,
@@ -2968,6 +2974,7 @@ impl CardId {
             Self::DingyDagger
             | Self::MightyWeapon
             | Self::MightyShield
+            | Self::GodByrd
             | Self::MyShinies
             | Self::AllIsWellCard
             | Self::Anguish

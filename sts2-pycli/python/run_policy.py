@@ -144,7 +144,13 @@ _BASIC_NAMES = frozenset({"strike", "defend"})
 # with a single-kind pick list — handled together (one pick at a time). The live
 # workbench enables these via ``interactive_card_*``; the CLI driver doesn't.
 _PENDING_SELECT_KINDS = frozenset(
-    {"upgrade_deck_card", "transform_deck_card", "enchant_deck_card", "grant_deck_card"}
+    {
+        "upgrade_deck_card",
+        "transform_deck_card",
+        "confirm_deck_selection",
+        "enchant_deck_card",
+        "grant_deck_card",
+    }
 )
 
 
@@ -374,6 +380,24 @@ _DEDICATED_VERB_KINDS = frozenset(
 )
 
 
+def _declines_optional_grant(rm: Any, action: dict[str, Any]) -> bool:
+    """Whether `action` confirms an optional card-grant grid with no pick.
+
+    On a "choose up to N" grant (Sea Glass, ``pending_card_grant_min == 0``)
+    the engine spells "take nothing" as ``grant_deck_card`` at ``idx == option
+    count``. That index is not a card. Sent to the workbench as ``select_cards
+    15`` on a 15-card grid, the backend granted "card 15" (which the engine
+    read as the confirm) and then sent the confirm it appends after a pick,
+    which the engine rejected as ``invalid_for_phase``: the PPO brain's run
+    stopped there (`test_ppo_brain_benchmark_run_completes[0]`).
+    """
+    if rm is None or action.get("action") != "grant_deck_card":
+        return False
+    if int(getattr(rm, "pending_card_grant_min", 1)) != 0:
+        return False
+    return action.get("idx") == len(rm.card_grant_options())
+
+
 def to_workbench_verb(rm: Any, action: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """RunAction dict → the workbench's C#-shaped ``(verb, args)``.
 
@@ -421,6 +445,10 @@ def to_workbench_verb(rm: Any, action: dict[str, Any]) -> tuple[str, dict[str, A
         return "buy_relic", {"relic_index": action.get("idx")}
     if kind == "shop_buy_potion":
         return "buy_potion", {"potion_index": action.get("idx")}
+    if _declines_optional_grant(rm, action):
+        return "skip_select", {}
+    if kind == "confirm_deck_selection":
+        return "skip_select", {}
     if kind in ("smith_card", "remove_deck_card") or kind in _PENDING_SELECT_KINDS:
         return "select_cards", {"indices": str(action.get("idx"))}
     if kind == "shop_remove_card":

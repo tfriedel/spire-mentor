@@ -169,7 +169,7 @@ pub fn kind_surface(kind: &str) -> Option<&'static str> {
         "smith_card" => "card-smith",
         "remove_deck_card" => "card-remove",
         "upgrade_deck_card" => "card-upgrade",
-        "transform_deck_card" => "card-transform",
+        "transform_deck_card" | "confirm_deck_selection" => "card-transform",
         "enchant_deck_card" => "card-enchant",
         "grant_deck_card" => "card-grant",
         "shop_buy_card" | "shop_buy_relic" | "shop_buy_potion" | "shop_remove_card"

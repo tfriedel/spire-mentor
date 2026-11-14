@@ -138,9 +138,6 @@ const DECK_MUTATION: [&str; 5] = [
     "grant_deck_card",
 ];
 
-/// Base rest-site option labels (`REST_OPTION_LABELS`).
-const REST_OPTION_LABELS: [&str; 2] = ["rest", "smith"];
-
 pub(crate) type R<T> = Result<T, String>;
 
 pub(crate) fn schema(e: SchemaError) -> String {
@@ -456,7 +453,14 @@ pub fn observe(
             o.insert("event_options".into(), emit_rm::event_option_infos(rm));
         }
         Some("rest") => {
-            o.insert("rest_option_labels".into(), json!(REST_OPTION_LABELS));
+            // `ppo.env.observe`: the engine's current option ids.
+            let ids: Vec<&str> = rm
+                .run_state
+                .rest_site_options()
+                .iter()
+                .map(sts2_core::runstate::RestSiteOption::option_id)
+                .collect();
+            o.insert("rest_option_labels".into(), json!(ids));
         }
         Some("potion-swap") => {
             o.insert(
@@ -1223,6 +1227,12 @@ impl Driver {
         if self.fight.is_some() && rm.phase() != Phase::Combat {
             self.fight = None;
         }
+        if let Some(a) = claws_auto_pick(rm, &actions) {
+            return Ok(Next::Forced(Forced {
+                action: a,
+                kind: ApplyKind::Run { strict: false },
+            }));
+        }
         if let Some(a) = actions
             .iter()
             .find(|a| !ENCODABLE.contains(&action_name(a)))
@@ -1685,6 +1695,20 @@ fn check_caps(n_members: usize, n_classes: usize, dtype: u8) -> R<()> {
     Ok(())
 }
 
+/// The forced step that resolves Claws' optional "up to 6 into Maul" select
+/// (GH #1353) without a decision: the first offered card until the cap, then
+/// the confirm, which is always last. That is the first six candidates in deck
+/// order, the pick the engine made before the select surfaced. The schema
+/// (`ironclad-e2e-v111`) has no kind for the confirm, so the select stays out
+/// of the policy until a schema revision adds one (`_claws_auto_pick` in
+/// `ppo/e2e/env.py`).
+pub(crate) fn claws_auto_pick(rm: &RunManager, actions: &[Value]) -> Option<Value> {
+    rm.run_state
+        .pending_claws_selection
+        .as_ref()
+        .and_then(|_| actions.first().cloned())
+}
+
 pub(crate) fn available(rm: &RunManager) -> Vec<Value> {
     match emit_rm::available_actions(rm) {
         Value::Array(a) => a,
@@ -1729,5 +1753,39 @@ mod face_var_tests {
             Value::Object(face_vars(&spent)),
             serde_json::json!({"enchantment_used": 1})
         );
+    }
+}
+
+#[cfg(test)]
+mod claws_tests {
+    use super::*;
+    use sts2_core::cards::CardId;
+    use sts2_core::relics::RelicId;
+
+    /// GH #1353: the schema has no kind for Claws' confirm, so the env
+    /// resolves the select as forced steps: the first six cards, then the
+    /// confirm. Mirrors `test_the_e2e_env_takes_the_first_six_without_a_decision`.
+    #[test]
+    fn claws_is_six_forced_picks_and_a_forced_confirm() {
+        let mut rm = new_run(7);
+        let deck: Vec<&str> = ["STRIKE_IRONCLAD", "DEFEND_IRONCLAD"].repeat(4);
+        sts2_wire::graft::set_master_deck(&mut rm, &json!(deck)).expect("deck");
+        rm.run_state.obtain_relic(RelicId::Claws);
+        assert!(rm.run_state.pending_claws_selection.is_some());
+        let mut driver = Driver::new(7);
+        let mut forced = Vec::new();
+        while rm.run_state.pending_claws_selection.is_some() {
+            let Next::Forced(f) = driver.peek(&mut rm) else {
+                panic!("Claws' select must be a forced step");
+            };
+            forced.push(action_name(&f.action).to_owned());
+            driver.apply(&mut rm, &f.action, f.kind).expect("apply");
+        }
+        let mut expect = vec!["transform_deck_card".to_owned(); 6];
+        expect.push("confirm_deck_selection".to_owned());
+        assert_eq!(forced, expect);
+        let ids: Vec<CardId> = rm.run_state.master_deck.iter().map(|c| c.card_id).collect();
+        assert_eq!(&ids[..2], &[CardId::StrikeIronclad, CardId::DefendIronclad]);
+        assert!(ids[2..].iter().all(|&c| c == CardId::Maul));
     }
 }

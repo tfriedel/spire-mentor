@@ -795,6 +795,24 @@ impl EnchantCardsReward {
     }
 }
 
+/// Claws' optional "transform up to N into Maul" deck select (C#
+/// `Claws.AfterObtained`, `Claws.cs:22-29`: `CardSelectorPrefs(prompt, 0, 6)`
+/// with `RequireManualConfirmation`, then one `CardCmd.Transform` over every
+/// picked card). The player picks cards one at a time and then confirms; the
+/// deck does not change until the confirm, which transforms all picks at once
+/// in original deck order. See [`RunState::pending_claws_selection`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingClawsSelection {
+    /// The legal picks in deck order: original master-deck index paired with
+    /// the Maul it becomes (built when the select opens, as C# builds each
+    /// candidate's preview `CardTransformation`).
+    pub candidates: Vec<(usize, Card)>,
+    /// Indices into `candidates` the player has picked, in pick order.
+    pub selected: Vec<usize>,
+    /// Most cards the player may pick (C# `MaxSelect`).
+    pub max_count: usize,
+}
+
 /// One queued interactive deck-transform pick (see
 /// [`RunState::pending_deck_transforms`]). NewLeaf-style transforms queue
 /// `{ basic_only: false, fixed_target: None }` (replacement rolled off
@@ -967,6 +985,10 @@ pub enum RestSiteOption {
     Clone,
     /// Hatch the Byrdpip egg (`Byrdoni's Nest` reward).
     Hatch,
+    /// v0.113.0: evolve Byrdpip into Byrdine (`EvolveRestSiteOption`),
+    /// offered by `Byrdpip.TryModifyRestSiteOptions` once six Byrd Swoops
+    /// have been played (`Byrdpip.cs`, `SwoopsPlayed >= 6`).
+    Evolve,
     /// Rekindle the `PumpkinCandle` (`KindleRestSiteOption`, granted by
     /// the PumpkinCandle ANCIENT relic): adds `kindleAmount = 5` to the
     /// relic's `KindleCount`, refreshing its +1-max-energy window.
@@ -1006,6 +1028,11 @@ pub enum RestSiteActionOutcome {
     /// `Byrdpip`'s `after_obtained` listener transforms every
     /// `ByrdonisEgg` in the deck into `ByrdSwoop`.
     Hatched,
+    /// `Evolve` selected (v0.113.0): Byrdpip was replaced by Byrdine in the
+    /// same relic slot (C# `EvolveRestSiteOption.OnSelect` →
+    /// `RelicCmd.Replace`), whose `AfterObtained` turned every Byrd Swoop
+    /// into a God Byrd.
+    Evolved,
     /// `Dig` selected (Shovel): the player obtained `relic`, pulled from
     /// the FRONT of the grab bag at a rarity rolled off the Rewards stream
     /// (C# `DigRestSiteOption.OnSelect` → `RelicCmd.Obtain(RelicFactory.
@@ -1060,7 +1087,13 @@ impl RestSiteOption {
     #[must_use]
     pub fn enabled(&self) -> bool {
         match self {
-            Self::Rest | Self::Dig | Self::Clone | Self::Hatch | Self::Kindle | Self::Mend => true,
+            Self::Rest
+            | Self::Dig
+            | Self::Clone
+            | Self::Hatch
+            | Self::Evolve
+            | Self::Kindle
+            | Self::Mend => true,
             Self::Smith { enabled } | Self::Cook { enabled } => *enabled,
             Self::Lift { lifts_done } => *lifts_done < 3,
         }
@@ -1080,6 +1113,7 @@ impl RestSiteOption {
             Self::Cook { .. } => "COOK",
             Self::Clone => "CLONE",
             Self::Hatch => "HATCH",
+            Self::Evolve => "EVOLVE",
             Self::Kindle => "KINDLE",
             Self::Mend => "MEND",
         }
@@ -1779,6 +1813,12 @@ pub struct RunState {
     /// (remove original, append replacement at the tail).
     pub pending_deck_transforms: Vec<PendingDeckTransform>,
 
+    /// Claws' open optional multi-pick (only ever `Some` when
+    /// [`Self::interactive_card_transform`] is set). The run loop offers a
+    /// `TransformDeckCard` per candidate not yet picked plus one
+    /// `ConfirmDeckSelection`; the deck changes only on the confirm.
+    pub pending_claws_selection: Option<PendingClawsSelection>,
+
     /// Queue of interactive deck-enchant picks (Wood Carvings' Snake →
     /// Slither), oldest first; gated on
     /// [`Self::interactive_card_transform`] like the transform queue (the
@@ -2209,6 +2249,7 @@ impl Default for RunState {
             pending_deck_upgrades: 0,
             interactive_card_transform: false,
             pending_deck_transforms: Vec::new(),
+            pending_claws_selection: None,
             pending_deck_enchants: Vec::new(),
             interactive_potion_swap: false,
             pending_potion_swaps: Vec::new(),
@@ -3038,6 +3079,7 @@ impl RunState {
         self.pending_deck_removals != 0
             || self.pending_deck_upgrades != 0
             || !self.pending_deck_transforms.is_empty()
+            || self.pending_claws_selection.is_some()
             || !self.pending_deck_enchants.is_empty()
             || !self.pending_card_selects.is_empty()
             || !self.pending_rewards.is_empty()
@@ -3784,6 +3826,13 @@ impl RunState {
                 self.obtain_relic(RelicId::Byrdpip);
                 RestSiteActionOutcome::Hatched
             }
+            RestSiteOption::Evolve => {
+                if self.evolve_byrdpip() {
+                    RestSiteActionOutcome::Evolved
+                } else {
+                    RestSiteActionOutcome::Disabled
+                }
+            }
             RestSiteOption::Kindle => {
                 // C# `KindleRestSiteOption.OnSelect` (`KindleRestSiteOption.cs:37-41`):
                 // `Owner.GetRelic<PumpkinCandle>()?.Rekindle()` → `KindleCount += 5`
@@ -3852,6 +3901,28 @@ impl RunState {
             }
             RestSiteOption::Mend => RestSiteActionOutcome::Unsupported,
         }
+    }
+
+    /// v0.113.0 `EvolveRestSiteOption.OnSelect`
+    /// (`EvolveRestSiteOption.cs:39-83`): without a Byrdpip it returns
+    /// `false`; otherwise `RelicCmd.Replace(byrdpip, byrdine)`, which is
+    /// `Remove(original)` then `Obtain(replace, player, indexOfOriginal)`
+    /// (`RelicCmd.cs:74-82`) — Byrdine takes Byrdpip's slot and its
+    /// `AfterObtained` (`Byrdine.cs`) transforms every ByrdSwoop in the deck
+    /// into a GodByrd (the run-side listener in `sts2-content`). Byrdpip's
+    /// `SwoopsPlayed` counter goes with the removed relic.
+    fn evolve_byrdpip(&mut self) -> bool {
+        let Some(idx) = self.relics.iter().position(|&r| r == RelicId::Byrdpip) else {
+            return false;
+        };
+        let _ = self.lose_relic(RelicId::Byrdpip);
+        self.obtain_relic(RelicId::Byrdine);
+        // `obtain_relic` appends; C# inserts at the original's index.
+        if let Some(at) = self.relics.iter().rposition(|&r| r == RelicId::Byrdine) {
+            let byrdine = self.relics.remove(at);
+            self.relics.insert(idx, byrdine);
+        }
+        true
     }
 
     /// v0.111.0 `CookRestSiteOption.OnSelect` (`CookRestSiteOption.cs:44-60`):
@@ -4629,22 +4700,11 @@ impl RunState {
     fn orobas_pool3(&self) -> Vec<RelicId> {
         use crate::cards::CardId;
         // Every relic whose C# `Rarity` is `RelicRarity.Starter`, upgraded
-        // starters included (e.g. `BlackBlood.cs:12`, `InfusedCore.cs:21`).
-        let has_starter_relic = self.relics.iter().any(|r| {
-            matches!(
-                r,
-                RelicId::BurningBlood
-                    | RelicId::BlackBlood
-                    | RelicId::RingOfTheSnake
-                    | RelicId::RingOfTheDrake
-                    | RelicId::CrackedCore
-                    | RelicId::InfusedCore
-                    | RelicId::BoundPhylactery
-                    | RelicId::PhylacteryUnbound
-                    | RelicId::DivineRight
-                    | RelicId::DivineDestiny
-            )
-        });
+        // starters included (e.g. `BlackBlood.cs:12`, `InfusedCore.cs:21`;
+        // v0.113.0 The Fool's SongBow / Storyteller).
+        let has_starter_relic = self.relics.iter().any(|r| r.is_starter_rarity());
+        // v0.113.0 adds FoolishShot -> DivineShot (`ArchaicTooth.cs:48-51`);
+        // FoolishShot exists in no earlier deck.
         let has_transcendence_card = self.master_deck.iter().any(|c| {
             matches!(
                 c.card_id,
@@ -4653,6 +4713,7 @@ impl RunState {
                     | CardId::Unleash
                     | CardId::FallingStar
                     | CardId::Dualcast
+                    | CardId::FoolishShot
             )
         });
         let mut pool = Vec::with_capacity(2);
@@ -8175,6 +8236,21 @@ mod tests {
             rs.master_deck = vec![card(CardId::StrikeIronclad)];
             assert!(rs.orobas_pool3().is_empty(), "{version:?}: locked");
         }
+        // v0.113.0 The Fool: SongBow / Storyteller are `RelicRarity.Starter`
+        // (`SongBow.cs:15`, `Storyteller.cs:20`) and FoolishShot is a
+        // `TranscendenceUpgrades` key (`ArchaicTooth.cs:48-51`). Without them
+        // a Fool's Orobas lost TOUCH_OF_OROBAS (Fool:1017 act2 event@334).
+        let mut rs = RunState::new();
+        rs.game_version = crate::GameVersion::V0_113_0;
+        rs.relics = vec![RelicId::SongBow];
+        rs.master_deck = vec![card(CardId::StrikeFool), card(CardId::FoolishShot)];
+        assert_eq!(
+            rs.orobas_pool3(),
+            vec![RelicId::TouchOfOrobas, RelicId::ArchaicTooth]
+        );
+        rs.relics = vec![RelicId::Storyteller];
+        rs.master_deck = vec![card(CardId::StrikeFool)];
+        assert_eq!(rs.orobas_pool3(), vec![RelicId::TouchOfOrobas]);
     }
 
     #[test]

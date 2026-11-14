@@ -111,6 +111,7 @@ pub mod tuning_fork;
 pub mod twisted_funnel;
 pub mod unceasing_top;
 pub mod unsettling_lamp;
+pub mod v0113_event;
 pub mod vajra;
 pub mod vambrace;
 pub mod vexing_puzzlebox;
@@ -195,6 +196,7 @@ pub fn install_default_registry() {
         power_cell::install();
         tough_bandages::install();
         tingsha::install();
+        v0113_event::install();
         captains_wheel::install();
         sturdy_clamp::install();
         horn_cleat::install();

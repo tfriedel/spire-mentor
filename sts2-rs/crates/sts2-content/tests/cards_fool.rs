@@ -1229,6 +1229,54 @@ fn ki_chant_discards_the_rest_in_draw_order() {
     assert_eq!(ids, vec![CardId::Vitriol, CardId::Jest, CardId::KiChant]);
 }
 
+/// GH #1337: KiChant awaits its `CardPileCmd.Shuffle` (`KiChant.cs`), and
+/// with it the Stratagem pick `Hook.AfterShuffle` opens. The play then goes
+/// on: the old draw cards still in the pile return to the top, and the top 3
+/// are offered.
+#[test]
+fn ki_chant_goes_on_after_a_stratagem_pick_its_shuffle_opened() {
+    let mut s = fool_state();
+    add_player_power(&mut s, 95, PowerKind::Stratagem, 1);
+    push_draw(&mut s, CardId::Jest);
+    for id in [
+        CardId::StrikeFool,
+        CardId::StrikeFool,
+        CardId::DefendFool,
+        CardId::DefendFool,
+    ] {
+        push_discard(&mut s, id);
+    }
+    play(&mut s, CardId::KiChant, false, None);
+
+    let pc = s.pending_choice.as_ref().expect("Stratagem pick");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawToHand);
+    assert_eq!(pc.options.len(), 5, "the whole shuffled draw pile");
+    let strike = pc
+        .options
+        .iter()
+        .position(|o| o.card_id == CardId::StrikeFool)
+        .expect("a Strike offered");
+    let _ = sts2_core::resolve_choice_atomic_apply(&mut s, &[u8::try_from(strike).unwrap()]);
+    assert_eq!(hand_ids(&s), vec![CardId::StrikeFool]);
+
+    let pc = s.pending_choice.as_ref().expect("KiChant's top-3 select");
+    assert_eq!(pc.kind, sts2_core::ChoiceKind::AddFromDrawByType);
+    assert_eq!(pc.options.len(), 3);
+    let jest = pc
+        .options
+        .iter()
+        .position(|o| o.card_id == CardId::Jest)
+        .expect("the kept draw card is back on top");
+    let _ = sts2_core::resolve_choice_atomic_apply(&mut s, &[u8::try_from(jest).unwrap()]);
+    assert_eq!(hand_ids(&s), vec![CardId::StrikeFool, CardId::Jest]);
+    assert!(s.pending_choice.is_none());
+    // The two unpicked top cards, then KiChant itself.
+    assert_eq!(s.player.discard.len(), 3);
+    assert_eq!(count_in(&s, &s.player.discard, CardId::KiChant), 1);
+    assert_eq!(s.player.draw.len(), 1);
+    assert!(s.player.play.is_empty());
+}
+
 #[test]
 fn ki_chant_short_draw_shuffles_under_the_kept_cards() {
     // Fewer than 3 in draw, discard not empty: Shuffle, then the old draw
@@ -1246,6 +1294,25 @@ fn ki_chant_short_draw_shuffles_under_the_kept_cards() {
     play(&mut s, CardId::KiChant, false, None);
     assert!(s.pending_choice.is_none());
     assert_eq!(hand_ids(&s), vec![CardId::Jest]);
+}
+
+/// GH #1337: `OnPlayWrapper` runs `CardCmd.Transform(this,
+/// TransformIntoAfterPlay)` while MourningBlow is still on Play, before the
+/// result move (`CardModel.cs`). A dupe's result is `PileType.None`, so the
+/// Sadness leaves combat, but it was generated: `History.CardGenerated`
+/// counts it, and Anguish reads that count.
+#[test]
+fn a_dupe_mourning_blow_still_generates_its_sadness() {
+    let mut s = fool_state();
+    let i = push_hand(&mut s, CardId::MourningBlow, false);
+    let uid = s.player.hand[usize::from(i)];
+    s.cards[uid.get() as usize - 1].set_combat_var(sts2_core::cards::VarKey::IsDupe, 1);
+    let _ = sts2_core::combat_loop::play_card(&mut s, i, Some(0));
+    assert_eq!(enemy_hp(&s), 90);
+    assert!(hand_ids(&s).is_empty(), "the dupe's Sadness leaves combat");
+    assert!(s.player.play.is_empty() && s.player.discard.is_empty());
+    play(&mut s, CardId::Anguish, false, Some(0));
+    assert_eq!(enemy_hp(&s), 90 - (6 + 6), "one Sadness was generated");
 }
 
 #[test]
@@ -1361,4 +1428,53 @@ fn the_tower_scales_with_total_floor() {
         assert_eq!(enemy_hp(&s), 100 - dmg);
         assert_eq!(count_in(&s, &s.player.exhaust, CardId::TheTower), 1);
     }
+}
+
+/// `EpicRetrieval.cs` (v0.113.0): 2 energy, 15 damage; when ITS hit dislodges
+/// the player's arrow, `AfterArrowDislodged` gains `EnergyVar(3)` (+1
+/// upgraded). Rust gained 1/2, which left Fool:1014 two energy short of C#
+/// and rejected the next play (act1 combat@135).
+#[test]
+fn epic_retrieval_dislodge_gains_three_energy() {
+    for (upgraded, gain) in [(false, 3), (true, 4)] {
+        let mut state = fresh(V113, CharacterId::Fool);
+        let enemy = first_enemy(&state);
+        // Impale (hit counter 3), then two powered hits leave it at 1, so
+        // Epic Retrieval's hit is the dislodging one.
+        sts2_core::fool::shoot_arrow_at_target(&mut state, enemy, 1, 1);
+        for _ in 0..2 {
+            sts2_core::damage::apply_damage(
+                &mut state,
+                sts2_core::hooks::CreatureRef::Player,
+                enemy,
+                1,
+                sts2_core::hooks::ValueProps::MOVE,
+                None,
+            );
+        }
+        assert_eq!(sts2_core::fool::impaled_hit_counter(&state, enemy), Some(1));
+        state.player.energy = 2;
+        play(&mut state, CardId::EpicRetrieval, upgraded, Some(0));
+        assert!(!sts2_core::fool::creature_is_impaled(&state, enemy));
+        assert_eq!(state.player.energy, gain, "2 - 2 + EnergyVar");
+    }
+}
+
+/// `WahHammer.ModifyDamageMultiplicative` doubles only damage whose
+/// `cardSource` is the Wah Hammer: its 9 against an impaled target is 18,
+/// but ViolentChordPower's `AfterCardPlayed` 9 (Unpowered
+/// `CreatureCmd.Damage`, no card source) stays 9 — 27 in all. Rust doubled
+/// both (36) and ended Fool:1008's Vantom fight early (act1 combat@249).
+#[test]
+fn wah_hammer_does_not_double_violent_chord() {
+    let mut state = fresh(V113, CharacterId::Fool);
+    let enemy = first_enemy(&state);
+    // Impaled with hit counter 3, so the hammer does not dislodge it.
+    sts2_core::fool::shoot_arrow_at_target(&mut state, enemy, 1, 1);
+    let p = state.player.creature_uid.expect("player");
+    sts2_core::card_effects::apply_power_to_creature(&mut state, p, PowerKind::ViolentChord, 9);
+    let before = hp_of(&state, enemy);
+    play(&mut state, CardId::WahHammer, false, Some(0));
+    assert!(sts2_core::fool::creature_is_impaled(&state, enemy));
+    assert_eq!(before - hp_of(&state, enemy), 2 * 9 + 9);
 }

@@ -42,8 +42,8 @@ def _env_version(**kwargs) -> str:
     return env.rm.game_version
 
 
-def test_default_env_runs_the_stable_build(restore_version) -> None:
-    sts2_client.set_game_version(sts2_client.DEFAULT_GAME_VERSION)
+def test_an_env_on_the_legacy_build_runs_it(restore_version) -> None:
+    sts2_client.set_game_version(sts2_client.LEGACY_GAME_VERSION)
     assert _env_version() == "v0.107.1"
 
 

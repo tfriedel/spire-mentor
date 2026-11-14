@@ -21,6 +21,7 @@ import subprocess
 import sys
 
 import pytest
+from sts2_client import LEGACY_GAME_VERSION
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 ARENA = os.path.join(ROOT, "sts2-rs", "target", "release", "run_arena")
@@ -37,7 +38,10 @@ def _env(monkeypatch):
 def _env_expert_outcome(seed: int, act1: str = "overgrowth") -> dict:
     from ppo.env import PpoRunEnv, Terminal
 
-    env = PpoRunEnv(seed=seed, expert=True, act1=act1)
+    # `run_arena` has no build switch: it simulates the engine's own default,
+    # which is the legacy build. Pin the env to it, or the selected build
+    # (v0.111.0 by default) turns every cell into version skew.
+    env = PpoRunEnv(seed=seed, expert=True, act1=act1, game_version=LEGACY_GAME_VERSION)
     terminal = None
     for out in env.expert_run():
         if isinstance(out, Terminal):

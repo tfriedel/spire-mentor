@@ -463,6 +463,7 @@ pub fn e2e_selfplay<'py>(
     let out = py.allow_threads(move || {
         let mut env = E2eEnv::over_run(sts2_e2e::env::new_run(seed), seed);
         let mut cache = TokCache::new();
+        cache.set_chars(net.fills("chars"));
         let mut chosen: Vec<usize> = Vec::new();
         let mut step = env.reset();
         loop {

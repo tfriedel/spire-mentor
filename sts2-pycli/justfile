@@ -104,28 +104,39 @@ promote-champion character onnx:
 
 ## Testing
 
+# The build a recipe runs on when it names none (2026-11-14: v0.111.0, was
+# v0.107.1). Same value as `sts2_client.DEFAULT_GAME_VERSION`, which a bare
+# `pytest` or tool run gets; the recipes still name it, so they say what they
+# run.
+default_build := "v0.111.0"
+
+# `sts2_client.LEGACY_GAME_VERSION` / Rust's `GameVersion::default()`: what a
+# file that names no build is, and what the engine simulates when it is told
+# none. It never moves. The slow suite and the hint tools run on it (see
+# `test-slow-pr`).
+engine_default_build := "v0.107.1"
+
 # Run pytest unit tests, excluding `slow` ones (rebuilds C# headless runner first)
 test: build-cs
-    @echo "🧪 Running tests..."
-    uv run --frozen pytest
+    @echo "🧪 Running tests ({{default_build}})..."
+    uv run --frozen pytest --game-version {{default_build}}
 
 # Run ONLY the slow-marked tests (full-run PPO/parity walks, ~2700 CPU-seconds).
-test-slow: build-cs
+test-slow: (build-cs engine_default_build)
     @echo "🐢 Running slow tests..."
-    uv run --frozen pytest -m slow
+    uv run --frozen pytest -m slow --game-version {{engine_default_build}}
 
-# Run the whole suite, slow tests included (pre-merge / nightly gate).
-test-all: build-cs
-    @echo "🧪 Running full suite (incl. slow)..."
-    uv run --frozen pytest -m ""
+# Run the whole suite, slow tests included: `test`, then `test-slow`. Two runs
+# because they run on different builds (see `test-slow-pr`).
+test-all: test test-slow
 
 # Run tests with verbose output
 test-verbose: build-cs
-    uv run --frozen pytest -v
+    uv run --frozen pytest -v --game-version {{default_build}}
 
 # Run tests with coverage report
 test-coverage: build-cs
-    uv run --frozen pytest --cov=python --cov-report=term-missing
+    uv run --frozen pytest --cov=python --cov-report=term-missing --game-version {{default_build}}
 
 # Full regression — 5 games per character, all must complete
 #
@@ -151,16 +162,42 @@ regression-test: build-cs
     @echo "🎮 Running full regression (this takes a while)..."
     @for char in Ironclad Silent Defect Regent Necrobinder; do \
         echo "── $char ──"; \
-        uv run --frozen --no-sync python python/play_full_run.py 5 "$char" 2>&1 | grep -E "Wins|Completed"; \
+        STS2_GAME_VERSION={{default_build}} uv run --frozen --no-sync python python/play_full_run.py 5 "$char" 2>&1 | grep -E "Wins|Completed"; \
     done
 
-# The later game builds' half of the gate (v0.107.1 is `just test` +
-# `just regression-test`). Every build in GATE_BUILDS gets the pytest suite and
-# the 5x5 random-policy regression; a game version that ships is a gate entry.
+# The game builds the per-PR gate covers. v0.107.1 is still supported, but it
+# is NOT in the per-PR gate any more (2026-11-14): run `just test-107` on
+# demand, or `just gate-full` from the repo root. A game version that ships is
+# an entry here; a build outside the gate rots silently.
 gate_builds := "v0.111.0 v0.113.0"
 
-# pytest on every later game build
-test-builds: build-cs-all
+# How many seeds the full-run parity sweeps walk in the per-PR gate
+# (`PARITY_SEEDS`; the full sweep, `just test-slow`, is 20).
+gate_parity_seeds := "6"
+
+# The per-PR gate's Python half: static checks, then pytest, the trimmed slow
+# suite and the 5x5 regression on the gated builds. `just gate` at the repo
+# root adds the Rust half.
+#
+# The per-PR gate, Python half (run `just gate` at the repo root for all of it)
+gate:
+    @just format-check
+    @just lint
+    @just typecheck
+    @just deptry
+    @just check-champions
+    @just test-builds
+    @just test-slow-pr
+    @just regression-builds
+
+# Build the C# headless runner for the gated game builds only
+build-cs-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for v in {{gate_builds}}; do just build-cs "$v"; done
+
+# pytest (fast suite) on every gated game build
+test-builds: build-cs-gate
     #!/usr/bin/env bash
     set -euo pipefail
     for v in {{gate_builds}}; do
@@ -168,27 +205,78 @@ test-builds: build-cs-all
         uv run --frozen pytest tests/ -q --game-version "$v"
     done
 
-# 5 games x 5 characters on every later game build; fails on the first
-# incomplete run (unlike `regression-test`, which only prints the counts)
-regression-builds: build-cs-all
+# The slow suite as the per-PR gate runs it: every slow test, but the full-run
+# parity sweeps (tests/test_ppo_env_parity.py, tests/test_ppo_rust_parity.py)
+# walk `gate_parity_seeds` seeds instead of 20. Those two files are 95% of the
+# slow suite's CPU, and every seed checks the same invariant, so the extra
+# seeds buy rare-path coverage, not a different check. It also skips the
+# `soak`-marked tests: the two longest slow tests, which set the suite's wall
+# time while a shorter parametrization of each stays in. `just test-slow` is the
+# full sweep; run it (or `just gate-full`) for a change to the PPO env, the run
+# AI or the arena.
+#
+# It runs on the ENGINE's default build (v0.107.1), not a gated one, and that
+# is not a choice: the parity sweeps compare `PpoRunEnv` against the `run_arena` binary,
+# which has no build switch and always simulates the default. Under
+# `--game-version v0.113.0` the env moves and the arena does not, so 13 of 18
+# env-parity cells fail on version skew alone (measured 2026-11-14). The suite
+# checks the env / agent / learner plumbing, which is the same on every build.
+#
+# The slow suite, trimmed for the per-PR gate
+test-slow-pr: (build-cs engine_default_build)
+    @echo "🐢 Running slow tests ({{gate_parity_seeds}} parity seeds)..."
+    PARITY_SEEDS={{gate_parity_seeds}} uv run --frozen pytest -m "slow and not soak" -q --game-version {{engine_default_build}}
+
+# 5 games x 5 characters on every gated game build, all (build, character)
+# pairs at once; fails if any run is incomplete (unlike `regression-test`,
+# which only prints the counts). Each pair is one single-threaded C# process,
+# so running them side by side costs nothing: 266 s serial -> the longest pair.
+#
+# 5x5 random-policy regression on every gated game build
+regression-builds: build-cs-gate
     #!/usr/bin/env bash
     set -euo pipefail
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    chars="Ironclad Silent Defect Regent Necrobinder"
     for v in {{gate_builds}}; do
-        for char in Ironclad Silent Defect Regent Necrobinder; do
-            echo "── $v $char ──"
-            out="$(STS2_GAME_VERSION="$v" uv run --frozen --no-sync python python/play_full_run.py 5 "$char" 2>&1 \
-                | grep -E "Wins|Completed")"
-            echo "$out"
-            grep -q "Completed: 5/5" <<<"$out"
+        for char in $chars; do
+            STS2_GAME_VERSION="$v" uv run --frozen --no-sync python python/play_full_run.py 5 "$char" \
+                >"$tmp/$v-$char.log" 2>&1 &
         done
+    done
+    wait || true
+    fail=0
+    for v in {{gate_builds}}; do
+        for char in $chars; do
+            out="$(grep -E "Wins|Completed" "$tmp/$v-$char.log" || true)"
+            echo "── $v $char ── $out"
+            if ! grep -q "Completed: 5/5" <<<"$out"; then
+                fail=1
+                tail -n 30 "$tmp/$v-$char.log"
+            fi
+        done
+    done
+    exit "$fail"
+
+# v0.107.1's pytest fast suite and 5x5 regression: no longer in the per-PR gate
+test-107: (build-cs "v0.107.1")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run --frozen pytest tests/ -q --game-version v0.107.1
+    for char in Ironclad Silent Defect Regent Necrobinder; do
+        out="$(STS2_GAME_VERSION=v0.107.1 uv run --frozen --no-sync python python/play_full_run.py 5 "$char" 2>&1 \
+            | grep -E "Wins|Completed")"
+        echo "── v0.107.1 $char ── $out"
+        grep -q "Completed: 5/5" <<<"$out"
     done
 
 ## C# Build
 
 # Build the C# headless runner for one game build (GH #789): lib/<ver>/ ->
 # src/Sts2Headless/bin/<ver>/. The tests and tools pick a build with
-# STS2_GAME_VERSION (default v0.107.1); pytest also takes --game-version.
-build-cs ver="v0.107.1":
+# STS2_GAME_VERSION; pytest also takes --game-version. Bare `just build-cs`
+# builds `default_build`.
+build-cs ver=default_build:
     @echo "🔨 Building C# project for {{ver}}..."
     {{dotnet}} build {{cs_project}} -p:GameVersion={{ver}}
 
@@ -247,13 +335,13 @@ test-venv-hashkey:
 # 50-combat seeded smoke gate for the sts2_hint recommender (bead sts2-rs-886i).
 # Fails if any seed hits UnsupportedStateError. Free-running coverage:
 # `uv run python tests/smoke_hint.py --random-seeds 50`.
-smoke-hint: build-cs
+smoke-hint: (build-cs engine_default_build)
     @echo "🔥 Running 50-combat sts2_hint smoke..."
     uv run python tests/smoke_hint.py --seeds 1-50
 
 # Wall-clock bench for sts2_hint.recommend() — writes baseline JSON
 # under tests/bench_baselines/ when --update-baseline is passed.
-bench-hint: build-cs
+bench-hint: (build-cs engine_default_build)
     @echo "📊 Running sts2_hint overhead bench..."
     uv run python tests/bench_hint_overhead.py
 

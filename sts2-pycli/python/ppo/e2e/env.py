@@ -477,7 +477,7 @@ class _RunEnv(PpoRunEnv):
         env = object.__new__(cls)
         env.seed = int(seed)
         env.ascension = int(rm.ascension_level)
-        env.character = CHARACTER
+        env.character = factory.CHARACTER
         env.sims = 0
         env.boss_sims = 0
         env.max_steps = int(max_steps)
@@ -540,6 +540,11 @@ class _RunEnv(PpoRunEnv):
             actions = self._mask_rejectable(phase, actions)
             if is_combat(actions):
                 return CombatTurn(step_index=self.steps)
+            if rm.pending_claws_select:
+                self.forced["CARD_TRANSFORM"] += 1
+                self._take(_claws_auto_pick(actions))
+                self.steps += 1
+                continue
             assert_encodable(actions, phase=phase)
             surface = classify_surface(phase, actions)
             if len(actions) == 1:
@@ -572,6 +577,18 @@ class _RunEnv(PpoRunEnv):
             raise RuntimeError(f"engine rejected action {actions[idx]!r}: {result}")
         self.steps += 1
         return self._advance("net")
+
+
+def _claws_auto_pick(actions: list[dict[str, Any]]) -> dict[str, Any]:
+    """The forced step that resolves Claws' optional "up to 6 into Maul" select.
+
+    GH #1353: the first offered card until the cap, then the confirm, which is
+    always last. That is the first six candidates in deck order, the pick the
+    engine made before the select surfaced. The schema has no kind for the
+    confirm, so the select stays out of the policy until a schema revision adds
+    one. Mirrors `claws_auto_pick` in `sts2-e2e/src/env.rs`.
+    """
+    return actions[0]
 
 
 def _forced_name(actions: list[dict[str, Any]], rm: Any) -> str:
@@ -777,7 +794,12 @@ class RowMeta:
 
 # The run-level reads the policy may make: `contracts.POLICY_CALLS`' `rm.*` names, and
 # the ones whose raw value carries hidden information (`contracts.POLICY_FILTERS`).
-_POLICY_RM = frozenset(c.split(".", 1)[1] for c in C.POLICY_CALLS if c.startswith("rm."))
+# A fill event adds its own (`contracts.FILL_POLICY_CALLS`: "chars" reads `rm.character`).
+_POLICY_RM = frozenset(
+    c.split(".", 1)[1]
+    for c in (*C.POLICY_CALLS, *(c for cs in C.FILL_POLICY_CALLS.values() for c in cs))
+    if c.startswith("rm.")
+)
 _POLICY_RM_FILTERS = {
     c.split(".", 1)[1]: f for c, f in C.POLICY_FILTERS.items() if c.startswith("rm.")
 }

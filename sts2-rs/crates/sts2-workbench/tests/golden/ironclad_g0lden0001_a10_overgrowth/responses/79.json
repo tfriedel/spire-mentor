@@ -5,6 +5,7 @@
    "ascension": 10,
    "backend": "rust",
    "character": "Ironclad",
+   "game_version": "v0.107.1",
    "name": "golden mid",
    "progress": {
     "act": 1,

@@ -198,7 +198,7 @@ fn autobattle_stops_at_run_level_decisions_and_grades_the_pick() {
         &mut wb,
         "POST",
         "/api/live/start",
-        json!({"character": "Ironclad", "seed": "AUT0BATTLE", "ascension": 0, "act1": "overgrowth"}),
+        json!({"character": "Ironclad", "seed": "AUT0BATTLE", "ascension": 0, "act1": "overgrowth", "game_version": "v0.107.1"}),
     );
     call(
         &mut wb,

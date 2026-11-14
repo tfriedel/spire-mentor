@@ -1448,12 +1448,19 @@ _V0111_ADDED_CLASS_CARDS: dict[str, list[str]] = {
 _V0111_ADDED_COLORLESS_CARDS: list[str] = ["THE_BALL"]
 _V0111_ADDED_EVENT_CARDS: list[str] = ["ABUNDANCE"]
 #: v0.113.0 event cards (`CardId::V0113_ONLY`): Waterfall of Obvious Secrets'
-#: Dingy Dagger, Shrine of the Warlord's Mighty Weapon and Mighty Shield.
-_V0113_ADDED_EVENT_CARDS: list[str] = ["DINGY_DAGGER", "MIGHTY_WEAPON", "MIGHTY_SHIELD"]
+#: Dingy Dagger, Shrine of the Warlord's Mighty Weapon and Mighty Shield, and
+#: God Byrd (Byrdpip's rest-site Evolve upgrades Byrd Swoop into it).
+_V0113_ADDED_EVENT_CARDS: list[str] = [
+    "DINGY_DAGGER",
+    "MIGHTY_WEAPON",
+    "MIGHTY_SHIELD",
+    "GOD_BYRD",
+]
 
 
 def sweep_game_version() -> str:
-    """The game build the sweep lists are for: ``$STS2_GAME_VERSION`` or v0.107.1.
+    """The game build the sweep lists are for: ``$STS2_GAME_VERSION``, or the
+    default build (``sts2_client.DEFAULT_GAME_VERSION``, spelled out here).
 
     `sts2_client.apply_game_version_arg` (``--game-version``) sets the env var
     for the whole process tree, so reading it here keeps this module free of
@@ -1461,7 +1468,7 @@ def sweep_game_version() -> str:
     """
     raw = os.environ.get("STS2_GAME_VERSION", "").strip()
     if not raw:
-        return "v0.107.1"
+        return "v0.111.0"
     return raw if raw.startswith("v") else f"v{raw}"
 
 

@@ -32,7 +32,7 @@ import re
 import sys
 from pathlib import Path
 
-from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS
+from sts2_client import LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS
 from workbench.localization import (
     _ENGINE_WIKI_VERSION,
     _KEYWORDS_AFTER_DESCRIPTION,
@@ -51,8 +51,8 @@ _DEFAULT_OUT = _PUBLIC / "card_text.json"
 def out_path_for(version: str | None = None) -> Path:
     """``web/public/card_text.json`` for the default build, else
     ``web/public/<ver>/card_text.json``."""
-    key = version or DEFAULT_GAME_VERSION
-    return _DEFAULT_OUT if key == DEFAULT_GAME_VERSION else _PUBLIC / key / "card_text.json"
+    key = version or LEGACY_GAME_VERSION
+    return _DEFAULT_OUT if key == LEGACY_GAME_VERSION else _PUBLIC / key / "card_text.json"
 
 
 def _strip_tags(text: str) -> str:
@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--version",
         choices=SUPPORTED_GAME_VERSIONS,
-        default=DEFAULT_GAME_VERSION,
+        default=LEGACY_GAME_VERSION,
         help="Game build whose text wins (default: the default build)",
     )
     parser.add_argument(

@@ -71,6 +71,7 @@ _DECK_MUTATION_ACTIONS = frozenset(
         "remove_deck_card",
         "upgrade_deck_card",
         "transform_deck_card",
+        "confirm_deck_selection",
         "enchant_deck_card",
         "grant_deck_card",
     }
@@ -85,10 +86,6 @@ _PHASE_SURFACE = {
     "rest_site": "rest",
     "treasure": "treasure",
 }
-
-# Base rest-site option order is always [Rest, Smith] (run_manager.rs);
-# the engine exposes no labels (workbench does the same mapping).
-REST_OPTION_LABELS = ("rest", "smith")
 
 
 def classify_surface(phase: str, actions: list[dict[str, Any]]) -> str | None:
@@ -208,7 +205,10 @@ def observe(
         obs["event_name"] = rm.current_event_name()
         obs["event_options"] = rm.event_option_infos()
     elif surface == "rest":
-        obs["rest_option_labels"] = list(REST_OPTION_LABELS)
+        # The engine's CURRENT option ids, in `rest_option` idx order. After a
+        # Miniature Tent first pick the taken option is gone and the rest
+        # move up, so a fixed ["rest", "smith"] misnames them.
+        obs["rest_option_labels"] = [oid for oid, _ in rm.rest_site_options()]
     elif surface == "potion-swap":
         # The potion being OFFERED. Every option token names a potion you
         # would THROW AWAY (or the decline), so without this the decision is

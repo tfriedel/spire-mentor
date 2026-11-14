@@ -180,7 +180,7 @@ def test_pad_indices_did_not_move():
     assert len(vocab.FIXED_KINDS) == vocab.N_FIXED, "no spare fixed row left"
 
 
-COVER_SEEDS = (5, 12, 13, 15)
+COVER_SEEDS = (2, 6, 14, 22)
 
 
 @pytest.mark.slow
@@ -209,8 +209,10 @@ def test_live_path_carries_the_offer_into_the_state_token(monkeypatch):
     never yield it as a decision — the exact set this test needs to inspect.
 
     `COVER_SEEDS` are known cover seeds: with the flag on, each produces at
-    least one full-belt potion reward at A0. Re-censused 2026-11-12 over
-    0..39 (GH #1301): 5, 12, 13, 15, 27, 31, 36, 38 swap. Seed 17, the
+    least one full-belt potion reward at A0. Re-censused 2026-11-14 over
+    0..39: 2, 6, 14, 22, 26, 39 swap. The 2026-11-12 set (GH #1301: 5, 12,
+    13, 15, 27, 31, 36, 38) was empty on main at 5a96d6647, after v0.111.0
+    became the default build (#1358). Seed 17, the
     previous single cover seed, had lost its swap by then (most likely to
     act 1 rolling from the seed, `7320dbe99`); 15 and 5 had each drifted
     out earlier and drifted back in. A

@@ -8,7 +8,7 @@ import ResultsView from "./ResultsView";
 import StudiesForm from "./StudiesForm";
 import { decodeHash, emptyPosition, encodeHash, formatPosition, sweepFromSearch, type Position } from "./position";
 import { usePanelChoice } from "../panelPrefs";
-import { DEFAULT_GAME_VERSION, effectiveGameVersion, gameVersionBody, gameVersionLabel } from "../gameVersion";
+import { LEGACY_GAME_VERSION, NO_VERSION_PICK, effectiveGameVersion, gameVersionBody, gameVersionLabel } from "../gameVersion";
 
 // The distribution sweeps run on both hosts since GH #707 (the wasm steps
 // them between requests); the flag stays so a host could switch them off
@@ -40,25 +40,25 @@ export default function App() {
   // build the selector names, like /api/live/start. Until the server's list
   // lands the pick is taken as-is; a pick the server cannot run then falls
   // back to its default (the pick itself is left alone).
-  const [gameVersionPick, setGameVersionPick] = usePanelChoice("wb.gameVersion", DEFAULT_GAME_VERSION);
+  const [gameVersionPick, setGameVersionPick] = usePanelChoice("wb.gameVersion", NO_VERSION_PICK);
   const [gameVersions, setGameVersions] = useState<string[] | null>(null);
-  const [serverDefaultVersion, setServerDefaultVersion] = useState(DEFAULT_GAME_VERSION);
+  const [serverDefaultVersion, setServerDefaultVersion] = useState(LEGACY_GAME_VERSION);
   const gameVersion = gameVersions
     ? effectiveGameVersion(gameVersionPick, gameVersions, serverDefaultVersion)
     : gameVersionPick;
   // The board on screen names its own build; the catalog follows it.
-  const shownVersion = position ? (position.game_version ?? DEFAULT_GAME_VERSION) : gameVersion;
+  const shownVersion = position ? (position.game_version ?? LEGACY_GAME_VERSION) : gameVersion;
   useEffect(() => {
     let cancelled = false;
     api
       .capabilities()
       .then((c) => {
         if (cancelled) return;
-        setGameVersions(c.game_versions?.length ? c.game_versions : [DEFAULT_GAME_VERSION]);
+        setGameVersions(c.game_versions?.length ? c.game_versions : [LEGACY_GAME_VERSION]);
         if (c.default_game_version) setServerDefaultVersion(c.default_game_version);
       })
       .catch(() => {
-        if (!cancelled) setGameVersions([DEFAULT_GAME_VERSION]);
+        if (!cancelled) setGameVersions([LEGACY_GAME_VERSION]);
       });
     return () => {
       cancelled = true;

@@ -318,5 +318,5 @@ def test_reward_preview_endpoint_takes_a_game_version(tmp_path):
     assert r.status_code == 200
     if _V111_DB.is_file():
         # Unknown to v0.107.1 (no stats, no damage), a real attack in v0.111.0.
-        base = c.post("/api/deck/reward-preview", json=body).json()
+        base = c.post("/api/deck/reward-preview", json={**body, "game_version": "v0.107.1"}).json()
         assert r.json()["candidates"][0]["delta"] != base["candidates"][0]["delta"]

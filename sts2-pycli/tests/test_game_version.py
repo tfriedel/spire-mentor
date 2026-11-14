@@ -30,10 +30,12 @@ def restore_version():
         os.environ[sts2_client.GAME_VERSION_ENV] = env
 
 
-def test_default_is_stable_build() -> None:
-    assert sts2_client.DEFAULT_GAME_VERSION == "v0.107.1"
-    assert sts2_client.SUPPORTED_GAME_VERSIONS[0] == sts2_client.DEFAULT_GAME_VERSION
-    assert "v0.111.0" in sts2_client.SUPPORTED_GAME_VERSIONS
+def test_the_default_and_the_legacy_build_are_two_things() -> None:
+    """Naming no build gets v0.111.0; a file that names none IS v0.107.1."""
+    assert sts2_client.DEFAULT_GAME_VERSION == "v0.111.0"
+    assert sts2_client.LEGACY_GAME_VERSION == "v0.107.1"
+    assert sts2_client.SUPPORTED_GAME_VERSIONS[0] == sts2_client.LEGACY_GAME_VERSION
+    assert sts2_client.DEFAULT_GAME_VERSION in sts2_client.SUPPORTED_GAME_VERSIONS
 
 
 @pytest.mark.parametrize("raw", ["v0.111.0", "0.111.0", " v0.111.0 "])
@@ -48,9 +50,9 @@ def test_normalize_rejects_unsupported() -> None:
 
 def test_resolve_reads_env(monkeypatch) -> None:
     monkeypatch.delenv(sts2_client.GAME_VERSION_ENV, raising=False)
-    assert sts2_client.resolve_game_version() == "v0.107.1"
-    monkeypatch.setenv(sts2_client.GAME_VERSION_ENV, "0.111.0")
     assert sts2_client.resolve_game_version() == "v0.111.0"
+    monkeypatch.setenv(sts2_client.GAME_VERSION_ENV, "0.107.1")
+    assert sts2_client.resolve_game_version() == "v0.107.1"
 
 
 def test_paths_are_version_keyed() -> None:

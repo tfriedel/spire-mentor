@@ -91,6 +91,7 @@ pub fn classify(rm: &RunManager, actions: &[RunAction]) -> Option<AblationSurfac
                 RunAction::RemoveDeckCard { .. }
                     | RunAction::UpgradeDeckCard { .. }
                     | RunAction::TransformDeckCard { .. }
+                    | RunAction::ConfirmDeckSelection
                     | RunAction::EnchantDeckCard { .. }
             )
         })

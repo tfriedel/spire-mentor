@@ -163,6 +163,12 @@ class PpoDecision:
     #: one-per-card either way -- this says how many of them the reply
     #: carries, not how many the net ranks.
     pick_count: int = 1
+    #: Claws' optional "up to N" pick (GH #1353): how many more cards the
+    #: screen takes. The candidates are then one ``transform_deck_card`` per
+    #: card plus a trailing ``confirm_deck_selection``, and the net is asked
+    #: again after each card it takes, as in the engine (see
+    #: :func:`plan_optional_picks`). 0 for every other screen.
+    optional_room: int = 0
 
 
 @lru_cache(maxsize=1024)
@@ -548,7 +554,21 @@ def _live_potion_swap_enabled() -> bool:
     return bool(sts2_rs.resolve_potion_swap_flag())
 
 
-_REST_OPTION_LABELS = ("rest", "smith")
+def _rest_option_labels(options: list[dict[str, Any]]) -> list[str]:
+    """Option ids by ``room.Options`` slot, for ``ppo.encoder``'s rest token.
+
+    The mod sends only enabled options, so a disabled option's slot stays
+    ``""`` (occupied, id unknown). So does every slot of a mod too old to
+    send ``id``. Mirrors ``sts2-runai`` ``rest_option_labels``.
+    """
+    labels: list[str] = []
+    for i, o in enumerate(options):
+        slot = int(o.get("option_index", i))
+        if slot < 0:
+            continue
+        labels.extend([""] * (slot + 1 - len(labels)))
+        labels[slot] = str(o.get("id") or "")
+    return labels
 
 
 def _build_rest_site(state: dict[str, Any]) -> PpoDecision | None:
@@ -558,7 +578,7 @@ def _build_rest_site(state: dict[str, Any]) -> PpoDecision | None:
         return None
     run_state = state.get("run_state") or {}
     obs = _base_obs(state, run_state)
-    obs["rest_option_labels"] = list(_REST_OPTION_LABELS)
+    obs["rest_option_labels"] = _rest_option_labels(options)
     # ``option_index`` is the option's slot in C# ``room.Options`` -- the
     # engine ``rest_site_options()`` order the net was trained on (a disabled
     # Smith keeps slot 1). The mod's ``index`` is renumbered after it drops
@@ -1212,7 +1232,8 @@ _CARD_SELECT_SURFACES = {
 #:     `Add(item, Deck)` (SeaGlass.cs:74-91).
 #:   * CLAWS  `FromDeckForTransformation` -> `CardCmd.Transform(..)` into Maul
 #:     (Claws.cs:22-29) -- master-deck cards, which is the `transform`
-#:     surface's own shape.
+#:     surface's own shape. It takes 0..=6 cards and a confirm, as the
+#:     engine's `confirm_deck_selection` does (GH #1353).
 #:   * BLITZ.NEOW (v0.113.0 Blitz mode)  `FromSimpleGridForRewards(prefs(3))`
 #:     -> `Add(item, Deck)` (Models.Blitz/BlitzRunModel.cs:24-35) -- 3 of 10
 #:     generated class cards, ROOM_FULL_OF_CHEESE's shape. Unmapped it went
@@ -1388,10 +1409,24 @@ def _build_card_select(state: dict[str, Any], prev_msg_type: str | None) -> PpoD
         ]
         obs["card_grant_option_enchantments"] = [_card_enchantment(c) for c in cards]
         kind = "grant_deck_card"
-    for i, c in enumerate(cards):
-        actions.append({"action": kind, "idx": i})
-        responses.append(_response(int(c.get("index", i))))
-        labels.append(str(c.get("name") or c.get("id")))
+    # Claws (GH #1353): "up to N", then confirm. The engine offers the cards
+    # still unpicked plus `confirm_deck_selection`; on a grid that already
+    # holds picks (`selected_count`) only the room left is offered.
+    claws = prompt == CLAWS_PROMPT and min_n is not None and int(min_n) == 0
+    optional_room = 0
+    if claws:
+        taken = max(0, int(state.get("selected_count") or 0))
+        optional_room = max(0, int(max_n if max_n is not None else len(cards)) - taken)
+        pick_count = 1
+    if not claws or optional_room > 0:
+        for i, c in enumerate(cards):
+            actions.append({"action": kind, "idx": i})
+            responses.append(_response(int(c.get("index", i))))
+            labels.append(str(c.get("name") or c.get("id")))
+    if claws:
+        actions.append({"action": "confirm_deck_selection"})
+        responses.append({"action": "skip"})
+        labels.append("confirm")
     return PpoDecision(
         obs,
         actions,
@@ -1399,7 +1434,60 @@ def _build_card_select(state: dict[str, Any], prev_msg_type: str | None) -> PpoD
         responses,
         labels,
         pick_count=min(pick_count, len(cards)),
+        optional_room=optional_room,
     )
+
+
+#: Claws' select prompt (GH #1353), upper-cased as `_PROMPT_SURFACES` keys are.
+CLAWS_PROMPT = "CLAWS.SELECTIONSCREENPROMPT"
+
+
+def plan_optional_picks(
+    policy: Any,
+    decision: PpoDecision,
+    pick: Callable[[list[float], list[dict[str, Any]]], int],
+) -> tuple[list[int], list[float], Any, int]:
+    """Play Claws' "up to N, then confirm" screen the way the engine asks it.
+
+    The engine asks once per card (GH #1353): the cards not yet picked plus
+    `confirm_deck_selection`, with the deck unchanged until the confirm. The
+    world wants the whole answer in one reply, so this asks the net again
+    after each card it takes, removing that card from the offer, until it
+    confirms or the room is used up.
+
+    Args:
+        policy: The run policy (``distribution(obs, actions, metrics)``).
+        decision: A :func:`_build_card_select` decision with ``optional_room``.
+        pick: Chooses a candidate from ``(probs, actions)``.
+
+    Returns:
+        The picked candidates' positions in ``decision`` (cards only, in pick
+        order), then the first ask's probs, value and chosen position, which
+        the annotations describe.
+    """
+    n_cards = len(decision.actions) - 1
+    left = list(range(n_cards))
+    picked: list[int] = []
+    first: tuple[list[float], Any, int] | None = None
+    deck_idxs = list(decision.obs.get("transform_select_deck_indices") or [])
+    while True:
+        offer = left if len(picked) < decision.optional_room else []
+        actions = [{"action": "transform_deck_card", "idx": j} for j in range(len(offer))]
+        actions.append({"action": "confirm_deck_selection"})
+        obs = dict(decision.obs)
+        obs["transform_select_deck_indices"] = [deck_idxs[i] for i in offer]
+        if len(actions) == 1:
+            probs, value, chosen = [1.0], None, 0
+        else:
+            probs, value = policy.distribution(obs, actions, decision.metrics)
+            chosen = pick(probs, actions)
+        if first is None:
+            first = (probs, value, offer[chosen] if chosen < len(offer) else n_cards)
+        if chosen >= len(offer):
+            break
+        picked.append(offer[chosen])
+        left.remove(offer[chosen])
+    return picked, *first
 
 
 #: Bridge message ``type`` -> builder. Anything else (``card_bundle``,
@@ -2084,6 +2172,14 @@ def pick_noncombat_action_ppo(
             decision = builder(state)
         if decision is None or not decision.actions:
             return _fallback(), None
+        if decision.optional_room > 0:
+            cards, probs, value, chosen = plan_optional_picks(
+                policy, decision, lambda p, a: _select_index(p, temperature, rng, a)
+            )
+            idxs = [i for c in cards for i in decision.responses[c].get("indices") or []]
+            action = {"action": "choose", "indices": idxs} if idxs else {"action": "skip"}
+            action["annotations"] = build_ppo_annotations(decision, probs, chosen, value)
+            return action, None
         if len(decision.actions) == 1:
             probs, value, chosen = [1.0], None, 0
         else:

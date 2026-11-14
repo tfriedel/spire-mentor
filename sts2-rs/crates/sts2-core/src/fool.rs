@@ -646,6 +646,11 @@ fn after_arrow_impaled(state: &mut CombatState) {
     }
 }
 
+/// `EpicRetrieval` `EnergyVar(3)` (v0.113.0 `Cards/EpicRetrieval.cs`): the
+/// energy its `AfterArrowDislodged` gains when it is the dislodging source
+/// (4 upgraded).
+pub const EPIC_RETRIEVAL_ENERGY: i32 = 3;
+
 /// `Hook.AfterArrowDislodged` for a player arrow: Yah (once per turn,
 /// energy), Twine (block), EpicRetrieval (energy when it is the source).
 fn after_arrow_dislodged(state: &mut CombatState) {
@@ -670,7 +675,12 @@ fn after_arrow_dislodged(state: &mut CombatState) {
     if let Some(uid) = crate::card_effects::resolving_card_uid(state) {
         if let Some(c) = state.cards.get(uid.0.get() as usize - 1) {
             if c.card_id == CardId::EpicRetrieval {
-                let energy = if c.upgraded { 2 } else { 1 };
+                // `EpicRetrieval.cs`: `EnergyVar(3)`, `OnUpgrade` +1.
+                let energy = if c.upgraded {
+                    EPIC_RETRIEVAL_ENERGY + 1
+                } else {
+                    EPIC_RETRIEVAL_ENERGY
+                };
                 state.gain_energy(energy);
             }
         }
@@ -908,6 +918,30 @@ fn generate_into_hand(state: &mut CombatState, id: CardId, upgraded: bool) {
     if let Some(card) = crate::lookup_card_factory().and_then(|f| f(id, upgraded)) {
         let _ = crate::card_effects::spawn_card_into_hand_with_origin(state, card, true);
     }
+}
+
+/// v0.113.0 `GodByrdPower.AfterPlayerTurnStart` (`GodByrdPower.cs`): for
+/// the owning player, when `AmountOnTurnStart != 0`, deal `Amount` Unpowered
+/// to every hittable enemy, then `PowerCmd.Remove(this)`. The turn-start
+/// walk iterates the snapshot taken before the cluster ran, so a GodByrd
+/// played this turn (`AmountOnTurnStart == 0`) waits for the next turn.
+/// Not a Fool power — any character can evolve Byrdpip — but it lives with
+/// the other v0.113.0 turn-start powers.
+pub fn god_byrd_after_player_turn_start(
+    state: &mut CombatState,
+    uid: crate::PowerUid,
+    amount: i32,
+) {
+    if amount == 0 {
+        return;
+    }
+    crate::card_effects::deal_damage_to_all_alive_enemies(
+        state,
+        amount,
+        ValueProps::UNPOWERED,
+        None,
+    );
+    state.drop_power(uid.0);
 }
 
 /// `EcstasyPower.AfterPlayerTurnStart`: up to `amount` of the Sadness in
@@ -1223,10 +1257,68 @@ pub fn release_stretch(state: &mut CombatState, card: Option<CardUid>) {
     }
 }
 
+/// The pick step of `KiChant.cs`: `FromCombatPile(Draw, 1, top count)` to
+/// hand, then `CardCmd.Discard` the other top cards still in the draw pile
+/// (the select's [`crate::PostChoiceEffect::DiscardUnpickedFromDraw`]). A
+/// single top card is taken without a screen (`cards.Count <= MinSelect`);
+/// the grid sorts by `(Rarity, Id)` like every Draw-pile select. Runs at the
+/// end of the card's `OnPlay`, or after the Stratagem pick its shuffle
+/// opened ([`crate::PostChoiceEffect::KiChantPick`]).
+pub fn ki_chant_pick(state: &mut CombatState, count: usize) {
+    let mut top: SmallVec<[crate::CardUid; 4]> =
+        state.player.draw.iter().take(count).copied().collect();
+    match top.len() {
+        0 => {}
+        1 => {
+            let uid = top[0];
+            if let Some(pos) = state.player.draw.iter().position(|&u| u == uid) {
+                state.player.draw.remove(pos);
+                crate::cards::unpin(&mut state.player, uid);
+                let _ = crate::cards::try_add_to_hand(&mut state.player, uid);
+            }
+        }
+        _ => {
+            let rank = crate::lookup_card_rarity_rank();
+            let version = state.game_version;
+            let rarity = |state: &CombatState, uid: crate::CardUid| {
+                let id = state.cards[uid.0.get() as usize - 1].card_id;
+                rank.map_or(0, |f| f(id, version))
+            };
+            top.sort_by(|a, b| {
+                rarity(state, *a)
+                    .cmp(&rarity(state, *b))
+                    .then_with(|| crate::cards::draw_select_tiebreak(&state.cards, *a, *b, version))
+            });
+            let options: Vec<crate::ChoiceOption> = top
+                .iter()
+                .map(|&uid| {
+                    let c = &state.cards[uid.0.get() as usize - 1];
+                    crate::ChoiceOption {
+                        card_id: c.card_id,
+                        upgraded: c.upgraded,
+                        card_uid: Some(uid),
+                        source_pile: Some(crate::cards::PileKind::Draw),
+                    }
+                })
+                .collect();
+            state.open_hand_choice(crate::PendingChoice {
+                kind: crate::ChoiceKind::AddFromDrawByType,
+                options,
+                min_select: 1,
+                max_select: 1,
+                can_skip: false,
+                post_effect: Some(crate::PostChoiceEffect::DiscardUnpickedFromDraw),
+                picked: SmallVec::new(),
+            });
+        }
+    }
+}
+
 /// `ShowOffPower.AfterDeath` for an enemy death: each instance raises its
 /// ShowOff card's `IncreasedAim` (the card's `VarKey::Generic`; the card
 /// uid sits in the power's `counter`) by its Amount and removes itself. The
-/// C# also raises the deck version's; that carry-over is not modelled.
+/// C# also raises the deck version's: the run bridge folds the var back onto
+/// the master-deck card when the combat ends.
 pub fn show_off_after_death(state: &mut CombatState) {
     let jobs: SmallVec<[(core::num::NonZeroU32, i32, i32); 2]> = state
         .player_power_uids()

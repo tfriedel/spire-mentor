@@ -25,6 +25,13 @@ state) into a `Tok`: the token arrays of one row of the row batch
   `POTION`, `OFFER`, `MAPNODE` on map decisions) and one `OPT_*` token per
   merged class.
 
+A row of another character's run, and an Ironclad row in a launch that
+declares it, also carries the "chars" fill event (GH #1373, SCHEMA.md section
+13): the character in RUNCTX's `X_CHAR`, and on a combat row the pet (`ALLY`:
+Osty) and the orb belt (`ORB`) between the `BOSS` tokens and the S_ctx block,
+`E_DOOMED` on the enemies, and the Osty and Frost terms of `S_HP_LOSS_END`.
+Without the declaration an Ironclad row is unchanged.
+
 PRIV tokens (value only) go in the separate `pcat`/`pcont`/`psec` arrays:
 the true top-10 draw (`PRIV_DRAW`), the true next moves (`PRIV_ENEMY`, once
 the wheel has `peek_intents`) and this act's room queues and the later
@@ -497,6 +504,7 @@ class _Run:
         self._deck: list[Any] | None = None
         self._act: int | None = None
         self._floor: int | None = None
+        self._char: int | None = None
         rk = getattr(d, "run_key", None)
         # The run-static cache key: the run uid on the env path, else the run
         # object (checked with `is`).
@@ -635,9 +643,11 @@ def _runctx(
     deck: list[Any],
     sel: tuple[float, ...],
     room: str | None,
+    char: int = 0,
 ) -> None:
     cat, cont = buf.new("RUNCTX")
     cat[XC["X_DTYPE"]] = d.dtype
+    cat[XC["X_CHAR"]] = char
     if d.dtype in (DT["EVENT"], DT["NEOW"]):
         cat[XC["X_ID_MAIN"]] = _vid("event", _event_name(d, run))
     if d.is_combat:
@@ -792,17 +802,74 @@ def clear_cache(key: Any = None) -> None:
             del _MEMO[k]
 
 
+def run_char(run: _Run) -> int:
+    """X_CHAR of the row (`contracts.CHAR_ID`), or 0 when it carries no "chars"
+    data (SCHEMA.md section 13): an Ironclad run in a process that does not
+    declare the event (`factory.fill_chars`), or a run view without the
+    `character` read (a recording that predates it)."""
+    if run._char is None:
+        c = run.obs.get("character")
+        if c is None:
+            c = run.read("character")
+        if c is None or (str(c) == CT.BASE_CHARACTER and not _ironclad_chars()):
+            run._char = 0
+        else:
+            run._char = CT.char_id(c)
+    return run._char
+
+
+def _ironclad_chars() -> bool:
+    """Whether this process's Ironclad rows carry the "chars" event."""
+    import os
+
+    from . import factory
+
+    return os.environ.get(factory.CHARS_ENV, "") == "1"
+
+
+def _chars_tokens(buf: _Buf, player: dict[str, Any]) -> None:
+    """The "chars" tokens of a combat row, after the BOSS tokens: the pet
+    (`ALLY`: Osty, alive or dead) and the orb belt (`ORB`, one per slot)."""
+    o = player.get("osty")
+    if o:
+        cat, cont = buf.new("ALLY")
+        cat[XC["X_ID_MAIN"]] = _vid("monster", "Osty")
+        hp, mhp = _f(o.get("hp")), max(1.0, _f(o.get("max_hp")))
+        cont[CT.SCTX_C["E_HPF"]] = hp / mhp
+        cont[CT.SCTX_C["E_HP"]] = hp / 200.0
+        cont[CT.SCTX_C["E_MAXHP"]] = mhp / 200.0
+        cont[CT.SCTX_C["E_ALIVE"]] = float(bool(o.get("alive")))
+    orbs = player.get("orbs") or []
+    slots = max(int(player.get("orb_slots") or 0), len(orbs))
+    for i in range(min(slots, CT.MAX_ORB_TOKENS)):
+        cat, cont = buf.new("ORB")
+        cat[XC["X_POS"]] = _pos(i)
+        if i < len(orbs):
+            cat[XC["X_ID_MAIN"]] = _vid("orb", orbs[i].get("type"))
+            cont[XF["C_ORB_PASSIVE"]] = _f(orbs[i].get("passive")) / 10.0
+            cont[XF["C_ORB_EVOKE"]] = _f(orbs[i].get("evoke")) / 20.0
+        else:
+            cat[XC["X_ID_MAIN"]] = _vid("orb", "Empty")
+
+
 def _head(
-    d: Any, run: _Run, snap: dict[str, Any] | None, room: str | None
+    d: Any,
+    run: _Run,
+    snap: dict[str, Any] | None,
+    room: str | None,
+    player: dict[str, Any] | None = None,
 ) -> tuple[_Buf, list[Any], list[Any]]:
-    # A combat head is at most 8 tokens; an OOC row grows from 64.
+    """The head. `player` is `state_to_dict(bv)["player"]` on a combat row of
+    another character's run (`run_char(run) != 0`), else None."""
+    # A combat head is at most 8 tokens (19 with the "chars" tokens); an OOC
+    # row grows from 64.
     buf = _Buf(8 if d.is_combat else 64)
     stc = _static(run)
     fm = stc["fm"]
     bosses = stc["bosses"]
     deck = run.deck()
     ench = run.deck_ench() or []
-    _runctx(buf, d, run, fm, len(bosses), deck, _sel_spec(d), room)
+    _runctx(buf, d, run, fm, len(bosses), deck, _sel_spec(d), room, run_char(run))
     if snap is not None:
         draw = _pile_summary(snap["draw_unknown"], snap["draw_top"], snap["draw_bottom"])
         _summary(buf, "SUM_DRAW", *draw)
@@ -822,6 +889,8 @@ def _head(
         cat[XC["X_ID_MAIN"]] = _vid("encounter", b)
         cont[XF["B_ORDER"]] = float(k)
         cont[XF["B_ACT"]] = act / 3.0
+    if player is not None:
+        _chars_tokens(buf, player)
     return buf, deck, ench
 
 
@@ -908,8 +977,10 @@ def _sctx_trailing(
     picked: list[int],
     tele: Any,
     fc: Any,
+    player: dict[str, Any] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """The trailing columns of the S_ctx block: `[T, 17]` cat, `[T, 88]` cont."""
+    """The trailing columns of the S_ctx block: `[T, 17]` cat, `[T, 88]` cont.
+    `player` as in `_head`: with it, the "chars" terms of the tactical columns."""
     t = len(sec)
     xc = np.zeros((t, N_CAT - NS_CAT), np.int16)
     xf = np.zeros((t, N_CONT - NS_CONT), np.float32)
@@ -971,12 +1042,21 @@ def _sctx_trailing(
                 xf[hand_tok[int(hi)], XF["K_PICKED"] - NS_CONT] = 1.0
     # Tactical columns and the WP-ENG-1 intent columns, per enemy (a dead
     # enemy keeps a forecast in the getter; it gets none here).
-    md, kill, loss = TC.tactical(snap, acts)
+    if player is None:
+        md, kill, loss = TC.tactical(snap, acts)
+        doomed: list[float] = []
+    else:
+        md, kill, loss = TC.tactical(
+            snap, acts, end_block=TC.end_turn_block(player), ally_hp=TC.ally_hp_of(player)
+        )
+        doomed = TC.doomed(snap)
     em = np.flatnonzero(s[:a0] == SEC["ENEMY"])
     enemies = snap.get("enemies") or []
     for j, ti in enumerate(em):
         xf[ti, XF["E_MAXDMG"] - NS_CONT] = md[j] / 50.0 if j < len(md) else 0.0
         xf[ti, XF["E_KILLABLE"] - NS_CONT] = kill[j] if j < len(kill) else 0.0
+        if j < len(doomed):
+            xf[ti, XF["E_DOOMED"] - NS_CONT] = doomed[j]
         if (tele is not None or fc is not None) and not _dead(enemies, j):
             cat_row = np.zeros(N_CAT, np.int16)
             cont_row = np.zeros(N_CONT, np.float32)
@@ -1012,7 +1092,14 @@ def encode_combat(d: Any, *, rare: Any = None, priv: bool = True, check: bool = 
     acts = d.obs_actions
     run = _Run(d)
     picked = combat_picks(snap, acts)
-    buf, _deck, _ench = _head(d, run, snap, d.room)
+    d_bv = getattr(d, "d_bv", None)
+    player = None
+    if run_char(run):
+        # The row carries the "chars" fill event.
+        if d_bv is None:
+            d_bv = sts2_rs.state_to_dict(bv)
+        player = d_bv.get("player") or {}
+    buf, _deck, _ench = _head(d, run, snap, d.room, player)
     hcat, hcont, hsec, hflags = buf.arrays()
     rf = sts2_rs.rollout_features(bv, version=1)
     tk = T.tokens(snap, acts, rf, "S_ctx")
@@ -1029,7 +1116,7 @@ def encode_combat(d: Any, *, rare: Any = None, priv: bool = True, check: bool = 
     n_mem = len(acts)
     if n_act != n_mem:
         raise CT.SchemaError(f"S_ctx built {n_act} action tokens for {n_mem} members")
-    xc, xf = _sctx_trailing(cat15, sec, n_act, d, snap, getattr(d, "d_bv", None), picked, tele, fc)
+    xc, xf = _sctx_trailing(cat15, sec, n_act, d, snap, d_bv, picked, tele, fc, player)
     # The row's arrays, written in place: the head, then the S_ctx block.
     t = len(sec)
     lo = len(hsec)

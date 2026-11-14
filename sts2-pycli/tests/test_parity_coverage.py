@@ -268,7 +268,10 @@ def _all_card_subjects() -> set[str]:
     uncovered here.
     """
     out: set[str] = set()
-    for character in _CHARACTERS:
+    # The Fool and its pack exist from v0.113.0; the other test builds have
+    # no such character to sweep.
+    fool = ("Fool",) if m.sweep_game_version() == "v0.113.0" else ()
+    for character in _CHARACTERS + fool:
         out |= {
             s.coverage_subject.split(":", 1)[1]
             for s in m.coverage_scenarios(character)

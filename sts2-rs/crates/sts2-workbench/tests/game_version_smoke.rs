@@ -76,7 +76,13 @@ fn capabilities_list_the_supported_builds() {
     #[cfg(workbench_game_data_v0_113_0)]
     want.push("v0.113.0");
     assert_eq!(caps["game_versions"], json!(want));
-    assert_eq!(caps["default_game_version"], json!("v0.107.1"));
+    // A new run starts on the new-run default when its bundle is embedded.
+    let default = if cfg!(workbench_game_data_v0_111_0) {
+        "v0.111.0"
+    } else {
+        "v0.107.1"
+    };
+    assert_eq!(caps["default_game_version"], json!(default));
 }
 
 #[test]
@@ -115,11 +121,11 @@ fn a_v0111_run_hashes_its_seed_with_that_build() {
         &mut wb,
         "POST",
         "/api/live/start",
-        json!({"character": "Ironclad", "seed": "TEST", "act1": "overgrowth"}),
+        json!({"character": "Ironclad", "seed": "TEST", "act1": "overgrowth", "game_version": "v0.107.1"}),
     );
     assert!(
         old["state"].get("game_version").is_none(),
-        "default is unnamed"
+        "a legacy-build state is unnamed"
     );
     let (v_old, seed_old) = live_run(&wb);
     assert_eq!(v_old, GameVersion::V0_107_1);
@@ -249,27 +255,31 @@ fn save_persist_and_run_log_keep_a_v0111_run() {
 }
 
 #[test]
-fn default_build_payloads_never_name_it() {
+fn legacy_build_payloads_name_it_too() {
     let mut wb = new_wb();
     let step = call(
         &mut wb,
         "POST",
         "/api/live/start",
-        json!({"character": "Ironclad", "seed": "TEST", "act1": "overgrowth"}),
+        json!({"character": "Ironclad", "seed": "TEST", "act1": "overgrowth", "game_version": "v0.107.1"}),
     );
     advance(&mut wb, step, 2);
-    let save = wb.build_save("v107", "t").expect("save");
-    assert!(save.get("game_version").is_none());
+    let mut save = wb.build_save("v107", "t").expect("save");
+    assert_eq!(save["game_version"], json!("v0.107.1"));
     let persist = wb.export_persist();
-    assert!(persist.get("game_version").is_none());
-    // And they restore as v0.107.1.
+    assert_eq!(persist["game_version"], json!("v0.107.1"));
+    // A save from before the key was always written names none, and
+    // restores as v0.107.1.
+    save.as_object_mut()
+        .expect("save object")
+        .remove("game_version");
     let mut wb2 = new_wb();
     wb2.restore_save(&save, sts2_workbench::runlog::DEFAULT_NOW_ISO)
         .expect("restore");
     assert_eq!(live_run(&wb2).0, GameVersion::V0_107_1);
     call(&mut wb, "POST", "/api/live/quit", Value::Null);
     let log = wb.take_run_log().expect("log");
-    assert!(!log.text.contains("game_version"));
+    assert!(log.text.contains(r#""game_version":"v0.107.1""#));
 }
 
 #[test]
@@ -379,7 +389,9 @@ fn reward_preview_grades_with_the_requested_builds_tables() {
     let mut deck = vec![json!({"id": "STRIKE_IRONCLAD"}); 5];
     deck.extend(vec![json!({"id": "DEFEND_IRONCLAD"}); 4]);
     let body = json!({"deck": deck, "candidates": [{"index": 0, "id": "OUTRAGE"}]});
-    let base = call(&mut wb, "POST", "/api/deck/reward-preview", body.clone());
+    let mut v107_body = body.clone();
+    v107_body["game_version"] = json!("v0.107.1");
+    let base = call(&mut wb, "POST", "/api/deck/reward-preview", v107_body);
     let mut v111_body = body.clone();
     v111_body["game_version"] = json!("v0.111.0");
     let v111 = call(&mut wb, "POST", "/api/deck/reward-preview", v111_body);
@@ -405,7 +417,9 @@ fn reward_preview_grades_with_the_requested_builds_tables() {
 fn simlab_deals_in_the_requested_build() {
     let mut wb = new_wb();
     let body = json!({"character": "Ironclad", "encounter": "FUZZY_WURM_CRAWLER_WEAK", "seed": 4});
-    let base = call(&mut wb, "POST", "/api/simlab/position/new", body.clone());
+    let mut v107_body = body.clone();
+    v107_body["game_version"] = json!("v0.107.1");
+    let base = call(&mut wb, "POST", "/api/simlab/position/new", v107_body);
     assert!(base["position"].get("game_version").is_none());
     let mut v111_body = body;
     v111_body["game_version"] = json!("v0.111.0");

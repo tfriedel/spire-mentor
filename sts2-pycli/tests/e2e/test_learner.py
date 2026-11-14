@@ -2676,3 +2676,28 @@ pytestmark = pytest.mark.skipif(
     'sys.platform == "win32"',
     reason="the learner ships rows through POSIX shared memory that outlives its creator; Windows unlinks a block when its last handle closes. The lane runs on Linux only.",
 )
+
+
+def test_the_character_and_the_chars_event_come_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GH #1373: a launch plays the process's character (`factory.CHARACTER`); every
+    character but Ironclad declares "chars"; Ironclad may, and the learner then turns
+    the event on for its workers' Ironclad rows (`factory.CHARS_ENV`)."""
+    from ppo.e2e import factory
+
+    monkeypatch.delenv(factory.CHARS_ENV, raising=False)
+    with pytest.raises(L.UsageError, match="this process plays Ironclad"):
+        make_learner(make_cfg(tmp_path / "a", character="Necrobinder", filled=["chars"]))
+    make_learner(make_cfg(tmp_path / "b"))
+    assert not factory.fill_chars()
+    lr = make_learner(make_cfg(tmp_path / "b2", filled=["chars"]))
+    assert lr.stamps["filled"] == ["chars"] and factory.fill_chars()
+    make_learner(make_cfg(tmp_path / "b3"))
+    assert not factory.fill_chars()
+    monkeypatch.setattr(factory, "CHARACTER", "Necrobinder")
+    with pytest.raises(L.UsageError, match='every character but Ironclad declares "chars"'):
+        make_learner(make_cfg(tmp_path / "c", character="Necrobinder"))
+    lr = make_learner(make_cfg(tmp_path / "d", character="Necrobinder", filled=["chars"]))
+    assert lr.stamps["filled"] == ["chars"] and lr.cfg.character == "Necrobinder"
+    factory.set_fill_chars(False)

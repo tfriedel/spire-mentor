@@ -159,6 +159,10 @@ FIXED_SAVED_AT = "2026-01-01T00:00:00Z"
 #: Rule (d): full bodies for every request in the first N steps of a
 #: ``"full": true`` scenario.
 DEFAULT_FULL_STEPS = 40
+#: `sts2_client.LEGACY_GAME_VERSION`: the build of a scenario that names none
+#: (every scenario recorded before builds were selectable). Spelled out here
+#: because this script imports the workbench lazily.
+LEGACY_BUILD = "v0.107.1"
 #: Deck-level ``card_select`` contexts (everything else is an in-combat choice
 #: or a choose-screen).
 DECK_CONTEXTS = frozenset({"remove", "upgrade", "transform", "enchant", "grant"})
@@ -885,8 +889,7 @@ def run_scenario(
                     "boss_sims": int(scn.get("combat_boss_sims", 16)),
                     "threads": 1,
                 }
-                if scn.get("game_version"):
-                    start_body["game_version"] = scn["game_version"]
+                start_body["game_version"] = scn.get("game_version") or LEGACY_BUILD
             else:
                 start_route = "/api/live/start"
                 start_body = {
@@ -896,10 +899,10 @@ def run_scenario(
                     "act1": scn["act1"],
                     "backend": "rust",
                 }
-                # GH #801: only a scenario on a non-default build names one, so
-                # every v0.107.1 scenario's start request is byte-identical.
-                if scn.get("game_version"):
-                    start_body["game_version"] = scn["game_version"]
+                # Every start names its build: a request that names none gets
+                # the default build, and these scenarios are recorded on the
+                # one their file says (the legacy build unless it names one).
+                start_body["game_version"] = scn.get("game_version") or LEGACY_BUILD
             status, body = rec.request("POST", start_route, start_body, probe=False)
             if status != 200:
                 raise RuntimeError(f"{name}: {start_route} -> {status}: {body}")
@@ -1097,6 +1100,9 @@ def _run_probe(
                 {"index": c.get("index", i), "id": c.get("id"), "upgraded": bool(c.get("upgraded"))}
                 for i, c in enumerate(cands)
             ],
+            # Graded with the run's own build's tables (a state names its
+            # build unless it is the legacy one).
+            "game_version": state.get("game_version") or LEGACY_BUILD,
         }
         rec.request("POST", "/api/deck/reward-preview", body, probe=True)
         return None

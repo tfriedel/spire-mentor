@@ -1225,6 +1225,13 @@ pub enum Effect {
         /// Energy to add (non-positive amounts are no-ops).
         amount: i32,
     },
+    /// Grant every living player on the seated player's side `amount` energy
+    /// ([`crate::coop::every_player_gains_energy`]): v0.113.0
+    /// `CompostPower.AfterDeath`. GH #1337.
+    GainEnergyEveryPlayer {
+        /// Energy each player gains.
+        amount: i32,
+    },
     /// Grant the player `amount` Stars. Deferred from read-only listener
     /// walks (`StarNextTurnPower.AfterEnergyReset`). Routes through
     /// [`CombatState::gain_stars`].
@@ -1854,6 +1861,9 @@ pub fn apply_effect(state: &mut CombatState, effect: Effect) {
             // through `CombatState::gain_energy`, which clamps non-positive
             // amounts and saturates at i8::MAX.
             state.gain_energy(amount);
+        }
+        Effect::GainEnergyEveryPlayer { amount } => {
+            crate::coop::every_player_gains_energy(state, amount);
         }
         Effect::GainStars { amount } => {
             // Player stars gain deferred from a read-only listener walk
@@ -9852,14 +9862,15 @@ pub fn after_death(
     let power = state.powers.get_by_id(uid.0)?;
     match power.kind {
         // v0.113.0 `CompostPower.AfterDeath`: a creature of the other side died
-        // -> each living player teammate gains Amount energy. Compost is only
-        // ever a player power, so "other side" is the enemy side.
+        // -> every living player on the owner's side gains Amount energy
+        // (`GetTeammatesOf(Owner)` includes the owner). Compost is only ever a
+        // player power, so "other side" is the enemy side.
         PowerKind::Compost
             if state.game_version >= crate::GameVersion::V0_113_0
                 && ctx.dead_side == Side::Enemy =>
         {
             let mut effects = SmallVec::new();
-            effects.push(Effect::GainEnergy {
+            effects.push(Effect::GainEnergyEveryPlayer {
                 amount: power.amount,
             });
             Some(effects)
@@ -12756,7 +12767,13 @@ pub fn modify_damage_parts(state: &CombatState, ctx: &DamageCtx) -> DamageParts 
             // v0.113.0 `WahHammer.ModifyDamageMultiplicative`: its own damage
             // is doubled against a target that has `ImpaledPower` — a plain
             // listener in `Hook.ModifyDamage`, after every additive.
-            if card.card_id == crate::cards::CardId::WahHammer {
+            // `cardSource != this` excludes everything else dealt while the
+            // card resolves: ViolentChord's / ExplosiveArrows' Unpowered
+            // `CreatureCmd.Damage` carry no card source. The card's own hit
+            // is a powered `DamageCmd.Attack` (`ValueProp.Move`), so the
+            // powered bit stands in for the missing `cardSource` (Fool:1008
+            // act1 combat@249: Rust doubled ViolentChord's 9 as well).
+            if card.card_id == crate::cards::CardId::WahHammer && ctx.props.is_powered() {
                 if let CreatureRef::Enemy(target) = ctx.target {
                     if crate::fool::creature_is_impaled(state, target) {
                         card_mul = DamageMul::new(2, 1);

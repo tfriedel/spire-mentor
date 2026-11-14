@@ -13,7 +13,11 @@ function of what the player sees):
 * per enemy, `killable`: `max_damage >= hp + block`.
 * `hp_loss`: the HP the player loses if the turn ended now, the displayed
   attack intents of every living enemy (`effective_amount x times`) less the
-  player's block.
+  player's block. On another character's row (the "chars" fill event, GH
+  #1373) two more terms come off, both zero for Ironclad: the block the Frost
+  orbs' passives add before the enemies act (`end_block`), and the HP of a
+  living Osty, which takes the unblocked attack damage first (`ally_hp`).
+* per enemy, `doomed`: Doom >= hp, so the enemy dies at the end of its turn.
 
 It ignores draw, energy gain and every other effect of the cards it plays, so
 `max_damage` is a lower bound on a combo turn and an upper bound when a random
@@ -47,11 +51,19 @@ def _attack_total(i: dict[str, Any]) -> float:
     return float(eff) * float(i.get("times") or 1)
 
 
-def hp_loss(snap: dict[str, Any], intents: list[list[dict[str, Any]]] | None = None) -> float:
-    """Unblocked incoming attack damage if the turn ended now.
+def hp_loss(
+    snap: dict[str, Any],
+    intents: list[list[dict[str, Any]]] | None = None,
+    *,
+    end_block: float = 0.0,
+    ally_hp: float = 0.0,
+) -> float:
+    """The HP the player loses to attack intents if the turn ended now.
 
     `intents` (aligned with `snap["enemies"]`) replaces the snapshot's
     displayed intents, e.g. with the full telegraph once the getter exists.
+    `end_block` and `ally_hp` are `end_turn_block` and `ally_hp_of` of the
+    player (0 for Ironclad).
     """
     inc = 0.0
     for j, m in enumerate(snap["enemies"]):
@@ -59,7 +71,46 @@ def hp_loss(snap: dict[str, Any], intents: list[list[dict[str, Any]]] | None = N
             continue
         ints = intents[j] if intents is not None else m.get("intents") or []
         inc += sum(_attack_total(i) for i in ints)
-    return max(0.0, inc - float(snap["player"].get("block") or 0))
+    unblocked = max(0.0, inc - float(snap["player"].get("block") or 0) - end_block)
+    return max(0.0, unblocked - ally_hp)
+
+
+def end_turn_block(player: dict[str, Any]) -> float:
+    """The block the orb belt adds at the end of the player's turn, before the
+    enemies act: each Frost orb's passive (`OrbQueue.BeforeTurnEnd`,
+    `FrostOrb.Passive`: unpowered block, Focus already in `passive`).
+
+    `player` is `state_to_dict(bv)["player"]`.
+    """
+    return float(
+        sum(
+            int(o.get("passive") or 0) for o in player.get("orbs") or [] if o.get("type") == "Frost"
+        )
+    )
+
+
+def ally_hp_of(player: dict[str, Any]) -> float:
+    """The HP of the player's living Osty, else 0. Osty takes the unblocked
+    damage of an attack on its owner, and the overkill passes on to the owner
+    (`DieForYouPower.ModifyUnblockedDamageTarget`, `CreatureCmd.Damage`)."""
+    o = player.get("osty") or {}
+    return float(o.get("hp") or 0) if o.get("alive") else 0.0
+
+
+DOOM = "DOOM"
+
+
+def doomed(snap: dict[str, Any]) -> list[float]:
+    """Per enemy of `snap["enemies"]`: 1.0 if it is alive and its Doom is at
+    least its HP (`DoomPower.IsOwnerDoomed`: it dies at the end of its turn)."""
+    out = []
+    for m in snap["enemies"]:
+        doom = sum(
+            float(p.get("amount") or 0) for p in m.get("powers") or [] if p.get("name") == DOOM
+        )
+        hp = float(m.get("hp") or 0)
+        out.append(float(not m.get("is_dead") and hp > 0 and doom >= hp))
+    return out
 
 
 def max_damage(snap: dict[str, Any], playable: set[int]) -> list[float]:
@@ -121,6 +172,9 @@ def tactical(
     snap: dict[str, Any],
     actions: list[dict[str, Any]],
     intents: list[list[dict[str, Any]]] | None = None,
+    *,
+    end_block: float = 0.0,
+    ally_hp: float = 0.0,
 ) -> tuple[list[float], list[float], float]:
     """`(max_damage per enemy, killable per enemy, hp_loss)`, unscaled."""
     md = max_damage(snap, playable_from(actions))
@@ -129,4 +183,4 @@ def tactical(
         alive = not m.get("is_dead")
         ehp = float(m.get("hp") or 0) + float(m.get("block") or 0)
         kill.append(float(alive and ehp > 0 and md[j] >= ehp))
-    return md, kill, hp_loss(snap, intents)
+    return md, kill, hp_loss(snap, intents, end_block=end_block, ally_hp=ally_hp)

@@ -31,7 +31,13 @@ row with a non-empty draw pile (STATE's N_DRAW) has PRIV_DRAW tokens: the tokeni
 reads `cs.true_draw_top` or the old `state_to_dict` fallback, so PRIV_DRAW does not
 depend on the fill. Any other fill event not declared leaves no trace: its reserved
 columns are zero and no row has its reserved decision types or action kinds. A
-declared event other than WP-ENG-1 has no positive check here (`unchecked`).
+declared event other than WP-ENG-1 and "chars" has no positive check here (`unchecked`).
+
+"chars" (GH #1373, SCHEMA.md section 13) is the characters' event: a row that carries
+it has its character in RUNCTX's X_CHAR. Declared: X_CHAR is set on at least `CHAR_MIN`
+(95%) of the rows. Not declared: no row has X_CHAR, an ALLY or ORB token or E_DOOMED
+(the generic rule above, over `contracts.FILL_SLOTS`). Every launch of another
+character declares it; an Ironclad launch may, and then its rows carry it too.
 
 Fewer than `MIN_ROWS` combat rows, or with WP-ENG-1 declared fewer than `MIN_ENEMIES`
 live-enemy tokens, is inconclusive: `ok` is False, `inconclusive` is True and a problem
@@ -60,6 +66,8 @@ from . import contracts as C
 
 WP: Final = "WP-ENG-1"
 AUX_MIN: Final = 0.95
+CHARS: Final = C.FILL_CHARS
+CHAR_MIN: Final = 0.95
 ENEMY_MIN: Final = 0.5
 MIN_ROWS: Final = 100
 MIN_ENEMIES: Final = 100
@@ -77,9 +85,10 @@ _FC_CONT: Final = tuple(
 def reserved_cols(event: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """The `cat` and `cont` columns `contracts` reserves for fill event `event`."""
     status = f"reserved:{event}"
+    slots = C.FILL_SLOTS.get(event, {})
     return (
-        tuple(C.XC[c.name] for c in C.X_CAT if c.status == status),
-        tuple(C.XF[c.name] for c in C.X_CONT if c.status == status),
+        tuple(C.XC[c.name] for c in C.X_CAT if c.status == status) + tuple(slots.get("cat", ())),
+        tuple(C.XF[c.name] for c in C.X_CONT if c.status == status) + tuple(slots.get("cont", ())),
     )
 
 
@@ -111,6 +120,7 @@ class FillCheck:
     dead_filled: int  # of those, with a nonzero WP-ENG-1 column
     draw_rows: int  # combat rows with a non-empty draw pile
     draw_missing: int  # of those, without a PRIV_DRAW token
+    char_rows: int = 0  # rows whose RUNCTX X_CHAR is set (another character's run)
     # Undeclared event -> tokens with a nonzero reserved column, plus rows of its
     # reserved decision types and option tokens of its reserved action kinds.
     stray: dict[str, int] = field(default_factory=dict)
@@ -134,7 +144,8 @@ class FillCheck:
             f"telegraph {pct(self.tele, self.enemies)}, forecast "
             f"{pct(self.forecast, self.enemies)}, PRIV_ENEMY {self.priv_enemy}; dead enemies "
             f"{self.dead} ({self.dead_filled} filled); PRIV_DRAW missing on "
-            f"{self.draw_missing} of {self.draw_rows} rows with a draw pile"
+            f"{self.draw_missing} of {self.draw_rows} rows with a draw pile; "
+            f"X_CHAR {pct(self.char_rows, self.rows)}"
         )
 
 
@@ -161,6 +172,7 @@ def check(rb: Mapping[str, np.ndarray], filled: Iterable[str]) -> FillCheck:
         raise C.SchemaError("a row does not start with its RUNCTX token")
     combat_rows = int(comb.sum())
     aux_rows = int(((cat[first, C.XC["X_ID_AUX"]] != 0) & comb).sum()) if n else 0
+    char_rows = int((cat[first, C.XC["X_CHAR"]] != 0).sum()) if n else 0
     wp = reserved_cols(WP)
     enemy = (sec == C.SEC["ENEMY"]) & tok_comb
     alive = cont[:, C.SCTX_C["E_ALIVE"]] > 0
@@ -187,7 +199,7 @@ def check(rb: Mapping[str, np.ndarray], filled: Iterable[str]) -> FillCheck:
     opt = (rb["tok_flags"] & np.uint8(C.TF_OPTION)) != 0
     for ev in C.FILL_EVENTS:
         if ev in key:
-            if ev != WP:
+            if ev not in (WP, CHARS):
                 unchecked.append(ev)
             continue
         cols = reserved_cols(ev)
@@ -198,6 +210,8 @@ def check(rb: Mapping[str, np.ndarray], filled: Iterable[str]) -> FillCheck:
         if ev == WP:  # PRIV_ENEMY is `cs.peek_intents`, a WP-ENG-1 getter
             ptok |= psec == C.SEC["PRIV_ENEMY"]
         hits = int(_nonzero(cat, cont, cols).sum()) + int(ptok.sum())
+        if secs := C.FILL_SLOTS.get(ev, {}).get("sections"):
+            hits += int(np.isin(sec, list(secs)).sum())
         hits += int(np.isin(rb["dtype"], dts).sum()) if dts else 0
         hits += int((opt & np.isin(kinds, aks)).sum()) if aks else 0
         if hits:
@@ -225,6 +239,11 @@ def check(rb: Mapping[str, np.ndarray], filled: Iterable[str]) -> FillCheck:
                     f"{WP} declared but there are {priv_enemy} PRIV_ENEMY tokens for "
                     f"{n_live} live enemies (< {ENEMY_MIN:.0%})"
                 )
+    if CHARS in key and n and char_rows < CHAR_MIN * n:
+        problems.append(
+            f"{CHARS} declared but X_CHAR is set on {char_rows}/{n} rows (< {CHAR_MIN:.0%}): "
+            "the workers do not tokenize with it (factory.fill_chars)"
+        )
     if dead_filled:
         problems.append(f"{dead_filled} dead-enemy token(s) carry {WP} values")
     if draw_missing:
@@ -243,6 +262,7 @@ def check(rb: Mapping[str, np.ndarray], filled: Iterable[str]) -> FillCheck:
         dead_filled=dead_filled,
         draw_rows=draw_rows,
         draw_missing=draw_missing,
+        char_rows=char_rows,
         stray=stray,
         unchecked=tuple(unchecked),
         problems=tuple(problems),

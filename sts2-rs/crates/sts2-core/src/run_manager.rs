@@ -237,6 +237,13 @@ pub enum RunAction {
     /// [`crate::runstate::RunState::interactive_card_transform`] is set.
     /// Bead 6ynt.4.deck-add / GH #34.
     TransformDeckCard { idx: usize },
+    /// Confirm Claws' optional multi-pick (see
+    /// [`crate::runstate::RunState::pending_claws_selection`]): every card
+    /// picked so far with [`Self::TransformDeckCard`] becomes a Maul at once,
+    /// and confirming with no pick leaves the deck unchanged. C#
+    /// `CardSelectorPrefs(prompt, 0, 6) { RequireManualConfirmation = true }`
+    /// (`Claws.cs:22-29`). Phase-agnostic like [`Self::RemoveDeckCard`].
+    ConfirmDeckSelection,
     /// Enchant a deck card, draining one pending interactive enchant (see
     /// [`crate::runstate::RunState::pending_deck_enchants`] — Wood
     /// Carvings' Snake → Slither). `idx` is the position within the
@@ -1585,6 +1592,7 @@ impl RunManager {
         rs.pending_post_pick_relic_grants.clear();
         rs.pending_deck_upgrades = 0;
         rs.pending_deck_transforms.clear();
+        rs.pending_claws_selection = None;
         rs.pending_deck_enchants.clear();
         rs.pending_potion_swaps.clear();
         rs.pending_choice = None;
@@ -1696,6 +1704,16 @@ impl RunManager {
         // space. Mandatory, no skip (`CardSelectorPrefs(
         // TransformSelectionPrompt, N)` → min==max==N).
         // Bead 6ynt.4.deck-add / GH #34.
+        // Claws' optional "up to 6" select (C# min 0, manual confirm): one
+        // TransformDeckCard per candidate not picked yet (none once the cap is
+        // reached) plus the confirm, always last. GH #1353.
+        if self.run_state.pending_claws_selection.is_some() {
+            let mut actions: Vec<RunAction> = (0..self.transform_eligible_deck_indices().len())
+                .map(|idx| RunAction::TransformDeckCard { idx })
+                .collect();
+            actions.push(RunAction::ConfirmDeckSelection);
+            return actions;
+        }
         if !self.run_state.pending_deck_transforms.is_empty() {
             return (0..self.transform_eligible_deck_indices().len())
                 .map(|idx| RunAction::TransformDeckCard { idx })
@@ -2119,6 +2137,9 @@ impl RunManager {
         if let RunAction::TransformDeckCard { idx } = action {
             return self.do_transform_deck_card_at(idx);
         }
+        if let RunAction::ConfirmDeckSelection = action {
+            return self.do_confirm_deck_selection();
+        }
         // Phase-agnostic: drain a pending interactive deck enchant
         // (Wood Carvings Snake).
         if let RunAction::EnchantDeckCard { idx } = action {
@@ -2489,6 +2510,17 @@ impl RunManager {
         // Spoils Map quest: paid right after the chest's gold
         // (`OneOffSynchronizer.cs:138-140`).
         let _ = self.run_state.try_complete_spoils_quest();
+        // Awarding the pick (`TreasureRoomRelicSynchronizer.AwardRelics`)
+        // runs `list.StableShuffle(_rng)` on the unclaimed-relic list, which
+        // is empty in single player. Before v0.113.0 an empty shuffle drew
+        // nothing; v0.113.0 seeds a child Rng off ONE TreasureRoomRelics
+        // draw whatever the length, so every chest costs two draws and
+        // the next chest's rarity roll lands one draw later.
+        let version = self.run_state.game_version;
+        self.run_state
+            .rng
+            .treasure_room
+            .shuffle_for::<u8>(version, &mut []);
         if let Some(id) = picked {
             self.run_state.obtain_relic(id);
         }
@@ -2886,6 +2918,11 @@ impl RunManager {
                 // walks boss → second boss; the win is stamped only at the
                 // second-boss point, or at the boss point when no second
                 // exists (`CombatManager.cs:801-806`). Bead sts2-rs-40ikw.2.
+                // v0.113.0 offers the last-act boss room's `ExtraRewards`
+                // (Royalties, Heist gold-back; `RewardsSet.cs:96-103`); the
+                // exit callback queued them only on that build, so this is a
+                // no-op before it. Collected before the win is stamped.
+                self.run_state.grant_extra_reward_gold();
                 if !self.run_state.awaiting_second_boss() {
                     self.run_state.is_over = true;
                     self.run_state.player_won = true;
@@ -2894,9 +2931,11 @@ impl RunManager {
                 }
                 // First boss of the A10 double-boss pair. C#
                 // `RewardsSet.WithRewardsFromRoom` returns an EMPTY set for a
-                // Boss room in the last act (`RewardsSet.cs:91-94`, both
-                // builds): no gold, no potion roll, no card reward, no
-                // `ExtraRewards`. `GenerateWithoutOffering` still runs
+                // Boss room in the last act (`RewardsSet.cs:91-94`, v0.107.1
+                // and v0.111.0): no gold, no potion roll, no card reward, no
+                // `ExtraRewards`. v0.113.0 keeps the `ExtraRewards` (gold
+                // collected above, Grimoire removals drained after the card
+                // reward step). `GenerateWithoutOffering` still runs
                 // `Hook.ModifyRewards` on that empty set (`RewardsSet.cs:139`),
                 // so a relic hook that adds rewards on any combat room
                 // (WongosMysteryTicket) can still fire. There is no
@@ -2912,6 +2951,12 @@ impl RunManager {
                 self.card_reward_options.clear();
                 self.card_reward_upgraded.clear();
                 self.card_reward_enchantments.clear();
+                if self.run_state.game_version >= crate::GameVersion::V0_113_0 {
+                    // The kept extras are populated (one `Rewards` draw per
+                    // fixed gold reward, TheHunt card rolls) ahead of the
+                    // hook rewards, as on any other boss.
+                    self.populate_fixed_extra_gold_rewards();
+                }
                 self.populate_hook_rewards(reward_room_type, hook_relics, false);
                 self.open_card_reward_phase();
                 return ActionResult::Advanced;
@@ -5088,6 +5133,7 @@ impl RunManager {
         self.run_state.pending_deck_removals != 0
             || self.run_state.pending_deck_upgrades != 0
             || !self.run_state.pending_deck_transforms.is_empty()
+            || self.run_state.pending_claws_selection.is_some()
             || !self.run_state.pending_deck_enchants.is_empty()
     }
 
@@ -5148,7 +5194,23 @@ impl RunManager {
     /// (raw-core tests that never install the content registry) that filter
     /// falls back to "everything", keeping the legacy unfiltered order.
     #[must_use]
+    ///
+    /// While Claws' select is open it is that select's offer instead: the
+    /// candidates not picked yet, in deck order, and nothing once
+    /// `max_count` cards are picked.
     pub fn transform_eligible_deck_indices(&self) -> Vec<usize> {
+        if let Some(sel) = &self.run_state.pending_claws_selection {
+            if sel.selected.len() >= sel.max_count {
+                return Vec::new();
+            }
+            return sel
+                .candidates
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !sel.selected.contains(i))
+                .map(|(_, (deck_idx, _))| *deck_idx)
+                .collect();
+        }
         let basic_only = self
             .run_state
             .pending_deck_transforms
@@ -5261,6 +5323,9 @@ impl RunManager {
     /// When a rolled entry's callback is unwired (raw-core tests) the pick
     /// drains without mutating the deck. Bead 6ynt.4.deck-add / GH #34.
     fn do_transform_deck_card_at(&mut self, idx: usize) -> ActionResult {
+        if self.run_state.pending_claws_selection.is_some() {
+            return self.do_pick_claws_card(idx);
+        }
         if self.run_state.pending_deck_transforms.is_empty() {
             return ActionResult::InvalidForPhase;
         }
@@ -5309,6 +5374,42 @@ impl RunManager {
                 self.phase = Phase::RunOver;
             }
         }
+        self.settle_after_deck_pick();
+        ActionResult::Advanced
+    }
+
+    /// Pick one more card for Claws' open select: `idx` is a position in
+    /// [`Self::transform_eligible_deck_indices`]. The deck is untouched until
+    /// [`RunAction::ConfirmDeckSelection`].
+    fn do_pick_claws_card(&mut self, idx: usize) -> ActionResult {
+        let Some(&deck_idx) = self.transform_eligible_deck_indices().get(idx) else {
+            return ActionResult::InvalidForPhase;
+        };
+        let Some(sel) = self.run_state.pending_claws_selection.as_mut() else {
+            return ActionResult::InvalidForPhase;
+        };
+        let Some(pos) = sel.candidates.iter().position(|(i, _)| *i == deck_idx) else {
+            return ActionResult::InvalidForPhase;
+        };
+        sel.selected.push(pos);
+        ActionResult::Advanced
+    }
+
+    /// Close Claws' select: transform every picked card into its Maul in one
+    /// `CardCmd.Transform` (originals leave, Mauls are appended in original
+    /// deck order — [`crate::runstate::RunState::transform_specific_cards`]).
+    fn do_confirm_deck_selection(&mut self) -> ActionResult {
+        let Some(sel) = self.run_state.pending_claws_selection.take() else {
+            return ActionResult::InvalidForPhase;
+        };
+        let (indices, mauls): (Vec<usize>, Vec<crate::cards::Card>) = sel
+            .candidates
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| sel.selected.contains(i))
+            .map(|(_, c)| c)
+            .unzip();
+        let _ = self.run_state.transform_specific_cards(&indices, mauls);
         self.settle_after_deck_pick();
         ActionResult::Advanced
     }
@@ -6394,6 +6495,7 @@ impl RunManager {
             O::Rested { .. }
             | O::SmithUpgraded { .. }
             | O::Hatched
+            | O::Evolved
             | O::Dug { .. }
             | O::Kindled
             | O::Lifted
@@ -11862,6 +11964,97 @@ mod tests {
         }
     }
 
+    /// v0.113.0 keeps a last-act boss room's `ExtraRewards`
+    /// (`RewardsSet.cs:96-103`; v0.111.0 returned before the merge): the
+    /// final boss pays the queued Royalties gold before the win is stamped
+    /// (act23 Regent:1003 v0.113.0: Royalties+ 40 at the final boss).
+    #[test]
+    fn final_boss_win_collects_queued_extra_gold() {
+        let mut rm =
+            RunManager::new(0, CharacterId::Regent).with_game_version(crate::GameVersion::V0_113_0);
+        rm.run_state.act_index = 3;
+        rm.run_state.current_room =
+            Some(crate::runstate::Room::new(crate::runstate::RoomType::Boss));
+        rm.run_state.pending_extra_reward_gold = vec![40];
+        rm.combat = Some(crate::CombatState {
+            is_over: true,
+            player_won: true,
+            ..crate::CombatState::default()
+        });
+        rm.set_phase(Phase::Combat);
+        let gold_before = rm.run_state.gold;
+
+        let _ = rm.exit_combat_and_transition();
+
+        assert_eq!(rm.phase(), Phase::RunOver);
+        assert!(rm.run_state.player_won);
+        assert_eq!(rm.run_state.gold, gold_before + 40);
+        assert!(rm.run_state.pending_extra_reward_gold.is_empty());
+    }
+
+    /// v0.113.0's A10 first final-act boss offers only its `ExtraRewards`
+    /// (`RewardsSet.cs:96-103`): Royalties gold is collected and its
+    /// `GoldReward.Populate` reads one `Rewards` draw (`GoldReward.cs:70-74`),
+    /// still with no default gold, potion or card reward.
+    #[test]
+    fn double_boss_first_act3_boss_win_pays_extras_on_v0113() {
+        fn cards(_rs: &mut RunState) -> Vec<crate::cards::CardId> {
+            vec![crate::cards::CardId::Bash; 3]
+        }
+        fn gold_and_potion(rs: &mut RunState, _room: crate::runstate::RoomType) -> bool {
+            rs.gold += 1000;
+            false
+        }
+        let cb = ContentCallbacks {
+            generate_card_reward_options: Some(cards),
+            apply_combat_gold_and_potion: Some(gold_and_potion),
+            ..ContentCallbacks::default()
+        };
+        let mut rm = RunManager::with_ascension(0, CharacterId::Regent, 10)
+            .with_game_version(crate::GameVersion::V0_113_0)
+            .with_content_callbacks(cb);
+        rm.run_state.act_index = 3;
+        rm.run_state.generate_map();
+        let boss_coord = {
+            let map = rm.run_state.current_act_map.as_ref().expect("map");
+            map.point(map.boss.expect("boss")).coord
+        };
+        let mut room = crate::runstate::Room::new(crate::runstate::RoomType::Boss);
+        room.map_coord = Some(boss_coord);
+        rm.run_state.current_room = Some(room);
+        let mut combat = crate::CombatState {
+            player_won: true,
+            ..crate::CombatState::default()
+        };
+        combat.player.current_hp = 50;
+        combat.player.max_hp = 50;
+        let player = combat.init_player_creature();
+        crate::card_effects::apply_power_to_creature(
+            &mut combat,
+            player,
+            crate::PowerKind::Royalties,
+            40,
+        );
+        combat.is_over = true;
+        rm.combat = Some(combat);
+        // What the exit callback queues for the Royalties stacks.
+        rm.run_state.pending_extra_reward_gold = vec![40];
+        rm.set_phase(Phase::Combat);
+        let gold_before = rm.run_state.gold;
+        let rewards_before = rm.run_state.rng.rewards.counter();
+
+        let _ = rm.exit_combat_and_transition();
+
+        assert_eq!(rm.phase(), Phase::MapChoice, "on to the second boss");
+        assert!(rm.card_reward_options.is_empty(), "no card reward");
+        assert_eq!(rm.run_state.gold, gold_before + 40, "Royalties only");
+        assert_eq!(
+            rm.run_state.rng.rewards.counter(),
+            rewards_before + 1,
+            "one GoldReward.Populate draw"
+        );
+    }
+
     /// Below A10 the act-3 boss win stays terminal even with a map
     /// coord attached (regression guard for the awaiting-second-boss
     /// gate).
@@ -12889,6 +13082,38 @@ mod tests {
             .shared_relic_grab_bag_by_rarity
             .values()
             .any(|b| b.contains(&granted)));
+    }
+
+    /// v0.113.0: a chest costs TWO TreasureRoomRelics draws (the rarity
+    /// roll, then the award's empty `StableShuffle` seeding a child Rng);
+    /// earlier builds cost one. Whole-run sweep seeds P113044 (Defect,
+    /// Fool) and P113045 (Ironclad) got the wrong rarity at the SECOND
+    /// chest when Rust drew only once.
+    #[test]
+    fn treasure_room_draws_twice_from_its_stream_on_v0113_only() {
+        for (version, draws) in [
+            (crate::GameVersion::V0_111_0, 1),
+            (crate::GameVersion::V0_113_0, 2),
+        ] {
+            let mut rm = RunManager::new(7, CharacterId::Ironclad);
+            rm.run_state.game_version = version;
+            let mut shared = std::collections::BTreeMap::new();
+            for (rarity, relic) in [
+                (crate::runstate::RelicRarity::Common, RelicId::BurningBlood),
+                (crate::runstate::RelicRarity::Uncommon, RelicId::Nunchaku),
+                (crate::runstate::RelicRarity::Rare, RelicId::RoyalPoison),
+            ] {
+                shared.insert(rarity, vec![relic]);
+            }
+            rm.run_state.shared_relic_grab_bag_by_rarity = shared;
+            let before = rm.run_state.rng.treasure_room.counter();
+            assert_eq!(rm.resolve_treasure_room(), ActionResult::Advanced);
+            assert_eq!(
+                rm.run_state.rng.treasure_room.counter() - before,
+                draws,
+                "{version:?}"
+            );
+        }
     }
 
     #[test]

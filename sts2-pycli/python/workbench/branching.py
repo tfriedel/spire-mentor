@@ -28,9 +28,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+import sts2_client
 from game_log import GameLogger
 from run_policy import to_workbench_verb
-from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS, Game
+from sts2_client import DEFAULT_GAME_VERSION, LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS, Game
 from sts2_hint import display_maps
 
 from workbench import (
@@ -256,21 +257,24 @@ class BranchingLiveSession:
         # session's lifetime: ``seek`` rebuilds the run from scratch, and a
         # rebuild under another build would replay the line against different
         # rules (and, since v0.111.0 hashes seeds differently, a different
-        # run). ``None`` is the default build, NOT the process-wide
-        # ``STS2_GAME_VERSION`` — a workbench run's build is part of its
-        # identity, recorded in its save and log.
-        version = game_version or DEFAULT_GAME_VERSION
+        # run). On the Rust engine ``None`` is the default build, NOT the
+        # process-wide ``STS2_GAME_VERSION`` — a workbench run's build is part
+        # of its identity, recorded in its save and log. The C# backend has
+        # exactly one build, the one this process's oracle was selected for.
+        process_build = sts2_client.GAME_VERSION
+        version = game_version or (DEFAULT_GAME_VERSION if backend == "rust" else process_build)
         if version not in SUPPORTED_GAME_VERSIONS:
             raise ValueError(
                 f"unsupported game_version {version!r} "
                 f"(supported: {', '.join(SUPPORTED_GAME_VERSIONS)})"
             )
-        if version != DEFAULT_GAME_VERSION and backend != "rust":
+        if backend != "rust" and version != process_build:
             # The C# oracle binary is selected per PROCESS (``STS2_GAME_VERSION``
             # at import); a per-session build switch only exists on the Rust
             # engine.
             raise ValueError(
-                f"game_version {version!r} requires the rust backend (got {backend!r})"
+                f"game_version {version!r} requires the rust backend (got {backend!r}, "
+                f"whose oracle in this process is {process_build})"
             )
         self.game_version = version
         # Loc map for display-time name resolution of the log labels/diffs. The
@@ -417,7 +421,7 @@ class BranchingLiveSession:
         from workbench.backends.imported_combat import ImportedCombatBackend
 
         sess = cls(logs_dir=logs_dir, backend="rust", loc=loc, game_version=game_version)
-        if sess.game_version != DEFAULT_GAME_VERSION:
+        if sess.game_version != LEGACY_GAME_VERSION:
             # The board is rebuilt by ``sts2_rs.state_from_dict``, which reads
             # the build off ``$.game_version`` (absent = the default). The
             # session's build wins over whatever the wire names, as in the
@@ -2566,14 +2570,10 @@ class BranchingLiveSession:
                     "act1": self.act1,
                     "backend": self.backend,
                     # GH #801: the build is part of the identity (a line only
-                    # replays under the rules that recorded it). Only written
-                    # off the default, so a v0.107.1 log is byte-identical to
-                    # before; a reader treats the missing key as v0.107.1.
-                    **(
-                        {"game_version": self.game_version}
-                        if self.game_version != DEFAULT_GAME_VERSION
-                        else {}
-                    ),
+                    # replays under the rules that recorded it). Always
+                    # written, so a log names its build; a reader treats the
+                    # missing key (an older v0.107.1 log) as v0.107.1.
+                    "game_version": self.game_version,
                 },
             )
             path = self._path_to(self._active_id)

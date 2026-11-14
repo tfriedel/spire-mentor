@@ -127,7 +127,9 @@ def _its(path: Path) -> list[int]:
     ("target", "every"),
     # every > 1: state.pt every few iterations, as at launch (5M decisions = ~38
     # iterations), so the kill leaves rows past the state that the resume replays.
-    [(7, 1), (19, 1), (151, 1), (23, 5)],
+    # (151, 1) is `soak`: at 300 s it was the longest test of the slow suite, and
+    # the three shorter kills exercise the same resume path per PR.
+    [(7, 1), (19, 1), pytest.param(151, 1, marks=pytest.mark.soak), (23, 5)],
 )
 def test_sigkill_then_resume_reproduces_the_next_three_iterations(
     tmp_path: Path, target: int, every: int

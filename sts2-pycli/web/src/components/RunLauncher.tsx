@@ -4,7 +4,7 @@ import { e2eAdvisable } from "../advisor";
 import { characterArt, characterInBuild, characterKey } from "../characters";
 import { ASCENSION_LEVELS, ascensionLevel, ascensionModifiers } from "../ascension";
 import { canonicalizeSeed, generateSeed } from "../seed";
-import { DEFAULT_GAME_VERSION, gameVersionLabel } from "../gameVersion";
+import { LEGACY_GAME_VERSION, gameVersionLabel } from "../gameVersion";
 import CombatBudget, { type CombatPreset } from "./CombatBudget";
 import RichText from "./RichText";
 import "../skins/runend.css";
@@ -41,7 +41,7 @@ export default function RunLauncher({
   ascension, onAscension,
   act1, onAct1,
   backend, onBackend, backends,
-  gameVersion = DEFAULT_GAME_VERSION, onGameVersion, gameVersions = [],
+  gameVersion = LEGACY_GAME_VERSION, onGameVersion, gameVersions = [],
   onPlay, onWatch, busy, error,
   offCombatBrain, onOffCombatBrain, e2eAvailable = false,
   advisor = "search", onAdvisor,
@@ -101,7 +101,7 @@ export default function RunLauncher({
   const slug = characterKey(character);
   // The build this run would play (the version select shows the same value):
   // a character it lacks is not offered, and a pick it lacks falls back.
-  const runVersion = backend === "rust" ? gameVersion : DEFAULT_GAME_VERSION;
+  const runVersion = backend === "rust" ? gameVersion : LEGACY_GAME_VERSION;
   useEffect(() => {
     if (!characterInBuild(slug, runVersion)) onCharacter(CHARACTERS[0]);
   }, [slug, runVersion, onCharacter]);
@@ -329,7 +329,7 @@ export default function RunLauncher({
               {/* Only the Rust engine plays a non-default build: with C#
                   the picker shows (and the run starts on) the default. */}
               <select aria-label="version"
-                value={backend === "rust" ? gameVersion : DEFAULT_GAME_VERSION}
+                value={backend === "rust" ? gameVersion : LEGACY_GAME_VERSION}
                 onChange={(e) => onGameVersion(e.target.value)}
                 disabled={busy || backend !== "rust"}>
                 {gameVersions.map((v) => (

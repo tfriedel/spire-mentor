@@ -352,6 +352,7 @@ fn action_kind(a: &ActionDesc) -> &'static str {
         ActionDesc::RemoveDeckCard { .. } => "remove_deck_card",
         ActionDesc::UpgradeDeckCard { .. } => "upgrade_deck_card",
         ActionDesc::TransformDeckCard { .. } => "transform_deck_card",
+        ActionDesc::ConfirmDeckSelection => "confirm_deck_selection",
         ActionDesc::EnchantDeckCard { .. } => "enchant_deck_card",
         ActionDesc::GrantDeckCard { .. } => "grant_deck_card",
         ActionDesc::ShopBuyCard { .. } => "shop_buy_card",
@@ -442,6 +443,51 @@ fn fixed_tok(kind: &str, price: i64) -> (i64, Cat, ContF64) {
     (SEC_FIXED, cat, cont)
 }
 
+/// `HEAL` / `REST` / `SMITH` (any case) → that option's fixed token and row.
+fn rest_base_token(label: &str) -> Option<(&'static str, i64)> {
+    if label.eq_ignore_ascii_case("HEAL") || label.eq_ignore_ascii_case("REST") {
+        Some(("rest_heal", 0))
+    } else if label.eq_ignore_ascii_case("SMITH") {
+        Some(("rest_smith", 1))
+    } else {
+        None
+    }
+}
+
+/// (fixed-token name, option-index row) for rest option `idx`. Mirrors
+/// `encoder.py::_rest_option_token`; the rule is documented there.
+///
+/// Heal and Smith are named by identity: after a Miniature Tent first pick
+/// the engine drops the taken option, so Smith sits at idx 0. Every other
+/// option keeps `rest_other` and the row the shipped nets were trained on
+/// (its idx in the full `[Heal, Smith, ...]` list). An empty label is an
+/// unknown but occupied slot. No label at all is the old positional rule.
+fn rest_option_token(labels: &[String], idx: i64) -> (&'static str, i64) {
+    let max_row = vocab::MAX_OPT_IDX as i64 - 1;
+    let Some(label) = at(labels, idx).filter(|l| !l.is_empty()) else {
+        let name = match idx {
+            0 => "rest_heal",
+            1 => "rest_smith",
+            _ => "rest_other",
+        };
+        return (name, idx.clamp(0, max_row));
+    };
+    if let Some(base) = rest_base_token(label) {
+        return base;
+    }
+    let n_base = labels
+        .iter()
+        .filter(|l| rest_base_token(l).is_some())
+        .count() as i64;
+    let n_unknown = labels
+        .iter()
+        .take(usize::try_from(idx).unwrap_or(0))
+        .filter(|l| l.is_empty())
+        .count() as i64;
+    let shift = (2 - n_base - n_unknown).max(0);
+    ("rest_other", (idx + shift).min(max_row))
+}
+
 /// Featurization context: obs lookups shared by the action builders.
 /// Mirrors `encoder.py::_Ctx`.
 struct Ctx<'a> {
@@ -458,6 +504,8 @@ struct Ctx<'a> {
     pending_potion_swap: &'a str,
     event_name: &'a str,
     event_options: &'a [EventOptionObs],
+    /// Engine option ids in `RestOption { idx }` order.
+    rest_option_labels: &'a [String],
     card_reward_ids: &'a [String],
     /// Per-option upgrade flags aligned with `card_reward_ids`; short or
     /// empty means "not upgraded". Only read under
@@ -528,6 +576,7 @@ impl<'a> Ctx<'a> {
             pending_potion_swap: obs.pending_potion_swap.as_deref().unwrap_or(""),
             event_name: obs.event_name.as_deref().unwrap_or(""),
             event_options: obs.event_options.as_deref().unwrap_or(&[]),
+            rest_option_labels: obs.rest_option_labels.as_deref().unwrap_or(&[]),
             card_reward_ids: obs.card_reward_option_ids.as_deref().unwrap_or(&[]),
             card_reward_upgraded: obs.card_reward_option_upgraded.as_deref().unwrap_or(&[]),
             bundles: if features.card_bundles {
@@ -679,6 +728,9 @@ fn build_action_token(ctx: &Ctx<'_>, a: &ActionDesc) -> (i64, Cat, ContF64) {
             stamp_enchant(ctx.features, &mut cat, &mut cont, ctx.deck_ench, di);
             (sec, cat, cont)
         }
+        // Claws' confirm reuses the skip token: no vocab row is added, and
+        // to the net it reads as "take no (more) cards" (GH #1353).
+        ActionDesc::ConfirmDeckSelection => fixed_tok("skip_card", 0),
         ActionDesc::TransformDeckCard { idx } => {
             let di = at(ctx.transform_idxs, *idx).copied();
             let ent = di.and_then(|di| at(ctx.deck, di));
@@ -781,18 +833,9 @@ fn build_action_token(ctx: &Ctx<'_>, a: &ActionDesc) -> (i64, Cat, ContF64) {
         }
         ActionDesc::LeaveShop => fixed_tok("leave_shop", 0),
         ActionDesc::RestOption { idx } => {
-            // Mirrors `("rest_heal", "rest_smith")[idx] if idx < 2 else
-            // "rest_other"` for the only idx values valid decision data
-            // ever carries (0/1); negative-idx Python tuple-wraparound
-            // is not replicated (structurally unreachable — `idx` is an
-            // unsigned engine option index).
-            let name = match *idx {
-                0 => "rest_heal",
-                1 => "rest_smith",
-                _ => "rest_other",
-            };
+            let (name, opt_idx) = rest_option_token(ctx.rest_option_labels, *idx);
             let (sec, mut cat, cont) = fixed_tok(name, 0);
-            cat[7] = (vocab::MAX_OPT_IDX as i64 - 1).min(*idx);
+            cat[7] = opt_idx;
             (sec, cat, cont)
         }
         ActionDesc::EventChoice { idx } => {
@@ -1633,5 +1676,72 @@ mod tests {
             assert_eq!(a[..CAT_CARD_TYPE], b[..CAT_CARD_TYPE]);
         }
         assert_eq!(on.obs_cat[0], off.obs_cat[0]);
+    }
+
+    fn rest_obs(ids: Option<&[&str]>) -> PpoObs {
+        serde_json::from_value(serde_json::json!({
+            "phase": "rest_site",
+            "surface": "rest",
+            "seed": 0, "ascension": 10,
+            "deck": [], "relics": [], "potions": [],
+            "map": null, "map_coord": null,
+            "total_floor": 1, "act_index": 1, "act_floor": 1,
+            "hp": 40, "max_hp": 80, "gold": 0,
+            "deck_size": 0, "num_upgraded": 0, "num_relics": 0, "num_potions": 0,
+            "rest_option_labels": ids
+        }))
+        .expect("rest obs")
+    }
+
+    /// (fixed-kind index, option-index row) of every rest action token.
+    fn rest_rows(ids: Option<&[&str]>, idxs: &[i64]) -> Vec<(i64, i64)> {
+        let actions: Vec<ActionDesc> = idxs
+            .iter()
+            .map(|&idx| ActionDesc::RestOption { idx })
+            .collect();
+        featurize_with(&rest_obs(ids), &actions, Features::default())
+            .act_cat
+            .iter()
+            .map(|c| (c[6], c[7]))
+            .collect()
+    }
+
+    /// After a Miniature Tent first pick the engine drops the taken option,
+    /// so Smith moves to idx 0. It must keep the Smith token (found by the
+    /// pep299 fork). Dig keeps the `rest_other` row 2 it was trained on.
+    #[test]
+    fn rest_options_are_named_by_identity_not_position() {
+        let heal = (vocab::fixed_index("rest_heal") as i64, 0);
+        let smith = (vocab::fixed_index("rest_smith") as i64, 1);
+        let other = |row| (vocab::fixed_index("rest_other") as i64, row);
+        let full = rest_rows(Some(&["HEAL", "SMITH", "DIG", "HATCH"]), &[0, 1, 2, 3]);
+        assert_eq!(full, [heal, smith, other(2), other(3)]);
+        // Heal taken: everything moved down one idx, no token changes.
+        assert_eq!(
+            rest_rows(Some(&["SMITH", "DIG", "HATCH"]), &[0, 1, 2]),
+            [smith, other(2), other(3)]
+        );
+        // Smith taken.
+        assert_eq!(rest_rows(Some(&["HEAL", "DIG"]), &[0, 1]), [heal, other(2)]);
+        // The bridge: a disabled Smith's slot is occupied but unnamed.
+        assert_eq!(
+            rest_rows(Some(&["HEAL", "", "DIG"]), &[0, 2]),
+            [heal, other(2)]
+        );
+    }
+
+    /// Recordings stored a fixed `["rest", "smith"]` (or nothing) whatever
+    /// was offered: they must featurize exactly as they always did.
+    #[test]
+    fn legacy_rest_labels_keep_the_positional_encoding() {
+        let positional = rest_rows(None, &[0, 1, 2, 3]);
+        assert_eq!(
+            rest_rows(Some(&["rest", "smith"]), &[0, 1, 2, 3]),
+            positional
+        );
+        assert_eq!(
+            rest_rows(Some(&["HEAL", "SMITH", "DIG", "HATCH"]), &[0, 1, 2, 3]),
+            positional
+        );
     }
 }

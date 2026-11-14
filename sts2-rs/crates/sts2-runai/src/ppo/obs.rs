@@ -447,6 +447,8 @@ pub enum ActionDesc {
     TransformDeckCard {
         idx: i64,
     },
+    /// Close Claws' optional multi-pick (GH #1353).
+    ConfirmDeckSelection,
     EnchantDeckCard {
         idx: i64,
     },
@@ -513,6 +515,7 @@ impl TryFrom<&RunAction> for ActionDesc {
             RunAction::TransformDeckCard { idx } => {
                 ActionDesc::TransformDeckCard { idx: idx as i64 }
             }
+            RunAction::ConfirmDeckSelection => ActionDesc::ConfirmDeckSelection,
             RunAction::EnchantDeckCard { idx } => ActionDesc::EnchantDeckCard { idx: idx as i64 },
             RunAction::GrantDeckCard { idx } => ActionDesc::GrantDeckCard { idx: idx as i64 },
             RunAction::ShopBuyCard { idx } => ActionDesc::ShopBuyCard { idx: idx as i64 },

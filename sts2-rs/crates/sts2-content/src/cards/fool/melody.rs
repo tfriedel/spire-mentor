@@ -172,8 +172,8 @@ pub(crate) fn play_cho_ki(state: &mut CombatState, _t: Option<CreatureUid>) -> E
 /// `FromCombatPile(Draw, 1, top 3 (+1))` to hand, and `CardCmd.Discard` the
 /// other top cards still in the draw pile.
 ///
-/// A Stratagem pick opened by the shuffle ends the play there (approximation:
-/// C# awaits that pick, then goes on).
+/// A Stratagem pick opened by the shuffle holds the offer until it resolves
+/// ([`sts2_core::PostChoiceEffect::KiChantPick`]).
 pub(crate) fn play_ki_chant(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let count = usize::try_from(var(state, 3, 4)).unwrap_or(0);
     let had_choice = state.pending_choice.is_some();
@@ -194,44 +194,20 @@ pub(crate) fn play_ki_chant(state: &mut CombatState, _t: Option<CreatureUid>) ->
             sts2_core::cards::pin_top(&mut state.player, uid);
         }
     }
-    if !had_choice && state.pending_choice.is_some() {
-        return EffectResult::Resolved;
-    }
-    let mut top: SmallVec<[CardUid; 4]> = state.player.draw.iter().take(count).copied().collect();
-    match top.len() {
-        0 => {}
-        1 => {
-            let uid = top[0];
-            if let Some(pos) = state.player.draw.iter().position(|&u| u == uid) {
-                state.player.draw.remove(pos);
-                sts2_core::cards::unpin(&mut state.player, uid);
-                let _ = sts2_core::cards::try_add_to_hand(&mut state.player, uid);
+    // The shuffle opened a Stratagem pick: C# awaits it inside
+    // `CardPileCmd.Shuffle`, then goes on. The kept cards are already back
+    // on top (one the pick takes simply leaves the pile, as `c.Pile ==
+    // drawPile` filters it in C#), so only the offer waits for the pick.
+    if !had_choice {
+        if let Some(pc) = state.pending_choice.as_mut() {
+            if pc.post_effect.is_none() {
+                pc.post_effect = Some(sts2_core::PostChoiceEffect::KiChantPick(
+                    u8::try_from(count).unwrap_or(u8::MAX),
+                ));
             }
-        }
-        _ => {
-            crate::cards::colorless::helpers::sort_draw_select(state, &mut top);
-            let options: Vec<sts2_core::ChoiceOption> = top
-                .iter()
-                .map(|&uid| {
-                    let c = &state.cards[uid.0.get() as usize - 1];
-                    sts2_core::ChoiceOption {
-                        card_id: c.card_id,
-                        upgraded: c.upgraded,
-                        card_uid: Some(uid),
-                        source_pile: Some(PileKind::Draw),
-                    }
-                })
-                .collect();
-            state.open_hand_choice(sts2_core::PendingChoice {
-                kind: sts2_core::ChoiceKind::AddFromDrawByType,
-                options,
-                min_select: 1,
-                max_select: 1,
-                can_skip: false,
-                post_effect: Some(sts2_core::PostChoiceEffect::DiscardUnpickedFromDraw),
-                picked: SmallVec::new(),
-            });
+            return EffectResult::Resolved;
         }
     }
+    sts2_core::fool::ki_chant_pick(state, count);
     EffectResult::Resolved
 }

@@ -49,6 +49,10 @@ pub struct DamageGivenCtx {
     pub target: crate::CreatureUid,
     /// Final post-mitigation damage applied.
     pub damage: i32,
+    /// C# `DamageResult.TotalDamage`: block absorbed plus HP actually lost
+    /// (capped at the HP the target had, so no overkill). MightyWings
+    /// thresholds on it (`MightyWings.cs`).
+    pub total_damage: i32,
     /// Damage-source props. Defaults to `ValueProps::NONE` for callers
     /// that don't yet plumb the bitset (e.g. early test fixtures).
     pub props: crate::hooks::ValueProps,

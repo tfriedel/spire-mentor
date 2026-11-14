@@ -520,11 +520,14 @@ def test_catalog_route(tmp_path) -> None:
 def test_sandbox_deals_and_keeps_the_selected_game_version(tmp_path) -> None:
     """GH #877: ``game_version`` on ``/position/new`` deals the fight in that
     build, the position remembers it through build / moves, and an unknown
-    build is a 400. A default-build position names no version at all."""
+    build is a 400. A legacy-build position names no version at all; a request
+    that names none deals the default build."""
     client = TestClient(create_app(results_root=tmp_path))
     body = {"character": "Ironclad", "encounter": "FUZZY_WURM_CRAWLER_WEAK", "seed": 4}
-    base = client.post("/api/simlab/position/new", json=body).json()
+    base = client.post("/api/simlab/position/new", json={**body, "game_version": "v0.107.1"}).json()
     assert "game_version" not in base["position"] and "game_version" not in base["wire"]
+    unnamed = client.post("/api/simlab/position/new", json=body).json()
+    assert unnamed["position"]["game_version"] == "v0.111.0"
 
     r = client.post("/api/simlab/position/new", json={**body, "game_version": "v0.111.0"})
     assert r.status_code == 200, r.text

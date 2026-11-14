@@ -2104,6 +2104,11 @@ fn run_after_player_turn_start_cluster(
                 let amount = state.powers.get_by_id(uid.0).map_or(0, |p| p.amount);
                 crate::fool::ecstasy_after_player_turn_start(state, amount);
             }
+            // v0.113.0 `GodByrdPower.AfterPlayerTurnStart`.
+            crate::PowerKind::GodByrd => {
+                let amount = state.powers.get_by_id(uid.0).map_or(0, |p| p.amount);
+                crate::fool::god_byrd_after_player_turn_start(state, uid, amount);
+            }
             k if hooks::is_folded_after_player_turn_start_kind(k) => {
                 if let Some(effects) =
                     hooks::collect_folded_after_player_turn_start_one(state, uid, &ctx)
@@ -2177,7 +2182,8 @@ pub(crate) fn run_turn_start_relic_tail(
     // energy now; `PlasmaOrb.PassiveVal => 1m` is a plain literal (no
     // `ModifyOrbValue`), so Focus does NOT scale it. The turn-end
     // `passive_tick` Plasma arm is intentionally inert — this is the only
-    // C# `Hook.AfterPlayerTurnStart`'s Late pass (BloodVial, FakeBloodVial):
+    // C# `Hook.AfterPlayerTurnStart`'s Late pass (BloodVial, FakeBloodVial,
+    // v0.113.0 BathTowel):
     // still inside `SetupPlayerTurn`, so after the bus above (and after a
     // Gambling Chip pick) and before the side walk. The hook walks nothing
     // once the combat is ending (`Hook.cs:101`).
@@ -2883,42 +2889,72 @@ pub(crate) fn run_auto_post_play(state: &mut CombatState) -> StepResult {
     // re-ordered it against Plating/Doom/Hailstorm and the Howl replay —
     // 8 v28wr enemy-hp events with the mirror one `combat_targets` roll
     // AHEAD (the mirror's Stampede attack landed where C#'s bailed).
-    if run_stampede_auto_post_play(state) {
-        // A lethal Stampede attack ends combat inside AutoPostPlay.
-        match check_combat_end(state) {
-            StepResult::Advanced => {}
-            end => {
-                // Combat is over; nothing is owed. Don't leak the marker a
-                // suspended batch may have set (`auto_play_choice_should_surface`
-                // already refuses to surface once `is_over` is set, but the flip
-                // can happen here rather than mid-damage).
-                state.pending_end_turn_resume = None;
-                return end;
-            }
+    //
+    // v0.113.0: Simpleton listens on the same hook, and `Hook.cs` walks the
+    // owner's powers in the order they were applied, so a Simpleton applied
+    // before Stampede plays first (GH #1337).
+    let simpleton_first = simpleton_listens_before_stampede(state);
+    if simpleton_first {
+        if let Some(stop) = run_simpleton_auto_post_play(state) {
+            return stop;
         }
     }
-
-    // Bead `sts2-rs-eirvo`: the Stampede batch suspended mid-way on a surfaced
-    // card-select, so C# is still inside its `await CardCmd.AutoPlay` — block
-    // the whole turn transition HERE, where it blocks, not after
+    // Bead `sts2-rs-eirvo`: a Stampede batch that suspended mid-way on a
+    // surfaced card-select leaves C# inside its `await CardCmd.AutoPlay` — the
+    // whole turn transition blocks HERE, where it blocks, not after
     // `BeforeTurnEnd`. Everything below (the rest of the batch, the Howl
     // replay, the unspent-energy / zero-block snapshots, `BeforeTurnEnd`, the
     // flush, the enemy turn) is owed to
     // [`resume_end_turn_after_auto_post_play`], which the choice resolver calls
     // once the pick lands.
-    if state.pending_end_turn_resume.is_some() {
-        return StepResult::PendingChoice;
-    }
-    if let Some(stop) = run_simpleton_auto_post_play(state) {
+    if let Some(stop) = run_stampede_batch(state) {
         return stop;
+    }
+    if !simpleton_first {
+        if let Some(stop) = run_simpleton_auto_post_play(state) {
+            return stop;
+        }
     }
 
     end_player_turn_phase_one_after_auto_post_play_stampede(state)
 }
 
+/// `true` when the player's Simpleton sits before their Stampede in the
+/// power list. Both listen on `AfterAutoPostPlayPhaseEntered`, which
+/// `Hook.cs` dispatches over `IterateCombatHookListeners`: the owner's powers
+/// in application order. GH #1337.
+fn simpleton_listens_before_stampede(state: &CombatState) -> bool {
+    if state.game_version < crate::GameVersion::V0_113_0 {
+        return false;
+    }
+    let (mut simpleton, mut stampede) = (None, None);
+    for (i, uid) in state.player_power_uids().iter().enumerate() {
+        match state.powers.get_by_id(uid.0).map(|p| p.kind) {
+            Some(crate::PowerKind::Simpleton) if simpleton.is_none() => simpleton = Some(i),
+            Some(crate::PowerKind::Stampede) if stampede.is_none() => stampede = Some(i),
+            _ => {}
+        }
+    }
+    matches!((simpleton, stampede), (Some(a), Some(b)) if a < b)
+}
+
+/// The Stampede batch with its post-batch checks: `Some` when it ended
+/// combat (a lethal Stampede attack ends combat inside AutoPostPlay; nothing
+/// is owed, so the marker a suspended batch may have set is dropped) or
+/// suspended on a select.
+fn run_stampede_batch(state: &mut CombatState) -> Option<StepResult> {
+    if run_stampede_auto_post_play(state) {
+        return stop_after_auto_post_play_batch(state);
+    }
+    state
+        .pending_end_turn_resume
+        .is_some()
+        .then_some(StepResult::PendingChoice)
+}
+
 /// v0.113.0 `SimpletonPower.AfterAutoPostPlayPhaseEntered`: auto-play `Amount`
-/// cards from the cheapest cost group in hand. Runs after Stampede (both are
-/// power listeners; a player holding both is not ordered by application).
+/// cards from the cheapest cost group in hand. Runs before or after Stampede
+/// by power order ([`simpleton_listens_before_stampede`]).
 /// `Some` when the batch ended combat or suspended on a select.
 fn run_simpleton_auto_post_play(state: &mut CombatState) -> Option<StepResult> {
     if state.game_version < crate::GameVersion::V0_113_0 || state.is_over {
@@ -2961,6 +2997,12 @@ pub(crate) fn resume_end_turn_after_simpleton(
     if remaining > 0 {
         crate::hooks::auto_play_simpleton_from_hand(state, remaining);
         if let Some(stop) = stop_after_auto_post_play_batch(state) {
+            return stop;
+        }
+    }
+    // A Simpleton applied before Stampede ran first: Stampede is still owed.
+    if simpleton_listens_before_stampede(state) {
+        if let Some(stop) = run_stampede_batch(state) {
             return stop;
         }
     }
@@ -3353,8 +3395,11 @@ pub(crate) fn resume_end_turn_after_auto_post_play(
             return StepResult::PendingChoice;
         }
     }
-    if let Some(stop) = run_simpleton_auto_post_play(state) {
-        return stop;
+    // A Simpleton applied before Stampede has already run.
+    if !simpleton_listens_before_stampede(state) {
+        if let Some(stop) = run_simpleton_auto_post_play(state) {
+            return stop;
+        }
     }
     finish_end_turn_after_auto_post_play(state)
 }
@@ -6991,6 +7036,7 @@ pub fn apply_damage_to_player(
                 dealer: dealer_uid,
                 target: target_uid,
                 damage: final_damage,
+                total_damage: absorbed.saturating_add(modified_hp_loss),
                 props,
                 // Player-received path: HandDrill must never fire when the
                 // target is the player (C# guards on `!target.IsPlayer`).
@@ -9696,29 +9742,41 @@ fn discard_result_goes_to_hand(card: &cards::Card) -> bool {
     }
 }
 
+/// `CardModel.OnPlayWrapper`'s `TransformIntoAfterPlay` step: after the last
+/// play's `AfterCardPlayed` and BEFORE the result move, a card whose `OnPlay`
+/// set the field is replaced on the Play pile (`CardCmd.Transform(this,
+/// TransformIntoAfterPlay)`), and the result move then carries the
+/// replacement to the location computed for the original. v0.113.0
+/// `MourningBlow.cs` sets a `Sadness`. Returns the uid now on Play: the
+/// replacement, or `uid` when nothing transformed (another card, a card no
+/// longer on Play, a combat that is ending).
+///
+/// Transforming first matters where the result is not a pile the card stays
+/// in: a dupe's Sadness leaves combat but was generated (Anguish counts it),
+/// and an exhausted copy exhausts as the Sadness (GH #1337).
+fn transform_into_after_play(state: &mut CombatState, uid: crate::CardUid) -> crate::CardUid {
+    let is_mourning_blow = state
+        .cards
+        .get(uid.0.get() as usize - 1)
+        .is_some_and(|c| c.card_id == cards::CardId::MourningBlow);
+    if !is_mourning_blow {
+        return uid;
+    }
+    crate::build_card_for_version(cards::CardId::Sadness, false, state.game_version)
+        .and_then(|sadness| crate::card_effects::transform_card_on_play(state, uid, sadness))
+        .unwrap_or(uid)
+}
+
 /// The result-location tail of a v0.113.0 card play once the card left Play:
-/// `TrickShot` drops its play-start arrow flag, and `MourningBlow` becomes the
-/// `Sadness` its `OnPlay` set as `TransformIntoAfterPlay` (`MourningBlow.cs`,
-/// `CardModel.OnPlayWrapper` `CardCmd.Transform` after `AfterCardPlayed`). C#
-/// transforms the card on Play just before the result move; transforming it
-/// in its result pile lands the same card in the same place. A dupe has left
-/// combat and a combat ending refuses the transform, as `CardCmd.Transform`
-/// does.
+/// `TrickShot` drops its play-start arrow flag.
 fn after_result_location(state: &mut CombatState, uid: crate::CardUid) {
     let idx = uid.0.get() as usize - 1;
-    let Some(card) = state.cards.get(idx) else {
-        return;
-    };
-    match card.card_id {
-        cards::CardId::TrickShot => state.cards[idx].combat_vars.zero(VarKey::Generic),
-        cards::CardId::MourningBlow if !state.player.play.contains(&uid) => {
-            if let Some(sadness) =
-                crate::build_card_for_version(cards::CardId::Sadness, false, state.game_version)
-            {
-                let _ = crate::card_effects::transform_card_in_place(state, uid, sadness);
-            }
-        }
-        _ => {}
+    if state
+        .cards
+        .get(idx)
+        .is_some_and(|c| c.card_id == cards::CardId::TrickShot)
+    {
+        state.cards[idx].combat_vars.zero(VarKey::Generic);
     }
 }
 
@@ -10518,6 +10576,15 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
     // the owner (`FeralPower.cs:58`), so it wins, and a dupe's `PileType.None`
     // is never handed over (`CardModel.cs:1981`). Held across an open choice,
     // the pick waits for `flush_played_cards_after_choice`.
+    // `TransformIntoAfterPlay` (MourningBlow -> Sadness) happens on Play, ahead
+    // of the result move; every decision below was taken for the played card
+    // (`card`, `card_idx`), and the move carries the replacement. Held across
+    // an open choice, it waits for `flush_played_cards_after_choice`.
+    let card_uid = if state.pending_choice.is_none() {
+        transform_into_after_play(state, card_uid)
+    } else {
+        card_uid
+    };
     let handed_over = state.pending_choice.is_none()
         && crate::coop::hand_over_played_card(
             state,
@@ -10579,13 +10646,16 @@ fn finish_card_play_tail(state: &mut CombatState, fin: CardPlayFinish) -> StepRe
         || corruption_exhausts_skill)
         && state.pending_choice.is_none()
     {
+        // The card that exhausts is the one on Play now (a MourningBlow's
+        // Sadness), so the exhaust listeners see its identity.
+        let moved = state.cards[card_uid.0.get() as usize - 1];
         let _ = exhaust_from_play(
             state,
             card_uid,
             target_uid,
-            card.card_id,
-            card.tags,
-            card.card_type,
+            moved.card_id,
+            moved.tags,
+            moved.card_type,
         );
     } else if card.card_type == cards::CardType::Power || played_card_is_dupe {
         // Bead `sts2-rs-3k85q`: Powers are removed from combat on play
@@ -10826,6 +10896,11 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
         clear_when_played_costs(state, idx);
         let corruption_exhausts_skill = card.card_type == cards::CardType::Skill
             && state.player_power_amount(crate::PowerKind::Corruption) > 0;
+        // `TransformIntoAfterPlay` runs on Play before the result move
+        // (`transform_into_after_play`): the decisions below stay the played
+        // card's, the move carries the replacement.
+        let uid = transform_into_after_play(state, uid);
+        let moved = state.cards[uid.0.get() as usize - 1];
         // C# `GetResultPileType` precedence: Corruption's hook override
         // beats the dupe's `PileType.None`, which beats intrinsic Exhaust
         // (sweep seed 5192).
@@ -10866,7 +10941,7 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
             continue;
         }
         if crate::card_effects::card_exhausts_inst(&card) || corruption_exhausts_skill {
-            let _ = exhaust_from_play(state, uid, None, card.card_id, card.tags, card.card_type);
+            let _ = exhaust_from_play(state, uid, None, moved.card_id, moved.tags, moved.card_type);
             after_result_location(state, uid);
             continue;
         }
@@ -13299,6 +13374,12 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
     // (`auto_feral_returns_to_hand`, see `feral_claims_result_location`).
     let result_pile_moved = matches!(resume_at, TailResume::AfterResultPile);
     if !result_pile_moved && state.player.play.contains(&top_uid) {
+        // `TransformIntoAfterPlay` runs on Play before the result move
+        // (`transform_into_after_play`): the decisions below stay the played
+        // card's (`top_idx`, `top_card_type`), the move carries the
+        // replacement.
+        let top_uid = transform_into_after_play(state, top_uid);
+        let moved = state.cards[top_uid.0.get() as usize - 1];
         let self_exhausts = self_exhausts_pre_dispatch;
         // CorruptionPower routes the owner's played Skills to Exhaust — the
         // auto-play mirror of the same branch in `play_card`, using the
@@ -13375,9 +13456,9 @@ fn finish_auto_played_card_tail(state: &mut CombatState, fin: AutoPlayFinish) ->
                 state,
                 top_uid,
                 None,
-                top_card_id,
-                top_card_tags,
-                top_card_type,
+                moved.card_id,
+                moved.tags,
+                moved.card_type,
             );
             // An `AfterCardExhausted` draw (Joss Paper / Dark Embrace) that
             // reshuffled into a Stratagem pick holds the rest of this play,

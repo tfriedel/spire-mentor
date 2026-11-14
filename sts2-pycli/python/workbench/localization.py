@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS
+from sts2_client import LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS
 
 _VER_NUMS = re.compile(r"\d+")
 
@@ -26,7 +26,7 @@ _VER_NUMS = re.compile(r"\d+")
 # ``data/<ver>/`` happens to be highest on disk (the wiki also carries older
 # v0.103.2 / v0.105.1 reference data).
 #
-# ``DEFAULT_GAME_VERSION`` is the build every loader reads when no version is
+# ``LEGACY_GAME_VERSION`` is the build every loader reads when no version is
 # passed; it mirrors ``sts2_core::GameVersion::default()`` and the Rust
 # ``data::ENGINE_WIKI_VERSION``. Each supported build maps to the wiki
 # ``data/<ver>/`` dir describing it (``engine_wiki_version``).
@@ -35,7 +35,7 @@ _VER_NUMS = re.compile(r"\d+")
 _ENGINE_WIKI_VERSIONS: dict[str, str] = {v: v for v in SUPPORTED_GAME_VERSIONS}
 # The default build's wiki dir. Kept under its historical name: scripts
 # (``bundle_workbench_data.py``, ``synergy.gen_card_text``) and tests import it.
-_ENGINE_WIKI_VERSION = _ENGINE_WIKI_VERSIONS[DEFAULT_GAME_VERSION]
+_ENGINE_WIKI_VERSION = _ENGINE_WIKI_VERSIONS[LEGACY_GAME_VERSION]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,12 +45,12 @@ def engine_wiki_version(version: str | None = None) -> str:
 
     Args:
         version: A supported build (``"v0.107.1"`` / ``"v0.111.0"``); ``None``
-            means :data:`DEFAULT_GAME_VERSION`.
+            means :data:`LEGACY_GAME_VERSION`.
 
     Raises:
         ValueError: ``version`` is not a supported build.
     """
-    key = version or DEFAULT_GAME_VERSION
+    key = version or LEGACY_GAME_VERSION
     try:
         return _ENGINE_WIKI_VERSIONS[key]
     except KeyError:
@@ -71,10 +71,10 @@ def loc_dir_for(version: str | None = None, repo_root: Path | None = None) -> Pa
         version: A supported build; ``None`` means the default.
         repo_root: The ``sts2-pycli`` root (default: this checkout's).
     """
-    key = version or DEFAULT_GAME_VERSION
+    key = version or LEGACY_GAME_VERSION
     engine_wiki_version(key)  # validate
     root = repo_root if repo_root is not None else _REPO_ROOT
-    if key == DEFAULT_GAME_VERSION:
+    if key == LEGACY_GAME_VERSION:
         return root / "localization_eng"
     return root / f"localization_eng_{key}"
 
@@ -90,7 +90,7 @@ def available_game_versions(repo_root: Path | None = None) -> list[str]:
     return [
         v
         for v in SUPPORTED_GAME_VERSIONS
-        if v == DEFAULT_GAME_VERSION or loc_dir_for(v, repo_root).is_dir()
+        if v == LEGACY_GAME_VERSION or loc_dir_for(v, repo_root).is_dir()
     ]
 
 
@@ -913,7 +913,7 @@ def build_workbench_loc(
 
     Args:
         wiki_data_dir: The wiki's ``data/`` dir (``None`` = no wiki checkout).
-        version: The game build (default: :data:`DEFAULT_GAME_VERSION`). Picks
+        version: The game build (default: :data:`LEGACY_GAME_VERSION`). Picks
             both the vendored loc dir (:func:`loc_dir_for`) and the wiki
             ``data/<ver>/`` manifests (:func:`engine_wiki_version`).
         repo_root: The ``sts2-pycli`` root (default: this checkout's).

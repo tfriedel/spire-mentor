@@ -73,6 +73,9 @@ pub fn run_action_to_value(a: &RunAction) -> Value {
             set(&mut d, "action", "transform_deck_card");
             set(&mut d, "idx", *idx);
         }
+        RunAction::ConfirmDeckSelection => {
+            set(&mut d, "action", "confirm_deck_selection");
+        }
         RunAction::EnchantDeckCard { idx } => {
             set(&mut d, "action", "enchant_deck_card");
             set(&mut d, "idx", *idx);
@@ -230,6 +233,7 @@ pub fn run_action_from_value(v: &Value) -> Result<RunAction, EmitError> {
         "transform_deck_card" => RunAction::TransformDeckCard {
             idx: req_usize(d, "idx")?,
         },
+        "confirm_deck_selection" => RunAction::ConfirmDeckSelection,
         "enchant_deck_card" => RunAction::EnchantDeckCard {
             idx: req_usize(d, "idx")?,
         },
@@ -356,6 +360,7 @@ mod tests {
             RunAction::RemoveDeckCard { idx: 1 },
             RunAction::UpgradeDeckCard { idx: 2 },
             RunAction::TransformDeckCard { idx: 3 },
+            RunAction::ConfirmDeckSelection,
             RunAction::EnchantDeckCard { idx: 4 },
             RunAction::GrantDeckCard { idx: 0 },
             RunAction::RestOption { idx: 1 },

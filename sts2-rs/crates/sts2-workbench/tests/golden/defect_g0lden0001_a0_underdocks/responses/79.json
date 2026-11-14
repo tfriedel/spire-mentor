@@ -5,6 +5,7 @@
    "ascension": 0,
    "backend": "rust",
    "character": "Defect",
+   "game_version": "v0.107.1",
    "name": "golden mid",
    "progress": {
     "act": 1,

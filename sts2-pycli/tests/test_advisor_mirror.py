@@ -854,6 +854,28 @@ def test_a_potion_screen_is_searched_end_to_end() -> None:
     assert advisor.live is not None, "answering is side-effect free on the fight"
 
 
+def test_an_offer_of_a_v0113_card_is_searched() -> None:
+    """A Colorless Potion offering My Shinies (a v0.113.0 card) is searched.
+
+    The adapter used to check card ids against the PPO vocab, frozen at
+    v0.111.0, so the offer raised ``card id 'MY_SHINIES' doesn't map to any
+    of [...]`` and fell to the deck-pick fallback -- for Instinct and the
+    search alike.
+    """
+    advisor, screen = _potion_screen("COLORLESS_POTION")
+    screen["prompt_key"] = "COLORLESS_POTION.selectionScreenPrompt"
+    screen["cards"] = [
+        {"id": "MY_SHINIES", "name": "My Shinies", "index": 0},
+        {"id": "MIND_BLAST", "name": "Mind Blast", "index": 1},
+        {"id": "FINESSE", "name": "Finesse", "index": 2},
+    ]
+    advice = advisor.answer_card_select(screen, HONEST, 8)
+
+    assert advice is not None, advisor.declines
+    assert advice["note"].startswith("combat MCTS"), advice["note"]
+    assert [o["label"] for o in advice["options"]] == ["My Shinies", "Mind Blast", "Finesse"]
+
+
 # ---------------------------------------------------------------------------
 # Hook-opened screens
 #

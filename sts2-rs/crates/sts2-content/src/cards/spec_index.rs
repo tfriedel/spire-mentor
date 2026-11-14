@@ -618,6 +618,7 @@ pub const V0111_ONLY_SPECS: &[fn() -> CardSpec] = &[
     crate::cards::colorless::my_shinies::spec,
     crate::cards::colorless::mighty_weapon::spec,
     crate::cards::colorless::mighty_shield::spec,
+    crate::cards::colorless::god_byrd::spec,
     // v0.113.0 The Fool (`crate::cards::fool`): every Fool card, so the
     // id-keyed lookups resolve. Pool membership is `fool::FOOL_POOL_V0113`.
     fs::all_is_well,

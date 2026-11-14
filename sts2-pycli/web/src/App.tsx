@@ -61,7 +61,7 @@ import { useMediaQuery, NARROW_QUERY, PHONE_LANDSCAPE_QUERY, SHORT_QUERY } from 
 import { CollapseButton, PanelGrip } from "./components/panelChrome";
 import { usePanelChoice, usePanelFlag, usePanelHeight } from "./panelPrefs";
 import {
-  DEFAULT_GAME_VERSION, declaredGameVersion, effectiveGameVersion, gameVersionBody, gameVersionLabel,
+  LEGACY_GAME_VERSION, NO_VERSION_PICK, declaredGameVersion, effectiveGameVersion, gameVersionBody, gameVersionLabel,
 } from "./gameVersion";
 import { bestAction, toggleHintsLatch } from "./hint";
 import { createActionGate } from "./actionGate";
@@ -292,9 +292,9 @@ function AppBody() {
   // is SENT is `gameVersion` -- the pick when this server can run it, else its
   // default -- so an older single-version server neither gets a version it
   // would 400 nor overwrites the remembered preference.
-  const [gameVersionPick, setGameVersionPick] = usePanelChoice("wb.gameVersion", DEFAULT_GAME_VERSION);
-  const [gameVersions, setGameVersions] = useState<string[]>([DEFAULT_GAME_VERSION]);
-  const [serverDefaultVersion, setServerDefaultVersion] = useState(DEFAULT_GAME_VERSION);
+  const [gameVersionPick, setGameVersionPick] = usePanelChoice("wb.gameVersion", NO_VERSION_PICK);
+  const [gameVersions, setGameVersions] = useState<string[]>([LEGACY_GAME_VERSION]);
+  const [serverDefaultVersion, setServerDefaultVersion] = useState(LEGACY_GAME_VERSION);
   const gameVersion = effectiveGameVersion(gameVersionPick, gameVersions, serverDefaultVersion);
   // The build the CURRENT live session plays, read off the live step itself
   // (`state.game_version`; writers omit the default). Derived, not tracked, so
@@ -2548,7 +2548,7 @@ function AppBody() {
             // GH #801: a run on a non-default game build says so, quietly --
             // the same seed is a different run on the beta.
             const versionTag = mode === "play" && live && liveGameVersion
-              && liveGameVersion !== DEFAULT_GAME_VERSION ? liveGameVersion : null;
+              && liveGameVersion !== LEGACY_GAME_VERSION ? liveGameVersion : null;
             return (
               <>
                 {(showAuto || versionTag || (deck.length > 0 && !analyzeInTopbar)) && (

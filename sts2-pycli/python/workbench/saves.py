@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sts2_client import DEFAULT_GAME_VERSION as _DEFAULT_GAME_VERSION
+from sts2_client import LEGACY_GAME_VERSION as _LEGACY_GAME_VERSION
 
 _log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ UNKNOWN_RUN_MODE = None
 # ``game_version`` for saves without the field (GH #801): every save written
 # before it existed was played on the default build. Writers omit the key at
 # the default, so a v0.107.1 save is byte-identical to one written before.
-DEFAULT_GAME_VERSION = _DEFAULT_GAME_VERSION
+LEGACY_GAME_VERSION = _LEGACY_GAME_VERSION
 
 
 def restore_attempts(payload: dict[str, Any]) -> list[bool]:
@@ -94,7 +94,7 @@ def write_save(
     line: list[dict[str, Any]],
     act1: str = DEFAULT_ACT1,
     node_values: list[float | None] | None = None,
-    game_version: str = DEFAULT_GAME_VERSION,
+    game_version: str = LEGACY_GAME_VERSION,
 ) -> Path:
     """Write a save file and return its path. Overwrites any same-slug file.
 
@@ -124,9 +124,10 @@ def write_save(
     written before it existed; the loader falls back to recomputing.
 
     ``game_version`` records which game build the run simulates (GH #801):
-    the same line replays to a different run under another build. Written
-    only when it is not :data:`DEFAULT_GAME_VERSION`; readers treat a missing
-    key as the default.
+    the same line replays to a different run under another build. Always
+    written, so a save names its build; readers treat a missing key (a save
+    from before 2026-11-14 that recorded a v0.107.1 run) as
+    :data:`LEGACY_GAME_VERSION`.
     """
     directory.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -143,9 +144,8 @@ def write_save(
         "step_count": len(line),
         "line": line,
         "node_values": node_values,
+        "game_version": game_version,
     }
-    if game_version != DEFAULT_GAME_VERSION:
-        payload["game_version"] = game_version
     path = directory / f"{slugify(name)}.json"
     path.write_text(json.dumps(payload, indent=2))
     return path

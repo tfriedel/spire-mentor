@@ -105,6 +105,7 @@ pub mod wish;
 // v0.111.0-only cards (GH #793).
 pub mod abundance;
 pub mod dingy_dagger;
+pub mod god_byrd;
 pub mod mighty_shield;
 pub mod mighty_weapon;
 pub mod my_shinies;
@@ -393,5 +394,6 @@ const POOL_V0111: &[(CardId, PlayCardFn)] = &[
         CardId::MightyShield,
         mighty_shield::play_mighty_shield as PlayCardFn,
     ),
+    (CardId::GodByrd, god_byrd::play_god_byrd as PlayCardFn),
     (CardId::TheBall, the_ball::play_the_ball as PlayCardFn),
 ];

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import MapView from "../MapView";
 import { bossArt } from "../mapArt";
-import { DEFAULT_GAME_VERSION } from "../../gameVersion";
+import { LEGACY_GAME_VERSION } from "../../gameVersion";
 import { HintsFixture } from "../../hints/HintsContext";
 import type { FullMap, MapGraph } from "../../api";
 
@@ -168,6 +168,6 @@ describe("the boss silhouette's art chain", () => {
 
   it("adds no overlay candidates for the default build", () => {
     const node = { col: 0, row: 1, type: "Boss", id: "QUEEN_BOSS", name: "Queen" };
-    expect(bossArt(node, null, DEFAULT_GAME_VERSION)).toEqual(bossArt(node));
+    expect(bossArt(node, null, LEGACY_GAME_VERSION)).toEqual(bossArt(node));
   });
 });

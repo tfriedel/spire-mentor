@@ -1267,14 +1267,17 @@ def _faithful_replay_plan(
     return fixture_path, actions, cfg
 
 
-def _requested_game_version(raw: str | None) -> str:
+def _requested_game_version(raw: str | None, backend: str = "rust") -> str:
     """The game build a start/import request names, or a 400 (GH #801).
 
-    Exact match only: the wire takes ``"v0.107.1"`` / ``"v0.111.0"``, and a
-    missing (or null) key is the default build.
+    Exact match only: the wire takes ``"v0.107.1"`` / ``"v0.111.0"``. A
+    request that names none gets :data:`sts2_client.DEFAULT_GAME_VERSION` on
+    the Rust engine, and on the C# backend the one build this process's
+    oracle was selected for. (A FILE that names none is another matter: that
+    is :data:`sts2_client.LEGACY_GAME_VERSION`.)
     """
     if raw is None:
-        return sts2_client.DEFAULT_GAME_VERSION
+        return sts2_client.DEFAULT_GAME_VERSION if backend == "rust" else sts2_client.GAME_VERSION
     if raw not in sts2_client.SUPPORTED_GAME_VERSIONS:
         raise HTTPException(
             400,
@@ -1339,7 +1342,7 @@ def create_app(
     assets = AssetResolver(images_root, manifest=manifest)
     # One resolver per game build: a later build reads its art overlay first
     # (GH #801). The default build's is ``assets`` itself.
-    assets_by_version: dict[str, AssetResolver] = {sts2_client.DEFAULT_GAME_VERSION: assets}
+    assets_by_version: dict[str, AssetResolver] = {sts2_client.LEGACY_GAME_VERSION: assets}
 
     def assets_for(version: str) -> AssetResolver:
         """The art resolver for game build *version*."""
@@ -1390,7 +1393,7 @@ def create_app(
     # use: a v0.111.0 run displays v0.111.0's card names and rules text, and
     # its monsters' HP bands. The default build's pair is the one above.
     loc_by_version: dict[str, tuple[dict[str, str], dict[str, dict[str, int]]]] = {
-        sts2_client.DEFAULT_GAME_VERSION: (card_loc, hp_ranges)
+        sts2_client.LEGACY_GAME_VERSION: (card_loc, hp_ranges)
     }
 
     def loc_bundle(version: str) -> tuple[dict[str, str], dict[str, dict[str, int]]]:
@@ -1410,7 +1413,7 @@ def create_app(
         ident = store.run_identity() if hasattr(store, "run_identity") else None
         version = ident.get("game_version") if isinstance(ident, dict) else None
         if version not in sts2_client.SUPPORTED_GAME_VERSIONS:
-            version = sts2_client.DEFAULT_GAME_VERSION
+            version = sts2_client.LEGACY_GAME_VERSION
         return version
 
     def replay_bundle(store: Any) -> tuple[dict[str, str], dict[str, dict[str, int]]]:
@@ -1421,7 +1424,7 @@ def create_app(
         """:func:`_live_step` under the localization of *session*'s live run."""
         version = getattr(session.live, "game_version", None)
         if not isinstance(version, str):
-            version = sts2_client.DEFAULT_GAME_VERSION
+            version = sts2_client.LEGACY_GAME_VERSION
         loc, ranges = loc_bundle(version)
         return _live_step(state, assets_for(version), loc, ranges)
 
@@ -1451,8 +1454,15 @@ def create_app(
         # carries the display data for.
         return {
             "backends": backends,
-            "game_versions": localization.available_game_versions(repo_root),
-            "default_game_version": sts2_client.DEFAULT_GAME_VERSION,
+            "game_versions": (versions := localization.available_game_versions(repo_root)),
+            # What the launcher starts on until the user picks: the default
+            # build when this checkout can display it (a public snapshot may
+            # carry only the legacy build's localization).
+            "default_game_version": (
+                sts2_client.DEFAULT_GAME_VERSION
+                if sts2_client.DEFAULT_GAME_VERSION in versions
+                else sts2_client.LEGACY_GAME_VERSION
+            ),
         }
 
     @app.get("/api/runs")
@@ -2072,7 +2082,7 @@ def create_app(
     @app.post("/api/live/start")
     def live_start(req: StartRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
         """Start a fresh live run, replacing any existing session."""
-        game_version = _requested_game_version(req.game_version)
+        game_version = _requested_game_version(req.game_version, req.backend)
         try:
             state = live_runs.start(
                 session,
@@ -2896,7 +2906,7 @@ def create_app(
             line=line,
             act1=sess.act1,
             node_values=sess.active_node_values(),
-            game_version=getattr(sess, "game_version", saves_mod.DEFAULT_GAME_VERSION),
+            game_version=getattr(sess, "game_version", saves_mod.LEGACY_GAME_VERSION),
         )
         return {"name": req.name, "path": str(path), "step_count": len(line)}
 

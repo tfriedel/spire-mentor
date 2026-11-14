@@ -239,6 +239,20 @@ class TestToHeadlessCombatPlayShape:
         wire = translate(to_headless_combat_play(bridge_state))
         assert "act_index" not in wire and "is_boss" not in wire
 
+    def test_the_run_floor_reaches_the_wire(self) -> None:
+        """GH #1337: the mod's top-level ``floor`` is C# ``RunState.TotalFloor``,
+        which v0.113.0's TheTower multiplies its damage by. It rides to the
+        wire as ``total_floor``; without it the engine reads floor 0."""
+        from sts2_hint.adapter import translate
+
+        bridge_state = _load_fixture("single_enemy_ironclad.json")["state"]
+        bridge_state["floor"] = 23
+        wire = translate(to_headless_combat_play(bridge_state))
+        assert wire["total_floor"] == 23
+
+        del bridge_state["floor"]
+        assert "total_floor" not in translate(to_headless_combat_play(bridge_state))
+
     def test_skittish_latch_and_a_teammates_plays_reach_the_wire(self) -> None:
         """GH #989: Skittish's once-a-turn latch (sent with the power's vars)
         becomes the engine's ``counter``, and a teammate's play buckets ride

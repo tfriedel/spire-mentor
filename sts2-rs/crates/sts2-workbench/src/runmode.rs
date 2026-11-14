@@ -74,6 +74,7 @@ const DEDICATED_VERB_KINDS: &[&str] = &[
     "leave_shop",
     "upgrade_deck_card",
     "transform_deck_card",
+    "confirm_deck_selection",
     "enchant_deck_card",
     "grant_deck_card",
 ];
@@ -82,6 +83,7 @@ const DEDICATED_VERB_KINDS: &[&str] = &[
 const PENDING_SELECT_KINDS: &[&str] = &[
     "upgrade_deck_card",
     "transform_deck_card",
+    "confirm_deck_selection",
     "enchant_deck_card",
     "grant_deck_card",
 ];
@@ -192,6 +194,7 @@ pub fn to_workbench_verb(rm: &RunManager, action: &Value) -> (String, Value) {
         "shop_buy_card" => ("buy_card".into(), json!({"card_index": field("idx")})),
         "shop_buy_relic" => ("buy_relic".into(), json!({"relic_index": field("idx")})),
         "shop_buy_potion" => ("buy_potion".into(), json!({"potion_index": field("idx")})),
+        "confirm_deck_selection" => ("skip_select".into(), json!({})),
         "smith_card" | "remove_deck_card" => {
             ("select_cards".into(), json!({"indices": indices("idx")}))
         }

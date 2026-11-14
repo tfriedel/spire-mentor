@@ -197,6 +197,7 @@ fn play(
     mut pick: impl FnMut(&[f32]) -> usize,
 ) -> Played {
     let mut cache = TokCache::new();
+    cache.set_chars(net.fills("chars"));
     let mut chosen: Vec<usize> = Vec::new();
     let (mut ms_tok, mut ms_net) = (0.0, 0.0);
     let mut step = env.reset();

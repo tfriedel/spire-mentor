@@ -379,11 +379,45 @@ def _shared_card_type(cards: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _claws_rule(state: dict[str, Any], cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Claws' "up to 6 into Maul" screen, played as Instinct's env plays it.
+
+    The e2e schema has no kind for the screen's confirm, so the env resolves
+    the select without asking the net: the first offered card until six are
+    taken, then confirm (`_claws_auto_pick` in `ppo/e2e/env.py`, GH #1353).
+    The screen asks again after each card (`selected_count`).
+    """
+    taken = max(0, int(state.get("selected_count") or 0))
+    room = max(0, int(state.get("max_select") or state.get("max_count") or 0) - taken)
+    options = [
+        {
+            "label": _label(c),
+            "is_best": room > 0 and j == 0,
+            "index": int(c.get("index", j)),
+            "action": "choose",
+        }
+        for j, c in enumerate(cards)
+    ]
+    best = (
+        {"action": "choose", "index": int(cards[0].get("index", 0)), "label": _label(cards[0])}
+        if room > 0 and cards
+        else {"action": "skip", "label": "confirm"}
+    )
+    return {
+        "note": "Instinct (e2e net, no search) · Claws by rule: the first six cards, as its env plays them",
+        "options": options,
+        "best": best,
+    }
+
+
 def deck_select(adv: InstinctAdvisor, state: dict[str, Any], session: Any) -> dict[str, Any]:
     cards = [c for c in (state.get("cards") or []) if isinstance(c, dict)]
+    prompt = str(state.get("prompt_key") or "").upper()
+    if prompt == "CLAWS.SELECTIONSCREENPROMPT":
+        return _claws_rule(state, cards)
     if not cards:
         raise InstinctUnavailable("no cards on this screen")
-    kind = _PROMPTS.get(str(state.get("prompt_key") or "").upper())
+    kind = _PROMPTS.get(prompt)
     if kind is None:
         raise InstinctUnavailable("Instinct does not know what this card screen does")
     n = max(1, int(state.get("max_select") or state.get("max_count") or 1))

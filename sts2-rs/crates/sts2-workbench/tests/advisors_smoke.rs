@@ -382,7 +382,8 @@ fn first_combat_seeded(wb: &mut Workbench, seed: &str) -> Value {
         wb,
         "POST",
         "/api/live/start",
-        json!({"character": "Ironclad", "seed": seed, "ascension": 0, "act1": "overgrowth"}),
+        // The fights these tests script were found on the legacy build.
+        json!({"character": "Ironclad", "seed": seed, "ascension": 0, "act1": "overgrowth", "game_version": "v0.107.1"}),
     );
     call(
         wb,

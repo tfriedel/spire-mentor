@@ -513,6 +513,37 @@ impl PyRunManager {
         u32::try_from(self.inner.run_state.pending_deck_transforms.len()).unwrap_or(u32::MAX)
     }
 
+    /// `True` while Claws' optional "up to `claws_select_max` cards into
+    /// Maul" select is open (GH #1353). The legal actions are then one
+    /// `transform_deck_card` per card still offered (indexing
+    /// `transform_select_deck_indices()`) plus `confirm_deck_selection`, which
+    /// transforms every pick at once; the deck changes only on the confirm.
+    #[getter]
+    fn pending_claws_select(&self) -> bool {
+        self.inner.run_state.pending_claws_selection.is_some()
+    }
+
+    /// Most cards the open Claws select takes (C# `MaxSelect`), 0 when none
+    /// is open.
+    #[getter]
+    fn claws_select_max(&self) -> usize {
+        self.inner
+            .run_state
+            .pending_claws_selection
+            .as_ref()
+            .map_or(0, |s| s.max_count)
+    }
+
+    /// Cards already picked in the open Claws select, 0 when none is open.
+    #[getter]
+    fn claws_select_picked(&self) -> usize {
+        self.inner
+            .run_state
+            .pending_claws_selection
+            .as_ref()
+            .map_or(0, |s| s.selected.len())
+    }
+
     /// Number of master-deck cards the player still owes an interactive
     /// ENCHANT pick for (Wood Carvings' Snake → Slither). While `> 0` the
     /// legal action set is `enchant_deck_card` picks indexed into

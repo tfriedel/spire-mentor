@@ -362,6 +362,28 @@ fn install_listeners() {
         RelicId::Byrdpip,
         listener_byrdpip_transform_eggs as AfterObtainedRunFn,
     );
+    // v0.113.0 Byrdpip evolution: `AfterCardPlayed` counts the owner's Byrd
+    // Swoop plays (`SwoopsPlayed`, capped at 6) and `TryModifyRestSiteOptions`
+    // offers `EvolveRestSiteOption` from 6 on; picking it replaces Byrdpip
+    // with Byrdine (`RunState::do_rest_site_action(Evolve)`), whose
+    // `AfterObtained` turns every Byrd Swoop into a God Byrd and whose
+    // `BeforeCombatStart` summons the Byrdine pet.
+    register_after_card_played(
+        RelicId::Byrdpip,
+        listener_byrdpip_count_swoops as AfterCardPlayedFn,
+    );
+    sts2_core::run_effects::register_modify_rest_site_options(
+        RelicId::Byrdpip,
+        listener_byrdpip_rest_site_options as sts2_core::run_effects::ModifyRestSiteOptionsRunFn,
+    );
+    register_before_combat_start(
+        RelicId::Byrdine,
+        listener_byrdine_summon_pet as BeforeCombatStartFn,
+    );
+    register_after_obtained(
+        RelicId::Byrdine,
+        listener_byrdine_transform_swoops as AfterObtainedRunFn,
+    );
 
     // HistoryCourse (sts2-rs-ummci) — at the start of each play phase
     // after round 1, auto-play a free dupe of the last Attack/Skill the
@@ -964,6 +986,98 @@ fn listener_byrdpip_summon_pet(state: &mut CombatState) -> EffectResult {
     }
     let _ = state.summon_pet(sts2_core::MonsterKind::Byrdpip, BYRDPIP_PET_HP);
     EffectResult::Resolved
+}
+
+/// `Byrdpip.playsToEvolve` (`Byrdpip.cs`, v0.113.0): Byrd Swoop plays
+/// needed before the rest site offers Evolve; `SwoopsPlayed` stops there.
+pub const BYRDPIP_PLAYS_TO_EVOLVE: i32 = 6;
+
+/// v0.113.0 `Byrdpip.AfterCardPlayed`: when the owner plays a Byrd Swoop
+/// and `SwoopsPlayed < 6`, `SwoopsPlayed++`. The count is the combat
+/// relic's `counter`, which the combat exit flushes into
+/// `RunState::relic_counters[Byrdpip]` (`[SavedProperty]` in C#, so it
+/// carries across combats). v0.111.0's Byrdpip has no counter.
+fn listener_byrdpip_count_swoops(state: &mut CombatState, ctx: &CardEventCtx) -> EffectResult {
+    if state.game_version < sts2_core::GameVersion::V0_113_0
+        || ctx.card_id != sts2_core::cards::CardId::ByrdSwoop
+    {
+        return EffectResult::NotImplemented;
+    }
+    let Some(relic) = state
+        .relics
+        .iter_mut()
+        .find(|r| !r.is_melted && r.kind == RelicKind::Byrdpip)
+    else {
+        return EffectResult::NotImplemented;
+    };
+    if relic.counter >= BYRDPIP_PLAYS_TO_EVOLVE {
+        return EffectResult::NotImplemented;
+    }
+    relic.counter += 1;
+    EffectResult::Resolved
+}
+
+/// v0.113.0 `Byrdpip.TryModifyRestSiteOptions`: with `SwoopsPlayed >= 6`
+/// append an `EvolveRestSiteOption`.
+fn listener_byrdpip_rest_site_options(
+    rs: &RunState,
+    options: &mut Vec<sts2_core::runstate::RestSiteOption>,
+) -> EffectResult {
+    if rs.game_version < sts2_core::GameVersion::V0_113_0 || !rs.owns_active_relic(RelicId::Byrdpip)
+    {
+        return EffectResult::NotImplemented;
+    }
+    let swoops = rs
+        .relic_counters
+        .get(&RelicId::Byrdpip)
+        .copied()
+        .unwrap_or(0);
+    if swoops < BYRDPIP_PLAYS_TO_EVOLVE {
+        return EffectResult::NotImplemented;
+    }
+    options.push(sts2_core::runstate::RestSiteOption::Evolve);
+    EffectResult::Resolved
+}
+
+/// v0.113.0 `Byrdine.BeforeCombatStart` → `PlayerCmd.AddPet<ByrdineMonster>`.
+/// `ByrdineMonster` (9999 HP, `NOTHING_MOVE`, not interactable) has no
+/// `MonsterKind`; it behaves exactly like the Byrdpip pet, so that pet
+/// stands in for it (adding a species would widen the monster vocab).
+fn listener_byrdine_summon_pet(state: &mut CombatState) -> EffectResult {
+    if !player_owns(state, RelicKind::Byrdine) {
+        return EffectResult::NotImplemented;
+    }
+    let _ = state.summon_pet(sts2_core::MonsterKind::Byrdpip, BYRDPIP_PET_HP);
+    EffectResult::Resolved
+}
+
+/// v0.113.0 `Byrdine.AfterObtained`: every ByrdSwoop in the deck becomes a
+/// GodByrd (`CardScope.CreateCard<GodByrd>`, upgraded when the swoop was,
+/// then `CardCmd.Transform`). Like the egg transform, the new card is
+/// appended through the add-to-deck hooks.
+fn listener_byrdine_transform_swoops(rs: &mut RunState) -> EffectResult {
+    if rs.last_obtained_relic != Some(RelicId::Byrdine) {
+        return EffectResult::NotImplemented;
+    }
+    let mut indices: Vec<usize> = Vec::new();
+    let mut replacements: Vec<sts2_core::cards::Card> = Vec::new();
+    for (i, card) in rs.master_deck.iter().enumerate() {
+        if card.card_id == sts2_core::cards::CardId::ByrdSwoop {
+            if let Some(mut god) = crate::cards::spec_index::card_pod_from_id(
+                sts2_core::cards::CardId::GodByrd,
+                card.upgraded,
+            ) {
+                god.uid = card.uid;
+                indices.push(i);
+                replacements.push(god);
+            }
+        }
+    }
+    if rs.transform_specific_cards(&indices, replacements) > 0 {
+        EffectResult::Resolved
+    } else {
+        EffectResult::NotImplemented
+    }
 }
 
 /// `Byrdpip::after_obtained` — transform every `ByrdonisEgg` in the
@@ -3287,6 +3401,108 @@ mod tests {
         assert_eq!(pet_count(&state), 1, "no duplicate pet on re-summon");
     }
 
+    /// v0.113.0 `Byrdpip.AfterCardPlayed` (`Byrdpip.cs`): each Byrd Swoop
+    /// play bumps `SwoopsPlayed`, which stops at `playsToEvolve = 6`; other
+    /// cards and v0.111.0 (no counter in its `Byrdpip.cs`) leave it alone.
+    #[test]
+    fn byrdpip_counts_swoops_to_six_on_v0113_only() {
+        use sts2_core::cards::CardId;
+        let ctx = |card_id| CardEventCtx {
+            card_id,
+            card_uid: None,
+            target: None,
+            card_tags: sts2_core::cards::CardTags::default(),
+            energy_spent: 0,
+        };
+        let counter = |s: &CombatState| {
+            s.relics
+                .iter()
+                .find(|r| r.kind == RelicKind::Byrdpip)
+                .unwrap()
+                .counter
+        };
+        let mut state = CombatState {
+            game_version: sts2_core::GameVersion::V0_113_0,
+            ..Default::default()
+        };
+        push_relic(&mut state, RelicKind::Byrdpip);
+        for _ in 0..8 {
+            let _ = listener_byrdpip_count_swoops(&mut state, &ctx(CardId::ByrdSwoop));
+        }
+        let _ = listener_byrdpip_count_swoops(&mut state, &ctx(CardId::StrikeIronclad));
+        assert_eq!(counter(&state), BYRDPIP_PLAYS_TO_EVOLVE);
+
+        let mut old = CombatState {
+            game_version: sts2_core::GameVersion::V0_111_0,
+            ..Default::default()
+        };
+        push_relic(&mut old, RelicKind::Byrdpip);
+        let _ = listener_byrdpip_count_swoops(&mut old, &ctx(CardId::ByrdSwoop));
+        assert_eq!(counter(&old), 0);
+    }
+
+    /// v0.113.0 `Byrdpip.TryModifyRestSiteOptions` + `EvolveRestSiteOption`:
+    /// at 6 swoops the rest site offers EVOLVE after Heal/Smith; picking it
+    /// `RelicCmd.Replace`s Byrdpip with Byrdine in the same slot
+    /// (`RelicCmd.cs` `Obtain(replace, player, indexOfOriginal)`), and
+    /// `Byrdine.AfterObtained` turns each Byrd Swoop into a God Byrd that
+    /// keeps the swoop's upgrade. Five swoops, or v0.111.0, offer nothing.
+    #[test]
+    fn evolve_rest_site_option_replaces_byrdpip_with_byrdine() {
+        use sts2_core::cards::CardId;
+        use sts2_core::runstate::{RestSiteActionOutcome, RestSiteOption};
+        crate::relics::dispatch::ensure_installed();
+        let pod = |id, up| crate::cards::spec_index::card_pod_from_id(id, up).unwrap();
+        let mut rs = RunState::new();
+        rs.game_version = sts2_core::GameVersion::V0_113_0;
+        rs.relics = vec![RelicId::BurningBlood, RelicId::Byrdpip, RelicId::Anchor];
+        rs.master_deck = vec![
+            pod(CardId::ByrdSwoop, true),
+            pod(CardId::StrikeIronclad, false),
+            pod(CardId::ByrdSwoop, false),
+        ];
+        rs.relic_counters.insert(RelicId::Byrdpip, 5);
+        assert!(!rs.rest_site_options().contains(&RestSiteOption::Evolve));
+        rs.relic_counters.insert(RelicId::Byrdpip, 6);
+        let ids: Vec<_> = rs
+            .rest_site_options()
+            .iter()
+            .map(RestSiteOption::option_id)
+            .collect();
+        assert_eq!(ids, ["HEAL", "SMITH", "EVOLVE"]);
+
+        assert_eq!(
+            rs.do_rest_site_action(RestSiteOption::Evolve),
+            RestSiteActionOutcome::Evolved
+        );
+        assert_eq!(
+            rs.relics,
+            vec![RelicId::BurningBlood, RelicId::Byrdine, RelicId::Anchor]
+        );
+        assert!(!rs.relic_counters.contains_key(&RelicId::Byrdpip));
+        let deck: Vec<_> = rs
+            .master_deck
+            .iter()
+            .map(|c| (c.card_id, c.upgraded))
+            .collect();
+        assert_eq!(
+            deck,
+            vec![
+                (CardId::StrikeIronclad, false),
+                (CardId::GodByrd, true),
+                (CardId::GodByrd, false),
+            ]
+        );
+        assert_eq!(rs.master_deck[1].base_damage, 40);
+        assert_eq!(rs.master_deck[2].base_damage, 30);
+
+        let mut old = RunState::new();
+        old.game_version = sts2_core::GameVersion::V0_111_0;
+        old.relics = vec![RelicId::Byrdpip];
+        old.relic_counters.insert(RelicId::Byrdpip, 6);
+        assert!(!old.rest_site_options().contains(&RestSiteOption::Evolve));
+    }
+
     /// `Byrdpip::after_obtained` transforms every `ByrdonisEgg` in the
     /// master deck into a `ByrdSwoop`.
     #[test]
@@ -5391,6 +5607,7 @@ mod tests {
             dealer: player_uid,
             target: enemy_uid,
             damage: 7,
+            total_damage: 7,
             props: ValueProps::NONE,
             was_block_broken: true,
         };
@@ -5411,6 +5628,7 @@ mod tests {
             dealer: player_uid,
             target: enemy_uid,
             damage: 7,
+            total_damage: 7,
             props: ValueProps::NONE,
             was_block_broken: false,
         };
@@ -5433,6 +5651,7 @@ mod tests {
             dealer: enemy_uid,
             target: player_uid,
             damage: 7,
+            total_damage: 7,
             props: ValueProps::NONE,
             was_block_broken: true,
         };

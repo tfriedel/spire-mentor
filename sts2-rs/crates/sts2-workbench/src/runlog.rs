@@ -77,11 +77,9 @@ pub fn write_run_log(sess: &Session, now_iso: &str) -> Option<RunLog> {
         "act1": sess.act1,
         "backend": sess.backend(),
     });
-    // GH #801: only a non-default build is named (a v0.107.1 log keeps its
-    // bytes); `run_identity` reads absence as v0.107.1.
-    if !sess.game_version.is_default() {
-        meta["game_version"] = json!(sess.game_version.as_str());
-    }
+    // GH #801: always named, so a log says which build it is;
+    // `run_identity` reads absence (an older log) as v0.107.1.
+    meta["game_version"] = json!(sess.game_version.as_str());
     // Named only for an e2e start; `run_identity` reads absence as false.
     if sess.e2e_setup() {
         meta["e2e_setup"] = json!(true);

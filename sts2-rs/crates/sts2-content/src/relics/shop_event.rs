@@ -1450,34 +1450,26 @@ fn listener_belt_buckle_after_potion_used(
 ///   `CrackedCore` → `InfusedCore` (Defect)
 ///   `BoundPhylactery` → `PhylacteryUnbound` (Necrobinder)
 ///   `DivineRight` → `DivineDestiny` (Regent)
-/// Idempotent: subsequent calls (shouldn't happen — `after_obtained`
-/// fires once) leave already-upgraded starter relics alone since the
-/// mapping keys on the un-upgraded variant only. Bead `sts2-rs-70anj.3`.
+///   `SongBow` → `Storyteller` (The Fool, v0.113.0)
+/// An already-refined starter (no `RefinementUpgrades` entry) becomes
+/// Circlet. Bead `sts2-rs-70anj.3`.
 fn listener_touch_of_orobas(rs: &mut RunState) -> EffectResult {
     if rs.last_obtained_relic != Some(RelicId::TouchOfOrobas) {
         return EffectResult::NotImplemented;
     }
-    let mut upgraded = false;
-    for slot in &mut rs.relics {
-        let swap = match *slot {
-            RelicId::BurningBlood => Some(RelicId::BlackBlood),
-            RelicId::RingOfTheSnake => Some(RelicId::RingOfTheDrake),
-            RelicId::CrackedCore => Some(RelicId::InfusedCore),
-            RelicId::BoundPhylactery => Some(RelicId::PhylacteryUnbound),
-            RelicId::DivineRight => Some(RelicId::DivineDestiny),
-            _ => None,
-        };
-        if let Some(new_id) = swap {
-            *slot = new_id;
-            upgraded = true;
-            break;
-        }
+    // C# `TouchOfOrobas.AfterObtained` (`TouchOfOrobas.cs:158-165`): the
+    // FIRST relic with `Rarity == Starter` (`GetStarterRelic`) is
+    // `RelicCmd.Replace`d, in its slot, by its `RefinementUpgrades` entry —
+    // or by Circlet when it has none (an already-refined starter).
+    let Some(slot) = rs.relics.iter().position(|r| r.is_starter_rarity()) else {
+        return EffectResult::NotImplemented;
+    };
+    let old = rs.relics[slot];
+    rs.relics[slot] = old.refined_starter().unwrap_or(RelicId::Circlet);
+    if !rs.relics.contains(&old) {
+        rs.relic_counters.remove(&old);
     }
-    if upgraded {
-        EffectResult::Resolved
-    } else {
-        EffectResult::NotImplemented
-    }
+    EffectResult::Resolved
 }
 
 /// `LargeCapsule::after_obtained` — offers 2 random relic rewards
@@ -2076,27 +2068,13 @@ fn listener_snecko_eye_combat_start(state: &mut CombatState) -> EffectResult {
 /// ethereal sweep in [`crate::sts2_core::combat_loop`] honors the
 /// flag (bead `sts2-rs-ad53n`). Bead `sts2-rs-sei89`.
 fn listener_ghost_seed_combat_start(state: &mut CombatState) -> EffectResult {
-    use sts2_core::cards::CardId;
     if !state.relics.owns(RelicKind::GhostSeed) {
         return EffectResult::NotImplemented;
     }
-    // Closed set: every Python `CardRarity.BASIC` card whose name
-    // contains "STRIKE" or "DEFEND" at pin `01c094d`. Derived cards
-    // (`SetupStrikeCard`, `FocusedStrikeCard`) are non-basic and must
-    // NOT match — Python's rarity gate excludes them, and this
-    // explicit allowlist preserves that behavior.
-    const GHOST_SEED_TARGETS: &[CardId] = &[
-        CardId::StrikeIronclad,
-        CardId::DefendIronclad,
-        CardId::StrikeSilent,
-        CardId::DefendSilent,
-        CardId::StrikeDefect,
-        CardId::DefendDefect,
-        CardId::StrikeRegent,
-        CardId::DefendRegent,
-        CardId::StrikeNecrobinder,
-        CardId::DefendNecrobinder,
-    ];
+    // C# `GhostSeed.cs:51`: `Rarity == Basic && (Strike || Defend)` tag.
+    // Derived Strike-tag cards (`SetupStrikeCard`, ...) are non-basic and
+    // must NOT match, which the closed id lists preserve.
+    use super::neow_relics::{BASIC_DEFEND_IDS, BASIC_STRIKE_IDS};
     let mut uids: Vec<sts2_core::CardUid> = Vec::new();
     uids.extend(state.player.draw.iter().copied());
     uids.extend(state.player.hand.iter().copied());
@@ -2107,7 +2085,7 @@ fn listener_ghost_seed_combat_start(state: &mut CombatState) -> EffectResult {
             Some(c) => c.card_id,
             None => continue,
         };
-        if GHOST_SEED_TARGETS.contains(&card_id) {
+        if BASIC_STRIKE_IDS.contains(&card_id) || BASIC_DEFEND_IDS.contains(&card_id) {
             set_card_var(state, uid, VarKey::EtherealThisCombat, 1);
         }
     }
@@ -3160,7 +3138,9 @@ fn enchant_card_type_restriction(
     use sts2_core::cards::{CardType, EnchantmentId};
     match ench {
         // Attack-only (Sharp/Momentum/… group in `can_enchant_card`).
-        EnchantmentId::Sharp | EnchantmentId::Momentum => (Some(CardType::Attack), None),
+        EnchantmentId::Sharp | EnchantmentId::Momentum | EnchantmentId::Instinct => {
+            (Some(CardType::Attack), None)
+        }
         // Skill-only.
         EnchantmentId::Imbued => (Some(CardType::Skill), None),
         // Attack OR Skill — RoyalStamp's RoyallyApproved.
@@ -4264,6 +4244,12 @@ fn listener_paels_growth(rs: &mut RunState) -> EffectResult {
     if rs.last_obtained_relic != Some(RelicId::PaelsGrowth) {
         return EffectResult::NotImplemented;
     }
+    // `PaelsGrowth.AfterObtained` (`PaelsGrowth.cs:24`) awaits
+    // `CardSelectCmd.FromDeckForEnchantment(prefs: 1)`: the player picks the
+    // card. Found by the pep299 fork. One or zero candidates need no pick.
+    if try_queue_interactive_enchant(rs, sts2_core::cards::EnchantmentId::Clone, 4, 1, false) {
+        return EffectResult::Resolved;
+    }
     let _ = enchant_eligible_deck_cards(rs, sts2_core::cards::EnchantmentId::Clone, 4, 1);
     EffectResult::Resolved
 }
@@ -4418,6 +4404,19 @@ fn listener_ninja_scroll(state: &mut CombatState) -> EffectResult {
 fn listener_tri_boomerang(rs: &mut RunState) -> EffectResult {
     if rs.last_obtained_relic != Some(RelicId::TriBoomerang) {
         return EffectResult::NotImplemented;
+    }
+    // `TriBoomerang.AfterObtained` (`TriBoomerang.cs:26`) awaits
+    // `CardSelectCmd.FromDeckForEnchantment(prefs: Cards)`: the player picks
+    // the three Attacks. Found by the pep299 fork. With three or fewer
+    // candidates every one is enchanted and no screen opens.
+    if try_queue_interactive_enchant(
+        rs,
+        sts2_core::cards::EnchantmentId::Instinct,
+        1,
+        TRI_BOOMERANG_CARDS,
+        false,
+    ) {
+        return EffectResult::Resolved;
     }
     let _ = enchant_eligible_deck_cards(
         rs,
@@ -4725,6 +4724,8 @@ fn listener_archaic_tooth(rs: &mut RunState) -> EffectResult {
             CardId::Unleash => Some(CardId::Protector),
             CardId::FallingStar => Some(CardId::MeteorShower),
             CardId::Dualcast => Some(CardId::Quadcast),
+            // v0.113.0 (`ArchaicTooth.cs:48-51`); FoolishShot is v0.113-only.
+            CardId::FoolishShot => Some(CardId::DivineShot),
             _ => None,
         }
     };
@@ -4762,8 +4763,10 @@ fn listener_archaic_tooth(rs: &mut RunState) -> EffectResult {
 /// `CardSelectCmd.FromDeckForTransformation` select whose candidates are
 /// `Type != Quest && IsTransformable` (`CardSelectCmd.cs:592`); a deck card
 /// is transformable iff it is not Eternal (`CardModel.cs:738-751`). A Maul
-/// already in the deck is a legal (if pointless) pick. Rust surfaces no
-/// select: it takes the first 6 candidates in deck order. The transform then
+/// already in the deck is a legal (if pointless) pick. With
+/// [`RunState::interactive_card_transform`] set the select opens as
+/// [`RunState::pending_claws_selection`] (pick 0..=6, then confirm; GH #1353);
+/// otherwise Rust takes the first 6 candidates in deck order. The transform then
 /// follows `CardCmd.Transform` (`CardCmd.cs:383-436`): originals leave the
 /// deck and each Maul is appended through the add-to-deck hooks in original
 /// pile-index order, which [`RunState::transform_specific_cards`] does.
@@ -4772,12 +4775,12 @@ fn listener_claws(rs: &mut RunState) -> EffectResult {
     if rs.last_obtained_relic != Some(RelicId::Claws) {
         return EffectResult::NotImplemented;
     }
-    let mut indices = Vec::with_capacity(CLAWS_CARDS);
-    let mut mauls = Vec::with_capacity(CLAWS_CARDS);
+    let interactive = rs.interactive_card_transform;
+    let mut candidates = Vec::new();
     let version = rs.game_version;
     let maul_spec = crate::cards::spec_index::spec_for_card_id(CardId::Maul);
     for (i, card) in rs.master_deck.iter().enumerate() {
-        if indices.len() >= CLAWS_CARDS {
+        if !interactive && candidates.len() >= CLAWS_CARDS {
             break;
         }
         if card.is_quest() || !crate::cards::spec_index::card_is_removable_instance(card) {
@@ -4802,11 +4805,23 @@ fn listener_claws(rs: &mut RunState) -> EffectResult {
                     let _ = crate::enchantments::apply_static_enchantment(&mut maul, ench, amount);
                 }
             }
-            indices.push(i);
-            mauls.push(maul);
+            candidates.push((i, maul));
         }
     }
-    let _ = rs.transform_specific_cards(&indices, mauls);
+    if interactive {
+        // C# opens the screen even with no candidate; the empty confirm is
+        // then the only move, so skip the no-op decision.
+        if !candidates.is_empty() {
+            rs.pending_claws_selection = Some(sts2_core::runstate::PendingClawsSelection {
+                candidates,
+                selected: Vec::new(),
+                max_count: CLAWS_CARDS,
+            });
+        }
+    } else {
+        let (indices, mauls): (Vec<_>, Vec<_>) = candidates.into_iter().unzip();
+        let _ = rs.transform_specific_cards(&indices, mauls);
+    }
     EffectResult::Resolved
 }
 
@@ -4815,24 +4830,14 @@ fn listener_claws(rs: &mut RunState) -> EffectResult {
 /// `shop_event.py::NutritiousSoup.after_obtained`:
 /// `owner.enchant_basic_strikes("TezcatarasEmber")`). Static
 /// enchantments use `set_enchantment` (not `add`) so the call is
-/// idempotent. Basic-Strike CardIds across all five characters are
-/// enumerated explicitly — same convention as the deck-builder /
-/// damage tests. Bead `sts2-rs-w9vf8`.
+/// idempotent. Basic Strikes come from the shared
+/// [`super::neow_relics::BASIC_STRIKE_IDS`] list (every character's). Bead `sts2-rs-w9vf8`.
 fn listener_nutritious_soup(rs: &mut RunState) -> EffectResult {
     use sts2_core::cards::{CardId, EnchantmentId};
     if rs.last_obtained_relic != Some(RelicId::NutritiousSoup) {
         return EffectResult::NotImplemented;
     }
-    let is_basic_strike = |id: CardId| {
-        matches!(
-            id,
-            CardId::StrikeIronclad
-                | CardId::StrikeSilent
-                | CardId::StrikeDefect
-                | CardId::StrikeRegent
-                | CardId::StrikeNecrobinder
-        )
-    };
+    let is_basic_strike = |id: CardId| super::neow_relics::BASIC_STRIKE_IDS.contains(&id);
     for card in &mut rs.master_deck {
         // `CanEnchant` refuses a card that already carries an enchantment
         // (EnchantmentModel.cs:289, Ember is not stackable).
@@ -6011,6 +6016,11 @@ mod tests {
             (RelicId::CrackedCore, RelicId::InfusedCore),
             (RelicId::BoundPhylactery, RelicId::PhylacteryUnbound),
             (RelicId::DivineRight, RelicId::DivineDestiny),
+            // v0.113.0 `TouchOfOrobas.cs:52-53`.
+            (RelicId::SongBow, RelicId::Storyteller),
+            // No `RefinementUpgrades` entry: `GetUpgradedStarterRelic`
+            // falls back to Circlet (`TouchOfOrobas.cs:124-131`).
+            (RelicId::BlackBlood, RelicId::Circlet),
         ];
 
         for (starter, upgraded) in cases {
@@ -9155,6 +9165,27 @@ mod tests {
             sts2_core::cards::CardType::Attack,
             "a fresh Break, not Bash's stats under a new id"
         );
+    }
+
+    /// v0.113.0 `ArchaicTooth.TranscendenceUpgrades` adds FoolishShot ->
+    /// DivineShot (`ArchaicTooth.cs:48-51`).
+    #[test]
+    fn listener_archaic_tooth_transforms_foolish_shot_to_divine_shot() {
+        use sts2_core::cards::CardId;
+        use sts2_core::runstate::RunState;
+        crate::relics::dispatch::ensure_installed();
+        let mut rs = RunState::new();
+        rs.game_version = sts2_core::GameVersion::V0_113_0;
+        for id in [CardId::StrikeFool, CardId::FoolishShot] {
+            let mut c = sts2_core::cards::Card::pod_defaults();
+            c.card_id = id;
+            rs.master_deck.push(c);
+        }
+        rs.relics.push(RelicId::ArchaicTooth);
+        rs.last_obtained_relic = Some(RelicId::ArchaicTooth);
+        let _ = sts2_core::run_effects::dispatch_after_obtained(&mut rs);
+        let ids: Vec<_> = rs.master_deck.iter().map(|c| c.card_id).collect();
+        assert_eq!(ids, vec![CardId::StrikeFool, CardId::DivineShot]);
     }
 
     /// Bead `sts2-rs-rvwas`: ArchaicTooth transforms only the first
@@ -15590,5 +15621,218 @@ mod tests {
             vec![CardId::StrikeIronclad],
             "the Sharp-eligible Strike must be collected via its own spec"
         );
+    }
+}
+
+/// Found by the pep299 fork: these two relics opened no card select.
+#[cfg(test)]
+mod interactive_enchant_on_obtain_tests {
+    use super::*;
+    use sts2_core::cards::{CardId, EnchantmentId};
+    use sts2_core::potions::CharacterId;
+    use sts2_core::run_manager::{ActionResult, RunAction, RunManager};
+
+    fn manager_for(relic: RelicId, cards: &[CardId]) -> RunManager {
+        crate::cards::dispatch::ensure_installed();
+        crate::relics::dispatch::ensure_installed();
+        let mut rm = RunManager::new(0, CharacterId::Ironclad);
+        rm.run_state.set_agent_decisions();
+        rm.run_state.master_deck.clear();
+        for &id in cards {
+            push_deck_card(&mut rm.run_state, id);
+        }
+        rm.run_state.obtain_relic(relic);
+        rm
+    }
+
+    fn stacks(rm: &RunManager, ench: EnchantmentId) -> Vec<i32> {
+        let deck = rm.run_state.master_deck.iter();
+        deck.map(|c| c.enchantment(ench)).collect()
+    }
+
+    #[test]
+    fn tri_boomerang_enchants_the_three_attacks_the_player_picks() {
+        use CardId::{DefendIronclad as Defend, StrikeIronclad as Strike};
+        let mut rm = manager_for(
+            RelicId::TriBoomerang,
+            &[Strike, Strike, Defend, Strike, Strike],
+        );
+        assert_eq!(rm.run_state.pending_deck_enchants.len(), 3);
+        // Attacks only (`Instinct.CanEnchantCardType`).
+        assert_eq!(rm.enchant_eligible_deck_indices(), vec![0, 1, 3, 4]);
+        // Each pick leaves the offer, so idx 0 twice names two cards.
+        for idx in [3, 0, 0] {
+            assert_eq!(
+                rm.take_action(RunAction::EnchantDeckCard { idx }),
+                ActionResult::Advanced
+            );
+        }
+        assert!(rm.run_state.pending_deck_enchants.is_empty());
+        assert_eq!(stacks(&rm, EnchantmentId::Instinct), [1, 1, 0, 0, 1]);
+    }
+
+    #[test]
+    fn tri_boomerang_opens_no_screen_for_three_or_fewer_attacks() {
+        use CardId::{DefendIronclad as Defend, StrikeIronclad as Strike};
+        let rm = manager_for(RelicId::TriBoomerang, &[Strike, Defend, Strike]);
+        assert!(rm.run_state.pending_deck_enchants.is_empty());
+        assert_eq!(stacks(&rm, EnchantmentId::Instinct), [1, 0, 1]);
+    }
+
+    #[test]
+    fn paels_growth_clones_the_card_the_player_picks() {
+        use CardId::StrikeIronclad as Strike;
+        let mut rm = manager_for(RelicId::PaelsGrowth, &[Strike, Strike]);
+        assert_eq!(rm.run_state.pending_deck_enchants.len(), 1);
+        assert_eq!(
+            rm.take_action(RunAction::EnchantDeckCard { idx: 1 }),
+            ActionResult::Advanced
+        );
+        assert_eq!(stacks(&rm, EnchantmentId::Clone), [0, 4]);
+
+        let single = manager_for(RelicId::PaelsGrowth, &[Strike]);
+        assert!(single.run_state.pending_deck_enchants.is_empty());
+        assert_eq!(stacks(&single, EnchantmentId::Clone), [4]);
+    }
+}
+
+/// GH #1353: Claws' "up to 6 into Maul" select is a player choice.
+#[cfg(test)]
+mod claws_selection_tests {
+    use super::*;
+    use sts2_core::cards::CardId;
+    use sts2_core::potions::CharacterId;
+    use sts2_core::run_manager::{ActionResult, RunAction, RunManager};
+
+    /// An agent-mode run whose deck is exactly `cards`, after obtaining Claws.
+    fn claws_run(cards: &[CardId]) -> RunManager {
+        crate::cards::dispatch::ensure_installed();
+        crate::relics::dispatch::ensure_installed();
+        let mut rm = RunManager::new(0, CharacterId::Ironclad);
+        rm.run_state.set_agent_decisions();
+        rm.run_state.master_deck.clear();
+        for &id in cards {
+            push_deck_card(&mut rm.run_state, id);
+        }
+        rm.run_state.obtain_relic(RelicId::Claws);
+        rm
+    }
+
+    fn mauls(rm: &RunManager) -> usize {
+        rm.run_state
+            .master_deck
+            .iter()
+            .filter(|c| c.card_id == CardId::Maul)
+            .count()
+    }
+
+    const EIGHT: [CardId; 8] = [
+        CardId::StrikeIronclad,
+        CardId::DefendIronclad,
+        CardId::StrikeIronclad,
+        CardId::DefendIronclad,
+        CardId::StrikeIronclad,
+        CardId::DefendIronclad,
+        CardId::StrikeIronclad,
+        CardId::DefendIronclad,
+    ];
+
+    #[test]
+    fn the_select_offers_every_candidate_and_the_confirm() {
+        let rm = claws_run(&EIGHT);
+        let actions = rm.get_available_actions();
+        assert_eq!(actions.len(), 9);
+        assert_eq!(actions.last(), Some(&RunAction::ConfirmDeckSelection));
+        assert!(actions[..8]
+            .iter()
+            .all(|a| matches!(a, RunAction::TransformDeckCard { .. })));
+    }
+
+    #[test]
+    fn zero_one_or_six_picks_transform_exactly_those_on_confirm() {
+        for picks in [0, 1, 6] {
+            let mut rm = claws_run(&EIGHT);
+            let original = rm.run_state.master_deck.clone();
+            for _ in 0..picks {
+                assert_eq!(
+                    rm.take_action(RunAction::TransformDeckCard { idx: 0 }),
+                    ActionResult::Advanced
+                );
+                // The deck changes only on the confirm (one C# Transform).
+                assert_eq!(rm.run_state.master_deck, original);
+            }
+            assert_eq!(
+                rm.take_action(RunAction::ConfirmDeckSelection),
+                ActionResult::Advanced
+            );
+            assert!(rm.run_state.pending_claws_selection.is_none());
+            assert_eq!(mauls(&rm), picks);
+            assert_eq!(rm.run_state.master_deck.len(), original.len());
+        }
+    }
+
+    #[test]
+    fn the_cap_leaves_only_the_confirm() {
+        let mut rm = claws_run(&EIGHT);
+        for _ in 0..CLAWS_CARDS {
+            assert_eq!(
+                rm.take_action(RunAction::TransformDeckCard { idx: 0 }),
+                ActionResult::Advanced
+            );
+        }
+        assert_eq!(
+            rm.get_available_actions(),
+            vec![RunAction::ConfirmDeckSelection]
+        );
+        assert_eq!(
+            rm.take_action(RunAction::TransformDeckCard { idx: 0 }),
+            ActionResult::InvalidForPhase
+        );
+    }
+
+    #[test]
+    fn a_later_card_can_be_picked_and_mauls_join_in_deck_order() {
+        let mut rm = claws_run(&[CardId::StrikeIronclad, CardId::DefendIronclad, CardId::Bash]);
+        // Pick the Bash (offer idx 2), then the Defend (offer idx 1).
+        for idx in [2, 1] {
+            assert_eq!(
+                rm.take_action(RunAction::TransformDeckCard { idx }),
+                ActionResult::Advanced
+            );
+        }
+        assert_eq!(rm.transform_eligible_deck_indices(), vec![0]);
+        assert_eq!(
+            rm.take_action(RunAction::ConfirmDeckSelection),
+            ActionResult::Advanced
+        );
+        let deck = &rm.run_state.master_deck;
+        assert_eq!(deck[0].card_id, CardId::StrikeIronclad);
+        assert_eq!(deck[1].card_id, CardId::Maul);
+        assert_eq!(deck[2].card_id, CardId::Maul);
+        assert_eq!(deck[1].target_type, sts2_core::cards::TargetType::Enemy);
+    }
+
+    #[test]
+    fn the_select_preempts_the_phase_until_confirmed() {
+        let mut rm = claws_run(&EIGHT);
+        assert!(rm.run_state.has_pending_grant_choice());
+        rm.take_action(RunAction::ConfirmDeckSelection);
+        assert!(!rm
+            .get_available_actions()
+            .iter()
+            .any(|a| matches!(a, RunAction::ConfirmDeckSelection)));
+    }
+
+    #[test]
+    fn non_interactive_runs_keep_the_first_six() {
+        crate::relics::dispatch::ensure_installed();
+        let mut rm = RunManager::new(0, CharacterId::Ironclad);
+        rm.run_state.master_deck.clear();
+        for &id in &EIGHT {
+            push_deck_card(&mut rm.run_state, id);
+        }
+        rm.run_state.obtain_relic(RelicId::Claws);
+        assert!(rm.run_state.pending_claws_selection.is_none());
+        assert_eq!(mauls(&rm), CLAWS_CARDS);
     }
 }

@@ -24,7 +24,7 @@ use sts2_core::map::MapPointType;
 use sts2_core::run_manager::RunManager;
 #[cfg(feature = "ppo")]
 use sts2_core::run_manager::{Phase, RunAction};
-use sts2_core::shop::{is_shop_entry_available, ShopInventory};
+use sts2_core::shop::{is_shop_entry_available, merchant_price_with_modifiers, ShopInventory};
 use sts2_core::ChoiceKind;
 
 #[cfg(feature = "ppo")]
@@ -116,6 +116,7 @@ pub fn classify_surface(phase: Phase, actions: &[RunAction]) -> Option<&'static 
                 RunAction::RemoveDeckCard { .. }
                     | RunAction::UpgradeDeckCard { .. }
                     | RunAction::TransformDeckCard { .. }
+                    | RunAction::ConfirmDeckSelection
                     | RunAction::EnchantDeckCard { .. }
                     | RunAction::GrantDeckCard { .. }
             )
@@ -327,8 +328,10 @@ fn build_full_map_obs(rm: &RunManager) -> Option<FullMapObs> {
 }
 
 /// `RunManager.shop_inventory()` mirror (`sts2-py::run_manager.rs`
-/// ~:1184).
-fn build_shop_obs(inv: &ShopInventory) -> ShopObs {
+/// ~:1184). Prices must match the Python-facing shop inventory and the
+/// engine's actual affordability/charge calculation, including relic discounts.
+fn build_shop_obs(inv: &ShopInventory, active_relics: &[sts2_core::relics::RelicId]) -> ShopObs {
+    let price_of = |base| i64::from(merchant_price_with_modifiers(active_relics, base));
     let cards: Vec<ShopCardObs> = inv
         .cards
         .iter()
@@ -337,7 +340,7 @@ fn build_shop_obs(inv: &ShopInventory) -> ShopObs {
         .map(|(idx, e)| ShopCardObs {
             idx: idx as i64,
             id: e.card.as_ref().map(|c| format!("{:?}", c.card_id)),
-            price: i64::from(e.price),
+            price: price_of(e.price),
             on_sale: e.on_sale,
             is_colorless: e.is_colorless,
             available: is_shop_entry_available(e.price) && e.card.is_some(),
@@ -351,7 +354,7 @@ fn build_shop_obs(inv: &ShopInventory) -> ShopObs {
         .map(|(idx, e)| ShopEntryObs {
             idx: idx as i64,
             id: e.relic_id.map(|r| format!("RELIC.{}", r.to_python_name())),
-            price: i64::from(e.price),
+            price: price_of(e.price),
             available: is_shop_entry_available(e.price) && e.relic_id.is_some(),
         })
         .collect();
@@ -362,7 +365,7 @@ fn build_shop_obs(inv: &ShopInventory) -> ShopObs {
         .map(|(idx, e)| ShopEntryObs {
             idx: idx as i64,
             id: e.potion_kind.map(|k| format!("{k:?}")),
-            price: i64::from(e.price),
+            price: price_of(e.price),
             available: is_shop_entry_available(e.price) && e.potion_kind.is_some(),
         })
         .collect();
@@ -370,7 +373,7 @@ fn build_shop_obs(inv: &ShopInventory) -> ShopObs {
         cards,
         relics,
         potions,
-        removal_cost: i64::from(inv.removal_cost),
+        removal_cost: price_of(inv.removal_cost),
         removal_used: inv.removal_used,
     }
 }
@@ -598,7 +601,9 @@ pub fn build_obs(rm: &RunManager, phase: &str, surface: Option<&str>) -> PpoObs 
             );
         }
         Some("shop") => {
-            obs.shop = rm.shop_inventory().map(build_shop_obs);
+            obs.shop = rm
+                .shop_inventory()
+                .map(|inv| build_shop_obs(inv, &rs.active_relics()));
         }
         Some("event") => {
             obs.event_name = rs.current_event.map(|id| id.python_name().to_string());
@@ -633,7 +638,14 @@ pub fn build_obs(rm: &RunManager, phase: &str, surface: Option<&str>) -> PpoObs 
             });
         }
         Some("rest") => {
-            obs.rest_option_labels = Some(vec!["rest".to_string(), "smith".to_string()]);
+            // The CURRENT option ids (`ppo.env.observe`): a Miniature Tent
+            // second pick no longer lists the option already taken.
+            obs.rest_option_labels = Some(
+                rs.rest_site_options()
+                    .iter()
+                    .map(|opt| opt.option_id().to_string())
+                    .collect(),
+            );
         }
         Some("potion-swap") => {
             // `RunManager::pending_potion_swap`'s debug-name spelling
@@ -1086,21 +1098,31 @@ impl RunNudge {
         let Some(threshold) = self.smith_hp else {
             return argmax;
         };
-        if phase != Phase::RestSite || actions[argmax] != (RunAction::RestOption { idx: 0 }) {
+        if phase != Phase::RestSite {
             return argmax;
         }
+        // Find Rest and Smith by identity: after a Miniature Tent first pick
+        // the option at idx 0 is whatever is left, not Rest.
+        use sts2_core::runstate::RestSiteOption;
         let rs = &rm.run_state;
-        let smith_enabled = matches!(
-            rs.rest_site_options().get(1),
-            Some(sts2_core::runstate::RestSiteOption::Smith { enabled: true })
-        );
-        if !smith_enabled || f64::from(rs.current_hp) < f64::from(threshold) * f64::from(rs.max_hp)
+        let options = rs.rest_site_options();
+        let RunAction::RestOption { idx } = actions[argmax] else {
+            return argmax;
+        };
+        if !matches!(options.get(idx), Some(RestSiteOption::Rest))
+            || f64::from(rs.current_hp) < f64::from(threshold) * f64::from(rs.max_hp)
         {
             return argmax;
         }
+        let Some(smith_idx) = options
+            .iter()
+            .position(|opt| matches!(opt, RestSiteOption::Smith { enabled: true }))
+        else {
+            return argmax;
+        };
         actions
             .iter()
-            .position(|a| *a == RunAction::RestOption { idx: 1 })
+            .position(|a| *a == RunAction::RestOption { idx: smith_idx })
             .unwrap_or(argmax)
     }
 }
@@ -1519,5 +1541,44 @@ mod run_nudge_tests {
     #[should_panic(expected = "not a number")]
     fn a_typo_panics_instead_of_running_the_baseline() {
         let _ = RunNudge::parse(Some("smith_hp=half"));
+    }
+
+    /// Found by the pep299 fork: after a Miniature Tent first pick, idx 0 is
+    /// Smith. The obs must say so and the nudge must not read it as Rest.
+    #[test]
+    fn miniature_tent_second_pick_observation_and_nudge_track_smith() {
+        use sts2_core::potions::CharacterId;
+        use sts2_core::run_manager::{Phase, RunAction, RunManager};
+        use sts2_core::RelicId;
+
+        sts2_content::relics::dispatch::ensure_installed();
+        let mut rm = RunManager::new(0, CharacterId::Ironclad)
+            .with_content_callbacks(sts2_content::run_callbacks::ironclad_content_callbacks());
+        rm.run_state.relics.push(RelicId::MiniatureTent);
+        rm.run_state.current_hp = rm.run_state.max_hp;
+        // Something to upgrade, so Smith is enabled.
+        let strike = sts2_content::cards::spec_index::card_pod_from_id(
+            sts2_core::cards::CardId::StrikeIronclad,
+            false,
+        );
+        rm.run_state.master_deck.push(strike.expect("Strike pod"));
+        rm.enter_rest_site();
+
+        let nudge = RunNudge::parse(Some("smith_hp=0.5"));
+        let before = super::build_obs(&rm, "rest_site", Some("rest"));
+        assert_eq!(
+            before.rest_option_labels,
+            Some(vec!["HEAL".to_owned(), "SMITH".to_owned()])
+        );
+        // Healthy: a Rest argmax is nudged to Smith.
+        let actions = rm.get_available_actions();
+        assert_eq!(nudge.smith_override(&rm, Phase::RestSite, &actions, 0), 1);
+
+        rm.take_action(RunAction::RestOption { idx: 0 });
+        assert_eq!(rm.phase(), Phase::RestSite);
+        let after = super::build_obs(&rm, "rest_site", Some("rest"));
+        assert_eq!(after.rest_option_labels, Some(vec!["SMITH".to_owned()]));
+        let actions = rm.get_available_actions();
+        assert_eq!(nudge.smith_override(&rm, Phase::RestSite, &actions, 0), 0);
     }
 }

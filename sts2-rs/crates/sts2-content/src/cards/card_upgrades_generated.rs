@@ -921,6 +921,13 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
             base_block: Some(25),
             keywords: None,
         }),
+        // `GodByrd.cs`: `Damage.UpgradeValueBy(10)` 30 → 40 (the power amount).
+        CardId::GodByrd => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(40),
+            base_block: None,
+            keywords: None,
+        }),
         // ── v0.111.0-only cards (GH #793). The ids exist in no v0.107.1
         // state, so these rows cannot move a v0.107.1 upgrade.
         // `Abundance.cs` / `Tutor.cs`: `EnergyCost.UpgradeBy(-1)` 1 → 0.

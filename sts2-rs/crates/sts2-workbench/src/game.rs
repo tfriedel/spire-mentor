@@ -688,6 +688,31 @@ impl Game {
         // C# `CardSelectorPrefs(prompt, 0, N)` with `Cancelable = false`
         // (Kifuda.cs:24-26) still accepts an empty confirm, and the oracle
         // offers `skip_select` for it (min_select 0). Twin of `RustGame.act`.
+        // Claws (GH #1353): one `select_cards` picks every chosen card and
+        // confirms, as C#'s manual-confirm screen does; `skip_select` confirms
+        // with none. Ascending with shift, like transforms. Twin of
+        // `RustGame.act`.
+        if (action == "select_cards" || action == "skip_select")
+            && rmx::pending_claws_select(self.rm()?)
+        {
+            let idxs = if action == "select_cards" {
+                sorted_unique(parse_indices(args.get("indices"))?, false)
+            } else {
+                Vec::new()
+            };
+            if idxs.len() > rmx::claws_select_room(self.rm()?) {
+                return err("select_cards: too many cards for Claws");
+            }
+            let mut acts: Vec<RunAction> = idxs
+                .into_iter()
+                .enumerate()
+                .map(|(n, i)| RunAction::TransformDeckCard {
+                    idx: usize_of(i - n as i64),
+                })
+                .collect();
+            acts.push(RunAction::ConfirmDeckSelection);
+            return self.take_all(action, acts);
+        }
         if action == "skip_select" {
             let rm = self.rm()?;
             if rmx::pending_deck_enchants(rm) > 0 && rmx::pending_enchant_optional(rm) {
@@ -888,7 +913,7 @@ impl Game {
                 if rmx::pending_deck_upgrades(rm) > 0 {
                     return Ok(RunAction::UpgradeDeckCard { idx });
                 }
-                if rmx::pending_deck_transforms(rm) > 0 {
+                if rmx::pending_claws_select(rm) || rmx::pending_deck_transforms(rm) > 0 {
                     return Ok(RunAction::TransformDeckCard { idx });
                 }
                 if rmx::pending_deck_enchants(rm) > 0 {
@@ -916,6 +941,9 @@ impl Game {
                 }
                 if phase == "card_reward" && rmx::card_offer_choose_screen(rm) {
                     return Ok(RunAction::PickCardReward { idx: None });
+                }
+                if rmx::pending_claws_select(rm) {
+                    return Ok(RunAction::ConfirmDeckSelection);
                 }
                 err("skip_select not valid here")
             }
@@ -1042,6 +1070,11 @@ impl Game {
         if rmx::pending_deck_upgrades(rm) > 0 {
             let mut state = self.base_state("card_select");
             self.fill_card_upgrade(&mut state);
+            return state;
+        }
+        if rmx::pending_claws_select(rm) {
+            let mut state = self.base_state("card_select");
+            self.fill_claws_select(&mut state);
             return state;
         }
         if rmx::pending_deck_transforms(rm) > 0 {
@@ -1297,6 +1330,14 @@ impl Game {
         let cards = self.deck_subset_cards(&rmx::transform_select_deck_indices(rm));
         let count = Self::clamp_count(rmx::pending_deck_transforms(rm), cards.len());
         Self::set_select(state, cards, count, count, false, "transform");
+    }
+
+    /// `_fill_claws_select`: any 0..=room of the cards still offered.
+    fn fill_claws_select(&self, state: &mut Value) {
+        let rm = self.rm.as_ref().expect("run");
+        let cards = self.deck_subset_cards(&rmx::transform_select_deck_indices(rm));
+        let max = i64::try_from(rmx::claws_select_room(rm).min(cards.len())).unwrap_or(0);
+        Self::set_select(state, cards, 0, max, false, "transform");
     }
 
     /// `_fill_card_enchant`.
@@ -2518,6 +2559,42 @@ mod tests {
         let rm = game.rm.as_ref().unwrap();
         assert_eq!(rmx::pending_deck_enchants(rm), 0);
         assert_eq!(format!("{:?}", rm.run_state.master_deck), deck_before);
+    }
+
+    /// Claws (GH #1353) renders "up to 6" and one `select_cards` transforms
+    /// every named card at once (twin of the Python
+    /// `test_select_cards_transforms_the_named_cards_at_once`).
+    #[test]
+    fn claws_select_cards_transforms_the_named_cards_at_once() {
+        let mut game = Game::new();
+        game.start("Ironclad", "7", 0, "overgrowth").expect("start");
+        {
+            let rs = &mut game.rm.as_mut().unwrap().run_state;
+            rs.relics.push(sts2_core::RelicId::Claws);
+            rs.last_obtained_relic = Some(sts2_core::RelicId::Claws);
+            let _ = sts2_core::run_effects::dispatch_after_obtained(rs);
+            rs.last_obtained_relic = None;
+        }
+        let state = game.serialize();
+        assert_eq!(state["decision"], json!("card_select"));
+        assert_eq!(state["min_select"], json!(0));
+        assert_eq!(state["max_select"], json!(6));
+        let deck_len = game.rm.as_ref().unwrap().run_state.master_deck.len();
+        game.act("select_cards", &json!({"indices": "0,2"}))
+            .expect("select_cards accepted");
+        let rm = game.rm.as_ref().unwrap();
+        assert!(!rmx::pending_claws_select(rm));
+        let deck = &rm.run_state.master_deck;
+        assert_eq!(deck.len(), deck_len);
+        assert!(deck[deck_len - 2..]
+            .iter()
+            .all(|c| c.card_id == sts2_core::cards::CardId::Maul));
+        assert_eq!(
+            deck.iter()
+                .filter(|c| c.card_id == sts2_core::cards::CardId::Maul)
+                .count(),
+            2
+        );
     }
 
     /// Orobas' Sea Glass grid (MinSelect 0) accepts `skip_select` (twin of the

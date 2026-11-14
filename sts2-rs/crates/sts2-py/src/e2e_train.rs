@@ -218,7 +218,7 @@ impl PyE2eTrainEnv {
     /// Raises:
     ///     ValueError: an unknown cap key or build.
     #[new]
-    #[pyo3(signature = (rm, seed, *, first_ooc = false, capture = false, f9_seed = 0, f9_rate = 0.0, encode = true, priv_ = false, rare = None, caps = None, game_version = None, f9_queue_max = sts2_e2e::train::F9_QUEUE_MAX, detail = false))]
+    #[pyo3(signature = (rm, seed, *, first_ooc = false, capture = false, f9_seed = 0, f9_rate = 0.0, encode = true, priv_ = false, rare = None, caps = None, game_version = None, f9_queue_max = sts2_e2e::train::F9_QUEUE_MAX, detail = false, chars = false))]
     #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
     fn new(
         rm: &PyRunManager,
@@ -234,6 +234,7 @@ impl PyE2eTrainEnv {
         game_version: Option<&str>,
         f9_queue_max: usize,
         detail: bool,
+        chars: bool,
     ) -> PyResult<Self> {
         let mut c = Caps::default();
         for (k, v) in caps.unwrap_or_default() {
@@ -270,7 +271,12 @@ impl PyE2eTrainEnv {
                     game_version,
                 },
             ),
-            cache: TokCache::new(),
+            cache: {
+                // `factory.fill_chars()`: Ironclad rows carry the "chars" event.
+                let mut cache = TokCache::new();
+                cache.set_chars(chars);
+                cache
+            },
             encode,
             priv_,
             detail,

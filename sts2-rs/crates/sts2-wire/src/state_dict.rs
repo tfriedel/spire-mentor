@@ -2636,6 +2636,20 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
                 set.insert(k.python_name());
             }
         }
+        "card_any" => {
+            // Every build's cards, for checking a carried id -- the cards'
+            // `power_any`. "card" is the PPO vocab, frozen at v0.111.0 (its
+            // order is the nets' embedding rows), so the adapter dropped
+            // v0.113.0's (My Shinies) off the board and could not search an
+            // offer of one, though `card_id_from_python_name` parses them.
+            for k in CardId::all()
+                .iter()
+                .chain(&CardId::V0111_ONLY)
+                .chain(&CardId::V0113_ONLY)
+            {
+                set.insert(k.to_python_name());
+            }
+        }
         "orb" => {
             for k in ORB_KINDS {
                 set.insert(orb_python_name(*k));
@@ -2643,7 +2657,7 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
         }
         other => {
             return Err(format!(
-                "unknown registry kind `{other}` (expected one of: relic, relic_id, card, monster, power, power_all, power_any, potion, orb, event, boss, enchantment)"
+                "unknown registry kind `{other}` (expected one of: relic, relic_id, card, card_any, monster, power, power_all, power_any, potion, orb, event, boss, enchantment)"
             ));
         }
     }

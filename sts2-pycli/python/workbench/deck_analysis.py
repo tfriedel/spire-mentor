@@ -39,7 +39,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS
+from sts2_client import LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS
 
 _DATA = Path(__file__).resolve().parent / "data"
 
@@ -88,7 +88,7 @@ _DEAD_TYPES = {"Curse", "Status"}
 
 def _version_key(version: str | None) -> str:
     """``version`` validated, ``None`` -> the default build."""
-    key = version or DEFAULT_GAME_VERSION
+    key = version or LEGACY_GAME_VERSION
     if key not in SUPPORTED_GAME_VERSIONS:
         raise ValueError(
             f"unsupported game version {key!r}; supported: {', '.join(SUPPORTED_GAME_VERSIONS)}"
@@ -100,7 +100,7 @@ def data_dir_for(version: str | None = None) -> Path:
     """Where game build ``version``'s tables live: ``data/`` for the default
     build, ``data/<ver>/`` for every other (``build_card_db --version``)."""
     key = _version_key(version)
-    return _DATA if key == DEFAULT_GAME_VERSION else _DATA / key
+    return _DATA if key == LEGACY_GAME_VERSION else _DATA / key
 
 
 @cache

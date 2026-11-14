@@ -213,10 +213,10 @@ pub fn deck_trend(store: &ReplayStore) -> Value {
 
 /// `POST /api/deck/reward-preview {deck, candidates, game_version?}`
 /// (stateless). `game_version` names the build whose tables grade the
-/// cards (absent = the default build, GH #877); an unsupported one is the
+/// cards (absent = the new-run default, GH #877); an unsupported one is the
 /// caller's 400.
 pub fn reward_preview(body: &Value) -> Result<Value, String> {
-    let version = crate::session::parse_game_version(body.get("game_version"))?;
+    let version = crate::session::requested_game_version(body.get("game_version"))?;
     let list = |k: &str| -> Vec<Value> {
         body.get(k)
             .and_then(Value::as_array)

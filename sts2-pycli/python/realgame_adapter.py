@@ -136,7 +136,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS, normalize_game_version
+from sts2_client import LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS, normalize_game_version
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ def envelope_game_version(msg: dict[str, Any]) -> str:
 
     Read from the envelope's ``game_version`` (``SimStateExtractor.ApplyEnvelope``,
     PROTOCOL.md section 1). Absent, ``None`` or blank -- every mod build before
-    the field -- means :data:`sts2_client.DEFAULT_GAME_VERSION` (v0.107.1), so an
+    the field -- means :data:`sts2_client.LEGACY_GAME_VERSION` (v0.107.1), so an
     old mod gets exactly the engine it always got.
 
     Raises:
@@ -171,7 +171,7 @@ def envelope_game_version(msg: dict[str, Any]) -> str:
     """
     raw = msg.get("game_version")
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return DEFAULT_GAME_VERSION
+        return LEGACY_GAME_VERSION
     if not isinstance(raw, str):
         raise UnsupportedGameVersionError(raw)
     try:
@@ -801,6 +801,12 @@ def to_headless_combat_play(state: dict[str, Any]) -> dict[str, Any]:
     act = state.get("act")
     if isinstance(act, int) and not isinstance(act, bool):
         out["act"] = act
+    # The run-wide floor (the bridge's top-level ``floor``, C#
+    # ``RunState.TotalFloor``): ``translate`` forwards it as the wire's
+    # ``total_floor``, which v0.113.0's TheTower scales with (GH #1337).
+    floor = state.get("floor")
+    if isinstance(floor, int) and not isinstance(floor, bool):
+        out["context"]["total_floor"] = floor
 
     # Co-op teammates (PROTOCOL.md ``allies``), in the mod's order: an
     # ``AnyAlly`` card lands on the first living one, in the engine and in
@@ -938,7 +944,7 @@ def to_headless_combat_play(state: dict[str, Any]) -> dict[str, Any]:
     # build. Emitted only for a non-default build, so a v0.107.1 board (and any
     # board from a mod predating the field) yields the dict it always did.
     game_version = envelope_game_version(state)
-    if game_version != DEFAULT_GAME_VERSION:
+    if game_version != LEGACY_GAME_VERSION:
         out["game_version"] = game_version
 
     return out

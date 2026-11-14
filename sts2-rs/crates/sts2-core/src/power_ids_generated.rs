@@ -723,6 +723,11 @@ pub enum PowerKind {
     ViolentChord,
     /// v0.113.0 `YahPower`: once per turn when the owner's arrow is dislodged gain `Amount` energy.
     Yah,
+    /// v0.113.0 `GodByrdPower` (GodByrd card, Byrdine relic): Counter buff;
+    /// at the owner's next player turn start (`AmountOnTurnStart != 0`) deal
+    /// `Amount` Unpowered to every hittable enemy, then remove itself. Not a
+    /// Fool power: appended after the Fool block so their indices hold.
+    GodByrd,
 }
 
 impl PowerKind {
@@ -1044,6 +1049,7 @@ impl PowerKind {
             Self::Tune => "TUNE",
             Self::ViolentChord => "VIOLENT_CHORD",
             Self::Yah => "YAH",
+            Self::GodByrd => "GOD_BYRD",
         }
     }
 
@@ -1343,7 +1349,7 @@ impl PowerKind {
 
     /// Powers that exist only from game build v0.113.0 on: The Fool's
     /// (`Models.Powers`, alphabetical like the decomp directory).
-    pub const V0113_ONLY: [PowerKind; 31] = [
+    pub const V0113_ONLY: [PowerKind; 32] = [
         Self::Aim,
         Self::AllIsWell,
         Self::Archery,
@@ -1375,6 +1381,7 @@ impl PowerKind {
         Self::Tune,
         Self::ViolentChord,
         Self::Yah,
+        Self::GodByrd,
     ];
 
     /// Powers that v0.111.0 deleted (GH #794): `DiamondDiademPower` went with
@@ -1427,7 +1434,8 @@ impl PowerKind {
             | Self::Stretch
             | Self::Tune
             | Self::ViolentChord
-            | Self::Yah => crate::GameVersion::V0_113_0,
+            | Self::Yah
+            | Self::GodByrd => crate::GameVersion::V0_113_0,
             _ => crate::GameVersion::V0_107_1,
         }
     }

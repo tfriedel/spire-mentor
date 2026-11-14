@@ -658,10 +658,66 @@ pub enum RelicKind {
     Twine,
     /// v0.113.0 Fool relic, see [`RelicId::WhittlingKnife`].
     WhittlingKnife,
+    /// v0.113.0 event relic, see [`RelicId::Byrdine`] (Byrdpip's evolution).
+    /// Its only combat hook is the `BeforeCombatStart` pet summon.
+    Byrdine,
+    // ── v0.113.0-only event relics with a combat hook. Listeners in
+    // `crate::relic_effects::v0113_event`; also off the `"relic"` registry.
+    /// v0.113.0 event relic, see [`RelicId::ObsidianVice`].
+    ObsidianVice,
+    /// v0.113.0 event relic, see [`RelicId::TormentousCollar`].
+    TormentousCollar,
+    /// v0.113.0 event relic, see [`RelicId::MightyWings`].
+    MightyWings,
+    /// v0.113.0 event relic, see [`RelicId::BathTowel`].
+    BathTowel,
+    /// v0.113.0 event relic, see [`RelicId::BathRobes`].
+    BathRobes,
 }
 }
 
 impl RelicId {
+    /// Whether the relic's C# `Rarity` is `RelicRarity.Starter`: the six
+    /// characters' starters and their Touch-of-Orobas upgrades
+    /// (`BurningBlood.cs`, `BlackBlood.cs`, ..., v0.113.0 `SongBow.cs:15`,
+    /// `Storyteller.cs:20`). `TouchOfOrobas.GetStarterRelic` and Orobas'
+    /// `OptionPool3` key on it.
+    #[must_use]
+    pub const fn is_starter_rarity(self) -> bool {
+        matches!(
+            self,
+            Self::BurningBlood
+                | Self::BlackBlood
+                | Self::RingOfTheSnake
+                | Self::RingOfTheDrake
+                | Self::CrackedCore
+                | Self::InfusedCore
+                | Self::BoundPhylactery
+                | Self::PhylacteryUnbound
+                | Self::DivineRight
+                | Self::DivineDestiny
+                | Self::SongBow
+                | Self::Storyteller
+        )
+    }
+
+    /// `TouchOfOrobas.RefinementUpgrades` (`TouchOfOrobas.cs:21-54`, v0.113.0
+    /// adds SongBow -> Storyteller): the Ancient version of a starter relic,
+    /// `None` for a relic with no entry (`GetUpgradedStarterRelic` then
+    /// falls back to Circlet).
+    #[must_use]
+    pub const fn refined_starter(self) -> Option<Self> {
+        match self {
+            Self::BurningBlood => Some(Self::BlackBlood),
+            Self::RingOfTheSnake => Some(Self::RingOfTheDrake),
+            Self::CrackedCore => Some(Self::InfusedCore),
+            Self::BoundPhylactery => Some(Self::PhylacteryUnbound),
+            Self::DivineRight => Some(Self::DivineDestiny),
+            Self::SongBow => Some(Self::Storyteller),
+            _ => None,
+        }
+    }
+
     /// Map this run-side relic identifier to its combat-side
     /// [`RelicKind`] discriminant, or `None` when the relic has no
     /// combat-side representation.
@@ -996,18 +1052,18 @@ impl RelicId {
             // `RelicKind` so its universe (combat encoders, digests) stays
             // the v0.107.1 one.
             Self::DowsingRod | Self::NeowsSacrifice => None,
-            // v0.113.0-only event relics: no combat-side kind yet. Their
-            // combat hooks (BathTowel heal, TormentousCollar Weak, Wuppy's
-            // damage redirect, ...) are not modelled; see the v0.113.0
-            // run-lane progress notes.
-            Self::ObsidianVice
-            | Self::Thumbscrew
-            | Self::TormentousCollar
-            | Self::MightyWings
-            | Self::BathTowel
-            | Self::BathRobes
-            | Self::Wuppy
-            | Self::Byrdine => None,
+            // v0.113.0-only event relics. Thumbscrew (a new
+            // `ModifyAttackHitCount` hook) and Wuppy (a pet that takes the
+            // owner's powered attacks) have no combat side yet; Byrdine's
+            // pet summon is `RelicKind::Byrdine`; the rest have listeners in
+            // `crate::relic_effects::v0113_event`.
+            Self::Thumbscrew | Self::Wuppy => None,
+            Self::Byrdine => Some(RelicKind::Byrdine),
+            Self::ObsidianVice => Some(RelicKind::ObsidianVice),
+            Self::TormentousCollar => Some(RelicKind::TormentousCollar),
+            Self::MightyWings => Some(RelicKind::MightyWings),
+            Self::BathTowel => Some(RelicKind::BathTowel),
+            Self::BathRobes => Some(RelicKind::BathRobes),
             // v0.113.0 Fool relics: combat listeners in `crate::fool`.
             Self::SongBow => Some(RelicKind::SongBow),
             Self::Storyteller => Some(RelicKind::Storyteller),
@@ -1379,10 +1435,17 @@ impl RelicKind {
             RelicKind::Ocarina => "OCARINA",
             RelicKind::Twine => "TWINE",
             RelicKind::WhittlingKnife => "WHITTLING_KNIFE",
+            RelicKind::Byrdine => "BYRDINE",
+            RelicKind::ObsidianVice => "OBSIDIAN_VICE",
+            RelicKind::TormentousCollar => "TORMENTOUS_COLLAR",
+            RelicKind::MightyWings => "MIGHTY_WINGS",
+            RelicKind::BathTowel => "BATH_TOWEL",
+            RelicKind::BathRobes => "BATH_ROBES",
         }
     }
 
-    /// The v0.113.0-only kinds (The Fool's relics). Callers that must keep
+    /// The v0.113.0-only kinds (The Fool's relics and the v0.113.0 event
+    /// relics with a combat hook). Callers that must keep
     /// the v0.111.0 universe (the `"relic"` embedding registry) skip these.
     #[must_use]
     pub const fn is_v0113_only(self) -> bool {
@@ -1397,6 +1460,12 @@ impl RelicKind {
                 | RelicKind::Ocarina
                 | RelicKind::Twine
                 | RelicKind::WhittlingKnife
+                | RelicKind::Byrdine
+                | RelicKind::ObsidianVice
+                | RelicKind::TormentousCollar
+                | RelicKind::MightyWings
+                | RelicKind::BathTowel
+                | RelicKind::BathRobes
         )
     }
 }

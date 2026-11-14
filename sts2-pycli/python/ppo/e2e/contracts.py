@@ -309,7 +309,10 @@ SECTIONS: Final = _SECTION_TABLE
 N_SECTION: Final = 64  # section-embedding table size
 SEC: Final[Mapping[str, int]] = {s: i for i, s in enumerate(SECTIONS)}
 PRIV_SECTIONS: Final = frozenset({21, 48, 49, 50, 51, 52, 53, 54, 55})
-RESERVED_SECTIONS: Final = frozenset(i for i, s in enumerate(SECTIONS) if s.startswith("RES_"))
+# The sections no fill event has taken ("chars" took RES_44 and RES_45, section 4b).
+RESERVED_SECTIONS: Final = frozenset(
+    i for i, s in enumerate(SECTIONS) if s.startswith("RES_") and s not in ("RES_44", "RES_45")
+)
 SUMMARY_SECTIONS: Final = (24, 25, 26, 27, 28)
 OOC_OPTION_SECTIONS: Final = frozenset(range(32, 39)) | frozenset({39, 40, 41, 42, 43})
 OPTION_SECTIONS: Final = SCTX_ACT_SECTIONS | OOC_OPTION_SECTIONS
@@ -605,7 +608,7 @@ _OOC_CARD_CATS = ("upgraded", "card_type", "X_ID_MAIN", "X_ID_MOD")
 _PILE = (_cat(*_CARD_CATS), (*SCTX_PILE_CARD_COLS, XF["K_PICKED"]))
 _ACT_TAIL = SCTX_RL2_ACTION_COLS
 
-SECTION_LIVE: Final[Mapping[int, tuple[tuple[int, ...], tuple[int, ...]]]] = {
+_SECTION_LIVE_BASE: Final[Mapping[int, tuple[tuple[int, ...], tuple[int, ...]]]] = {
     SEC["STATE"]: (
         _cat("choice_kind"),
         SCTX_STATE_COLS + SCTX_RL2_STATE_COLS + (XF["S_HP_LOSS_END"],),
@@ -721,6 +724,114 @@ SECTION_IDS: Final[Mapping[str, tuple[str, str, str, str]]] = {
     "PRIV_ENEMY": ("next move step 1", "step 2", "step 3", "monster"),
     "PRIV_RUN": ("next act boss", "act-3 second boss", "act-3 first boss", "-"),
 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4b. The "chars" fill event (GH #1373): the other characters' mechanics.
+#
+#    The schema was frozen for Ironclad. A row that carries the "chars" fill
+#    event has its character (`X_CHAR` on RUNCTX, nonzero), the player's pet
+#    (`ALLY`: Necrobinder's Osty), the orb belt (`ORB`) and the doomed flag
+#    (`E_DOOMED` on ENEMY). Every row of another character's run carries it.
+#    An Ironclad row carries it only in a launch that declares the event
+#    (`factory.fill_chars()`): then an Ironclad with orbs (Potion of Capacity,
+#    Infused Core) or facing Doom (Potion of Doom) shows them. Without the
+#    declaration every Ironclad row, fixture and checkpoint stays as it was.
+#
+#    It is a fill event: it takes reserved sections and spare columns under
+#    alias names and adds no tensor shape. The hashed tables above keep the
+#    reserved names (`RES_44`, `X_RES0`, `X_C_RES0`, ...), so `schema_sha256`
+#    does not move and an Ironclad checkpoint loads unchanged; the net starts
+#    the event's inputs at zero weight (the identity rule, section 2.12).
+# ═══════════════════════════════════════════════════════════════════════════
+
+FILL_CHARS: Final = "chars"
+# The playable characters, as `rm.character` names them. X_CHAR holds 1 + the
+# index; 0, the column's absent value, is a row without "chars" data.
+# Fool exists from v0.113.0 on; it has its id so that a later build's run encodes.
+CHARACTERS: Final = ("Ironclad", "Silent", "Defect", "Regent", "Necrobinder", "Fool")
+CHAR_ID: Final[Mapping[str, int]] = {c: i + 1 for i, c in enumerate(CHARACTERS)}
+# The launch character: its rows carry the "chars" event only when declared.
+BASE_CHARACTER: Final = CHARACTERS[0]
+
+# Alias -> the reserved name it takes. Aliases resolve through SEC, XC and XF
+# like any other name; the hashed tables list only the reserved names.
+CHARS_SECTIONS: Final[Mapping[str, str]] = {"ALLY": "RES_44", "ORB": "RES_45"}
+CHARS_CAT: Final[Mapping[str, str]] = {"X_CHAR": "X_RES0"}
+CHARS_CONT: Final[Mapping[str, str]] = {
+    "C_ORB_PASSIVE": "X_C_RES0",
+    "C_ORB_EVOKE": "X_C_RES1",
+    "E_DOOMED": "X_C_RES2",
+}
+# What each alias holds (documentation; SCHEMA.md section 13 repeats it).
+CHARS_DOC: Final[Mapping[str, str]] = {
+    "ALLY": "the player's pet, one token while the run has one (Necrobinder's Osty)",
+    "ORB": "one token per orb slot, front (next evoked) first; an empty slot has X_ID_MAIN EMPTY",
+    "X_CHAR": "the run's character (CHAR_ID, 1-6; 0 = no chars data; RUNCTX only)",
+    "C_ORB_PASSIVE": "ORB: passive value with Focus / 10",
+    "C_ORB_EVOKE": "ORB: evoke value with Focus / 20",
+    "E_DOOMED": "ENEMY flag: Doom >= hp, the enemy dies at the end of its turn",
+}
+# An orb belt has at most 10 slots (OrbCmd.AddSlots caps the capacity at 10).
+MAX_ORB_TOKENS: Final = 10
+MAX_ALLY_TOKENS: Final = 1
+
+SEC.update({a: SEC[r] for a, r in CHARS_SECTIONS.items()})  # type: ignore[attr-defined]
+XC.update({a: XC[r] for a, r in CHARS_CAT.items()})  # type: ignore[attr-defined]
+XF.update({a: XF[r] for a, r in CHARS_CONT.items()})  # type: ignore[attr-defined]
+
+# Sections that sit between the BOSS tokens and the S_ctx block of a combat
+# row, in this order. They never occur out of combat.
+COMBAT_EXT_SECTIONS: Final = (SEC["ALLY"], SEC["ORB"])
+CHARS_SECTION_IDS: Final = frozenset(SEC[a] for a in CHARS_SECTIONS)
+
+# The live columns the event adds: new sections, and columns on old ones.
+_CHARS_LIVE: Final[Mapping[int, tuple[tuple[int, ...], tuple[int, ...]]]] = {
+    SEC["ALLY"]: (
+        _cat("X_ID_MAIN"),
+        tuple(SCTX_C[n] for n in ("E_HPF", "E_HP", "E_MAXHP", "E_ALIVE")),
+    ),
+    SEC["ORB"]: (_cat("X_ID_MAIN", "X_POS"), (XF["C_ORB_PASSIVE"], XF["C_ORB_EVOKE"])),
+    SEC["RUNCTX"]: (_cat("X_CHAR"), ()),
+    SEC["ENEMY"]: ((), (XF["E_DOOMED"],)),
+}
+
+
+def _with_fill(
+    base: Mapping[int, tuple[tuple[int, ...], tuple[int, ...]]],
+    add: Mapping[int, tuple[tuple[int, ...], tuple[int, ...]]],
+) -> dict[int, tuple[tuple[int, ...], tuple[int, ...]]]:
+    out = dict(base)
+    for s, (c, f) in add.items():
+        bc, bf = out.get(s, ((), ()))
+        out[s] = (bc + tuple(x for x in c if x not in bc), bf + tuple(x for x in f if x not in bf))
+    return out
+
+
+# Every section's live columns: the frozen table plus the fill events' slots.
+# `schema_sha256` hashes `_SECTION_LIVE_BASE` only.
+SECTION_LIVE: Final[Mapping[int, tuple[tuple[int, ...], tuple[int, ...]]]] = _with_fill(
+    _SECTION_LIVE_BASE, _CHARS_LIVE
+)
+# The reserved inputs each fill event outside the column statuses takes
+# (`net.layout(filled)` inits them live for a launch that declares the event).
+FILL_SLOTS: Final[Mapping[str, Mapping[str, tuple[int, ...]]]] = {
+    FILL_CHARS: {
+        "sections": tuple(sorted(CHARS_SECTION_IDS)),
+        "cat": tuple(XC[a] for a in CHARS_CAT),
+        "cont": tuple(XF[a] for a in CHARS_CONT),
+    }
+}
+# `rm.*` reads a fill event adds to the policy facade (`POLICY_CALLS` is hashed).
+FILL_POLICY_CALLS: Final[Mapping[str, frozenset[str]]] = {FILL_CHARS: frozenset({"rm.character"})}
+
+
+def char_id(character: Any) -> int:
+    """X_CHAR of a run's character (`rm.character`); `SchemaError` on an unknown one."""
+    try:
+        return CHAR_ID[str(character)]
+    except KeyError:
+        raise SchemaError(f"character {character!r} not in {CHARACTERS}") from None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -996,7 +1107,7 @@ TF_KNOWN: Final = TF_OPTION | TF_REP | TF_HIDDEN | TF_TEACHER | TF_POOLED
 
 # Reserved columns and ids start carrying data only at these events. The
 # schema hash does not move; the `filled` stamp records which happened.
-FILL_EVENTS: Final = ("WP-ENG-1", "content-prior", "D9", "#1069")
+FILL_EVENTS: Final = ("WP-ENG-1", "content-prior", "D9", "#1069", FILL_CHARS)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1553,13 +1664,14 @@ def validate_row_batch(
     and `done` only on a practice segment's out-of-combat end row.
 
     Per row (`_check_row`): the head (RUNCTX, the five SUM_* tokens in order,
-    1-2 BOSS); RUNCTX's X_DTYPE equal to `dtype`, its encounter id NONE out of
+    1-2 BOSS, then on another character's combat row its ALLY and ORB tokens,
+    section 4b); RUNCTX's X_DTYPE equal to `dtype`, its encounter id NONE out of
     combat and its event id only on EVENT and NEOW rows; the member -> class
     map (onto, numbered by first occurrence, `action` in range); class tokens
     = the first member's token; TF_OPTION, TF_REP, TF_HIDDEN, TF_TEACHER and
     TF_POOLED on exactly their tokens; every member's X_KIND and section
     against its class kind (`KIND_SECTION`); a combat row's S_ctx block from
-    `sctx_lo` = 6 + bosses to the end, starting with STATE and ending with its
+    `sctx_lo` = 6 + bosses (+ its ALLY and ORB tokens) to the end, starting with STATE and ending with its
     `n_mem` action tokens; an out-of-combat row's body sections in their
     fixed order and its option tokens last, in class order; pool entries on
     SUM_* tokens (PRIV: on PRIV_RUN), in range, unique, finite positive
@@ -1704,6 +1816,10 @@ for _k, _s in KIND_SECTION.items():
 _DTYPE_KIND: Final = np.zeros((N_DTYPE, 256), bool)
 for _d in DECISION_TYPES:
     _DTYPE_KIND[_d.id, list(_d.kinds)] = True
+_IS_EXT_SEC: Final = _sec_mask(COMBAT_EXT_SECTIONS)
+_EXT_RANK: Final = np.full(N_SECTION, -1, np.int64)
+for _r, _s in enumerate(COMBAT_EXT_SECTIONS):
+    _EXT_RANK[_s] = _r
 _BODY_RANK: Final = np.full(N_SECTION, -1, np.int64)
 for _r, _s in enumerate(OOC_BODY_SECTIONS):
     _BODY_RANK[_s] = _r
@@ -1751,6 +1867,24 @@ def _check_row(
     if not 1 <= nb <= MAX_BOSS_TOKENS:
         _fail(f"{where}: {nb} BOSS tokens after the summaries (want 1-{MAX_BOSS_TOKENS})")
     body0 = h + nb
+    # The "chars" fill event (section 4b): a combat row's ALLY and ORB tokens
+    # sit between the head and the S_ctx block; only a row with X_CHAR set
+    # (another character's run) carries any of the event's inputs.
+    n_ext = 0
+    while combat and body0 + n_ext < nt and _IS_EXT_SEC[sec[body0 + n_ext]]:
+        n_ext += 1
+    ext = sec[body0 : body0 + n_ext]
+    if (np.diff(_EXT_RANK[ext]) < 0).any():
+        _fail(f"{where}: the ALLY and ORB tokens must come in that order")
+    if int((ext == SEC["ALLY"]).sum()) > MAX_ALLY_TOKENS:
+        _fail(f"{where}: more than {MAX_ALLY_TOKENS} ALLY token")
+    if int((ext == SEC["ORB"]).sum()) > MAX_ORB_TOKENS:
+        _fail(f"{where}: more than {MAX_ORB_TOKENS} ORB tokens")
+    if _IS_EXT_SEC[sec[body0 + n_ext :]].any():
+        _fail(f"{where}: an ALLY or ORB token outside a combat row's head")
+    if cat[0, XC["X_CHAR"]] == 0 and (n_ext or (b["cont"][t0:t1][:, XF["E_DOOMED"]] != 0).any()):
+        _fail(f'{where}: "chars" inputs on a row without X_CHAR')
+    body0 += n_ext
     if cat[0, XC["X_DTYPE"]] != dtype:
         _fail(f"{where}: RUNCTX X_DTYPE {int(cat[0, XC['X_DTYPE']])} != dtype {dtype}")
     if not combat and cat[0, XC["X_ID_AUX"]] != 0:
@@ -2515,7 +2649,9 @@ def schema_spec() -> dict[str, Any]:
         "priv_sections": sorted(PRIV_SECTIONS),
         "x_cat": [[c.name, c.size, c.transform, c.status] for c in X_CAT],
         "x_cont": [[c.name, c.transform, c.status] for c in X_CONT],
-        "section_live": {SECTIONS[s]: [list(c), list(f)] for s, (c, f) in SECTION_LIVE.items()},
+        "section_live": {
+            SECTIONS[s]: [list(c), list(f)] for s, (c, f) in _SECTION_LIVE_BASE.items()
+        },
         "prior_columns": list(PRIOR_COLUMNS),
         "room_types": list(ROOM_TYPES),
         "action_kinds": [[k.id, k.name, k.status] for k in ACTION_KINDS],

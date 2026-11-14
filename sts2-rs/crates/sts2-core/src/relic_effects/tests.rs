@@ -756,6 +756,7 @@ fn after_damage_given_register_and_dispatch_roundtrip() {
         dealer: target,
         target,
         damage: 10,
+        total_damage: 10,
         props: crate::hooks::ValueProps::NONE,
         was_block_broken: false,
     };
@@ -2940,6 +2941,7 @@ fn bone_flute_fires_when_dealer_is_osty() {
         dealer: crate::CreatureUid(osty_uid),
         target: player_uid,
         damage: 5,
+        total_damage: 5,
         props: crate::hooks::ValueProps::NONE,
         was_block_broken: false,
     };
@@ -2996,6 +2998,7 @@ fn bone_flute_does_not_fire_when_dealer_is_not_osty() {
         dealer: player_uid,
         target: player_uid,
         damage: 5,
+        total_damage: 5,
         props: crate::hooks::ValueProps::NONE,
         was_block_broken: false,
     };
@@ -9841,6 +9844,7 @@ fn osty_relics_ignore_a_teammates_osty() {
         dealer,
         target: enemy,
         damage: 5,
+        total_damage: 5,
         props: crate::hooks::ValueProps::MOVE,
         was_block_broken: false,
     };
@@ -10449,4 +10453,160 @@ fn a_hit_tungsten_rod_zeroes_keeps_the_buffer_stack() {
         "Buffer absorbs the 2 the Rod left"
     );
     assert_eq!(state.player_power_amount(crate::PowerKind::Buffer), 0);
+}
+
+// ── v0.113.0 event relics (GH #1342) ──────────────────────────────────
+// Pinned to the v0.113.0 decomp `Models.Relics/<Name>.cs`.
+
+fn v0113_state() -> CombatState {
+    let mut state = fresh_state_with_player(80, 50);
+    state.game_version = crate::GameVersion::V0_113_0;
+    state
+}
+
+/// `ObsidianVice.BeforeSideTurnEnd`: `DamageVar(1) * hand count`, unpowered,
+/// to one `CombatTargets` pick.
+#[test]
+#[serial_test::serial(global_registry)]
+fn obsidian_vice_hits_one_enemy_for_hand_count() {
+    ensure_installed();
+    let mut state = v0113_state();
+    give_player_relic(&mut state, RelicKind::ObsidianVice);
+    let e1 = push_enemy(&mut state, 1310, 50);
+    for raw in 9101..9105 {
+        state
+            .player
+            .hand
+            .push(crate::CardUid(NonZeroU32::new(raw).unwrap()));
+    }
+    let before = state.run_rng.combat_targets.counter();
+    let _ = dispatch_before_turn_end(&mut state, Side::Player);
+    assert_eq!(
+        enemy_current_hp(&state, e1),
+        46,
+        "4 cards in hand -> 4 damage"
+    );
+    assert_eq!(state.run_rng.combat_targets.counter(), before + 1);
+}
+
+#[test]
+#[serial_test::serial(global_registry)]
+fn obsidian_vice_inert_with_empty_hand_or_before_v0113() {
+    ensure_installed();
+    let mut state = v0113_state();
+    give_player_relic(&mut state, RelicKind::ObsidianVice);
+    let e1 = push_enemy(&mut state, 1311, 50);
+    let before = state.run_rng.combat_targets.counter();
+    let _ = dispatch_before_turn_end(&mut state, Side::Player);
+    assert_eq!(enemy_current_hp(&state, e1), 50);
+    assert_eq!(
+        state.run_rng.combat_targets.counter(),
+        before,
+        "no target roll"
+    );
+
+    state.game_version = crate::GameVersion::V0_111_0;
+    state
+        .player
+        .hand
+        .push(crate::CardUid(NonZeroU32::new(9110).unwrap()));
+    let _ = dispatch_before_turn_end(&mut state, Side::Player);
+    assert_eq!(enemy_current_hp(&state, e1), 50);
+}
+
+/// `TormentousCollar.BeforeSideTurnStart`: Elite room, turn 1, 2 Weak to
+/// every hittable enemy.
+#[test]
+#[serial_test::serial(global_registry)]
+fn tormentous_collar_weakens_elites_on_turn_one_only() {
+    ensure_installed();
+    let mut state = v0113_state();
+    give_player_relic(&mut state, RelicKind::TormentousCollar);
+    let e1 = push_enemy(&mut state, 1320, 50);
+    let weak = |s: &CombatState| enemy_power_amount(s, e1, PowerKind::Weak);
+
+    let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+    assert_eq!(weak(&state), 0, "not an Elite room");
+
+    state.is_elite = true;
+    let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+    assert_eq!(weak(&state), 2);
+
+    state.round = 2;
+    let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+    assert_eq!(weak(&state), 2, "turn 2: no more Weak");
+}
+
+/// `MightyWings.AfterDamageGiven`: owner's powered attack, `TotalDamage >=
+/// 30` -> 2 Strength.
+#[test]
+#[serial_test::serial(global_registry)]
+fn mighty_wings_strength_on_thirty_total_damage() {
+    ensure_installed();
+    let mut state = v0113_state();
+    give_player_relic(&mut state, RelicKind::MightyWings);
+    let e1 = push_enemy(&mut state, 1330, 50);
+    let player = state.player.creature_uid.unwrap();
+    let ctx = |total, props| DamageGivenCtx {
+        dealer: player,
+        target: e1,
+        damage: total,
+        total_damage: total,
+        props,
+        was_block_broken: false,
+    };
+    let _ = dispatch_after_damage_given(&mut state, &ctx(29, ValueProps::MOVE));
+    assert_eq!(player_power_amount(&state, PowerKind::Strength), 0);
+    let _ = dispatch_after_damage_given(
+        &mut state,
+        &ctx(40, ValueProps::MOVE.union(ValueProps::UNPOWERED)),
+    );
+    assert_eq!(
+        player_power_amount(&state, PowerKind::Strength),
+        0,
+        "unpowered"
+    );
+    let _ = dispatch_after_damage_given(&mut state, &ctx(30, ValueProps::MOVE));
+    assert_eq!(player_power_amount(&state, PowerKind::Strength), 2);
+}
+
+/// `BathTowel.AfterPlayerTurnStartLate`: heal 8 on turn 1 only.
+#[test]
+#[serial_test::serial(global_registry)]
+fn bath_towel_heals_eight_on_turn_one() {
+    ensure_installed();
+    let mut state = v0113_state();
+    give_player_relic(&mut state, RelicKind::BathTowel);
+    crate::relic_effects::blood_vial::dispatch_after_player_turn_start_late(&mut state);
+    assert_eq!(state.player.current_hp, 58);
+    state.round = 2;
+    crate::relic_effects::blood_vial::dispatch_after_player_turn_start_late(&mut state);
+    assert_eq!(state.player.current_hp, 58);
+}
+
+/// `BathRobes.BeforeCombatStart`: the first Boss fight heals to full, once.
+#[test]
+#[serial_test::serial(global_registry)]
+fn bath_robes_full_heal_at_first_boss_only() {
+    ensure_installed();
+    let mut state = v0113_state();
+    give_player_relic(&mut state, RelicKind::BathRobes);
+    let _ = dispatch_before_combat_start(&mut state);
+    assert_eq!(state.player.current_hp, 50, "not a Boss room");
+
+    state.is_boss = true;
+    let _ = dispatch_before_combat_start(&mut state);
+    assert_eq!(state.player.current_hp, 80);
+    assert_eq!(state.relics.iter().last().unwrap().counter, 1, "WasUsed");
+
+    state.player.current_hp = 40;
+    let uid = state.player.creature_uid.unwrap();
+    state
+        .creatures
+        .iter_mut()
+        .find(|c| c.id == uid.0)
+        .unwrap()
+        .current_hp = 40;
+    let _ = dispatch_before_combat_start(&mut state);
+    assert_eq!(state.player.current_hp, 40, "used up");
 }

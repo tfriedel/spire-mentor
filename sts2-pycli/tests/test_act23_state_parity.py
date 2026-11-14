@@ -119,7 +119,7 @@ def test_diff_nav_clean_when_aligned() -> None:
 # HP oracle-artifact classifier (issue #158 step 3)
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
-# Claws: C# is sent the same first-6 candidates Rust transformed atomically
+# Claws: both engines surface the select; the walk adds multi-card picks
 # --------------------------------------------------------------------------- #
 def _claws_view(n: int) -> dict:
     return {
@@ -132,21 +132,24 @@ def _claws_view(n: int) -> dict:
     }
 
 
-def test_claws_atomic_choice_picks_first_six_candidates() -> None:
-    assert a23.claws_atomic_choice(_claws_view(20)) == [
-        ("select_cards", {"indices": "0,1,2,3,4,5"})
+def test_claws_multi_choices_take_the_first_k_up_to_six() -> None:
+    assert a23.claws_multi_choices(_claws_view(20)) == [
+        ("select_cards", {"indices": ",".join(str(i) for i in range(k))}) for k in range(2, 7)
     ]
 
 
-def test_claws_atomic_choice_clamps_to_candidate_count() -> None:
-    assert a23.claws_atomic_choice(_claws_view(3)) == [("select_cards", {"indices": "0,1,2"})]
-    assert a23.claws_atomic_choice(_claws_view(0)) == []
+def test_claws_multi_choices_clamp_to_candidate_count() -> None:
+    assert a23.claws_multi_choices(_claws_view(3)) == [
+        ("select_cards", {"indices": "0,1"}),
+        ("select_cards", {"indices": "0,1,2"}),
+    ]
+    assert a23.claws_multi_choices(_claws_view(1)) == []
 
 
-def test_claws_atomic_choice_ignores_other_selects() -> None:
+def test_claws_multi_choices_ignore_other_selects() -> None:
     view = _claws_view(10)
     view["prompt_key"] = "TO_TRANSFORM"
-    assert a23.claws_atomic_choice(view) == []
+    assert a23.claws_multi_choices(view) == []
 
 
 def test_hp_artifact_peeled_in_combat() -> None:
@@ -625,3 +628,60 @@ def test_combat_past_the_round_cap_ends_as_a_harness_terminal(
 def test_combat_at_the_round_cap_carries_on(monkeypatch: pytest.MonkeyPatch) -> None:
     out, _acts = _run_capped(monkeypatch, a23.COMBAT_ROUND_CAP)
     assert out.result.terminal != "combat_round_cap"
+
+
+# --------------------------------------------------------------------------- #
+# Fake Merchant: C# shop page vs Rust option-model event (GH #1294, #1342)
+# --------------------------------------------------------------------------- #
+def _fm_cs(relics: list[dict] | None = None) -> dict:
+    return {
+        "decision": "shop",
+        "event_name": "FAKE_MERCHANT",
+        "relics": relics
+        if relics is not None
+        else [
+            {"index": 0, "id": "FAKE_MANGO", "cost": 48, "is_stocked": True},
+            {"index": 1, "id": "FAKE_ANCHOR", "cost": 52, "is_stocked": True},
+        ],
+    }
+
+
+def _fm_rs(*option_ids: str) -> dict:
+    return {
+        "decision": "event_choice",
+        "options": [
+            {"index": i, "option_id": oid, "is_locked": False} for i, oid in enumerate(option_ids)
+        ],
+    }
+
+
+def test_fake_merchant_pair_matches_shop_and_option_model() -> None:
+    assert a23._fake_merchant_pair(_fm_cs(), _fm_rs("buy", "throw_foul", "leave"))
+    # A disabled option is not listed by the Rust view.
+    assert a23._fake_merchant_pair(_fm_cs(), _fm_rs("buy", "leave"))
+
+
+def test_fake_merchant_pair_rejects_other_rooms() -> None:
+    real_shop = {**_fm_cs(), "event_name": None}
+    assert not a23._fake_merchant_pair(real_shop, _fm_rs("buy", "leave"))
+    assert not a23._fake_merchant_pair(_fm_cs(), _fm_rs("leave", "fight"))
+    assert not a23._fake_merchant_pair(_fm_cs(), {"decision": "shop", "options": []})
+
+
+def test_fake_merchant_choices_mirror_first_stocked_buy_and_leave() -> None:
+    cs = _fm_cs(
+        [
+            {"index": 0, "id": "FAKE_MANGO", "cost": 48, "is_stocked": False},
+            {"index": 1, "id": "FAKE_ANCHOR", "cost": 52, "is_stocked": True},
+        ]
+    )
+    got = a23._fake_merchant_choices(cs, _fm_rs("buy", "throw_foul", "leave"))
+    assert got == [
+        ("buy_relic", {"relic_index": 1}, ("choose_option", {"option_index": 0})),
+        ("leave_room", {}, ("choose_option", {"option_index": 2})),
+    ]
+
+
+def test_fake_merchant_choices_only_leave_when_rust_cannot_buy() -> None:
+    got = a23._fake_merchant_choices(_fm_cs(), _fm_rs("leave"))
+    assert got == [("leave_room", {}, ("choose_option", {"option_index": 0}))]

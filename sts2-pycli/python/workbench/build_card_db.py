@@ -30,7 +30,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS
+from sts2_client import LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS
 
 from workbench import deck_analysis, localization
 
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--version",
         choices=SUPPORTED_GAME_VERSIONS,
-        default=DEFAULT_GAME_VERSION,
+        default=LEGACY_GAME_VERSION,
         help="game build whose table to write (default: the default build)",
     )
     ap.add_argument("--manifest", type=Path, default=None)

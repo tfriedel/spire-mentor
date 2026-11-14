@@ -5,12 +5,21 @@
  * v0.113.0 — the build that adds the Fool). The
  * server advertises what it can run in `GET /api/capabilities`
  * (`game_versions` / `default_game_version`); the launcher sends the pick as
- * `game_version` on start / start-faithful / import-state. Every reader treats
- * a missing key as the default, so payloads from before the selector existed
- * (and every 0.107 payload, whose writers omit the key) read as v0.107.1.
+ * `game_version` on start / start-faithful / import-state.
+ *
+ * Two different builds answer "which one, when none is named":
+ * - A stored payload (save, persist, run log, position) with no key is
+ *   `LEGACY_GAME_VERSION`: writers used to omit the key for v0.107.1. They
+ *   always write it now. The legacy build's static tables also sit unprefixed
+ *   under `public/`.
+ * - A new run starts on the server's `default_game_version` (v0.111.0 since
+ *   2026-11-14) until the user picks one. Requests always name their build.
  */
 
-export const DEFAULT_GAME_VERSION = "v0.107.1";
+export const LEGACY_GAME_VERSION = "v0.107.1";
+
+/** The stored launcher pick meaning "no pick yet": follow the server default. */
+export const NO_VERSION_PICK = "";
 
 /** Launcher labels for the versions we know; an unknown one shows as-is. */
 const LABELS: Record<string, string> = {
@@ -69,28 +78,28 @@ export function runLogGameVersion(text: string | null | undefined): string | nul
 
 /** The `game_version` a payload carries, or the default when it carries none. */
 export function payloadGameVersion(p: unknown): string {
-  return declaredGameVersion(p) ?? DEFAULT_GAME_VERSION;
+  return declaredGameVersion(p) ?? LEGACY_GAME_VERSION;
 }
 
 /** The version to actually send: the remembered pick when this server can run
  *  it, else the server's default. The pick itself is left alone, so a visit to
  *  an older (single-version) server does not overwrite the preference. */
 export function effectiveGameVersion(
-  pick: string, available: readonly string[], serverDefault: string = DEFAULT_GAME_VERSION,
+  pick: string, available: readonly string[], serverDefault: string = LEGACY_GAME_VERSION,
 ): string {
   if (available.includes(pick)) return pick;
-  return available.includes(serverDefault) ? serverDefault : (available[0] ?? DEFAULT_GAME_VERSION);
+  return available.includes(serverDefault) ? serverDefault : (available[0] ?? LEGACY_GAME_VERSION);
 }
 
 /** The URL of a per-build static table under `public/` (GH #877): the
  *  default build's at `/<file>` (where it always was), every other build's at
  *  `/<ver>/<file>` — `sfx_map.json`, `card_text.json`. */
 export function versionedPublicPath(file: string, v: string | null | undefined): string {
-  return v && v !== DEFAULT_GAME_VERSION ? `/${v}/${file}` : `/${file}`;
+  return v && v !== LEGACY_GAME_VERSION ? `/${v}/${file}` : `/${file}`;
 }
 
-/** The request-body fragment for `v`: empty for the default, so a 0.107 run
- *  posts exactly the body it always did. */
+/** The request-body fragment for `v`: every request names its build. Empty
+ *  only when there is none to name (the C# backend runs its process's one). */
 export function gameVersionBody(v: string | null | undefined): { game_version?: string } {
-  return v && v !== DEFAULT_GAME_VERSION ? { game_version: v } : {};
+  return v ? { game_version: v } : {};
 }

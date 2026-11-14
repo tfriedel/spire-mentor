@@ -85,6 +85,51 @@ def test_every_registry_card_resolves_from_csharp_form() -> None:
     )
 
 
+def _csharp_form(cid: str) -> str:
+    """The `CARD.<entry>` id the game emits for registry id *cid*."""
+    for suffix in ("_CARD", "_STATUS"):
+        if cid.endswith(suffix):
+            return f"CARD.{cid[: -len(suffix)]}"
+    return f"CARD.{cid}"
+
+
+def test_every_engine_card_resolves_to_itself_from_csharp_form() -> None:
+    """Every build's cards, v0.113.0's included, resolve -- to themselves.
+
+    The adapter checked candidates against the PPO vocab ("card", frozen at
+    v0.111.0), so My Shinies -- a v0.113.0 card a Colorless Potion offers --
+    was soft-dropped from every search state, and an in-fight offer of it
+    could not be searched ("card id 'MY_SHINIES' doesn't map to any of ...").
+    """
+    try:
+        engine = sorted(sts2_rs.list_registry_names("card_any"))
+    except ValueError:
+        pytest.skip("engine predates the card_any registry kind")
+    wrong = []
+    for cid in engine:
+        try:
+            _cls, resolved = _resolve_card_id(_csharp_form(cid), "$")
+        except Exception as e:
+            wrong.append((cid, f"raise {e}"))
+            continue
+        if resolved != cid:
+            wrong.append((cid, resolved))
+    assert not wrong, f"{len(wrong)}/{len(engine)} engine cards mis-resolve: {wrong[:25]}"
+    assert {"MY_SHINIES", "DEEP_STRETCH"} <= set(engine)
+
+
+def test_vocab_cards_resolve_as_they_did_against_the_vocab(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Widening the known set changes nothing for a card that resolved before."""
+    from sts2_hint import adapter
+
+    vocab = frozenset(_registry("card"))
+    forms = [_csharp_form(cid) for cid in vocab] + [f"CARD.{cid}" for cid in vocab]
+    now = {f: _resolve_card_id(f, "$") for f in forms}
+    monkeypatch.setattr(adapter, "_registry_card_names", lambda: vocab)
+    before = {f: _resolve_card_id(f, "$") for f in forms}
+    assert now == before
+
+
 def test_every_registry_power_recoverable_from_its_lockey() -> None:
     """Exhaustive safety-net: every registry power must be recoverable from a
     loc-key of its own id (`<id>.title`). This is the fallback that makes ANY

@@ -418,6 +418,31 @@ def _translate_potion(name: str | None, path: str) -> str | None:
 
 
 @functools.lru_cache(maxsize=1)
+def _registry_card_names() -> frozenset[str]:
+    """Every card id the engine simulates, on any build (best-effort).
+
+    Not ``"card"``: that is the PPO vocabulary, frozen at v0.111.0 because its
+    order is the nets' embedding rows, so it leaves out v0.113.0's cards. A
+    v0.113.0 card on the board (My Shinies from a Colorless Potion) was then
+    dropped from every search state, and an offer of one could not be
+    searched at all. ``"card_any"`` is the engine's whole universe, which the
+    wire parser accepts; an engine older than the kind keeps ``"card"``.
+    """
+    try:
+        import sts2_rs  # type: ignore[import-not-found]
+
+        list_names = getattr(sts2_rs, "list_registry_names", None)
+        if list_names is None:
+            return frozenset()
+        try:
+            return frozenset(list_names("card_any"))
+        except ValueError:
+            return _registry_names("card")
+    except Exception:
+        return frozenset()
+
+
+@functools.lru_cache(maxsize=1)
 def _registry_power_names() -> frozenset[str]:
     """The valid ``sts2_rs`` power ids (best-effort).
 
@@ -702,7 +727,7 @@ def _select_card_candidate(candidates: list[str], c_id: str, path: str) -> str:
     ``SLOTH`` instead of raising. The suffix candidates below are only
     guaranteed unambiguous on the registry-backed path.
     """
-    known = _registry_names("card")
+    known = _registry_card_names()
     if not known:
         return candidates[0]
     for cand in candidates:
@@ -1361,6 +1386,11 @@ def translate(
         out["act_index"] = act
     if ctx.get("room_type") == "Boss":
         out["is_boss"] = True
+    # The run-wide floor (C# `RunState.TotalFloor`), which v0.113.0's TheTower
+    # multiplies its damage by (GH #1337). Omitted at 0, like `state_to_dict`.
+    total_floor = ctx.get("total_floor")
+    if isinstance(total_floor, int) and not isinstance(total_floor, bool) and total_floor > 0:
+        out["total_floor"] = total_floor
     # Co-op teammates (``$.allies``): omitted when solo, so a single-player
     # board yields the wire it always did.
     allies = state.get("allies")
@@ -1502,7 +1532,7 @@ def _wire_game_version(state: dict[str, Any]) -> str | None:
     raw = state.get("game_version")
     if raw is None:
         return None
-    from sts2_client import DEFAULT_GAME_VERSION, normalize_game_version
+    from sts2_client import LEGACY_GAME_VERSION, normalize_game_version
 
     if not isinstance(raw, str):
         raise UnsupportedStateError(f"$.game_version: must be a string, got {raw!r}")
@@ -1510,7 +1540,7 @@ def _wire_game_version(state: dict[str, Any]) -> str | None:
         ver = normalize_game_version(raw)
     except ValueError as exc:
         raise UnsupportedStateError(f"$.game_version: {exc}") from None
-    return None if ver == DEFAULT_GAME_VERSION else ver
+    return None if ver == LEGACY_GAME_VERSION else ver
 
 
 def _rng_block(state: dict[str, Any], seed: int, ascension: int) -> dict[str, Any]:

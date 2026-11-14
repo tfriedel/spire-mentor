@@ -222,6 +222,13 @@ def _live(status: str, filled: tuple[str, ...]) -> bool:
     )
 
 
+def _fill_slots(kind: str, filled: tuple[str, ...]) -> frozenset[int]:
+    """The spare inputs of `kind` ("sections", "cat", "cont") that the declared
+    fill events took (`contracts.FILL_SLOTS`: "chars" names its slots there,
+    because the frozen tables keep them as `reserved:spare`)."""
+    return frozenset(i for ev in filled for i in C.FILL_SLOTS.get(ev, {}).get(kind, ()))
+
+
 def layout(filled: Iterable[str] = ()) -> Layout:
     """The `Layout` of this checkout's `contracts`; with `filled`, the layout of
     a launch whose rows already carry those fill events (`E2ENet(filled=...)`)."""
@@ -239,7 +246,8 @@ def _layout(filled: tuple[str, ...]) -> Layout:
             continue
         if c.size >= C.VOCAB_ROWS:
             raise AssertionError(f"{c.name}: a {c.size}-row column is not a small column")
-        small.append((C.XC[c.name], c.size, 0, _live(c.status, filled)))
+        col = C.XC[c.name]
+        small.append((col, c.size, 0, _live(c.status, filled) or col in _fill_slots("cat", filled)))
     x_cat = {c.name: c for c in C.X_CAT}
     return Layout(
         n_cat=C.N_CAT,
@@ -261,8 +269,22 @@ def _layout(filled: tuple[str, ...]) -> Layout:
         small_sizes=tuple(s[1] for s in small),
         small_absent=tuple(s[2] for s in small),
         small_live=tuple(s[3] for s in small),
-        zero_cont=tuple(C.XF[c.name] for c in C.X_CONT if not _live(c.status, filled)),
-        reserved_sections=tuple(sorted(C.RESERVED_SECTIONS)),
+        zero_cont=tuple(
+            C.XF[c.name]
+            for c in C.X_CONT
+            if not _live(c.status, filled) and C.XF[c.name] not in _fill_slots("cont", filled)
+        ),
+        # Zero rows of the section table: the reserved sections, and those of a
+        # fill event the launch does not declare ("chars": ALLY and ORB).
+        reserved_sections=tuple(
+            sorted(
+                (
+                    C.RESERVED_SECTIONS
+                    | {s for slots in C.FILL_SLOTS.values() for s in slots.get("sections", ())}
+                )
+                - _fill_slots("sections", filled)
+            )
+        ),
         filled=filled,
         prior_live="content-prior" in filled,
     )

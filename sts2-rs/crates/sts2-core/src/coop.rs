@@ -677,6 +677,26 @@ pub fn every_player(state: &mut CombatState, mut body: impl FnMut(&mut CombatSta
     }
 }
 
+/// `PlayerCmd.GainEnergy(amount)` for every living player on the seated
+/// player's side, in the run's player order: v0.113.0 `CompostPower.AfterDeath`
+/// (`GetTeammatesOf(Owner).Where(c => c.IsAlive && c.IsPlayer)`, which
+/// includes the owner). Unlike [`every_player`] it reaches everyone from
+/// inside a seat pass too: a teammate's Compost hears the death there, and
+/// its energy is still everybody's. Solo, the seated player alone.
+pub fn every_player_gains_energy(state: &mut CombatState, amount: i32) {
+    if !has_seats(state) {
+        state.gain_energy(amount);
+        return;
+    }
+    for id in seats_in_run_order(state) {
+        with_seat(state, id, |state| {
+            if state.player.current_hp > 0 {
+                state.gain_energy(amount);
+            }
+        });
+    }
+}
+
 /// The seat id of `allies[ally]`: its [`SeatStash::seat`], or `ally + 1`
 /// without stashes (nobody but us is ever seated then).
 #[must_use]

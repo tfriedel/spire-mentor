@@ -1202,11 +1202,9 @@ impl Session {
                 .and_then(|s| serde_json::to_value(s).ok())
                 .unwrap_or(Value::Null),
         });
-        // GH #801: named only when not the default, so a v0.107.1 persist
-        // keeps its bytes; a reader treats absence as v0.107.1.
-        if !self.game_version.is_default() {
-            out["game_version"] = json!(self.game_version.as_str());
-        }
+        // GH #801: always named, so a persist says which build it is; a
+        // reader treats absence (an older v0.107.1 persist) as v0.107.1.
+        out["game_version"] = json!(self.game_version.as_str());
         // Named only for an e2e start (every other persist keeps its bytes).
         if self.e2e_setup {
             out["e2e_setup"] = json!(true);
@@ -1432,6 +1430,28 @@ impl Session {
 /// an error naming the supported builds.
 pub fn game_version_of(payload: &Value) -> Result<GameVersion, String> {
     parse_game_version(payload.get("game_version"))
+}
+
+/// The build a start request that names none runs on:
+/// [`GameVersion::NEW_RUN_DEFAULT`] when this binary embeds its display
+/// bundle, else the build every binary embeds.
+#[must_use]
+pub fn new_run_default() -> GameVersion {
+    if crate::data::embedded_versions().contains(&GameVersion::NEW_RUN_DEFAULT) {
+        GameVersion::NEW_RUN_DEFAULT
+    } else {
+        GameVersion::default()
+    }
+}
+
+/// The `game_version` of a REQUEST (start, import, catalog, reward preview):
+/// absent or `null` is [`new_run_default`]. A stored payload that names none
+/// is another matter, see [`game_version_of`].
+pub fn requested_game_version(value: Option<&Value>) -> Result<GameVersion, String> {
+    match value {
+        None | Some(Value::Null) => Ok(new_run_default()),
+        named => parse_game_version(named),
+    }
 }
 
 /// A `game_version` value as the wire carries it (see [`game_version_of`]):

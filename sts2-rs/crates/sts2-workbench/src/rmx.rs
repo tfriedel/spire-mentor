@@ -425,6 +425,22 @@ pub fn pending_deck_transforms(rm: &RunManager) -> u32 {
     u32::try_from(rm.run_state.pending_deck_transforms.len()).unwrap_or(u32::MAX)
 }
 
+/// `pending_claws_select`: Claws' "up to N into Maul" select is open.
+#[must_use]
+pub fn pending_claws_select(rm: &RunManager) -> bool {
+    rm.run_state.pending_claws_selection.is_some()
+}
+
+/// How many more cards the open Claws select takes
+/// (`claws_select_max - claws_select_picked`), 0 when none is open.
+#[must_use]
+pub fn claws_select_room(rm: &RunManager) -> usize {
+    rm.run_state
+        .pending_claws_selection
+        .as_ref()
+        .map_or(0, |s| s.max_count.saturating_sub(s.selected.len()))
+}
+
 /// `pending_deck_enchants`.
 #[must_use]
 pub fn pending_deck_enchants(rm: &RunManager) -> u32 {

@@ -166,8 +166,8 @@ pub mod potion_effects;
 // hook channels in `relic_effects` mutate.
 pub mod runstate;
 pub use runstate::{
-    CardReward, PendingDeckEnchant, PendingDeckTransform, PotionReward, RelicRarity, RelicReward,
-    Reward, Room, RoomType, RunState,
+    CardReward, PendingClawsSelection, PendingDeckEnchant, PendingDeckTransform, PotionReward,
+    RelicRarity, RelicReward, Reward, Room, RoomType, RunState,
 };
 
 // Bead sts2-rs-6ynt.4.1 (P7 events framework): Run-side events POD
@@ -2814,6 +2814,11 @@ pub enum PostChoiceEffect {
     /// pile goes through `CardCmd.Discard`. Read by the `AddFromDrawByType`
     /// resolver.
     DiscardUnpickedFromDraw,
+    /// v0.113.0 KiChant (`KiChant.cs`): its `CardPileCmd.Shuffle` opened a
+    /// Stratagem pick, which C# awaits before offering the top `count` draw
+    /// cards, so that offer rides the pick ([`fool::ki_chant_pick`]).
+    /// GH #1337.
+    KiChantPick(u8),
 }
 
 /// A potion's `Hook.AfterPotionUsed` dispatch deferred because the potion's
@@ -13545,6 +13550,9 @@ fn apply_post_choice_effect(state: &mut CombatState, effect: Option<PostChoiceEf
             } else {
                 apply_player_power_legacy(state, kind, amount);
             }
+        }
+        Some(PostChoiceEffect::KiChantPick(count)) => {
+            crate::fool::ki_chant_pick(state, usize::from(count));
         }
         Some(PostChoiceEffect::ExhaustDrawCardGainStrength {
             skip_innate,

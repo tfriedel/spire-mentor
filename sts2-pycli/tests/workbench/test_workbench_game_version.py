@@ -71,7 +71,8 @@ def test_capabilities_list_the_supported_builds(tmp_path):
     caps = _client(tmp_path).get("/api/capabilities").json()
     assert caps["game_versions"] == localization.available_game_versions()
     assert caps["game_versions"][0] == V107
-    assert caps["default_game_version"] == V107
+    # A new run starts on the default build when this checkout can show it.
+    assert caps["default_game_version"] == (V111 if V111 in caps["game_versions"] else V107)
     assert "backends" in caps
 
 
@@ -103,24 +104,39 @@ def test_an_unsupported_build_is_a_400_naming_the_supported_ones(tmp_path, route
     assert V107 in detail and V111 in detail
 
 
-def test_a_non_default_build_on_the_csharp_engine_is_a_400(tmp_path, monkeypatch):
+def _other_build() -> str:
+    """A supported build this process's C# oracle was NOT selected for."""
+    import sts2_client
+
+    return next(v for v in (V107, V111) if v != sts2_client.GAME_VERSION)
+
+
+def test_another_build_than_the_process_oracle_on_the_csharp_engine_is_a_400(tmp_path, monkeypatch):
     c = _client(tmp_path, monkeypatch)
     r = c.post(
         "/api/live/start",
-        json={"character": "Ironclad", "seed": "s", "backend": "csharp", "game_version": V111},
+        json={
+            "character": "Ironclad",
+            "seed": "s",
+            "backend": "csharp",
+            "game_version": _other_build(),
+        },
     )
     assert r.status_code == 400
     assert "rust" in r.json()["detail"]
 
 
-def test_the_default_build_named_explicitly_is_the_default(tmp_path, monkeypatch):
+@pytest.mark.parametrize("named", [True, False])
+def test_the_csharp_engine_runs_the_process_oracle_build(tmp_path, monkeypatch, named):
+    """Named or not: the C# backend has one build, the process's."""
+    import sts2_client
+
     c = _client(tmp_path, monkeypatch)
-    r = c.post(
-        "/api/live/start",
-        json={"character": "Ironclad", "seed": "s", "backend": "csharp", "game_version": V107},
-    )
+    body = {"character": "Ironclad", "seed": "s", "backend": "csharp"}
+    if named:
+        body["game_version"] = sts2_client.GAME_VERSION
+    r = c.post("/api/live/start", json=body)
     assert r.status_code == 200
-    assert "game_version" not in r.json()["state"]
 
 
 # ── readers: a missing key is the default ───────────────────────────────────
@@ -155,8 +171,9 @@ def test_write_save_omits_the_default_build(tmp_path):
         progress={},
         line=[],
     )
-    p107 = saves_mod.write_save(tmp_path, name="a", **common)
-    assert "game_version" not in json.loads(p107.read_text())
+    # Every save names its build, the legacy one included.
+    p107 = saves_mod.write_save(tmp_path, name="a", game_version=V107, **common)
+    assert json.loads(p107.read_text())["game_version"] == V107
     p111 = saves_mod.write_save(tmp_path, name="b", game_version=V111, **common)
     assert json.loads(p111.read_text())["game_version"] == V111
 
@@ -170,11 +187,13 @@ def test_start_on_v0111_runs_that_build(tmp_path):
     step = _start(c, V111)
     assert step["state"]["game_version"] == V111
     assert c.get("/api/live/state").json()["state"]["game_version"] == V111
-    # The default build never carries the key (its golden bytes are unchanged).
-    default = _start(c, None)
-    assert "game_version" not in default["state"]
+    # The legacy build's STATE never carries the key (its golden bytes are
+    # unchanged); a start that names no build gets the default one.
+    legacy = _start(c, V107)
+    assert "game_version" not in legacy["state"]
+    assert _start(c, None)["state"]["game_version"] == V111
     # v0.111.0 hashes the text seed differently: the same seed is another run.
-    assert step["state"]["bg_seed"] != default["state"]["bg_seed"]
+    assert step["state"]["bg_seed"] != legacy["state"]["bg_seed"]
 
 
 def test_start_faithful_on_v0111(tmp_path):
@@ -251,14 +270,14 @@ def test_the_run_log_meta_carries_the_build_and_resumes_on_it(tmp_path):
     assert r.json()["state"]["game_version"] == V111
 
 
-def test_a_default_run_log_has_no_build_key(tmp_path):
+def test_a_legacy_build_run_log_names_its_build_too(tmp_path):
     _rust()
     c = _client(tmp_path)
-    step = _start(c, None)
+    step = _start(c, V107)
     _first_enabled_action(c, step)
     log_path = c.post("/api/live/quit").json()["log_path"]
     ident = TimelineStore.load_jsonl(log_path).run_identity()
-    assert ident is not None and "game_version" not in ident
+    assert ident is not None and ident["game_version"] == V107
 
 
 def test_a_bug_report_names_the_sessions_build(tmp_path, monkeypatch):
@@ -271,7 +290,7 @@ def test_a_bug_report_names_the_sessions_build(tmp_path, monkeypatch):
     dump = c.get(f"/api/bugreport/{r.json()['id']}").json()
     assert dump["meta"]["engine_build"] == V111
 
-    _start(c, None)
+    _start(c, V107)
     r = c.post("/api/bugreport", json={"mode": "live"})
     dump = c.get(f"/api/bugreport/{r.json()['id']}").json()
     assert dump["meta"]["engine_build"] == V107

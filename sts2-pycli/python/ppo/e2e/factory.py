@@ -28,12 +28,53 @@ and `ppo/combat_bench/`.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import sts2_client
 
 GAME_VERSION = "v0.111.0"
-CHARACTER = "Ironclad"
+# The campaign's character. A process plays one: `STS2_E2E_CHARACTER` names it
+# before the process starts (spawned workers inherit it, as with the game
+# version); unset, it is Ironclad. Another character's rows carry the "chars"
+# fill event (GH #1373, SCHEMA.md section 13), so its learner declares
+# `--filled` with "chars" and `--character`.
+CHARACTER_ENV = "STS2_E2E_CHARACTER"
+CHARACTERS = ("Ironclad", "Silent", "Defect", "Regent", "Necrobinder")
+
+
+def _character() -> str:
+    raw = os.environ.get(CHARACTER_ENV, "").strip()
+    if not raw:
+        return CHARACTERS[0]
+    by_lower = {c.lower(): c for c in CHARACTERS}
+    if raw.lower() not in by_lower:
+        raise ValueError(f"{CHARACTER_ENV}={raw!r}: not one of {CHARACTERS}")
+    return by_lower[raw.lower()]
+
+
+CHARACTER = _character()
+
+# Whether this process's Ironclad rows carry the "chars" fill event (orbs and
+# Doom on an Ironclad run). Another character's rows always do. The learner
+# sets it from `--filled` before it spawns its workers; unset, Ironclad rows
+# are the frozen schema's.
+CHARS_ENV = "STS2_E2E_CHARS"
+
+
+def fill_chars() -> bool:
+    """Whether a row of this process's `CHARACTER` carries the "chars" event."""
+    return CHARACTERS[0] != CHARACTER or os.environ.get(CHARS_ENV, "") == "1"
+
+
+def set_fill_chars(on: bool) -> None:
+    """Declare (or drop) the "chars" event for this process and its children."""
+    if on:
+        os.environ[CHARS_ENV] = "1"
+    else:
+        os.environ.pop(CHARS_ENV, None)
+
+
 ASCENSION = 10
 MODE = "agent"
 ACT1 = "roll"
@@ -63,8 +104,9 @@ def require_selection() -> None:
 
 
 def new_run(seed: int, *, interactive_potion_swap: bool = True) -> Any:
-    """A fresh campaign run: Ironclad A10 on v0.111.0, agent mode, from Neow,
-    act 1 rolled from the seed.
+    """A fresh campaign run: `CHARACTER` (Ironclad unless `STS2_E2E_CHARACTER`
+    names another) at A10 on v0.111.0, agent mode, from Neow, act 1 rolled
+    from the seed.
 
     Args:
         seed: The run seed, in [0, 2**31).

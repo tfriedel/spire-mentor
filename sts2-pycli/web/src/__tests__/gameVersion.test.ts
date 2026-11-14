@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { buildBrowserDump } from "../bugreport";
 import {
-  DEFAULT_GAME_VERSION,
+  LEGACY_GAME_VERSION,
   declaredGameVersion,
   effectiveGameVersion,
   gameVersionBody,
@@ -16,7 +16,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("game version helpers (GH #801)", () => {
   it("a missing key reads as the default", () => {
-    expect(DEFAULT_GAME_VERSION).toBe("v0.107.1");
+    expect(LEGACY_GAME_VERSION).toBe("v0.107.1");
     expect(payloadGameVersion({})).toBe("v0.107.1");
     expect(payloadGameVersion(null)).toBe("v0.107.1");
     expect(declaredGameVersion({ idx: 1 })).toBeNull();
@@ -42,8 +42,8 @@ describe("game version helpers (GH #801)", () => {
     expect(runLogGameVersion(null)).toBeNull();
   });
 
-  it("the default is never put on the wire", () => {
-    expect(gameVersionBody("v0.107.1")).toEqual({});
+  it("every named build goes on the wire, the legacy one included", () => {
+    expect(gameVersionBody("v0.107.1")).toEqual({ game_version: "v0.107.1" });
     expect(gameVersionBody(undefined)).toEqual({});
     expect(gameVersionBody("v0.111.0")).toEqual({ game_version: "v0.111.0" });
   });
@@ -73,14 +73,14 @@ describe("api.live.importState", () => {
     return bodies;
   }
 
-  it("sends game_version only for a non-default build", async () => {
+  it("sends game_version whenever a build is named", async () => {
     const bodies = captureBodies();
     await api.live.importState("{}", "run");
     await api.live.importState("{}", "run", "v0.107.1");
     await api.live.importState("{}", "combat", "v0.111.0");
     expect(bodies).toEqual([
       { payload: "{}", lane: "run" },
-      { payload: "{}", lane: "run" },
+      { payload: "{}", lane: "run", game_version: "v0.107.1" },
       { payload: "{}", lane: "combat", game_version: "v0.111.0" },
     ]);
   });
@@ -146,7 +146,7 @@ describe("bug report engine_build", () => {
 describe("versionedPublicPath (GH #877)", () => {
   it("keeps the default build's table where it always was", () => {
     expect(versionedPublicPath("sfx_map.json", null)).toBe("/sfx_map.json");
-    expect(versionedPublicPath("sfx_map.json", DEFAULT_GAME_VERSION)).toBe("/sfx_map.json");
+    expect(versionedPublicPath("sfx_map.json", LEGACY_GAME_VERSION)).toBe("/sfx_map.json");
   });
   it("puts another build's under its version dir", () => {
     expect(versionedPublicPath("card_text.json", "v0.111.0")).toBe("/v0.111.0/card_text.json");

@@ -120,6 +120,7 @@ addopts = "-ra -n auto --dist worksteal -m 'not slow'"
 timeout = 600
 markers = [
   "slow: tests that take significant time (run on demand, not in `just test`)",
+  "soak: the longest slow tests; the per-PR gate (`just test-slow-pr`) skips them, `just test-slow` runs them",
   "oracle: needs the C# oracle, i.e. the player's own game assembly in lib/ (skipped when absent; `-m 'not oracle'` is the game-free subset)",
   "pending_run_level: strict xfail on builds whose run level is not ported yet (tests/conftest.py PENDING_BUILDS)",
   "pending_e2e_tables: strict xfail on builds with no e2e static tables yet (tests/conftest.py PENDING_BUILDS)",
@@ -240,6 +241,14 @@ DEP001 = ["zstandard"]
 # repo rename (sts2-cli -> sts2-pycli): `just deptry` failed to spawn, so new
 # modules never got registered here.
 known_first_party = [
+  "card_inventory",
+  "display_names",
+  "headless_eval",
+  "realgame_instinct",
+  "realgame_instinct_screens",
+  "realgame_parity",
+  "realgame_turn_plan",
+  "referee_spike",
   "act23_state_parity",
   "build_asset_manifest",
   "choice_grade",

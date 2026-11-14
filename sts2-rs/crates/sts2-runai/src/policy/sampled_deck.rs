@@ -272,6 +272,7 @@ impl RunPolicy for SampledDeckPolicy {
             actions.first(),
             Some(
                 RunAction::TransformDeckCard { .. }
+                    | RunAction::ConfirmDeckSelection
                     | RunAction::EnchantDeckCard { .. }
                     | RunAction::GrantDeckCard { .. }
             )

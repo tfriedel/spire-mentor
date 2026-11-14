@@ -24,7 +24,8 @@ pub(crate) fn on_after_side_turn_start_blood_vial(
 }
 
 /// C# `Hook.AfterPlayerTurnStart`'s Late pass (`AfterPlayerTurnStartLate`),
-/// which only BloodVial and FakeBloodVial override (v0.111.0 and v0.107.1).
+/// which only BloodVial and FakeBloodVial override (v0.111.0 and v0.107.1);
+/// v0.113.0 adds BathTowel (`BathTowel.cs`).
 /// It runs inside `SetupPlayerTurn`, after every normal `AfterPlayerTurnStart`
 /// listener and before the outer loop's `Hook.AfterSideTurnStart`.
 ///
@@ -41,13 +42,18 @@ pub fn dispatch_after_player_turn_start_late(state: &mut CombatState) {
         .filter(|k| {
             matches!(
                 k,
-                crate::RelicKind::BloodVial | crate::RelicKind::FakeBloodVial
+                crate::RelicKind::BloodVial
+                    | crate::RelicKind::FakeBloodVial
+                    | crate::RelicKind::BathTowel
             )
         })
         .collect();
     for kind in kinds {
         let _ = match kind {
             crate::RelicKind::BloodVial => on_after_side_turn_start_blood_vial(state, Side::Player),
+            crate::RelicKind::BathTowel => {
+                super::v0113_event::on_after_player_turn_start_late_bath_towel(state)
+            }
             _ => super::fake_blood_vial::on_after_side_turn_start_fake_blood_vial(
                 state,
                 Side::Player,

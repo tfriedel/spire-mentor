@@ -1,7 +1,7 @@
 // Map node glyphs and boss art lookup — kept out of the component file so it
 // exports only the component (react-refresh/only-export-components).
 import { assetUrl, type BossNode } from "../api";
-import { DEFAULT_GAME_VERSION } from "../gameVersion";
+import { LEGACY_GAME_VERSION } from "../gameVersion";
 
 /** Fallback glyphs/colors for nodes without server-resolved stamp art —
  *  muted dyed-ink tones that sit on parchment, not neon accents. */
@@ -78,7 +78,7 @@ export function bossArt(
   // non-default build tries its overlay first and the shared tree second —
   // without it the new boss falls through to the server's small map stamp.
   const art = (rel: string) => [
-    ...(gameVersion && gameVersion !== DEFAULT_GAME_VERSION
+    ...(gameVersion && gameVersion !== LEGACY_GAME_VERSION
       ? [assetUrl(`${gameVersion}/${rel}`)] : []),
     assetUrl(rel),
   ];

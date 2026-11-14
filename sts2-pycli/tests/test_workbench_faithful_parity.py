@@ -542,3 +542,43 @@ def test_loading_a_legacy_save_without_run_mode_still_works(tmp_path) -> None:
     r = client.post("/api/saves/load", json={"name": "legacy"})
     assert r.status_code == 200, r.json()
     assert r.json()["decision"] == before["decision"]
+
+
+class _GrantGrid:
+    """The slice of ``RunManager`` a card-grant grid shows the translator."""
+
+    def __init__(self, options: int, minimum: int) -> None:
+        self.pending_card_grant_min = minimum
+        self._options = [("Strike", False)] * options
+
+    def card_grant_options(self) -> list[tuple[str, bool]]:
+        return self._options
+
+
+def test_declining_an_optional_card_grant_is_a_skip_not_a_card() -> None:
+    """Sea Glass offers "up to N" cards; the engine spells "none" as a grant at
+    ``idx == option count``. That is a skip, not ``select_cards 15``: the
+    backend reads an index as a card and appends its own confirm after it, a
+    second action the engine rejects (the PPO brain's run stopped there).
+    """
+    grid = _GrantGrid(options=15, minimum=0)
+    decline = {"action": "grant_deck_card", "idx": 15}
+    assert to_workbench_verb(grid, decline) == ("skip_select", {})
+    # A real pick on the same grid is still a pick.
+    pick = {"action": "grant_deck_card", "idx": 14}
+    assert to_workbench_verb(grid, pick) == ("select_cards", {"indices": "14"})
+
+
+def test_a_mandatory_card_grant_has_no_decline_index() -> None:
+    """A fixed-count grant (Room Full of Cheese) has no "none": every index
+    the engine names is a card."""
+    grid = _GrantGrid(options=3, minimum=3)
+    assert to_workbench_verb(grid, {"action": "grant_deck_card", "idx": 2}) == (
+        "select_cards",
+        {"indices": "2"},
+    )
+    # Other pending selects never read the grant grid.
+    assert to_workbench_verb(grid, {"action": "upgrade_deck_card", "idx": 3}) == (
+        "select_cards",
+        {"indices": "3"},
+    )

@@ -238,6 +238,12 @@ class Cfg:
     # (SCHEMA.md 10). A fresh net inits their reserved inputs live; a resume may add
     # events (the identity rule: the checkpoint's zero weights stay), never drop one.
     filled: list[str] = field(default_factory=list)
+    # The campaign's character: the one this process plays (`factory.CHARACTER`, from
+    # `STS2_E2E_CHARACTER`, which the workers inherit). Recorded here so a run's cfg
+    # says what it trained; a mismatch with the process is refused. Any character but
+    # Ironclad needs "chars" in `filled` (GH #1373). Ironclad may declare it: its rows
+    # then show orbs and Doom too (the learner sets `STS2_E2E_CHARS` for its workers).
+    character: str = "Ironclad"
     # Action logs (plan §3.2): the workers keep boss-2, capped and error segments and 2%
     # of runs under <save_dir>/actions (`actionlog.LogSink`, 10 GB in total).
     action_logs: bool = True
@@ -936,6 +942,20 @@ class Learner:
         OC.atomic_write_text(self.sd.p(OC.LEARNER_PID), json.dumps(OC.pid_record(argv=argv)) + "\n")
         import sts2_client
 
+        from . import factory
+
+        if cfg.character != factory.CHARACTER:
+            raise UsageError(
+                f"--character {cfg.character}: this process plays {factory.CHARACTER}; set "
+                f"{factory.CHARACTER_ENV}={cfg.character} before the learner starts"
+            )
+        if cfg.character != C.BASE_CHARACTER and C.FILL_CHARS not in cfg.filled:
+            raise UsageError(
+                f"--filled {sorted(cfg.filled)} with --character {cfg.character}: every "
+                f'character but {C.BASE_CHARACTER} declares "chars"'
+            )
+        # The workers (and this process) tokenize Ironclad rows with the event iff declared.
+        factory.set_fill_chars(C.FILL_CHARS in cfg.filled)
         try:
             self.stamps = make_stamps(filled=cfg.filled)
         except sts2_client.GameVersionMismatch as e:

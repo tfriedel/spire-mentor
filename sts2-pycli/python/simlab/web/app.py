@@ -115,9 +115,18 @@ def build_api_router(mgr: JobManager) -> APIRouter:
     def _game_version_or_400(raw: object) -> str | None:
         """A request's ``game_version`` (GH #877): ``None`` for the default
         build, else a supported build; anything else is a 400 naming them."""
-        from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS
+        from sts2_client import (
+            DEFAULT_GAME_VERSION,
+            LEGACY_GAME_VERSION,
+            SUPPORTED_GAME_VERSIONS,
+        )
 
-        if raw is None or raw == DEFAULT_GAME_VERSION:
+        if raw is None:
+            # A request that names no build gets the default one. (`None` out
+            # of here means "the engine's own default", which is the legacy
+            # build: a position FILE that names none.)
+            raw = DEFAULT_GAME_VERSION
+        if raw == LEGACY_GAME_VERSION:
             return None
         if raw not in SUPPORTED_GAME_VERSIONS:
             raise HTTPException(

@@ -1212,6 +1212,8 @@ pub fn detect_card_surface(rm: &RunManager, actions: &[RunAction]) -> Option<Car
         RunAction::RemoveDeckCard { .. } => return Some(CardSurface::RemoveDeck),
         RunAction::UpgradeDeckCard { .. } => return Some(CardSurface::UpgradeDeck),
         RunAction::TransformDeckCard { .. } => return Some(CardSurface::TransformDeck),
+        // Claws' select with its cap reached: only the confirm is left.
+        RunAction::ConfirmDeckSelection => return None,
         _ => {}
     }
     match rm.phase() {

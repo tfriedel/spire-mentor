@@ -86,7 +86,9 @@ from ppo.e2e import ops_contract as OC
 from ppo.e2e import panels as P
 
 GAME_VERSION = "v0.111.0"
-CHARACTER = "Ironclad"
+# The process's campaign character (`ppo.e2e.factory.CHARACTER_ENV`; Ironclad
+# when unset). `factory` reads the same variable and checks its spelling.
+CHARACTER = os.environ.get("STS2_E2E_CHARACTER", "").strip().capitalize() or "Ironclad"
 ASCENSION = 10
 # Caps (plan section 3.2, PREREG-0 "Reward"): a capped run is a loss.
 MAX_FIGHT_TURNS = 100
@@ -203,7 +205,7 @@ def select_campaign_build() -> None:
 
 
 def construct_run(seed: int) -> Any:
-    """The campaign run for `seed`: Ironclad A10, v0.111.0, agent mode, Neow, act 1 rolled,
+    """The campaign run for `seed`: `CHARACTER` A10, v0.111.0, agent mode, Neow, act 1 rolled,
     potion swap on (the student's setting, D4).
 
     Uses WP1's ``ppo.e2e.factory.new_run`` when that module is present (the merged

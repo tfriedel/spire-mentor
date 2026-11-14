@@ -67,11 +67,12 @@ static COLORLESS_V0113: std::sync::LazyLock<Vec<CardId>> = std::sync::LazyLock::
 });
 
 /// Cards v0.113.0 adds to a colorless pool: MyShinies (Colorless) and the
-/// event cards DingyDagger, MightyShield, MightyWeapon (Event). The Event
-/// pool's GodByrd and the Token pool's tarot cards have no `CardId` yet.
-const V0113_COLORLESS_POOL_ADDITIONS: [CardId; 4] = [
+/// event cards DingyDagger, GodByrd, MightyShield, MightyWeapon (Event). The
+/// Token pool's tarot cards have no `CardId` yet.
+const V0113_COLORLESS_POOL_ADDITIONS: [CardId; 5] = [
     CardId::MyShinies,
     CardId::DingyDagger,
+    CardId::GodByrd,
     CardId::MightyShield,
     CardId::MightyWeapon,
 ];

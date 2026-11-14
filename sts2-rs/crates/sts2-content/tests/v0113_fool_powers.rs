@@ -427,6 +427,35 @@ fn simpleton_skips_unplayable_and_loops_amount_times() {
     assert_eq!(enemy_hp(&s), hp - 6 - 8);
 }
 
+/// GH #1337: Stampede and Simpleton both listen on
+/// `AfterAutoPostPlayPhaseEntered`, and `Hook.cs` walks the owner's powers in
+/// the order they were applied. With Bash (the only Attack) and Defend (the
+/// cheapest card) in hand, the order of the two plays is the order of the
+/// two powers.
+#[test]
+fn stampede_and_simpleton_auto_play_in_power_order() {
+    for (first, second, expect) in [
+        (
+            PowerKind::Simpleton,
+            PowerKind::Stampede,
+            vec![CardId::DefendIronclad, CardId::Bash],
+        ),
+        (
+            PowerKind::Stampede,
+            PowerKind::Simpleton,
+            vec![CardId::Bash, CardId::DefendIronclad],
+        ),
+    ] {
+        let mut s = fool_state();
+        let _ = push_hand(&mut s, CardId::Bash, false);
+        let _ = push_hand(&mut s, CardId::DefendIronclad, false);
+        add_player_power(&mut s, 90, first, 1);
+        add_player_power(&mut s, 91, second, 1);
+        let _ = sts2_core::combat_loop::end_player_turn_phase_one(&mut s);
+        assert_eq!(discard_ids(&s), expect, "{first:?} applied first");
+    }
+}
+
 /// Simpleton exists only from v0.113.0.
 #[test]
 fn simpleton_is_inert_before_v0113() {

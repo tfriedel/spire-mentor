@@ -12,6 +12,16 @@ from workbench.live_runs import LiveRuns, RestoreError, RunIdentity, resume_capa
 from workbench.session import Session
 
 
+@pytest.fixture(autouse=True)
+def _a_legacy_oracle_process(monkeypatch):
+    """The C# backend runs one build, its process's. These tests start and
+    restore C# runs whose saves name no build (so: the legacy one), which only
+    a process selected for the legacy build can do."""
+    import sts2_client
+
+    monkeypatch.setattr(sts2_client, "GAME_VERSION", sts2_client.LEGACY_GAME_VERSION)
+
+
 @pytest.fixture
 def runs(tmp_path, monkeypatch):
     monkeypatch.setattr(branching, "Game", FakeGame)

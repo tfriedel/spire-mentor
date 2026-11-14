@@ -4640,15 +4640,43 @@ pub fn exhaust_card_uid(state: &mut CombatState, uid: CardUid) -> bool {
 pub fn transform_card_in_place(
     state: &mut CombatState,
     old_uid: CardUid,
-    mut new_card: crate::cards::Card,
+    new_card: crate::cards::Card,
 ) -> Option<CardUid> {
     // C# `CardCmd.Transform` returns nothing as its first statement once
     // `CombatManager.IsEnding` (v0.107.1 CardCmd.cs:371-374, v0.111.0
     // :373-376), before anything moves or rolls.
+    let pile = find_card_pile(state, old_uid)?;
+    transform_card_in_pile(state, old_uid, new_card, Some(pile))
+}
+
+/// [`transform_card_in_place`] for a card on the Play pile: C#
+/// `CardModel.OnPlayWrapper` runs `CardCmd.Transform(this,
+/// TransformIntoAfterPlay)` before the played card's result move, so the
+/// replacement takes the original's Play slot and the result move then
+/// carries the replacement (GH #1337). `None` when `old_uid` is not on Play
+/// or the combat is ending.
+pub(crate) fn transform_card_on_play(
+    state: &mut CombatState,
+    old_uid: CardUid,
+    new_card: crate::cards::Card,
+) -> Option<CardUid> {
+    if !state.player.play.contains(&old_uid) {
+        return None;
+    }
+    transform_card_in_pile(state, old_uid, new_card, None)
+}
+
+/// `pile` is the pile holding `old_uid`; `None` is the Play pile, which
+/// [`PileKind`] does not name.
+fn transform_card_in_pile(
+    state: &mut CombatState,
+    old_uid: CardUid,
+    mut new_card: crate::cards::Card,
+    pile: Option<PileKind>,
+) -> Option<CardUid> {
     if crate::combat_loop::combat_is_ending(state) {
         return None;
     }
-    let pile = find_card_pile(state, old_uid)?;
     // Allocate a fresh arena row.
     let raw = u32::try_from(state.cards.len() + 1).expect("cards arena fits in u32");
     let new_uid = CardUid::new(raw).expect("non-zero uid");
@@ -4675,7 +4703,7 @@ pub fn transform_card_in_place(
     // `state.player.<pile>` is a `SmallVec` with a different inline
     // capacity, so `&mut`s to different piles have different types.
     match pile {
-        PileKind::Hand => {
+        Some(PileKind::Hand) => {
             let pos = state
                 .player
                 .hand
@@ -4684,7 +4712,7 @@ pub fn transform_card_in_place(
                 .expect("uid present per find_card_pile above");
             state.player.hand[pos] = new_uid;
         }
-        PileKind::Draw => {
+        Some(PileKind::Draw) => {
             let pos = state
                 .player
                 .draw
@@ -4693,7 +4721,7 @@ pub fn transform_card_in_place(
                 .expect("uid present per find_card_pile above");
             state.player.draw[pos] = new_uid;
         }
-        PileKind::Discard => {
+        Some(PileKind::Discard) => {
             let pos = state
                 .player
                 .discard
@@ -4702,7 +4730,7 @@ pub fn transform_card_in_place(
                 .expect("uid present per find_card_pile above");
             state.player.discard[pos] = new_uid;
         }
-        PileKind::Exhaust => {
+        Some(PileKind::Exhaust) => {
             let pos = state
                 .player
                 .exhaust
@@ -4710,6 +4738,10 @@ pub fn transform_card_in_place(
                 .position(|&u| u == old_uid)
                 .expect("uid present per find_card_pile above");
             state.player.exhaust[pos] = new_uid;
+        }
+        None => {
+            let pos = state.player.play.iter().position(|&u| u == old_uid)?;
+            state.player.play[pos] = new_uid;
         }
     }
     // Bead `sts2-rs-xk9yo`: a transform CREATES a new card that ENTERS
@@ -4720,7 +4752,8 @@ pub fn transform_card_in_place(
     // under Regalite). Mirrors `spawn_card_into_*`. Exhaust-pile transforms
     // are excluded inside `fire_after_card_entered_combat` (not a card-entered
     // event), matching the spawn gate.
-    fire_after_card_entered_combat(state, new_uid, pile, true);
+    // Play is a combat pile for this bus, like Hand (only Exhaust is not).
+    fire_after_card_entered_combat(state, new_uid, pile.unwrap_or(PileKind::Hand), true);
     // C# `CardCmd.TransformTo` fires `AfterCardGeneratedForCombat(addedByPlayer:
     // true)` UNCONDITIONALLY for the transformed-in card when it lands in a
     // combat pile (CardCmd.cs:395-401), so a transform (Charge → MinionDiveBomb,

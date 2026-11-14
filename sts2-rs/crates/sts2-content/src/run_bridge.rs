@@ -671,13 +671,18 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
     // lot (`BattlewornDummy.cs:110-116`) — unless the dummy ran out of time,
     // which returns before any reward (`:76-79`).
     //
-    // A Boss room in the last act is empty too: `RewardsSet.WithRewardsFromRoom`
-    // returns before the `ExtraRewards` merge (`RewardsSet.cs:91-94`, both
-    // builds). That covers the final boss and the A10 first boss. Rust's
-    // `act_index` is 1-based, so the last act is `>= 3`, the same predicate
-    // `RunManager::exit_combat_and_transition` uses.
+    // A Boss room in the last act is empty too before v0.113.0:
+    // `RewardsSet.WithRewardsFromRoom` returns before the `ExtraRewards`
+    // merge (`RewardsSet.cs:91-94` in v0.107.1 and v0.111.0). That covers the
+    // final boss and the A10 first boss. v0.113.0 only skips the room's
+    // default rewards there and still merges `combatRoom.ExtraRewards`
+    // (`RewardsSet.cs:96-103`), so Royalties / Heist / Grimoire pay out at
+    // the last-act boss too. Rust's `act_index` is 1-based, so the last act
+    // is `>= 3`, the same predicate `RunManager::exit_combat_and_transition`
+    // uses.
     let last_act_boss = rs.act_index >= 3
-        && rs.current_room.map(|r| r.room_type) == Some(sts2_core::runstate::RoomType::Boss);
+        && rs.current_room.map(|r| r.room_type) == Some(sts2_core::runstate::RoomType::Boss)
+        && rs.game_version < sts2_core::GameVersion::V0_113_0;
     let room_gives_rewards = !last_act_boss
         && match &rs.event_combat {
             Some(req) => {
@@ -747,6 +752,9 @@ pub fn exit_combat(rs: &mut RunState, combat: &CombatState) {
     // Goopy bumps the deck copy's enchantment amount on every play
     // (`Goopy.AfterCardPlayed`: `DeckVersion.Enchantment.Amount++`), GH #952.
     propagate_goopy_to_master_deck(rs, combat);
+    // ShowOff's kill raises the deck copy's Aim too (`ShowOff.IncreaseAim`:
+    // `(base.DeckVersion as ShowOff)?.IncreaseAim(amount)`), GH #1337.
+    propagate_show_off_to_master_deck(rs, combat);
 
     // Bead `sts2-rs-RP13`: ThievingHopper / SwipePower run-deck steal. C#
     // `SwipePower.Steal` permanently removes the stolen card from the run deck
@@ -1123,6 +1131,43 @@ fn propagate_goopy_to_master_deck(rs: &mut RunState, combat: &CombatState) {
             };
             let master = m.enchantment(EnchantmentId::Goopy);
             m.set_enchantment(EnchantmentId::Goopy, master.max(amount));
+        }
+    }
+}
+
+/// Fold each deck ShowOff's `IncreasedAim` back onto its master-deck card
+/// (C# `ShowOff.IncreaseAim` raises `DeckVersion` too; `IncreasedAim` is a
+/// `[SavedProperty]`). GH #1337.
+///
+/// The value lives in the card's [`sts2_core::cards::VarKey::Generic`] var
+/// (`sts2_core::fool::show_off_after_death`). Each master card reads its own
+/// combat copy through [`CombatState::deck_link`] (C# `DeckVersion`), so a
+/// ShowOff generated in the fight, which has no deck card, feeds nothing.
+/// Without a link there is no identity to follow and nothing is folded.
+/// Only grows, like the scaler fold-back.
+fn propagate_show_off_to_master_deck(rs: &mut RunState, combat: &CombatState) {
+    use sts2_core::cards::{CardId, VarKey};
+
+    let Some(link) = combat
+        .deck_link
+        .filter(|l| l.len as usize == rs.master_deck.len())
+    else {
+        return;
+    };
+    for (i, m) in rs.master_deck.iter_mut().enumerate() {
+        if m.card_id != CardId::ShowOffCard {
+            continue;
+        }
+        let Some(c) = link
+            .uid_of(i)
+            .and_then(|uid| combat.cards.get(uid.get() as usize - 1))
+            .filter(|c| c.card_id == CardId::ShowOffCard)
+        else {
+            continue;
+        };
+        let grown = c.combat_var(VarKey::Generic);
+        if grown > m.combat_var(VarKey::Generic) {
+            m.set_combat_var(VarKey::Generic, grown);
         }
     }
 }
@@ -2398,6 +2443,58 @@ mod tests {
         );
     }
 
+    /// GH #1337: `ShowOff.IncreaseAim` also raises the deck copy
+    /// (`(base.DeckVersion as ShowOff)?.IncreaseAim(amount)`, `ShowOff.cs`,
+    /// `IncreasedAim` is a `[SavedProperty]`), so a kill's Aim outlasts the
+    /// fight. A ShowOff generated mid-combat has no `DeckVersion`: its growth
+    /// stays in the fight.
+    #[test]
+    fn show_off_aim_persists_across_combat_round_trip() {
+        use sts2_core::cards::{CardId, VarKey};
+
+        crate::cards::dispatch::ensure_installed();
+
+        let show_off = || {
+            crate::cards::spec_index::card_pod_from_id(CardId::ShowOffCard, false)
+                .expect("show off spec")
+        };
+        let mut rs = fresh_run();
+        rs.master_deck.push(show_off());
+        rs.master_deck.push(show_off());
+
+        let mut state = enter_combat(&rs, select_first(act1_normal_pool()));
+        let link = state.deck_link.expect("a run combat links its deck");
+        let first = link.uid_of(0).expect("master[0] has a combat copy");
+        state.cards[first.get() as usize - 1].set_combat_var(VarKey::Generic, 4);
+        // A ShowOff generated in the fight, grown past both deck copies.
+        let mut generated = show_off();
+        generated.uid = sts2_core::CardUid::new(u32::try_from(state.cards.len() + 1).expect("u32"))
+            .expect("nz");
+        generated.set_combat_var(VarKey::Generic, 9);
+        state.cards.push(generated);
+
+        exit_combat(&mut rs, &state);
+        assert_eq!(
+            rs.master_deck[0].combat_var(VarKey::Generic),
+            4,
+            "the kill's IncreasedAim reaches the deck ShowOff"
+        );
+        assert_eq!(
+            rs.master_deck[1].combat_var(VarKey::Generic),
+            0,
+            "the other ShowOff keeps its own; the generated one has no deck card"
+        );
+
+        let state2 = enter_combat(&rs, select_first(act1_normal_pool()));
+        let link2 = state2.deck_link.expect("link");
+        let copy = &state2.cards[link2.uid_of(0).expect("copy").get() as usize - 1];
+        assert_eq!(
+            copy.combat_var(VarKey::Generic),
+            4,
+            "the next combat's ShowOff starts from the raised Aim"
+        );
+    }
+
     /// GH #952: Goopy's `AfterCardPlayed` also bumps the deck copy's amount
     /// (`base.Card.DeckVersion.Enchantment.Amount++`, `Goopy.cs`), so the growth
     /// outlasts the fight. Only the combat copies of master-deck cards fold
@@ -2582,16 +2679,25 @@ mod tests {
         );
     }
 
-    /// A Boss room in the last act offers an EMPTY reward set: C#
-    /// `RewardsSet.WithRewardsFromRoom` returns before the `ExtraRewards`
-    /// merge (`RewardsSet.cs:91-94`, both builds), so Royalties gold,
-    /// Grimoire removals and Heist gold-back are never offered there
-    /// (Ironclad seed 2164, v0.111.0: Royalties 40 paid at the final boss).
-    /// An earlier act's boss still pays them.
+    /// A Boss room in the last act offers an EMPTY reward set before
+    /// v0.113.0: C# `RewardsSet.WithRewardsFromRoom` returns before the
+    /// `ExtraRewards` merge (`RewardsSet.cs:91-94` in v0.107.1 / v0.111.0),
+    /// so Royalties gold, Grimoire removals and Heist gold-back are never
+    /// offered there (Ironclad seed 2164, v0.111.0: Royalties 40 paid at the
+    /// final boss). An earlier act's boss still pays them. v0.113.0 skips only
+    /// the default rewards and merges the extras (`RewardsSet.cs:96-103`;
+    /// act23 Regent:1003: Royalties+ paid 40 at the final boss).
     #[test]
     fn exit_combat_no_extra_rewards_on_last_act_boss() {
-        for (act, expect_extras) in [(2, true), (3, false)] {
+        use sts2_core::GameVersion::{V0_111_0, V0_113_0};
+        for (act, version, expect_extras) in [
+            (2, V0_111_0, true),
+            (3, V0_111_0, false),
+            (2, V0_113_0, true),
+            (3, V0_113_0, true),
+        ] {
             let mut rs = fresh_run();
+            rs.game_version = version;
             rs.act_index = act;
             rs.current_room = Some(sts2_core::runstate::Room::new(
                 sts2_core::runstate::RoomType::Boss,
@@ -2630,8 +2736,11 @@ mod tests {
             } else {
                 (gold_before, vec![])
             };
-            assert_eq!(rs.gold, gold, "act {act} boss gold");
-            assert_eq!(rs.pending_rewards, removals, "act {act} boss removals");
+            assert_eq!(rs.gold, gold, "act {act} {version:?} boss gold");
+            assert_eq!(
+                rs.pending_rewards, removals,
+                "act {act} {version:?} boss removals"
+            );
         }
     }
 

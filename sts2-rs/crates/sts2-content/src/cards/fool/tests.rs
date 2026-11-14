@@ -18,7 +18,11 @@ fn decomp(ns: &str, file: &str) -> Option<String> {
         .ok()?
         .flatten()
         .find(|e| e.file_name().to_string_lossy().ends_with(&suffix))?;
-    std::fs::read_to_string(dir.path().join(file)).ok()
+    // A Windows checkout (core.autocrlf) has the decomp in CRLF; the
+    // parsers below split on "\n".
+    std::fs::read_to_string(dir.path().join(file))
+        .ok()
+        .map(|s| s.replace("\r\n", "\n"))
 }
 
 fn names_in(src: &str, marker: &str) -> Vec<String> {

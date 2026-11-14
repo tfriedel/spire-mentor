@@ -101,10 +101,12 @@ fn payload_of(body: &Value) -> Result<&str, ApiError> {
 }
 
 /// The optional `game_version` of a start / start-faithful / import-state
-/// request (GH #801): `"v0.107.1"` (the default when absent) or
-/// `"v0.111.0"`; anything else is a 400 naming the supported builds.
+/// request (GH #801): a supported build, or
+/// [`crate::session::new_run_default`] when absent; anything else is a 400
+/// naming the supported builds.
 fn body_game_version(body: &Value) -> Result<GameVersion, ApiError> {
-    crate::session::parse_game_version(body.get("game_version")).map_err(|e| ApiError::new(400, e))
+    crate::session::requested_game_version(body.get("game_version"))
+        .map_err(|e| ApiError::new(400, e))
 }
 
 /// `{}`: the default `args` of an action request.
@@ -879,7 +881,7 @@ impl Workbench {
                     .into_iter()
                     .map(GameVersion::as_str)
                     .collect::<Vec<_>>(),
-                "default_game_version": GameVersion::default().as_str(),
+                "default_game_version": crate::session::new_run_default().as_str(),
             })),
             ("GET", "/api/meta") => Ok(crate::simlab_catalog::meta()),
             ("GET", "/api/simlab/catalog") => {
@@ -891,7 +893,7 @@ impl Workbench {
                     .filter_map(|kv| kv.split_once('='))
                     .find(|(key, _)| *key == "game_version")
                     .map(|(_, v)| json!(percent_decode(v)));
-                let version = crate::session::parse_game_version(raw.as_ref())
+                let version = crate::session::requested_game_version(raw.as_ref())
                     .map_err(|e| ApiError::new(400, e))?;
                 Ok(crate::simlab_catalog::catalog_for(version))
             }

@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from floors import engine_total_floor, game_floor
-from sts2_client import DEFAULT_GAME_VERSION, rs_engine_call
+from sts2_client import LEGACY_GAME_VERSION, rs_engine_call
 from sts2_hint import display_maps
 
 from workbench import localization
@@ -793,6 +793,25 @@ class RustGame(GameBackend):
                 if result not in ("advanced", "run_over"):
                     return _err(f"{action} rejected by engine: {result}")
             return self._serialize()
+        # Claws (GH #1353): an "up to N into Maul" card_select. One
+        # ``select_cards`` picks every chosen card and confirms, as C#'s
+        # manual-confirm screen does; ``skip_select`` confirms with none. A
+        # picked card leaves the offer, so walk ascending and shift each later
+        # index down by the earlier picks (as New Leaf below).
+        if action in ("select_cards", "skip_select") and getattr(
+            self.rm, "pending_claws_select", False
+        ):
+            raw = args.get("indices", "") if action == "select_cards" else ""
+            idxs = sorted({int(s) for s in str(raw).split(",") if s.strip() != ""})
+            if len(idxs) > int(self.rm.claws_select_max) - int(self.rm.claws_select_picked):
+                return _err(f"select_cards: Claws takes at most {self.rm.claws_select_max} cards")
+            steps = [{"action": "transform_deck_card", "idx": i - n} for n, i in enumerate(idxs)]
+            steps.append({"action": "confirm_deck_selection"})
+            for step in steps:
+                result = self.rm.take_action(step)
+                if result not in ("advanced", "run_over"):
+                    return _err(f"{action} rejected by engine: {result}")
+            return self._serialize()
         # Interactive deck transform (New Leaf): likewise a single pick-N
         # card_select. C# applies transforms in ASCENDING original-index
         # order (`CardCmd.Transform`'s `PileIndexSort`), and each resolve
@@ -1020,7 +1039,9 @@ class RustGame(GameBackend):
             # sts2-rs-1hiht.
             if getattr(self.rm, "pending_deck_upgrades", 0) > 0:
                 return {"action": "upgrade_deck_card", "idx": idx}
-            if getattr(self.rm, "pending_deck_transforms", 0) > 0:
+            if getattr(self.rm, "pending_claws_select", False) or (
+                getattr(self.rm, "pending_deck_transforms", 0) > 0
+            ):
                 return {"action": "transform_deck_card", "idx": idx}
             if getattr(self.rm, "pending_deck_enchants", 0) > 0:
                 return {"action": "enchant_deck_card", "idx": idx}
@@ -1048,6 +1069,8 @@ class RustGame(GameBackend):
                 return {"action": "combat_resolve_choice", "option": None}
             if phase == "card_reward" and getattr(self.rm, "card_offer_choose_screen", False):
                 return {"action": "pick_card_reward", "idx": None}
+            if getattr(self.rm, "pending_claws_select", False):
+                return {"action": "confirm_deck_selection"}
             raise _Unsupported("skip_select not valid here")
         if action == "select_card_reward":
             return {"action": "pick_card_reward", "idx": args["card_index"]}
@@ -1157,7 +1180,7 @@ class RustGame(GameBackend):
         # and the golden bytes recorded from them — exactly as it was. A
         # reader treats the missing key as the default.
         version = getattr(self.rm, "game_version", None)
-        if isinstance(version, str) and version != DEFAULT_GAME_VERSION:
+        if isinstance(version, str) and version != LEGACY_GAME_VERSION:
             state["game_version"] = version
         # The run's master RNG seed and the map node this room sits on. The game
         # rolls a combat room's layer variants from
@@ -1475,6 +1498,22 @@ class RustGame(GameBackend):
         state["cards"] = cards
         state["min_select"] = count
         state["max_select"] = count
+        state["can_skip"] = False
+        state["context"] = "transform"
+
+    def _fill_claws_select(self, state: dict[str, Any]) -> None:
+        """Deck card_select for Claws' "transform up to N into Maul" (GH #1353).
+
+        C# ``CardSelectorPrefs(prompt, 0, 6)`` with ``RequireManualConfirmation``
+        (``Claws.cs:22-29``): any 0..=6 of the cards still offered
+        (``transform_select_deck_indices()``, ``index`` = position in that
+        list), confirmed at once.
+        """
+        cards = self._deck_subset_cards(self.rm.transform_select_deck_indices())
+        room = int(self.rm.claws_select_max) - int(self.rm.claws_select_picked)
+        state["cards"] = cards
+        state["min_select"] = 0
+        state["max_select"] = max(0, min(room, len(cards)))
         state["can_skip"] = False
         state["context"] = "transform"
 
@@ -2031,6 +2070,7 @@ class _Unsupported(Exception):
 _PREEMPTS = (
     ("pending_deck_removals", RustGame._fill_card_removal),
     ("pending_deck_upgrades", RustGame._fill_card_upgrade),
+    ("pending_claws_select", RustGame._fill_claws_select),
     ("pending_deck_transforms", RustGame._fill_card_transform),
     ("pending_deck_enchants", RustGame._fill_card_enchant),
     ("pending_card_grants", RustGame._fill_card_grant),

@@ -400,10 +400,10 @@ def position_game_version(pos: dict[str, Any]) -> str | None:
     Raises:
         PositionError: The field names a build the engine does not support.
     """
-    from sts2_client import DEFAULT_GAME_VERSION, SUPPORTED_GAME_VERSIONS
+    from sts2_client import LEGACY_GAME_VERSION, SUPPORTED_GAME_VERSIONS
 
     raw = pos.get("game_version")
-    if raw is None or raw == DEFAULT_GAME_VERSION:
+    if raw is None or raw == LEGACY_GAME_VERSION:
         return None
     if raw not in SUPPORTED_GAME_VERSIONS:
         raise PositionError(

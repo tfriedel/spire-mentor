@@ -5,6 +5,10 @@
 //! Column indices are looked up by name at compile time ([`xc`], [`xf`],
 //! [`sc`], [`sec`]), so a name that drifts from the tables below fails the
 //! build instead of writing the wrong column.
+//!
+//! The "chars" fill event (GH #1373, `contracts` section 4b) names reserved
+//! sections and spare columns by alias ([`CHARS_ALIASES`]); the lookups
+//! resolve an alias to its slot.
 
 /// S_ctx categorical slots (`SCTX_SLOTS`), columns 0-14 of `cat`.
 pub const SCTX_SLOTS: [&str; 15] = [
@@ -422,7 +426,52 @@ const fn str_eq(a: &str, b: &str) -> bool {
     true
 }
 
+/// The "chars" fill event's names (`contracts` section 4b, GH #1373): each
+/// alias and the reserved section or spare column it takes. The tables above
+/// keep the reserved names, as the hashed tables of `contracts` do.
+pub const CHARS_ALIASES: [(&str, &str); 6] = [
+    ("ALLY", "RES_44"),
+    ("ORB", "RES_45"),
+    ("X_CHAR", "X_RES0"),
+    ("C_ORB_PASSIVE", "X_C_RES0"),
+    ("C_ORB_EVOKE", "X_C_RES1"),
+    ("E_DOOMED", "X_C_RES2"),
+];
+/// ORB tokens per row at most (`MAX_ORB_TOKENS`: a belt has at most 10 slots).
+pub const MAX_ORB_TOKENS: usize = 10;
+/// `contracts.CHARACTERS`: X_CHAR is 1 + the index; 0, the column's absent
+/// value, is a row without "chars" data.
+pub const CHARACTERS: [&str; 6] = [
+    "Ironclad",
+    "Silent",
+    "Defect",
+    "Regent",
+    "Necrobinder",
+    "Fool",
+];
+
+/// `contracts.char_id(name)`: X_CHAR of a run's character.
+#[must_use]
+pub fn char_id(name: &str) -> Option<i16> {
+    CHARACTERS
+        .iter()
+        .position(|c| *c == name)
+        .and_then(|i| i16::try_from(i + 1).ok())
+}
+
+const fn unalias(name: &str) -> &str {
+    let mut i = 0;
+    while i < CHARS_ALIASES.len() {
+        if str_eq(CHARS_ALIASES[i].0, name) {
+            return CHARS_ALIASES[i].1;
+        }
+        i += 1;
+    }
+    name
+}
+
 const fn find(names: &[&str], name: &str) -> usize {
+    let name = unalias(name);
     let mut i = 0;
     while i < names.len() {
         if str_eq(names[i], name) {
@@ -528,5 +577,14 @@ mod tests {
         assert_eq!(sec("RUNCTX"), 22);
         assert_eq!(sec("PRIV_RUN"), 49);
         assert_eq!(sec("OPT_FIXED"), 38);
+        // The "chars" aliases resolve to their reserved slots.
+        assert_eq!((sec("ALLY"), sec("ORB")), (44, 45));
+        assert_eq!(xc("X_CHAR"), xc("X_RES0"));
+        assert_eq!(xf("C_ORB_PASSIVE"), 202);
+        assert_eq!(xf("C_ORB_EVOKE"), 203);
+        assert_eq!(xf("E_DOOMED"), 204);
+        assert_eq!(char_id("Ironclad"), Some(1));
+        assert_eq!(char_id("Necrobinder"), Some(5));
+        assert_eq!(char_id("Watcher"), None);
     }
 }

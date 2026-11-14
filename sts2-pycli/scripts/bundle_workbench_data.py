@@ -55,7 +55,7 @@ _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent
 _MONO_ROOT = _REPO_ROOT.parent
 
-# Keep in lockstep with ``workbench.localization.DEFAULT_GAME_VERSION`` /
+# Keep in lockstep with ``workbench.localization.LEGACY_GAME_VERSION`` /
 # ``SUPPORTED_GAME_VERSIONS`` (and the Rust ``sts2_core::GameVersion``).
 _ENGINE_WIKI_VERSION = "v0.107.1"
 _VERSIONS = ("v0.107.1", "v0.111.0", "v0.113.0")
