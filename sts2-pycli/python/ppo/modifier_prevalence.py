@@ -65,7 +65,13 @@ def option_enchantment(obs: dict[str, Any], action: dict[str, Any]) -> tuple[boo
     if kind == "remove_deck_card":
         return True, _at(obs.get("card_removal_option_enchantments"), action.get("idx"))
     if kind == "grant_deck_card":
-        return True, _at(obs.get("card_grant_option_enchantments"), action.get("idx"))
+        # On an optional grid (Sea Glass) `idx == len(options)` is the
+        # "take no (more)" confirm, not a card (see run_policy
+        # `_declines_optional_grant`).
+        idx = action.get("idx")
+        if idx is not None and int(idx) >= len(obs.get("card_grant_options") or []):
+            return False, None
+        return True, _at(obs.get("card_grant_option_enchantments"), idx)
     if kind in _DECK_MAPPED:
         deck_i = _at(obs.get(_DECK_MAPPED[kind]), action.get("idx"))
         return True, _at(deck_ench, deck_i)

@@ -109,18 +109,25 @@ pub(crate) fn play_encore(state: &mut CombatState, _t: Option<CreatureUid>) -> E
 }
 
 /// `Enrapture.cs` (MP-only, AnyAlly): Vigor 6 (+3) then Stretch 6 (+3) on
-/// the target ally; single-player has only the owner.
+/// the target ally. Unplayable solo (no living ally to target).
 pub(crate) fn play_enrapture(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    // `AnyAlly` (`card_effects::card_is_any_ally`): "Give another player ..."
+    // — both powers land on the card's target teammate, not the owner. Read
+    // the amount before the target is seated (the card leaves with our seat).
     let n = var(state, 6, 9);
-    apply_to_player(state, PowerKind::Vigor, n);
-    apply_to_player(state, PowerKind::Stretch, n);
+    sts2_core::coop::apply_power_to_card_target(state, PowerKind::Vigor, n);
+    sts2_core::coop::apply_power_to_card_target(state, PowerKind::Stretch, n);
     EffectResult::Resolved
 }
 
-/// `Yoga.cs` (MP-only, AllAllies): Stretch 6 (+2) on every living player.
+/// `Yoga.cs` (MP-only, AllAllies): Stretch 6 (+2) on every living player,
+/// the owner included ("ALL players gain Stretch").
 pub(crate) fn play_yoga(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    // Read before the seats move: the played card stays with its owner.
     let n = var(state, 6, 8);
-    apply_to_player(state, PowerKind::Stretch, n);
+    sts2_core::coop::every_player(state, |state| {
+        apply_to_player(state, PowerKind::Stretch, n);
+    });
     EffectResult::Resolved
 }
 

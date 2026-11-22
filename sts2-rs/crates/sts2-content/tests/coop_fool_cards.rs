@@ -141,3 +141,62 @@ fn a_teammates_compost_gives_every_player_energy() {
     assert_eq!(state.player.energy, ours + 1);
     assert_eq!(state.allies[0].energy, mates + 1);
 }
+
+/// A power's amount on teammate `ally`, read with them seated.
+fn ally_power(state: &mut CombatState, ally: usize, kind: PowerKind) -> i32 {
+    let mut amount = 0;
+    sts2_core::coop::with_ally_seated(state, ally, |state| {
+        amount = state.player_power_amount(kind);
+    });
+    amount
+}
+
+/// `Yoga.cs` (AllAllies): "ALL players gain Stretch" — the owner and every
+/// living teammate get 6 (+2).
+#[test]
+fn yoga_gives_every_player_stretch() {
+    for (upgraded, n) in [(false, 6), (true, 8)] {
+        let (mut state, _) = fight();
+        play(&mut state, CardId::Yoga, upgraded);
+        assert_eq!(state.player_power_amount(PowerKind::Stretch), n);
+        assert_eq!(
+            ally_power(&mut state, 0, PowerKind::Stretch),
+            n,
+            "upgraded={upgraded}"
+        );
+    }
+}
+
+/// A dead teammate gets no Stretch (`c.IsAlive`).
+#[test]
+fn yoga_skips_a_dead_teammate() {
+    let (mut state, _) = fight();
+    state.allies[0].current_hp = 0;
+    play(&mut state, CardId::Yoga, false);
+    assert_eq!(state.player_power_amount(PowerKind::Stretch), 6);
+    assert_eq!(ally_power(&mut state, 0, PowerKind::Stretch), 0);
+}
+
+/// `Enrapture.cs` (AnyAlly): "Give another player Vigor and Stretch" — both
+/// land on the target teammate, none on the owner.
+#[test]
+fn enrapture_buffs_the_target_teammate_not_the_owner() {
+    for (upgraded, n) in [(false, 6), (true, 9)] {
+        let (mut state, _) = fight();
+        let uid = mint(&mut state, CardId::Enrapture, upgraded);
+        state.player.hand.push(uid);
+        let hand_index = u8::try_from(state.player.hand.len() - 1).expect("fits");
+        let _ = sts2_core::apply(
+            &mut state,
+            Action::PlayCardAtAlly {
+                hand_index,
+                ally: 0,
+            },
+        );
+        assert!(!state.player.hand.contains(&uid), "Enrapture was played");
+        assert_eq!(state.player_power_amount(PowerKind::Vigor), 0);
+        assert_eq!(state.player_power_amount(PowerKind::Stretch), 0);
+        assert_eq!(ally_power(&mut state, 0, PowerKind::Vigor), n);
+        assert_eq!(ally_power(&mut state, 0, PowerKind::Stretch), n);
+    }
+}
