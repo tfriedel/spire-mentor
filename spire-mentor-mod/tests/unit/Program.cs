@@ -1525,6 +1525,7 @@ Check("screen: run snapshot", BugReportDump.ScreenOf(new Dictionary<string, obje
 L10nTests.Run(Check);
 CoachL10nTests.Run(Check);
 AutopilotAttachTests.Run(Check);
+AgentHeartbeatTests.Run(Check);
 
 if (OperatingSystem.IsWindows())
 {

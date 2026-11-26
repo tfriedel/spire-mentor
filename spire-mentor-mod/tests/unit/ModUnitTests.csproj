@@ -56,5 +56,6 @@
     <Compile Include="../../AdviceMarks.cs" Link="AdviceMarks.cs" />
     <Compile Include="../../FrameLaunchRules.cs" Link="FrameLaunchRules.cs" />
     <Compile Include="../../AutopilotAttach.cs" Link="AutopilotAttach.cs" />
+    <Compile Include="../../AgentHeartbeat.cs" Link="AgentHeartbeat.cs" />
   </ItemGroup>
 </Project>

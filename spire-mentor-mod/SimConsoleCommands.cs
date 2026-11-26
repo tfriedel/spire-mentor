@@ -168,7 +168,7 @@ public class SpireMentorConsoleCmd : AbstractConsoleCmd
         }
         catch (Exception ex)
         {
-            Logger.Log($"[SpireMentor] Attach failed: {ex}");
+            Logger.Log($"Attach failed: {ex}");
             return new CmdResult(success: false, L10n.T("Autopilot could not attach (see the log)."));
         }
         return refusal is AttachRefusal r

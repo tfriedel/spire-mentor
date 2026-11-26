@@ -95,16 +95,15 @@ internal static class SimAgentGate
                 // reply to the first copy.
                 Task<string?> waitTask = BridgeServer.Instance.SendStateAndWaitForActionAsync(
                     stateJson, PerAttemptTimeout, ct);
-                while (true)
-                {
-                    Task done = await Task.WhenAny(waitTask, Task.Delay(5000, ct));
-                    if (done == waitTask)
-                    {
-                        break;
-                    }
-                    SimAutoSlayer.CurrentWatchdog?.Reset($"Awaiting agent decision ({context})");
-                }
+                // AgentHeartbeat.cs: the old inline loop spun on the main
+                // thread once ct was cancelled (public issue #53).
+                await AgentHeartbeat.WaitAsync(waitTask, TimeSpan.FromSeconds(5), ct,
+                    () => SimAutoSlayer.CurrentWatchdog?.Reset($"Awaiting agent decision ({context})"));
+                // WaitForPendingAsync cancels on ct too and never throws, so
+                // this completes (with null) after a stop -- a real yield.
                 string? response = await waitTask;
+                // A stop, not a timeout: unwind instead of logging "No response".
+                ct.ThrowIfCancellationRequested();
 
                 if (response != null)
                 {

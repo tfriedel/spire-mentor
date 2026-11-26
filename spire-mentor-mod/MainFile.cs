@@ -230,12 +230,12 @@ public static class MainFile
         try
         {
             slayer.Stop();
-            Logger.Log("[SpireMentor] Autopilot stopped by user; game handed back to the player.");
+            Logger.Log("Autopilot stopped by user; game handed back to the player.");
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Log($"[SpireMentor] Autopilot stop failed: {ex.Message}");
+            Logger.Log($"Autopilot stop failed: {ex.Message}");
             return false;
         }
     }
@@ -622,7 +622,7 @@ public static class PunchOffIdleLoopPatch
         {
             return true; // run original
         }
-        Logger.Log("[SpireMentor] PunchOff: skipping the idle punch loop (waits do not yield).");
+        Logger.Log("PunchOff: skipping the idle punch loop (waits do not yield).");
         __result = System.Threading.Tasks.Task.CompletedTask;
         return false;
     }
@@ -643,7 +643,7 @@ public static class PunchOffIdleLoopPatch
         }
         catch (Exception ex)
         {
-            Logger.Log($"[SpireMentor] PunchOff gate unreadable, skipping the loop: {ex.Message}");
+            Logger.Log($"PunchOff gate unreadable, skipping the loop: {ex.Message}");
             return true;
         }
     }
