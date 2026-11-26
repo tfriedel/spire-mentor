@@ -65,6 +65,24 @@ def test_practice_slots_round_the_share() -> None:
     assert [P.is_practice_slot(s, 8, 0) for s in range(8)] == [True] * 3 + [False] * 5
 
 
+def test_a_practice_mix_replaces_the_schedule() -> None:
+    """A lane's `practice_mix` sets the slot share and the boss share outright (the
+    schedule's values otherwise); bad keys or values are refused."""
+    t = 6e9  # past the schedule's span: share 0.25, boss 0.75
+    q = P.PracticeQueues(worker=0, mix={"share": 0.1, "boss": 0.9})
+    assert [q.wants_practice(s, 32, t) for s in range(32)].count(True) == 3
+    assert P.PracticeQueues(worker=0).share is None
+    assert [P.PracticeQueues(worker=0).wants_practice(s, 32, t) for s in range(32)].count(True) == 8
+    probs = P.cell_probs(t, 0.9)
+    assert math.isclose(sum(probs[c] for c in P.BOSS_MIX), 0.9)
+    assert math.isclose(probs["BOSS_ACT3_DOUBLE"], 0.9 * 0.65)
+    off = P.PracticeQueues(worker=0, enabled=False, mix={"share": 0.5})
+    assert not off.wants_practice(0, 32, t)
+    for bad in ({"share": 1.5}, {"boss": -0.1}, {"slots": 0.1}):
+        with pytest.raises(ValueError):
+            P.check_practice_mix(bad)
+
+
 def test_draws_match_the_cell_probabilities() -> None:
     q = P.PracticeQueues(worker=3, seed=11)
     n = 40_000

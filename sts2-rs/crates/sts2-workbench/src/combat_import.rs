@@ -105,7 +105,7 @@ const ORB_TITLE_TO_ID: [(&str, &str); 6] = [
 
 /// `sts2_hint.adapter._POWER_VAR_TO_ENGINE_FIELD`: (engine power id, C#
 /// `DynamicVar`) → the engine field holding the same quantity.
-const POWER_VAR_TO_ENGINE_FIELD: [((&str, &str), &str); 7] = [
+const POWER_VAR_TO_ENGINE_FIELD: [((&str, &str), &str); 8] = [
     (("CRIMSON_MANTLE", "SelfDamage"), "counter"),
     (("INFERNO", "SelfDamage"), "counter"),
     (("SKITTISH", "HasGainedBlockThisTurn"), "counter"),
@@ -113,6 +113,7 @@ const POWER_VAR_TO_ENGINE_FIELD: [((&str, &str), &str); 7] = [
     (("TORIC_TOUGHNESS", "Block"), "counter"),
     (("POSSESS_STRENGTH", "Stolen"), "counter"),
     (("POSSESS_SPEED", "Stolen"), "counter"),
+    (("THE_BOMB", "Damage"), "counter"),
 ];
 
 // ── registries and title maps (cached once per process) ─────────────────
@@ -1826,6 +1827,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p["counter"], 6);
+        // Each The Bomb's damage (`TheBombPower.SetDamage`), which the engine
+        // keeps on `counter`: rebuilt at 0, a second Bomb dealt nothing.
+        let p = translate_power(
+            &json!({"id": "THE_BOMB_POWER", "name": "The Bomb", "amount": 3,
+            "display_amount": 3, "vars": {"Damage": 40}}),
+            "$",
+        )
+        .unwrap();
+        assert_eq!(p["counter"], 40);
         assert!(translate_power(&json!({"id": "X", "name": "Not A Power"}), "$").is_err());
     }
 

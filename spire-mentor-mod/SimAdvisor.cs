@@ -98,8 +98,14 @@ internal sealed class SimAdvisor
     private const double RefusedActionWatchdogSeconds = 5.0;
 
     /// <summary>How many refused recommendations in a row before autoplay ends
-    /// the turn instead (see <see cref="OnActionRefused" />).</summary>
+    /// the turn instead, once no ranked option is left to fall back to (see
+    /// <see cref="OnActionRefused" />).</summary>
     private const int MaxRefusedBeforeEndTurn = 3;
+
+    /// <summary>How many of an advice's other options autoplay tries on one
+    /// board after the game refuses its pick (see <see cref="OnActionRefused" />).
+    /// Each silently refused one costs the watchdog's 5 s.</summary>
+    private const int MaxFallbacksPerBoard = 6;
 
     /// <summary>
     /// Cap on how long the settle barrier (<see cref="AwaitSettledThen" />)
@@ -302,6 +308,18 @@ internal sealed class SimAdvisor
     /// <summary>Consecutive recommendations the live game refused; reset by any
     /// accepted action. See <see cref="OnActionRefused" />.</summary>
     private int _refusedInARow;
+
+    /// <summary>The moves the game refused on the current board, and the
+    /// next-best option to fall back to (<see cref="RefusalFallback"/>).</summary>
+    private readonly RefusalFallback _refusals = new();
+
+    /// <summary>The ranked options of the combat advice <see cref="_lastBest"/>
+    /// came from: what a refused pick falls back to.</summary>
+    private List<MarkOption> _bestOptions = new();
+
+    /// <summary>The combat move autoplay last enqueued, for the refused-action
+    /// watchdog to name.</summary>
+    private SimBestAction? _lastExecuted;
 
     /// <summary>Decision screens the poll has seen come up; the refused-action
     /// watchdog compares it to tell a move that opened a pick from one the
@@ -1769,6 +1787,7 @@ internal sealed class SimAdvisor
                     Logger.Log($"[SimAdvisor] Advice {requestId} raced a board change: shown, not played; the fresh one is coming.");
                 }
                 _lastBest = racedBoard ? null : advice.Best;
+                _bestOptions = isCombat ? advice.Options.Select(o => o.ToMark()).ToList() : new();
                 _lastBestNote = advice.Note;
 
                 SimHud.Instance.SetAdvisorStatus(SimAdvisorStatus.Connected);
@@ -1924,7 +1943,15 @@ internal sealed class SimAdvisor
             }
 
             _lastBest = null; // consume: never double-fire the same advice
-            string label = string.IsNullOrEmpty(best.Label) ? best.Action : best.Label;
+            string label = MoveLabel(best);
+            // Asked again after a refusal, the advisor answers the same move
+            // for the same board: fall back instead of replaying it.
+            if (_refusals.IsRefused(CombatHistoryMark(), RefusalKey(best)))
+            {
+                Logger.Log($"[SimAdvisor] Takeover: '{label}' was already refused on this board.");
+                OnActionRefused(player, best, "already refused on this board");
+                return;
+            }
 
             switch (best.Action)
             {
@@ -1952,7 +1979,7 @@ internal sealed class SimAdvisor
                             $"[SimAdvisor] Takeover: the game refuses {card.Id.Entry} " +
                             $"(reason={reason}, preventer={preventer?.Id.Entry ?? "none"}, " +
                             $"energy={player.PlayerCombatState?.Energy ?? -1}).");
-                        OnActionRefused(player);
+                        OnActionRefused(player, best, $"the game refuses it: {reason}");
                         return;
                     }
                     var target = SimCombatHandler.ResolveTarget(card, best.TargetIndex, best.AllyIndex);
@@ -1960,7 +1987,7 @@ internal sealed class SimAdvisor
                         target == null)
                     {
                         Logger.Log("[SimAdvisor] Takeover: recommended target no longer hittable.");
-                        OnActionRefused(player);
+                        OnActionRefused(player, best, "its target is not on the board");
                         return;
                     }
                     // NOT reset here. Enqueuing is not acceptance: a silently
@@ -1972,6 +1999,7 @@ internal sealed class SimAdvisor
                     // The reset lives where the board actually moved: the
                     // history check in WatchForRefusedAction.
                     _aiActionsPending++;
+                    _lastExecuted = best;
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
                         new PlayCardAction(card, target));
                     break;
@@ -1997,9 +2025,10 @@ internal sealed class SimAdvisor
                         target == null)
                     {
                         Logger.Log("[SimAdvisor] Takeover: no valid target for the recommended potion.");
-                        OnActionRefused(player);
+                        OnActionRefused(player, best, "it has no valid target");
                         return;
                     }
+                    _lastExecuted = best;
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
                         new UsePotionAction(potion, target, cm.IsInProgress));
                     break;
@@ -2027,18 +2056,51 @@ internal sealed class SimAdvisor
     }
 
     /// <summary>
-    /// The search recommended something the live game will not accept. Asking
-    /// again is right once -- the board may simply have moved under a slow
-    /// reply -- but the search is deterministic given the same state, so a
-    /// genuine disagreement about legality returns the SAME illegal move
-    /// forever (14 identical refused `Defend`s in a row, floor 47,
-    /// 2026-08-06). Ending the turn is the one action that is always
-    /// available, so it is the escape hatch: worse play than the AI intended,
-    /// but the run continues and the log names the disagreement.
+    /// The advisor recommended something the live game will not accept. It is
+    /// deterministic given the same state, so a genuine disagreement about
+    /// legality returns the SAME illegal move forever (14 identical refused
+    /// `Defend`s in a row, floor 47, 2026-08-06). The advice already ranks the
+    /// other moves, so autoplay plays the best one the game has not refused on
+    /// this board, with a WARNING in the log: the disagreement is a bug worth
+    /// reporting. Ending the turn used to come first, and a targeting bug made
+    /// that a lost turn on every turn of a fight (autobattle, 2026-11-23).
+    /// It stays the escape hatch once no ranked option is left: worse play
+    /// than the AI intended, but the run continues.
     /// </summary>
-    private void OnActionRefused(Player player)
+    private void OnActionRefused(Player player, SimBestAction refused, string why)
     {
         _refusedInARow++;
+        int mark = CombatHistoryMark();
+        _refusals.Refuse(mark, RefusalKey(refused));
+        MarkOption? next = _refusals.RefusedOn(mark) <= MaxFallbacksPerBoard
+            ? _refusals.Next(mark, _bestOptions)
+            : null;
+        if (next != null)
+        {
+            string from = MoveLabel(refused);
+            string to = string.IsNullOrEmpty(next.Label) ? next.Action : next.Label;
+            Logger.Log(
+                $"[SimAdvisor] WARNING: the AI's move '{from}' was refused ({why}); falling back to " +
+                $"its next-best option '{to}'. The advisor and the live game disagree here -- worth a bug report.");
+            SimActionLog.Note(L10n.F("AI move '{0}' refused — playing '{1}' instead", from, to));
+            _lastBest = new SimBestAction
+            {
+                Action = next.Action,
+                CardIndex = next.CardIndex ?? -1,
+                TargetIndex = next.TargetIndex ?? -1,
+                AllyIndex = next.AllyIndex ?? -1,
+                Slot = next.Slot ?? -1,
+                Label = to,
+            };
+            _lastBestLabel = to;
+            // Each refusal adds a move to the refused set, so this recursion
+            // ends within MaxFallbacksPerBoard steps.
+            ExecuteBestOnce();
+            return;
+        }
+        Logger.Log(
+            $"[SimAdvisor] WARNING: the AI's move '{MoveLabel(refused)}' was refused ({why}) and no " +
+            "untried option is left on this board.");
         if (_refusedInARow < MaxRefusedBeforeEndTurn)
         {
             ScheduleAdvice();
@@ -2186,7 +2248,7 @@ internal sealed class SimAdvisor
                         ScheduleAdvice();
                         return;
                     }
-                    OnActionRefused(me);
+                    OnActionRefused(me, _lastExecuted ?? new SimBestAction { Label = label }, "it changed nothing on the board");
                 }
                 catch (Exception ex)
                 {
@@ -2827,6 +2889,12 @@ internal sealed class SimAdvisor
     /// throws: this only feeds the loop guard, and a guard that can crash the
     /// takeover path is worse than one that occasionally reads -1.
     /// </summary>
+    private static string MoveLabel(SimBestAction move) =>
+        string.IsNullOrEmpty(move.Label) ? move.Action : move.Label;
+
+    private static string RefusalKey(SimBestAction move) =>
+        RefusalFallback.Key(move.Action, move.CardIndex, move.TargetIndex, move.AllyIndex, move.Slot);
+
     private static int CombatHistoryMark()
     {
         try

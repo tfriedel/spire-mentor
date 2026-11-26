@@ -15,9 +15,16 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import sts2_client
 from sts2_client import Game
 
 SEED = "PROFILE1"
+
+#: v0.113 shuffles a list off ONE draw from the caller's RNG: `UnstableShuffle`
+#: seeds a child `Rng` with `rng.NextUnsignedLong()` (ListExtensions.cs:45-52).
+#: Earlier builds draw `NextInt` once per item, so there the relics a profile
+#: locks move the `up_front` counter, and on v0.113 they do not (GH #1781).
+ONE_DRAW_SHUFFLE = sts2_client.GAME_VERSION == "v0.113.0"
 
 
 def _rooms(game: Any) -> list[dict[str, Any]]:
@@ -51,8 +58,12 @@ def test_epochs_lists_what_each_epoch_unlocks(game):
 def test_a_locked_relic_epoch_changes_the_start_of_run_draws(game, second_game):
     game.start(seed=SEED, act1="overgrowth", profile={})
     second_game.start(seed=SEED, act1="overgrowth", profile={"locked_epochs": ["RELIC1_EPOCH"]})
-    # The relic bags are shuffled off `up_front`, one draw a relic.
-    assert _up_front(game) != _up_front(second_game)
+    # The relic bags are shuffled off `up_front`: one draw a relic, or one a
+    # bag on v0.113, whatever the bag holds.
+    if ONE_DRAW_SHUFFLE:
+        assert _up_front(game) == _up_front(second_game)
+    else:
+        assert _up_front(game) != _up_front(second_game)
 
 
 def test_an_empty_profile_is_the_default_run(game, second_game):
@@ -145,7 +156,9 @@ def test_the_probe_keeps_only_profiles_on_the_counter(game):
             "up_front": every[1]["up_front"],
         }
     )["results"]
-    assert [r["index"] for r in kept] == [1]
+    # On v0.113 the counter cannot tell a locked relic epoch apart; the bag
+    # order can (`test_the_probe_lists_the_relic_bag_in_its_order`).
+    assert [r["index"] for r in kept] == ([0, 1] if ONE_DRAW_SHUFFLE else [1])
 
 
 def test_the_probe_lists_the_relic_bag_in_its_order(game):

@@ -32,6 +32,7 @@ use sts2_core::parity::combat_state_to_bridge_state;
 use sts2_core::CombatState;
 use sts2_workbench::enemy_labels::{enemy_labels, labels_from_names};
 
+use crate::board_targets::BoardTargets;
 use crate::i18n::{tr, trf};
 use crate::mirror_state::{parse_bridge_action, step_result_name};
 use crate::py;
@@ -42,7 +43,9 @@ pub const MAX_PLAN_STEPS: usize = 12;
 /// Wall-clock cap on the re-searches that extend a plan past its PV. A plan
 /// is a drawing: once spent, the plan simply ends where it got to. A search
 /// starts only when the last one's duration still fits, so the cap holds to
-/// within the variance of one search.
+/// within the variance of one search. A non-finite budget has no cap:
+/// replays use it, because a plan cut by the clock depends on the machine's
+/// load (GH #1784: a golden replay lost a plan step under gate load).
 pub const PLAN_BUDGET_S: f64 = 0.5;
 
 /// The keys a plan step and `advice.best` share.
@@ -185,6 +188,8 @@ pub struct PlanWalk {
     hand_map: Vec<Option<i64>>,
     /// Engine (dense) potion slot -> the mod's belt slot.
     potion_map: Vec<i64>,
+    /// Engine enemy slot -> the mod's `enemies[]` index.
+    targets: BoardTargets,
     pub steps: Vec<Value>,
     pub done: bool,
 }
@@ -207,9 +212,24 @@ impl PlanWalk {
             state: state.clone(),
             hand_map,
             potion_map,
+            targets: BoardTargets::default(),
             steps: Vec::new(),
             done: false,
         }
+    }
+
+    /// The walk over engine fight `fight`, whose enemy slots can differ
+    /// from the board's (`board_targets`).
+    #[must_use]
+    pub fn on_fight(self, fight: &CombatState) -> Self {
+        self.with_targets(BoardTargets::of(fight))
+    }
+
+    /// The walk with the engine -> board enemy slots `targets`.
+    #[must_use]
+    pub fn with_targets(mut self, targets: BoardTargets) -> Self {
+        self.targets = targets;
+        self
     }
 
     /// `action` (engine combat form) as a plan step, or `None`.
@@ -234,11 +254,14 @@ impl PlanWalk {
             }
             _ => return None,
         }
-        for key in ["target_index", "ally_index"] {
-            let v = py::get(action, key);
-            if !v.is_null() {
-                step.insert(key.into(), py::int_of(v).into());
-            }
+        let target = py::get(action, "target_index");
+        if !target.is_null() {
+            let board = self.targets.to_board(py::int_of(target))?;
+            step.insert("target_index".into(), board.into());
+        }
+        let ally = py::get(action, "ally_index");
+        if !ally.is_null() {
+            step.insert("ally_index".into(), py::int_of(ally).into());
         }
         Some(Value::Object(step))
     }
@@ -326,10 +349,12 @@ pub fn search_plan(
     }
     let lone = first_step(best, state);
     let mut sim = cs.clone();
-    let mut walk = PlanWalk::new(wire, state);
+    let mut walk = PlanWalk::new(wire, state).on_fight(cs);
     let mut line: std::collections::VecDeque<Value> =
         pv.iter().filter(|a| a.is_object()).cloned().collect();
-    let budget = Duration::from_secs_f64(budget_s.max(0.0));
+    let budget = budget_s
+        .is_finite()
+        .then(|| Duration::from_secs_f64(budget_s.max(0.0)));
     let t0 = Instant::now();
     let mut last_search = Duration::ZERO;
     let mut ply = 0usize;
@@ -338,7 +363,7 @@ pub fn search_plan(
             let Some(research) = research.as_deref_mut().filter(|_| ply > 0) else {
                 break;
             };
-            if t0.elapsed() + last_search > budget {
+            if budget.is_some_and(|b| t0.elapsed() + last_search > b) {
                 break;
             }
             let t_search = Instant::now();

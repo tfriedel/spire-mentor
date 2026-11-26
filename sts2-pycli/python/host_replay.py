@@ -355,14 +355,14 @@ def _with_missing_acquires(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _pile_picks(
-    pile: list[str], spots: list[int], n: int, coming: list[str]
+    pile: list[str], spots: list[int], n: int, coming: list[str], *, stays: bool = False
 ) -> tuple[int, ...] | None:
     """Which `n` of the pile places `spots` were picked, given the draws that follow.
 
     `pile` is the draw pile from its top and `coming` the cards drawn next. A
-    picked card leaves the pile or stays as another card (a transform). The
-    places whose pick lets the pile give the most of `coming` in order; None
-    when two choices do as well.
+    picked card leaves the pile, or `stays` in its place as another card (a
+    transform). The places whose pick lets the pile give the most of `coming`
+    in order; None when two choices do as well.
     """
 
     def reach(marks: frozenset[int]) -> int:
@@ -374,7 +374,7 @@ def _pile_picks(
                 if j >= len(coming):
                     return len(coming)
                 if i in marks:
-                    nxt |= {j, j + 1}
+                    nxt.add(j + 1 if stays else j)
                 elif card == coming[j]:
                     nxt.add(j + 1)
                 else:
@@ -1174,11 +1174,12 @@ class Replayer:
         """
         if any(x[0] == c and x[2] for x in self.track.hand):
             return None  # a card the log drew: it is in hand
-        if c in self.track.discard:
-            return None  # picked out of the discard pile: its place there tells
         start = self.next_choice if self.next_choice is not None else self.ci
         was: dict[Any, Any] = {}  # an instance a pick transformed, by what it became
         order: list[Any] = []
+        # Copies in hand or discarded now are drawn later too (Photon Cut
+        # puts one back): they are not among the pile's.
+        out = {x[0] for x in self.track.hand if x[2]} | set(self.track.discard)
         for r in self.rows[start : self.combat_end]:
             if r["t"] == "shuffle":
                 break
@@ -1186,7 +1187,7 @@ class Replayer:
                 was[r.get("to_c")] = was.get(r.get("from_c"), r.get("from_c"))
             elif r["t"] == "draw":
                 x = was.get(r.get("c"), r.get("c"))
-                if self.track.ids.get(x) == card and x not in order:
+                if self.track.ids.get(x) == card and x not in order and x not in out:
                     order.append(x)
         return order.index(c) if c in order else None
 
@@ -1203,10 +1204,18 @@ class Replayer:
             return {}
         at = self.rows.index(row)
         coming: list[str] = []
+        drawn: set[Any] = set()
+        picked = {c.get("c") for c in row.get("cards", [])}
+        stays = False
         for r in self.rows[at + 1 : self.combat_end]:
             if r["t"] == "shuffle":
                 break
-            if r["t"] == "draw":
+            if r["t"] == "transform" and r.get("from_c") in picked:
+                stays = True
+            # A card drawn a second time was put back (Photon Cut): the pile
+            # held it once.
+            if r["t"] == "draw" and r.get("c") not in drawn:
+                drawn.add(r.get("c"))
                 coming.append(_norm(r["id"]))
         out: dict[int, int] = {}
         wanted = [_card(c) for c in row.get("cards", [])]
@@ -1217,9 +1226,12 @@ class Replayer:
             }
             if len(spots) <= len(mine):
                 continue
-            taken = _pile_picks(pile, sorted(spots), len(mine), coming)
+            taken = _pile_picks(pile, sorted(spots), len(mine), coming, stays=stays)
             if taken is not None:
-                self.log(f"     pick {kind[0]}: pile places {taken} of {sorted(spots)}")
+                self.log(
+                    f"     pick {kind[0]}: pile places {taken} of {sorted(spots)}; "
+                    f"pile {pile[:30]}; log draws {coming[:14]}"
+                )
                 out.update({n: spots[k] for n, k in zip(mine, taken, strict=True)})
         return out
 
@@ -1236,11 +1248,15 @@ class Replayer:
             hit = next((x for x in cards if _card(x) == want and x["index"] not in sel), None)
             copies = [x for x in cards if _norm(x["id"]) == want[0]]
             rank = self.track.hand_rank(c.get("c"), len(copies))
-            ahead = self.drawn_rank(c.get("c"), want[0])
+            # Only for copies the host says lie in the draw pile: one picked
+            # out of the discard pile is told by its place there.
+            piled = any("draw_index" in x for x in copies)
+            ahead = self.drawn_rank(c.get("c"), want[0]) if piled else None
             if ahead is not None and ahead < len(copies):
                 rank = ahead
             self.log(
-                f"     pick {c.get('c')} rank {rank} of {len(copies)} host copies; host list "
+                f"     pick {c.get('c')} rank {rank} (by draws {ahead}) of {len(copies)} host "
+                f"copies at pile places {[x.get('draw_index') for x in copies]}; host list "
                 f"{[_norm(x['id']) for x in cards]}; log draw pile "
                 f"{[(x, self.track.ids.get(x)) for x in self.track.draw_pile]}"
             )

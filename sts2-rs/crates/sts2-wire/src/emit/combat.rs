@@ -1125,6 +1125,15 @@ pub fn combat_state_to_value(state: &CombatState) -> Result<Value, EmitError> {
     if state.cards_drawn > 0 {
         set(&mut player, "cards_drawn_this_combat", state.cards_drawn);
     }
+    // Supermassive's multiplier
+    // (`state_dict::SeatHistory::cards_generated_this_combat`).
+    if state.player.generated_cards_this_combat > 0 {
+        set(
+            &mut player,
+            "cards_generated_this_combat",
+            state.player.generated_cards_this_combat,
+        );
+    }
 
     // Necrobinder's Osty pet. It lives in `state.creatures` (referenced by
     // `player.pet_uid`), deliberately *not* in `enemy_uids`, so the encounter

@@ -345,6 +345,29 @@ def test_possess_speed_carries_what_it_stole():
     assert pw["counter"] == 6
 
 
+def test_painful_stabs_carries_the_multi_claw_growth():
+    """Test Subject's extra MULTI_CLAW hits live in private monster data,
+    sent as Painful Stabs' ``ExtraMultiClawCount`` var; the engine keeps them
+    on that power's ``counter`` (Spire Bench seeds 180001932, 180000915)."""
+    state = base_state(
+        player=player_summary(hp=70, max_hp=75, block=0, relics=[], potions=[]),
+        hand=[card(index=0, cid="IRONCLAD/STRIKE", name="Strike")],
+        enemies=[enemy(index=0, name="Nibbit", hp=48, max_hp=48, intents=[])],
+    )
+    state["enemies"][0]["powers"] = [
+        {
+            "name": "Painful Stabs",
+            "id": "PAINFUL_STABS_POWER",
+            "description": "",
+            "amount": 1,
+            "display_amount": 1,
+            "vars": {"ExtraMultiClawCount": 2},
+        }
+    ]
+    (pw,) = adapter.translate(state)["encounter"][0]["powers"]
+    assert pw["counter"] == 2
+
+
 def test_toric_toughness_carries_its_stored_block():
     """``amount`` is the turns-left counter; the block lives in a var.
 
@@ -1530,3 +1553,10 @@ def test_the_combats_draw_count_is_copied():
     out: dict = {}
     adapter._copy_seat_history({"cards_drawn_this_combat": 21}, out)
     assert out["cards_drawn_this_combat"] == 21
+
+
+def test_the_combats_generated_card_count_is_copied():
+    """Supermassive's multiplier: the host's `cards_generated_this_combat`."""
+    out: dict = {}
+    adapter._copy_seat_history({"cards_generated_this_combat": 2}, out)
+    assert out["cards_generated_this_combat"] == 2

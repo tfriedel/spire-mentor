@@ -78,6 +78,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from .contracts import COMBAT_DTYPES
 from .schedules import (
     DEFAULT,
     Clocks,
@@ -773,6 +774,10 @@ class LossCfg:
     is_clamp: float = 2.0  # max of the IS weight π_prox / π_behav
     dual_clip: float = 3.0  # dual-clip c for negative advantages
     vf_coef: float = 0.5  # value loss = vf_coef · (V - target)²
+    # The value-loss coefficient of run (out-of-combat) rows; None: `vf_coef`. Run rows
+    # are about 12% of a lane's rows, so their critic gets that share of the value
+    # gradient; this weights them on their own. Stats keep `vf_coef` on every row.
+    vf_coef_run: float | None = None
 
 
 #: `LossRows` columns that may be None.
@@ -857,6 +862,19 @@ class LossOut:
     denom: float
 
 
+_COMBAT_IDS: dict[str, torch.Tensor] = {}
+
+
+def _combat_ids(device: torch.device) -> torch.Tensor:
+    """`contracts.COMBAT_DTYPES` as an int64 tensor on `device` (cached)."""
+    key = str(device)
+    t = _COMBAT_IDS.get(key)
+    if t is None:
+        t = torch.tensor(sorted(COMBAT_DTYPES), dtype=torch.int64, device=device)
+        _COMBAT_IDS[key] = t
+    return t
+
+
 def ppo_losses(
     logits: torch.Tensor | None,
     value: torch.Tensor,
@@ -874,7 +892,9 @@ def ppo_losses(
     ``rows.v`` count). The summed gradients of all chunks and ranks are then
     the gradient of the minibatch mean.
 
-    - value: ``vf_coef · (V - target)²`` on ``v`` rows, no value clipping;
+    - value: ``vf_coef · (V - target)²`` on ``v`` rows, no value clipping
+      (``vf_coef_run`` instead on run rows when it is set; the value stats keep
+      ``vf_coef`` on every row, so they compare across settings);
     - PPO (``pi`` rows): ratio = π_θ/π_prox clipped at ``clip``, times the IS
       weight π_prox/π_behav clamped at ``is_clamp``, dual-clipped at
       ``dual_clip · A`` for A < 0;
@@ -900,8 +920,14 @@ def ppo_losses(
     vt = torch.where(v_m, value.float(), zero)
     tgt = torch.where(v_m, rows.target.float(), zero)
     vmf = v_m.float()
-    vl_rows = cfg.vf_coef * (vt - tgt) ** 2 * vmf
-    vloss = vl_rows.sum() / denom
+    sq = (vt - tgt) ** 2 * vmf
+    vl_rows = cfg.vf_coef * sq
+    if cfg.vf_coef_run is None:
+        vloss = vl_rows.sum() / denom
+    else:
+        combat = torch.isin(rows.dtype.long(), _combat_ids(rows.dtype.device))
+        coef = torch.where(combat, cfg.vf_coef, float(cfg.vf_coef_run))
+        vloss = (coef * sq).sum() / denom
     st: dict[str, torch.Tensor] = {
         "n_v": vmf.sum().detach(),
         "vloss": vl_rows.sum().detach(),

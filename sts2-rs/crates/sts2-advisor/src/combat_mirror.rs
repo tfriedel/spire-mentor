@@ -206,6 +206,16 @@ fn to_value(state: &CombatState) -> Result<Value, MirrorError> {
     sts2_wire::emit::combat_state_to_value(state).map_err(|e| MirrorError::Value(e.to_string()))
 }
 
+/// Every option of a parked choice names the pile slot it sits in
+/// (`pending_choice` emits `pile` / `index` for a card in a pile).
+fn options_are_located(parked: &Value) -> bool {
+    let cards = list(parked, "cards");
+    !cards.is_empty()
+        && cards
+            .iter()
+            .all(|c| !get(c, "pile").is_null() && !get(c, "index").is_null())
+}
+
 /// Does the producer carry the run's own dice (`rng.run_seed`)? Then the
 /// world owns the RNG cursors.
 fn world_owns_rng(wire: &Value) -> bool {
@@ -624,7 +634,20 @@ impl CombatMirror {
                 unreported.insert("$.phase".into());
                 unreported.insert("$.side".into());
             }
-            let world = to_value(&build_state(wire)?.state)?;
+            // The world read with the counters the board withholds (Void
+            // Form's free plays): a false `$.deck.hand` cost diff here
+            // reseeded, which deleted the suspended card's tail, its
+            // AfterCardPlayed with it, and left Void Form's count one short
+            // for the rest of the turn (Spire Bench seeds 180000322,
+            // 180000516, 180000590, 180001456, 180000358, 180000884,
+            // 180001345: True Grit / Discovery played past the free plays).
+            let mut world_state = build_state(wire)?.state;
+            mirror_state::carry_player_power_counters(
+                &mut world_state,
+                carried,
+                &mirror::undisclosed_power_counters(wire),
+            );
+            let world = to_value(&world_state)?;
             let parked_desyncs = mirror::diff_observables(
                 &predicted,
                 &world,
@@ -697,9 +720,27 @@ impl CombatMirror {
         // which the diff ignores, and when it refuses (mismatched pile or
         // roster lengths) the field list is what explains why.
         let predicted = to_value(carried)?;
-        // The corpses the game's board dropped stay in their slots (GH #1656).
-        let spliced = mirror::with_carried_corpses(wire, &predicted);
+        // The corpses the game's board dropped stay in their slots (GH #1656),
+        // and so do the ones it reports that the carried fight missed (GH
+        // #1716): without them a missed kill renumbered the survivors with
+        // nothing aligned, the rename went unnoted, and the reseed's rename
+        // was applied to the carried uids (Spire Bench seeds 180000392,
+        // 180000817, 180001103, 180001314).
+        let spliced =
+            mirror::with_reported_corpses(wire, mirror::with_carried_corpses(wire, &predicted));
         let mut fresh = build_state(&spliced)?;
+        // The one hidden state the diff needs: a counter that sets an
+        // observable (Void Form's free plays set every hand card's cost).
+        // Diffed bare, each reconcile past the free plays reported
+        // `$.deck.hand` and reseeded, and the reseed drops every enemy-side
+        // carry: TestSubject's MULTI_CLAW escalation (its PAINFUL_STABS
+        // counter) restarted at 0 (seeds 180000590, 180001456, 180000358,
+        // 180000322).
+        mirror_state::carry_player_power_counters(
+            &mut fresh.state,
+            carried,
+            &mirror::undisclosed_power_counters(&spliced),
+        );
         // An advance that consumed the shuffle stream means the world rolled
         // its own order for whatever was reshuffled: the PILE paths are
         // unverifiable, not wrong. Nothing else is, and skipping the whole
@@ -881,6 +922,11 @@ impl CombatMirror {
                 &mirror::enemy_alignment(&spliced, &carried),
             );
             mirror_state::carry_corpse_intents(&mut fresh.state, &stale.state, &slots);
+            // The appliers of the player's applier-gated debuffs are player-
+            // side state naming an enemy: the all-`None` salvage above cannot
+            // map them, and without one Dampen/Shrink/Hex/Constrict outlive
+            // their caster for the rest of the fight.
+            mirror_state::carry_power_appliers(&mut fresh.state, &stale.state, &slots);
             pairs = Some(mirror_state::enemy_uid_pairs(
                 &fresh.state,
                 &stale.state,
@@ -1034,11 +1080,18 @@ impl CombatMirror {
         self.open_injection = None;
         let mut options = options;
 
+        // A generative KIND whose parked options (of that same kind) sit in a
+        // pile is not a generated offer: Heirloom Hammer clones one of the colorless HAND
+        // cards through `AddGeneratedToHand` (heirloom_hammer.rs). Its options
+        // are located like any hand screen's, or they tokenize as pile
+        // "generated" with no hand slot (seed 180000982).
         let generative = mirror_state::choice_kind_is_generative(kind).ok_or_else(|| {
             MirrorError::Value(format!(
                 "choice_kind_is_generative: unknown choice kind {kind:?}"
             ))
-        })?;
+        })? && !parked
+            .as_ref()
+            .is_some_and(|p| get(p, "kind").as_str() == Some(kind) && options_are_located(p));
         let engine_derived = parked.clone().unwrap_or(Value::Null);
         let mut graded = Vec::new();
         if let (Some(p), false) = (&parked, generative) {
@@ -1174,6 +1227,39 @@ impl CombatMirror {
             )?;
         }
         Ok(graded)
+    }
+
+    /// A screen the world opened from a play the mirror never saw start:
+    /// the world's board holds a card in `play_pile` while the carried fight
+    /// has nothing in play, no play suspended, no choice parked and no walk
+    /// suspended. Seeds
+    /// from the world's board then, and says so.
+    ///
+    /// Imbued autoplays its card on turn 1 after the opening draw
+    /// (`Imbued.AfterAutoPrePlayPhaseEntered`). A mirror seeded on Toolbox's
+    /// combat-start screen (`Toolbox.BeforeHandDraw`) never drew, and
+    /// [`Self::reconcile`]'s in-flight skip kept that pre-draw board under
+    /// the autoplayed Splash's screen: the hand in the draw pile, Splash
+    /// missing from play (seed 180001961).
+    ///
+    /// # Errors
+    ///
+    /// The world's board does not build.
+    pub fn adopt_unseen_play(&mut self, wire: &Value) -> Result<bool, MirrorError> {
+        let Some(m) = self.state.as_ref() else {
+            return Ok(false);
+        };
+        if self.parked.is_some()
+            || !m.state.player.play.is_empty()
+            || m.state.pending_play.is_some()
+            || m.state.pending_choice.is_some()
+            || mirror_state::has_suspended_walk(&m.state)
+            || !truthy(py::mget(obj(wire, "deck"), "play_pile"))
+        {
+            return Ok(false);
+        }
+        self.seed(wire)?;
+        Ok(true)
     }
 
     /// Fill in each option's `pile` / `index` from the engine's own choice,
@@ -1747,6 +1833,76 @@ mod tests {
         assert!(m.take_enemy_remap().is_none(), "nothing was renamed");
     }
 
+    /// Spire Bench seeds 180000392 / 180000817: the world killed the first
+    /// of three same-kind enemies while the mirror had it alive; the board
+    /// dropped it and reported it in `removed_roster`. Its uid stays the
+    /// corpse's and the survivors keep theirs, so the intent log keyed by uid
+    /// is not shifted onto the wrong creatures.
+    #[test]
+    fn a_kill_the_mirror_missed_renames_no_survivor() {
+        let deck: Vec<String> = ["StrikeIronclad", "DefendIronclad"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        let cs = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &deck,
+            80,
+            80,
+            &[],
+            &[],
+            "TWO_TAILED_RATS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("builds");
+        let wire = to_value(&cs).expect("wire");
+        assert_eq!(wire["encounter"].as_array().expect("encounter").len(), 3);
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        m.seed(&wire).expect("seeds");
+        let before: Vec<u32> = m
+            .mirrored()
+            .expect("fight")
+            .state
+            .enemy_uids
+            .iter()
+            .map(|u| u.0.get())
+            .collect();
+        assert!(m.take_enemy_remap().is_none());
+
+        // The world killed rat 0 (the mirror has it alive) and dropped it.
+        let mut corpse = wire["encounter"][0].clone();
+        corpse["hp"] = json!(0);
+        corpse["is_dead"] = json!(true);
+        corpse["removed_after_death"] = json!(true);
+        let mut world = wire.clone();
+        let enc = world["encounter"].as_array_mut().expect("encounter");
+        enc.remove(0);
+        let survivors = enc.clone();
+        world["removed_roster"] = Value::Array(std::iter::once(corpse).chain(survivors).collect());
+        let _ = m.reconcile(&world).expect("reconciles under OBSERVE");
+        let fight = &m.mirrored().expect("fight").state;
+        let after: Vec<u32> = fight.enemy_uids.iter().map(|u| u.0.get()).collect();
+        assert_eq!(
+            after, before,
+            "the corpse keeps slot 0, the survivors keep theirs"
+        );
+        assert!(
+            fight.is_removed_corpse(fight.enemy_uids[0]),
+            "slot 0 is the corpse"
+        );
+        let renamed: Vec<(u32, u32)> = m
+            .take_enemy_remap()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert!(renamed.is_empty(), "no uid moved: {renamed:?}");
+    }
+
     /// GH #1669: the game's board shows a dead enemy with no telegraph; the
     /// corpse keeps the one it died with, as in the engine the student
     /// trained on.
@@ -1840,6 +1996,137 @@ mod tests {
             .clone()
             .expect("parked");
         assert_eq!((pc.min_select, pc.max_select, pc.can_skip), (1, 1, true));
+    }
+
+    fn five_strikes() -> CombatState {
+        let deck: Vec<String> = vec!["StrikeIronclad".into(); 10];
+        sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &deck,
+            80,
+            80,
+            &[],
+            &[],
+            "TWO_TAILED_RATS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("builds")
+    }
+
+    /// Seed 180000982: Heirloom Hammer parks an `AddGeneratedToHand` over
+    /// HAND cards. The world's options get the parked hand locators, so the
+    /// student reads them in hand (`choice_pile`, `hand_slot`), not as
+    /// generated cards.
+    #[test]
+    fn a_generative_kind_over_hand_cards_is_located() {
+        let cs = five_strikes();
+        assert!(cs.player.hand.len() >= 2, "an opening hand");
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        m.seed(&to_value(&cs).expect("wire")).expect("seeds");
+        let hand = m.mirrored().expect("fight").state.player.hand.clone();
+        let at = |i: usize| json!({"id": "STRIKE_IRONCLAD", "upgraded": false, "pile": "hand", "index": i});
+        m.parked = Some(json!({
+            "type": "card_select", "kind": "add_generated_to_hand",
+            "cards": [at(0), at(1)], "min_select": 1, "max_select": 1, "can_skip": false,
+        }));
+        let options = vec![json!({"id": "STRIKE_IRONCLAD", "upgraded": false}); 2];
+        let origin = json!({"source": "FromHand", "source_model": "HEIRLOOM_HAMMER"});
+        m.inject_choice("add_generated_to_hand", options, 1, 1, false, origin)
+            .expect("injects");
+        let pc = m
+            .mirrored()
+            .expect("fight")
+            .state
+            .pending_choice
+            .clone()
+            .expect("open");
+        let uids: Vec<_> = pc.options.iter().map(|o| o.card_uid).collect();
+        assert_eq!(uids, vec![Some(hand[0]), Some(hand[1])]);
+        assert!(pc
+            .options
+            .iter()
+            .all(|o| o.source_pile == Some(sts2_core::cards::PileKind::Hand)));
+    }
+
+    /// A truly generated offer keeps no locator.
+    #[test]
+    fn a_generated_offer_stays_unlocated() {
+        let cs = five_strikes();
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        m.seed(&to_value(&cs).expect("wire")).expect("seeds");
+        m.parked = Some(json!({
+            "type": "card_select", "kind": "add_generated_free_to_hand",
+            "cards": [{"id": "FINESSE", "upgraded": false}], "min_select": 1, "max_select": 1,
+            "can_skip": true,
+        }));
+        let options = vec![json!({"id": "FINESSE", "upgraded": false})];
+        m.inject_choice(
+            "add_generated_free_to_hand",
+            options,
+            1,
+            1,
+            true,
+            Value::Null,
+        )
+        .expect("injects");
+        let pc = m
+            .mirrored()
+            .expect("fight")
+            .state
+            .pending_choice
+            .clone()
+            .expect("open");
+        assert_eq!(pc.options[0].card_uid, None);
+    }
+
+    /// Seed 180001961: the world's board shows a card in play (Imbued's
+    /// turn-1 autoplay of Splash) that the carried fight never played. The
+    /// in-flight skip keeps the carried board; adopting the unseen play seeds
+    /// from the world's.
+    #[test]
+    fn a_play_the_mirror_never_saw_is_adopted() {
+        let cs = five_strikes();
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        let seeded = to_value(&cs).expect("wire");
+        m.seed(&seeded).expect("seeds");
+        let mut world = seeded;
+        let in_play = world["deck"]["hand"]
+            .as_array_mut()
+            .expect("hand")
+            .remove(0);
+        world["deck"]["play_pile"] = json!([in_play]);
+        m.reconcile(&world).expect("reconciles");
+        let before = m.mirrored().expect("fight").state.player.hand.len();
+        assert_eq!(
+            before,
+            cs.player.hand.len(),
+            "the in-flight skip kept the carried hand"
+        );
+        assert!(m.adopt_unseen_play(&world).expect("adopts"));
+        let after = &m.mirrored().expect("fight").state.player;
+        assert_eq!((after.hand.len(), after.play.len()), (before - 1, 1));
+        // Nothing more to adopt once the mirror holds the world's board.
+        assert!(!m.adopt_unseen_play(&world).expect("no-op"));
+    }
+
+    /// A choice the engine parked itself is never re-seeded away.
+    #[test]
+    fn a_parked_choice_is_not_adopted_over() {
+        let cs = five_strikes();
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        let mut world = to_value(&cs).expect("wire");
+        m.seed(&world).expect("seeds");
+        m.parked = Some(json!({"kind": "exhaust_from_hand", "cards": []}));
+        let in_play = world["deck"]["hand"]
+            .as_array_mut()
+            .expect("hand")
+            .remove(0);
+        world["deck"]["play_pile"] = json!([in_play]);
+        assert!(!m.adopt_unseen_play(&world).expect("no-op"));
     }
 
     /// GH #1675: a damage wake stuns the Lagavulin Matriarch into SLASH; the
@@ -2061,6 +2348,195 @@ mod tests {
         let uid = st.player.hand[0];
         let card = st.cards.iter().find(|c| c.uid == uid).expect("card");
         assert_eq!(card.combat_var(VarKey::DampenDowngradedMarker), 1);
+    }
+
+    /// An OBSERVE reseed keeps the applier of the player's Dampen, so the
+    /// debuff still ends when its caster dies (corpus r6 seed 180001115:
+    /// a Flail Knight HP desync reseeded the Knights fight, Magi Knight's
+    /// Dampen outlived the Knight, and the world's re-upgraded cards broke
+    /// the next card_select's injection).
+    #[test]
+    fn a_reseed_keeps_the_appliers_of_the_players_debuffs() {
+        use sts2_core::PowerKind;
+        let deck: Vec<String> = ["StrikeIronclad", "DefendIronclad"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        let cs = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &deck,
+            80,
+            80,
+            &[],
+            &[],
+            "TWO_TAILED_RATS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("builds");
+        let wire = to_value(&cs).expect("wire");
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        m.seed(&wire).expect("seeds");
+        let dampen_applier = |st: &CombatState| {
+            let player = st.player.creature_uid.expect("player creature");
+            st.creatures
+                .iter()
+                .find(|c| c.id == player.0)
+                .map(|c| c.powers.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .chain(st.player.powers.iter().copied())
+                .find_map(|pu| {
+                    st.powers
+                        .get_by_id(pu.0)
+                        .filter(|p| p.kind == PowerKind::Dampen)
+                        .map(|p| p.applier)
+                })
+        };
+        {
+            let st = &mut m.state.as_mut().expect("fight").state;
+            let player = st.player.creature_uid.expect("player creature");
+            let caster = st.enemy_uids[1];
+            sts2_core::card_effects::apply_power_to_creature_with_applier(
+                st,
+                player,
+                PowerKind::Dampen,
+                1,
+                Some(caster),
+            );
+            assert_eq!(dampen_applier(st), Some(Some(caster)), "armed");
+        }
+        // The game's next board shows the Dampen and an HP the mirror did not
+        // predict, so the mirror reseeds.
+        let mut world = to_value(&m.mirrored().expect("fight").state).expect("wire");
+        world["player"]["hp"] = json!(70);
+        let _ = m.reconcile(&world);
+        assert!(!m.take_divergences().is_empty(), "the HP desync reseeds");
+        let st = &m.mirrored().expect("reseeded").state;
+        assert_eq!(
+            dampen_applier(st),
+            Some(Some(st.enemy_uids[1])),
+            "the reseeded Dampen still names its caster"
+        );
+    }
+
+    /// A fight under Void Form (2 free plays), its hand, and the mirror
+    /// seeded on it. The rebuild reads `cardsPlayedThisTurn` from nowhere:
+    /// the board never shows it.
+    fn void_form_fight() -> CombatMirror {
+        let deck: Vec<String> = [
+            "Discovery",
+            "DefendIronclad",
+            "DefendIronclad",
+            "DefendIronclad",
+            "DefendIronclad",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        let cs = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &deck,
+            80,
+            80,
+            &[],
+            &[],
+            "TWO_TAILED_RATS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("builds");
+        let mut wire = to_value(&cs).expect("wire");
+        wire["player"]["powers"] = json!([{"name": "VOID_FORM", "amount": 2}]);
+        let mut m = CombatMirror::new(Policy::Observe, "t", false);
+        m.seed(&wire).expect("seeds");
+        m
+    }
+
+    /// Play the first hand card of `id`; the engine's step result.
+    fn play_first(m: &mut CombatMirror, id: sts2_core::cards::CardId) -> &'static str {
+        let st = &m.mirrored().expect("fight").state;
+        let slot = st
+            .player
+            .hand
+            .iter()
+            .position(|uid| st.cards.iter().any(|c| c.uid == *uid && c.card_id == id))
+            .expect("in hand");
+        m.advance(&json!({"action": "play", "card_index": slot, "target_index": null}))
+            .expect("plays")
+    }
+
+    /// The game's board of the mirrored fight: every power counter it does
+    /// not report left out, as the host leaves Void Form's.
+    fn board_without_power_counters(m: &CombatMirror) -> Value {
+        let mut world = to_value(&m.mirrored().expect("fight").state).expect("wire");
+        for p in world["player"]["powers"].as_array_mut().expect("powers") {
+            p.as_object_mut().expect("power").remove("counter");
+        }
+        world
+    }
+
+    /// Spire Bench seeds 180000322, 180000516, 180000590, 180001456,
+    /// 180000358: a choice-opening card played under Void Form past its free
+    /// plays parks the card's tail. Verified against a bare rebuild, every
+    /// hand card read free, `$.deck.hand` diffed, and the reseed deleted the
+    /// suspended card, its AfterCardPlayed with it: Void Form's count stayed
+    /// one short for the rest of the turn.
+    #[test]
+    fn a_card_parked_past_void_forms_free_plays_survives_the_verify() {
+        use sts2_core::cards::CardId;
+        let mut m = void_form_fight();
+        let played = |m: &CombatMirror| {
+            sts2_core::combat_loop::void_form_cards_played_this_turn(
+                &m.mirrored().expect("fight").state,
+            )
+        };
+        play_first(&mut m, CardId::DefendIronclad);
+        play_first(&mut m, CardId::DefendIronclad);
+        assert_eq!(played(&m), 2, "the free plays are spent");
+        assert_eq!(play_first(&mut m, CardId::Discovery), "pending_choice");
+        assert!(m.mirrored().expect("fight").state.pending_play.is_some());
+        let desyncs = m
+            .reconcile(&board_without_power_counters(&m))
+            .expect("reconciles");
+        assert!(desyncs.is_empty(), "{desyncs:?}");
+        assert!(m.take_divergences().is_empty(), "no reseed");
+        assert!(
+            m.mirrored().expect("fight").state.pending_play.is_some(),
+            "the suspended Discovery survives the verify"
+        );
+    }
+
+    /// The rebuild path's diff, same cause: past the free plays a bare
+    /// rebuild read the hand free and reseeded at every reconcile, and the
+    /// reseed drops every enemy-side carry (TestSubject's PAINFUL_STABS
+    /// escalation restarted at 0: seeds 180000590, 180001456, 180000358).
+    #[test]
+    fn a_rebuild_past_void_forms_free_plays_reads_the_hand_at_cost() {
+        use sts2_core::cards::CardId;
+        let mut m = void_form_fight();
+        // The first reconcile after a seed excuses the roster; get it done.
+        let world = board_without_power_counters(&m);
+        assert!(m.reconcile(&world).expect("reconciles").is_empty());
+        play_first(&mut m, CardId::DefendIronclad);
+        play_first(&mut m, CardId::DefendIronclad);
+        let desyncs = m
+            .reconcile(&board_without_power_counters(&m))
+            .expect("reconciles");
+        assert!(desyncs.is_empty(), "{desyncs:?}");
+        assert!(m.take_divergences().is_empty(), "no reseed");
+        assert_eq!(
+            sts2_core::combat_loop::void_form_cards_played_this_turn(
+                &m.mirrored().expect("fight").state
+            ),
+            2
+        );
     }
 
     #[test]

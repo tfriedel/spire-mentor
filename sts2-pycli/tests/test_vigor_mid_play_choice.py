@@ -8,8 +8,18 @@ showed Vigor the real game had already spent (Spire Bench corpus, ~17 runs).
 
 from __future__ import annotations
 
+import pytest
+import sts2_client
 import sts2_rs
 from ppo.e2e import factory
+
+
+@pytest.fixture(autouse=True)
+def _campaign_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Select the e2e lane's build, as a campaign process does: the factory
+    refuses any other selection, so `--game-version v0.113.0` failed here
+    (GH #1781)."""
+    monkeypatch.setattr(sts2_client, "GAME_VERSION", factory.GAME_VERSION)
 
 
 def _vigor(cs) -> int:

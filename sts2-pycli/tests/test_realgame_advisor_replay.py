@@ -185,6 +185,9 @@ def test_the_native_advisor_serves_the_mods_socket(tmp_path: Path) -> None:
                 str(opts["sims"]),
                 "--boss-sims",
                 str(opts["boss_sims"]),
+                # A plan the clock cuts depends on the load (GH #1784).
+                "--plan-budget-s",
+                "inf",
                 "--log-dir",
                 str(tmp_path / "alog"),
                 "--workbench-logs",

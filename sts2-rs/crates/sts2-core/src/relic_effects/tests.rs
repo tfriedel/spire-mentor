@@ -4110,15 +4110,17 @@ fn letter_opener_inert_on_attack_card() {
     );
 }
 
+/// C# `AfterCombatEnd` clears only the status (`LetterOpener.cs:131`); the count
+/// resets at the next fight.
 #[test]
 #[serial_test::serial(global_registry)]
-fn letter_opener_after_combat_end_resets() {
+fn letter_opener_after_combat_end_keeps_counter() {
     ensure_installed();
     let mut state = fresh_state_with_player(70, 70);
     give_player_relic(&mut state, RelicKind::LetterOpener);
     set_letter_opener_counter(&mut state, 7);
     let _ = dispatch_after_combat_end(&mut state);
-    assert_eq!(letter_opener_counter(&state), 0);
+    assert_eq!(letter_opener_counter(&state), 7);
 }
 
 // -----------------------------------------------------------------
@@ -4364,15 +4366,17 @@ fn ornamental_fan_before_side_turn_start_resets_counter() {
     assert_eq!(ornamental_fan_counter(&state), 0, "per-turn counter reset");
 }
 
+/// C# `AfterCombatEnd` clears only the status (`OrnamentalFan.cs:123`); the count
+/// resets at the next fight.
 #[test]
 #[serial_test::serial(global_registry)]
-fn ornamental_fan_after_combat_end_resets_counter() {
+fn ornamental_fan_after_combat_end_keeps_counter() {
     ensure_installed();
     let mut state = fresh_state_with_player(70, 70);
     give_player_relic(&mut state, RelicKind::OrnamentalFan);
     set_ornamental_fan_counter(&mut state, 7);
     let _ = dispatch_after_combat_end(&mut state);
-    assert_eq!(ornamental_fan_counter(&state), 0);
+    assert_eq!(ornamental_fan_counter(&state), 7);
 }
 
 // -----------------------------------------------------------------
@@ -4748,15 +4752,17 @@ fn kusarigama_counter_resets_when_the_player_turn_ends() {
     assert_eq!(kusarigama_counter(&state), 0);
 }
 
+/// C# `AfterCombatEnd` clears only the status (`Kusarigama.cs:132`); the count
+/// resets at the next fight.
 #[test]
 #[serial_test::serial(global_registry)]
-fn kusarigama_after_combat_end_resets_counter() {
+fn kusarigama_after_combat_end_keeps_counter() {
     ensure_installed();
     let mut state = fresh_state_with_player(70, 70);
     give_player_relic(&mut state, RelicKind::Kusarigama);
     set_kusarigama_counter(&mut state, 7);
     let _ = dispatch_after_combat_end(&mut state);
-    assert_eq!(kusarigama_counter(&state), 0);
+    assert_eq!(kusarigama_counter(&state), 7);
 }
 
 // -----------------------------------------------------------------
@@ -9447,6 +9453,116 @@ fn meat_on_the_bone_reads_hp_before_burning_blood_heals() {
         .find(|c| c.id == uid.0)
         .map(|c| c.current_hp);
     assert_eq!(hp, Some(51));
+}
+
+/// Chosen Cheese's +1 max HP (`AfterCombatEnd`, CombatManager.cs:1320)
+/// lands before Meat on the Bone's check (`AfterCombatVictory`, :1331): at
+/// 45/90 the cheese leaves 46/91, over the half (45), so only Burning
+/// Blood's 6 heals (Spire Bench seed 180000504: the game ended on 52/91;
+/// the engine healed 12 more). The cheese itself is granted run-side later.
+#[test]
+fn meat_on_the_bone_reads_hp_after_chosen_cheese() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(90, 45);
+    give_player_relic(&mut state, RelicKind::BurningBlood);
+    give_player_relic(&mut state, RelicKind::MeatOnTheBone);
+    give_player_relic(&mut state, RelicKind::ChosenCheese);
+    let _ = dispatch_after_combat_victory(&mut state);
+    let uid = state.player.creature_uid.expect("player creature");
+    let hp = state
+        .creatures
+        .iter()
+        .find(|c| c.id == uid.0)
+        .map(|c| c.current_hp);
+    assert_eq!(hp, Some(51));
+}
+
+fn give_wax_relic(state: &mut CombatState, kind: RelicKind) {
+    let id = NonZeroU32::new(u32::try_from(state.relics.len() + 100).unwrap()).unwrap();
+    state.relics.push(crate::Relic {
+        id,
+        kind,
+        counter: 0,
+        is_wax: true,
+        is_melted: false,
+    });
+}
+
+/// Toy Box melts its next wax relic in `AfterCombatEnd`, before the victory
+/// walk (CombatManager.cs:1320/1331): a wax Meat on the Bone melted by this
+/// fight heals nothing (Spire Bench seed 180001868: 39/86 ended on 45,
+/// Burning Blood's 6 only). Off the third combat it still heals.
+#[test]
+fn toy_box_melts_a_wax_meat_on_the_bone_before_it_heals() {
+    ensure_installed();
+    for (combats_seen, want) in [(2, 45), (0, 57)] {
+        let mut state = fresh_state_with_player(86, 39);
+        give_player_relic(&mut state, RelicKind::BurningBlood);
+        give_player_relic(&mut state, RelicKind::ToyBox);
+        state.relics[1].counter = combats_seen;
+        give_wax_relic(&mut state, RelicKind::MeatOnTheBone);
+        // The combat's own victory branch (no enemies left): it melts, then
+        // walks the victory listeners.
+        assert_eq!(
+            crate::combat_loop::check_combat_end(&mut state),
+            crate::StepResult::CombatWon
+        );
+        let uid = state.player.creature_uid.expect("player creature");
+        let hp = state
+            .creatures
+            .iter()
+            .find(|c| c.id == uid.0)
+            .map(|c| c.current_hp);
+        assert_eq!(hp, Some(want), "Toy Box after {combats_seen} combats");
+    }
+}
+
+/// The wax relic Toy Box melts at a fight's end still hears that fight's
+/// `AfterCombatEnd` (C# builds the listener list before the pass): a melted
+/// Shuriken clears its count to 0 like a live one (Spire Bench seed
+/// 180000394: the next fight showed 0, the engine kept 1).
+#[test]
+fn toy_box_melt_still_clears_the_melted_relics_count() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 60);
+    give_player_relic(&mut state, RelicKind::BurningBlood);
+    give_player_relic(&mut state, RelicKind::ToyBox);
+    state.relics[1].counter = 2;
+    give_wax_relic(&mut state, RelicKind::Shuriken);
+    state.relics[2].counter = 2;
+    assert_eq!(
+        crate::combat_loop::check_combat_end(&mut state),
+        crate::StepResult::CombatWon
+    );
+    let shuriken = &state.relics[2];
+    assert!(shuriken.is_melted, "Toy Box melts it at this fight's end");
+    assert_eq!(shuriken.counter, 0, "its own AfterCombatEnd ran");
+}
+
+/// Ornamental Fan's and Kusarigama's `AfterCombatEnd` clear only the status
+/// (OrnamentalFan.cs:123, Kusarigama.cs:132): the count survives the fight,
+/// and a melted one shows it for the rest of the run (Spire Bench seeds
+/// 180000070, 180001922). The next fight resets it (Fan at the turn start,
+/// Kusarigama at `BeforeCombatStart`).
+#[test]
+fn fan_and_kusarigama_keep_their_count_past_combat_end() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 60);
+    give_player_relic(&mut state, RelicKind::OrnamentalFan);
+    give_player_relic(&mut state, RelicKind::Kusarigama);
+    state.relics[0].counter = 2;
+    state.relics[1].counter = 1;
+    assert_eq!(
+        crate::combat_loop::check_combat_end(&mut state),
+        crate::StepResult::CombatWon
+    );
+    assert_eq!(state.relics[0].counter, 2, "Fan keeps its count");
+    assert_eq!(state.relics[1].counter, 1, "Kusarigama keeps its count");
+    let _ = dispatch_before_combat_start(&mut state);
+    assert_eq!(
+        state.relics[1].counter, 0,
+        "Kusarigama starts the next fight at 0"
+    );
 }
 
 relic_listener_resolves!(

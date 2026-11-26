@@ -114,22 +114,37 @@ def boss_share(t: float) -> float:
     return _lerp(BOSS_SHARE, t)
 
 
-def cell_probs(t: float) -> dict[str, float]:
-    """P(cell) for one practice start at `t`, before fallbacks (sums to 1)."""
-    b = boss_share(t)
+def cell_probs(t: float, boss: float | None = None) -> dict[str, float]:
+    """P(cell) for one practice start at `t`, before fallbacks (sums to 1). `boss`
+    replaces the scheduled boss share (a lane's `practice_mix`)."""
+    b = boss_share(t) if boss is None else float(boss)
     out = {c: b * p for c, p in BOSS_MIX.items()}
     out.update({c: (1.0 - b) * p for c, p in ELITE_MIX.items()})
     return out
 
 
-def practice_slots(n_slots: int, t: float) -> int:
-    """How many of a worker's `n_slots` env slots run practice at `t`."""
-    return round(practice_share(t) * n_slots)
+def practice_slots(n_slots: int, t: float, share: float | None = None) -> int:
+    """How many of a worker's `n_slots` env slots run practice at `t`. `share`
+    replaces the scheduled share (a lane's `practice_mix`)."""
+    return round((practice_share(t) if share is None else float(share)) * n_slots)
 
 
-def is_practice_slot(slot: int, n_slots: int, t: float) -> bool:
+def is_practice_slot(slot: int, n_slots: int, t: float, share: float | None = None) -> bool:
     """Whether env slot `slot` (0-based) picks practice when it next starts a segment."""
-    return int(slot) < practice_slots(n_slots, t)
+    return int(slot) < practice_slots(n_slots, t, share)
+
+
+def check_practice_mix(mix: dict[str, Any]) -> dict[str, float]:
+    """A lane's `practice_mix`: optional "share" (of env slots) and "boss" (of practice
+    starts), each in [0, 1], replacing the schedule's value; {} keeps the schedule."""
+    bad = sorted(set(mix) - {"share", "boss"})
+    if bad:
+        raise ValueError(f"unknown keys {bad} (known: share, boss)")
+    out = {k: float(v) for k, v in mix.items()}
+    for k, v in out.items():
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"{k} {v} is not in [0, 1]")
+    return out
 
 
 @dataclass
@@ -159,6 +174,7 @@ class PracticeQueues:
         worker: int,
         seed: int = 0,
         enabled: bool = True,
+        mix: dict[str, float] | None = None,
         queue_len: int = QUEUE_LEN,
         max_age: int = MAX_AGE,
         max_uses: int = MAX_USES,
@@ -168,6 +184,8 @@ class PracticeQueues:
         self.seed = int(seed)
         self.starts = 0  # practice starts so far (the uid counter)
         self.enabled = bool(enabled)
+        m = check_practice_mix(dict(mix or {}))
+        self.share, self.boss = m.get("share"), m.get("boss")  # None: the schedule
         self.queue_len = int(queue_len)
         self.max_age = int(max_age)
         self.max_uses = int(max_uses)
@@ -202,7 +220,7 @@ class PracticeQueues:
 
     def wants_practice(self, slot: int, n_slots: int, t: float) -> bool:
         """Whether env slot `slot` starts a practice segment next (False when off)."""
-        return self.enabled and is_practice_slot(slot, n_slots, t)
+        return self.enabled and is_practice_slot(slot, n_slots, t, self.share)
 
     def expire(self, now: int) -> None:
         for cell, q in self.q.items():
@@ -219,7 +237,7 @@ class PracticeQueues:
     # ── starts ──────────────────────────────────────────────────────────────
 
     def draw_cell(self, t: float) -> str:
-        probs = cell_probs(t)
+        probs = cell_probs(t, self.boss)
         cells = list(probs)
         p = np.asarray([probs[c] for c in cells], dtype=float)
         return cells[int(self.rng.choice(len(cells), p=p / p.sum()))]

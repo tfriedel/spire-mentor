@@ -94,6 +94,14 @@ fn carry_enemy_slots(fresh: &mut CombatState, carried: &CombatState, slots: &[Op
 /// no telegraph, so the rebuild would read its intent as empty; the carried
 /// enemy (alive at the last decision, or already a corpse) still holds it.
 /// `enemy_slots` (`enemy_alignment`) names each fresh enemy's carried slot.
+///
+/// A corpse the board DOES telegraph keeps the board's telegraph: a reviver
+/// (Test Subject's `RESPAWN_MOVE`, Heal + Buff, set by `TriggerDeadState`'s
+/// `SetMoveImmediate`; Decimillipede's `REATTACH_MOVE`; Parafright's
+/// `REVIVE_MOVE`). Since a missed kill aligns (`align_missed_kills`, GH
+/// #1897) the carried creature is the one the mirror still had alive, and
+/// its pre-death attack overwrote the respawn (Spire Bench r7 seeds
+/// 180000239, 180001932: a knocked-out Test Subject read Bite / Multi Claw).
 pub fn carry_corpse_intents(
     fresh: &mut CombatState,
     carried: &CombatState,
@@ -111,7 +119,7 @@ pub fn carry_corpse_intents(
         if let Some(c) = fresh
             .creatures
             .iter_mut()
-            .find(|c| c.id == dst.0 && c.current_hp <= 0)
+            .find(|c| c.id == dst.0 && c.current_hp <= 0 && c.intent.is_none())
         {
             c.intent = intent;
         }
@@ -279,6 +287,31 @@ fn pile_carry_pairs<T: PartialEq>(fresh: &[T], carried: &[T]) -> Vec<(usize, usi
         .filter(|(_, (a, b))| a == b)
         .map(|(si, (&l, _))| if flip { (si, l) } else { (l, si) })
         .collect()
+}
+
+/// `(fresh uid, carried uid)` of each card the per-pile position pairing
+/// ([`pile_carry_pairs`]) names as the same card in both states.
+fn card_uid_pairs(fresh: &CombatState, carried: &CombatState) -> Vec<(CardUid, CardUid)> {
+    let id_of =
+        |st: &CombatState, u: &CardUid| st.cards.iter().find(|c| c.uid == *u).map(|c| c.card_id);
+    let piles = [
+        (&fresh.player.hand[..], &carried.player.hand[..]),
+        (&fresh.player.draw[..], &carried.player.draw[..]),
+        (&fresh.player.discard[..], &carried.player.discard[..]),
+        (&fresh.player.exhaust[..], &carried.player.exhaust[..]),
+        (&fresh.player.play[..], &carried.player.play[..]),
+    ];
+    let mut out = Vec::new();
+    for (fp, cp) in piles {
+        let fi: Vec<_> = fp.iter().map(|u| id_of(fresh, u)).collect();
+        let ci: Vec<_> = cp.iter().map(|u| id_of(carried, u)).collect();
+        for (f, c) in pile_carry_pairs(&fi, &ci) {
+            if fi[f].is_some() && fi[f] == ci[c] {
+                out.push((fp[f], cp[c]));
+            }
+        }
+    }
+    out
 }
 
 /// Carry the unobservable half of `carried` onto `fresh`.
@@ -488,7 +521,14 @@ pub fn transplant_hidden(
     // is documented-dead. The within-a-play scratch fields cannot span a
     // reconcile at all, because a graded decision never lands mid-play.
     fresh.player.shivs_played_this_turn = carried.player.shivs_played_this_turn;
-    fresh.player.generated_cards_this_combat = carried.player.generated_cards_this_combat;
+    // Never falls within a combat: the wire's `cards_generated_this_combat`
+    // when the host sends it (a Radiant Pearl's Luminesce is generated
+    // before the fight's first screen, corpus seed 180000111), else the
+    // mirror's running count.
+    fresh.player.generated_cards_this_combat = fresh
+        .player
+        .generated_cards_this_combat
+        .max(carried.player.generated_cards_this_combat);
     fresh.player.stars_gained_this_turn = carried.player.stars_gained_this_turn;
     // Murder's multiplier (C# `CardDrawnEntry` count). Never falls within a
     // combat: the wire's `cards_drawn_this_combat` when the host sends it,
@@ -581,6 +621,9 @@ pub fn transplant_hidden(
     // card's uid) — Unmovable rebuilt without it doubled EVERY
     // block card instead of only the turn's first (30 of the 140
     // on-play `$.player.block` divergences on the v27wr sweep).
+    // The History Course slots' cards (below), paired before the log is
+    // borrowed.
+    let pairs = card_uid_pairs(fresh, carried);
     {
         let src = &carried.combat_log;
         let dst = &mut fresh.combat_log;
@@ -591,7 +634,12 @@ pub fn transplant_hidden(
         if carry_turn_history {
             dst.cards_exhausted_this_turn = src.cards_exhausted_this_turn;
         }
-        dst.hp_lost_this_turn = src.hp_lost_this_turn;
+        // Spite's "lost HP this turn". The host discloses it (SeatHistory),
+        // and within a turn it only ever turns on, so the wire's `true` must
+        // not be overwritten by a mirror that missed the loss: corpus seed
+        // 180000995 lost HP before the fight's first screen (wire true,
+        // mirror 0) and its Spite+ previewed one hit instead of three.
+        dst.hp_lost_this_turn = dst.hp_lost_this_turn.max(src.hp_lost_this_turn);
         // Never falls within a combat, so the larger of wire and mirror is
         // right either way: a producer that discloses it (GH #989) is not
         // overwritten by a mirror that missed a hit (the host's 2 read as 1
@@ -614,7 +662,13 @@ pub fn transplant_hidden(
         dst.zero_cost_attacks_played_this_turn = src.zero_cost_attacks_played_this_turn;
         dst.card_plays_finished_this_turn = src.card_plays_finished_this_turn;
         dst.card_plays_finished_last_player_turn = src.card_plays_finished_last_player_turn;
-        dst.cards_discarded_this_turn = src.cards_discarded_this_turn;
+        // Within a turn the count only grows, so the wire's (the host
+        // discloses it) must not be overwritten by a mirror that missed a
+        // discard before the first screen (Whispering Earring's turn-1
+        // auto-plays, corpus seed 180001050: wire 3, mirror 0).
+        dst.cards_discarded_this_turn = dst
+            .cards_discarded_this_turn
+            .max(src.cards_discarded_this_turn);
         dst.lightning_orbs_channeled_this_combat = src.lightning_orbs_channeled_this_combat;
         // ChainsOfBinding's per-turn Bound budget. C#
         // `ChainsOfBindingPower.AfterCardDrawn` (`ChainsOfBindingPower.cs:36-45`)
@@ -637,20 +691,44 @@ pub fn transplant_hidden(
             dst.unmovable_card_block_plays
                 .clone_from(&src.unmovable_card_block_plays);
         }
-        // The HistoryCourse slots, with the uid component dropped — the
-        // reconstruction reallocated every CardUid, and
+        // The HistoryCourse slots. The reconstruction reallocated every
+        // CardUid, so a uid is re-pointed at the paired fresh card or, with
+        // no pairing, dropped:
         // `listener_history_course` already falls back to
         // `card_pod_from_id` for a stale uid, which is exactly why
         // `None` is safe. Left uncarried, the relic was permanently
         // inert in the mirror (30 v28wr events — run 1056's world kept
         // auto-playing last turn's Battle Trance dupe: +3 hand, -3
         // draw, +NO_DRAW the mirror never saw).
-        dst.last_attack_skill_played = src
-            .last_attack_skill_played
-            .map(|(id, up, _uid)| (id, up, None));
-        dst.prev_round_last_attack_skill_played = src
-            .prev_round_last_attack_skill_played
-            .map(|(id, up, _uid)| (id, up, None));
+        //
+        // The stamp's `upgraded` is the card as its play FINISHED; C#
+        // `CreateDupe` clones the live card at the next turn's start, after
+        // Razor Tooth's `AfterCardPlayed` upgrade (and any later one). The
+        // engine clones the live card through the uid; the rebuilt slot has
+        // none, so it takes the carried card's CURRENT upgrade (corpus r6
+        // seed 180000093: a Havoc-played Neow's Fury upgraded by Razor Tooth
+        // came back as a plain dupe, "up to 2" where the game said 3).
+        //
+        // Where the carried card pairs with a fresh one, the slot points at
+        // the FRESH card, so the engine clones it as it is when the dupe is
+        // made: frozen at the reconcile, an upgrade the enemy turn takes away
+        // came back (Magi Knight's Dampen downgrades every upgraded card,
+        // `DampenPower.AfterApplied`; corpus r7 seed 180000943: Razor Tooth's
+        // Pact's End+ dupe hit for 24, the game's downgraded one for 18, and
+        // the mirror killed a Flail Knight the game left at 2 HP).
+        let live = |slot: Option<(sts2_core::cards::CardId, bool, Option<CardUid>)>| {
+            slot.map(|(id, up, uid)| {
+                let src = uid
+                    .and_then(|u| carried.cards.iter().find(|c| c.uid == u))
+                    .filter(|c| c.card_id == id);
+                let mapped = src
+                    .and_then(|c| pairs.iter().find(|(_, cu)| *cu == c.uid))
+                    .map(|(fu, _)| *fu);
+                (id, src.map_or(up, |c| c.upgraded), mapped)
+            })
+        };
+        dst.last_attack_skill_played = live(src.last_attack_skill_played);
+        dst.prev_round_last_attack_skill_played = live(src.prev_round_last_attack_skill_played);
     }
 
     // Per-card hidden `combat_vars`. The C# producers emit no
@@ -723,7 +801,17 @@ pub fn transplant_hidden(
                 let vars: Vec<(VarKey, i32)> = src
                     .combat_vars
                     .iter()
-                    .filter(|(k, v)| *v != 0 && !WIRE_OWNED.contains(k) && dst.combat_var(*k) == 0)
+                    .filter(|(k, v)| {
+                        *v != 0
+                            && !WIRE_OWNED.contains(k)
+                            && (dst.combat_var(*k) == 0
+                                // The board stamps a card the deck does not
+                                // hold as generated (1); the carried card
+                                // knows it is a clone (`is_clone`, read by
+                                // Stomp's cost catch-up).
+                                || (*k == VarKey::GeneratedInCombat
+                                    && *v == sts2_core::cards::GENERATED_AS_CLONE))
+                    })
                     // Rampage's own escalation is wire-owned: C# grows
                     // `Damage.BaseValue` itself (`Rampage.cs:54`), so the
                     // reconstructed card's `base_damage` already carries
@@ -866,76 +954,168 @@ pub fn transplant_hidden(
     // carried instance's applier onto the fresh player-side power of the
     // same kind, remapped through the slot alignment; nothing else reads
     // `applier` on these kinds, so a missing mapping is inert.
-    {
-        use sts2_core::PowerKind as PK;
-        const APPLIER_KINDS: [PK; 4] = [PK::Shrink, PK::Hex, PK::Dampen, PK::Constrict];
-        let mut uid_map: Vec<(sts2_core::CreatureUid, sts2_core::CreatureUid)> = Vec::new();
-        for (slot, carried_slot) in slots.iter().enumerate() {
-            if let Some(cs) = carried_slot {
-                if let (Some(&src), Some(&dst)) =
-                    (carried.enemy_uids.get(*cs), fresh.enemy_uids.get(slot))
-                {
-                    uid_map.push((src, dst));
-                }
+    carry_power_appliers(fresh, carried, &slots);
+    carry_orbit_energy(fresh, carried);
+    carry_juggling_count(fresh, carried);
+    Ok(())
+}
+
+/// `Power.applier` of the player-side applier-gated debuffs
+/// (Shrink/Hex/Dampen/Constrict), carried from `carried` onto `fresh`
+/// through the enemy slot alignment `slots` (for each fresh enemy, its
+/// carried slot). Shared by [`transplant_hidden`] and the OBSERVE reseed:
+/// the reseed drops every enemy-side carry, but the applier is PLAYER-side
+/// state that only names an enemy, and losing it makes the debuff permanent
+/// (GH dtype triage: a reseed after an unrelated HP desync left Magi
+/// Knight's Dampen on after the Knight died, so the world's re-upgraded
+/// cards could not be located on the next card_select).
+pub fn carry_power_appliers(
+    fresh: &mut CombatState,
+    carried: &CombatState,
+    slots: &[Option<usize>],
+) {
+    use sts2_core::PowerKind as PK;
+    const APPLIER_KINDS: [PK; 4] = [PK::Shrink, PK::Hex, PK::Dampen, PK::Constrict];
+    let mut uid_map: Vec<(sts2_core::CreatureUid, sts2_core::CreatureUid)> = Vec::new();
+    for (slot, carried_slot) in slots.iter().enumerate() {
+        if let Some(cs) = carried_slot {
+            if let (Some(&src), Some(&dst)) =
+                (carried.enemy_uids.get(*cs), fresh.enemy_uids.get(slot))
+            {
+                uid_map.push((src, dst));
             }
         }
-        let carried_player_uids: Vec<sts2_core::PowerUid> = carried
-            .player
-            .powers
+    }
+    let carried_player_uids: Vec<sts2_core::PowerUid> = carried
+        .player
+        .powers
+        .iter()
+        .copied()
+        .chain(
+            carried
+                .player
+                .creature_uid
+                .and_then(|cu| carried.creatures.iter().find(|c| c.id == cu.0))
+                .map(|c| c.powers.clone())
+                .unwrap_or_default(),
+        )
+        .collect();
+    let fresh_player_uids: Vec<sts2_core::PowerUid> = fresh
+        .player
+        .powers
+        .iter()
+        .copied()
+        .chain(
+            fresh
+                .player
+                .creature_uid
+                .and_then(|cu| fresh.creatures.iter().find(|cr| cr.id == cu.0))
+                .map(|cr| cr.powers.clone())
+                .unwrap_or_default(),
+        )
+        .collect();
+    for kind in APPLIER_KINDS {
+        let Some(src_applier) = carried_player_uids.iter().find_map(|pu| {
+            carried
+                .powers
+                .get_by_id(pu.0)
+                .filter(|p| p.kind == kind)
+                .and_then(|p| p.applier)
+        }) else {
+            continue;
+        };
+        let Some(mapped) = uid_map
             .iter()
-            .copied()
-            .chain(
-                carried
-                    .player
-                    .creature_uid
-                    .and_then(|cu| carried.creatures.iter().find(|c| c.id == cu.0))
-                    .map(|c| c.powers.clone())
-                    .unwrap_or_default(),
-            )
-            .collect();
-        let fresh_player_uids: Vec<sts2_core::PowerUid> = fresh
-            .player
-            .powers
-            .iter()
-            .copied()
-            .chain(
-                fresh
-                    .player
-                    .creature_uid
-                    .and_then(|cu| fresh.creatures.iter().find(|cr| cr.id == cu.0))
-                    .map(|cr| cr.powers.clone())
-                    .unwrap_or_default(),
-            )
-            .collect();
-        for kind in APPLIER_KINDS {
-            let Some(src_applier) = carried_player_uids.iter().find_map(|pu| {
-                carried
-                    .powers
-                    .get_by_id(pu.0)
-                    .filter(|p| p.kind == kind)
-                    .and_then(|p| p.applier)
-            }) else {
-                continue;
-            };
-            let Some(mapped) = uid_map
-                .iter()
-                .find(|(src, _)| *src == src_applier)
-                .map(|(_, dst)| *dst)
-            else {
-                continue;
-            };
-            for pu in &fresh_player_uids {
-                if let Some(p) = fresh.powers.get_mut_by_id(pu.0) {
-                    if p.kind == kind && p.applier.is_none() {
-                        p.applier = Some(mapped);
-                        break;
-                    }
+            .find(|(src, _)| *src == src_applier)
+            .map(|(_, dst)| *dst)
+        else {
+            continue;
+        };
+        for pu in &fresh_player_uids {
+            if let Some(p) = fresh.powers.get_mut_by_id(pu.0) {
+                if p.kind == kind && p.applier.is_none() {
+                    p.applier = Some(mapped);
+                    break;
                 }
             }
         }
     }
-    carry_orbit_energy(fresh, carried);
-    Ok(())
+}
+
+/// Juggling's count of this turn's Attacks, where the carried fight saw
+/// more than the board's History does.
+///
+/// The rebuild derives the count from the wire's Attack bucket of
+/// `cards_played_this_turn`, which the host counts from C#
+/// `History.CardPlaysStarted` filtered on `HappenedThisTurn` (round AND
+/// side). C# `JugglingPower.BeforeCardPlayed` counts every Attack the owner
+/// plays from its `AfterSideTurnEnd` reset on, so a Strike Hellraiser plays
+/// as the turn's hand is drawn counts for Juggling but not as this turn's in
+/// History (Spire Bench seed 180000794, total floor 45 round 3: the board's
+/// bucket said 0 Attacks, and the game cloned the turn's SECOND hand Attack).
+/// The carried fight ran the same turn and counted it; within one round it
+/// stands when it is higher.
+fn carry_juggling_count(fresh: &mut CombatState, carried: &CombatState) {
+    use sts2_core::powers::PowerKind;
+    if fresh.round != carried.round {
+        return;
+    }
+    let count = |st: &CombatState| -> Option<(sts2_core::PowerUid, i32)> {
+        st.player_power_uids().into_iter().find_map(|pu| {
+            st.powers
+                .get_by_id(pu.0)
+                .filter(|p| p.kind == PowerKind::Juggling)
+                .map(|p| (pu, p.counter))
+        })
+    };
+    let (Some((_, seen)), Some((pu, derived))) = (count(carried), count(fresh)) else {
+        return;
+    };
+    if seen > derived {
+        if let Some(p) = fresh.powers.get_mut_by_id(pu.0) {
+            p.counter = seen;
+        }
+    }
+}
+
+/// Copy the carried counter of each named player power onto the fresh
+/// player's power of the same kind: [`transplant_hidden`]'s player-side power
+/// carry alone, for a reconcile that diffs the board before it transplants.
+///
+/// Some observables are derived from a counter the wire withholds. Void
+/// Form's free plays are its `cardsPlayedThisTurn` (C# `VoidFormPower.cs:81`
+/// `TryModifyEnergyCostInCombatLate`), which no board shows, so a bare rebuild
+/// read every hand card free past the free plays and `$.deck.hand` diffed on
+/// cost at every reconcile of such a turn (Spire Bench seeds 180000322,
+/// 180000516, 180000590, 180001456, 180000358). Only `names` (the powers the
+/// wire left undisclosed) are touched, and a carried 0 is not copied, as in
+/// the full transplant.
+pub fn carry_player_power_counters(
+    fresh: &mut CombatState,
+    carried: &CombatState,
+    names: &[String],
+) {
+    for name in names {
+        let Some(kind) = sts2_wire::state_dict::power_kind_from_python_name(name) else {
+            continue;
+        };
+        let Some(c) = carried.player_power_uids().into_iter().find_map(|pu| {
+            carried
+                .powers
+                .get_by_id(pu.0)
+                .filter(|p| p.kind == kind && p.counter != 0)
+                .map(|p| p.counter)
+        }) else {
+            continue;
+        };
+        let target = fresh
+            .player_power_uids()
+            .into_iter()
+            .find(|pu| fresh.powers.get_by_id(pu.0).is_some_and(|p| p.kind == kind));
+        if let Some(p) = target.and_then(|pu| fresh.powers.get_mut_by_id(pu.0)) {
+            p.counter = c;
+        }
+    }
 }
 
 /// Orbit's engine counter is the energy spent since it was applied; the
@@ -1673,6 +1853,219 @@ mod tests {
         assert_eq!(next.player.max_energy, 4, "a new turn reads the wire");
     }
 
+    /// Corpus r6 seed 180000093: History Course replays a dupe of the live
+    /// card, so a card upgraded after its play (Razor Tooth) comes back
+    /// upgraded. The rebuilt slot loses the uid, so the carry must take the
+    /// carried card's current upgrade rather than the stamp's.
+    #[test]
+    fn history_courses_slot_takes_the_cards_upgrade_since_the_play() {
+        use sts2_core::cards::CardId;
+        let carried = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &["NEOWS_FURY", "BASH", "BASH", "BASH", "BASH"].map(str::to_owned),
+            80,
+            80,
+            &[],
+            &[],
+            "AXEBOTS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("scenario");
+        let mut carried = carried;
+        let fury = carried
+            .cards
+            .iter()
+            .find(|c| c.card_id == CardId::NeowsFury)
+            .map(|c| c.uid)
+            .expect("fury");
+        // Stamped as the play finished (not upgraded), upgraded after it.
+        carried.combat_log.prev_round_last_attack_skill_played =
+            Some((CardId::NeowsFury, false, Some(fury)));
+        carried.combat_log.last_attack_skill_played = Some((CardId::NeowsFury, false, Some(fury)));
+        carried
+            .cards
+            .iter_mut()
+            .find(|c| c.uid == fury)
+            .expect("fury")
+            .upgraded = true;
+        let mut fresh = carried.clone();
+        fresh.combat_log.prev_round_last_attack_skill_played = None;
+        fresh.combat_log.last_attack_skill_played = None;
+        transplant_hidden(&mut fresh, &carried, Carry::default()).expect("transplants");
+        assert_eq!(
+            fresh.combat_log.prev_round_last_attack_skill_played,
+            Some((CardId::NeowsFury, true, Some(fury)))
+        );
+        assert_eq!(
+            fresh.combat_log.last_attack_skill_played,
+            Some((CardId::NeowsFury, true, Some(fury)))
+        );
+    }
+
+    /// Corpus r7 seed 180000943: Razor Tooth upgraded the played Pact's End,
+    /// then the enemy turn's Dampen downgraded it; History Course's dupe is
+    /// the downgraded card (C# `CreateDupe` at the next turn's start). The
+    /// slot must follow the fresh card, not freeze the upgrade it had at the
+    /// reconcile.
+    #[test]
+    fn history_courses_slot_follows_a_downgrade_after_the_reconcile() {
+        use sts2_core::cards::CardId;
+        let mut carried = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &["PACTS_END", "BASH", "BASH", "BASH", "BASH"].map(str::to_owned),
+            80,
+            80,
+            &[],
+            &[],
+            "AXEBOTS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("scenario");
+        let pe = carried
+            .cards
+            .iter()
+            .find(|c| c.card_id == CardId::PactsEnd)
+            .map(|c| c.uid)
+            .expect("pact's end");
+        carried.combat_log.last_attack_skill_played = Some((CardId::PactsEnd, false, Some(pe)));
+        carried
+            .cards
+            .iter_mut()
+            .find(|c| c.uid == pe)
+            .expect("pe")
+            .upgraded = true;
+        // The rebuild numbers the cards in reverse: no uid means the same card.
+        let mut fresh = carried.clone();
+        fresh.combat_log.last_attack_skill_played = None;
+        let n = u32::try_from(fresh.cards.len()).expect("fits");
+        let renumber =
+            |u: CardUid| CardUid(std::num::NonZeroU32::new(n + 1 - u.0.get()).expect("nz"));
+        for c in &mut fresh.cards {
+            c.uid = renumber(c.uid);
+        }
+        fresh.cards.reverse();
+        let p = &mut fresh.player;
+        for u in p
+            .hand
+            .iter_mut()
+            .chain(p.draw.iter_mut())
+            .chain(p.discard.iter_mut())
+            .chain(p.exhaust.iter_mut())
+            .chain(p.play.iter_mut())
+        {
+            *u = renumber(*u);
+        }
+        transplant_hidden(&mut fresh, &carried, Carry::default()).expect("transplants");
+        let slot = fresh.combat_log.last_attack_skill_played.expect("carried");
+        assert_eq!(slot.2, Some(renumber(pe)), "the slot names the fresh card");
+        // Dampen downgrades it during the enemy turn; the dupe is that card.
+        let card = fresh
+            .cards
+            .get(slot.2.expect("uid").0.get() as usize - 1)
+            .expect("indexed by uid");
+        assert_eq!(card.card_id, CardId::PactsEnd);
+    }
+
+    /// Spire Bench r7 seeds 180000239 / 180001932: a knocked-out Test Subject
+    /// telegraphs its respawn on the board; the carried creature (alive in a
+    /// mirror that missed the kill) must not put its attack back.
+    #[test]
+    fn a_reviving_corpse_keeps_the_telegraph_the_board_shows() {
+        use sts2_core::Intent;
+        let carried = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &["StrikeIronclad".to_owned()],
+            80,
+            80,
+            &[],
+            &[],
+            "TWO_TAILED_RATS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("scenario");
+        let mut carried = carried;
+        let (u0, u1) = (carried.enemy_uids[0], carried.enemy_uids[1]);
+        for c in &mut carried.creatures {
+            if c.id == u0.0 || c.id == u1.0 {
+                c.intent = Some(Intent::Attack { damage: 22 });
+            }
+        }
+        let mut fresh = carried.clone();
+        for c in &mut fresh.creatures {
+            if c.id == u0.0 {
+                c.current_hp = 0;
+                c.intent = Some(Intent::Heal); // the board's respawn telegraph
+            } else if c.id == u1.0 {
+                c.current_hp = 0;
+                c.intent = None; // an ordinary corpse: no telegraph
+            }
+        }
+        let slots: Vec<Option<usize>> = (0..fresh.enemy_uids.len()).map(Some).collect();
+        carry_corpse_intents(&mut fresh, &carried, &slots);
+        let intent = |u: sts2_core::CreatureUid| {
+            fresh
+                .creatures
+                .iter()
+                .find(|c| c.id == u.0)
+                .and_then(|c| c.intent)
+        };
+        assert_eq!(
+            intent(u0),
+            Some(Intent::Heal),
+            "the board's telegraph stands"
+        );
+        assert_eq!(
+            intent(u1),
+            Some(Intent::Attack { damage: 22 }),
+            "a silent corpse keeps the one it died with (GH #1669)"
+        );
+    }
+
+    /// Corpus seeds 180000995 (Spite) and 180000111 (Supermassive): the
+    /// host saw an HP loss and a generated card before the mirror existed.
+    /// The wire's values must survive a carried mirror that counts 0, and a
+    /// carried count the wire lacks must still travel.
+    #[test]
+    fn the_wires_hp_loss_and_generated_cards_survive_a_mirror_that_missed_them() {
+        let carry = || Carry {
+            enemy_slots: Some(Vec::new()),
+            rng: false,
+            relic_counters: Vec::new(),
+            power_counters: Vec::new(),
+            turn_history: false,
+        };
+        let carried = CombatState::default();
+        let mut fresh = carried.clone();
+        fresh.combat_log.hp_lost_this_turn = 1;
+        fresh.player.generated_cards_this_combat = 1;
+        transplant_hidden(&mut fresh, &carried, carry()).expect("transplants");
+        assert_eq!(fresh.combat_log.hp_lost_this_turn, 1, "Spite+ hits 3 times");
+        assert_eq!(
+            fresh.player.generated_cards_this_combat, 1,
+            "Supermassive counts the Luminesce"
+        );
+        let mut seen = CombatState::default();
+        seen.player.generated_cards_this_combat = 3;
+        let mut blind = CombatState::default();
+        transplant_hidden(&mut blind, &seen, carry()).expect("transplants");
+        assert_eq!(
+            blind.player.generated_cards_this_combat, 3,
+            "an older host sends nothing"
+        );
+    }
+
     /// GH #1741: Orbit's cumulative energy survives a rebuild that can
     /// only derive it mod 4 from the badge.
     #[test]
@@ -1761,6 +2154,57 @@ mod tests {
         };
         transplant_hidden(&mut fresh, &carried, carry).expect("transplants");
         assert_eq!(counters(&fresh), vec![4, 4]);
+    }
+
+    /// GH corpus-compare seed 180000794: a Strike Hellraiser plays as the
+    /// hand is drawn counts for Juggling, not in the board's History bucket.
+    /// The carried count stands within the round; a new round's board wins.
+    #[test]
+    fn jugglings_carried_count_stands_within_the_round() {
+        let text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../sts2-wire/tests/fixtures/combat_action_ironclad.json"),
+        )
+        .expect("fixture");
+        let mut wire: serde_json::Value = serde_json::from_str(&text).expect("fixture parses");
+        wire["player"]["powers"] = json!([{"name": "JUGGLING", "amount": 1}]);
+        wire["player"]["cards_played_this_turn"] = json!([0, 1, 0, 0, 0, 0]);
+        let count = |st: &CombatState| -> Option<i32> {
+            st.player_power_uids().into_iter().find_map(|pu| {
+                st.powers
+                    .get_by_id(pu.0)
+                    .filter(|p| p.kind == sts2_core::powers::PowerKind::Juggling)
+                    .map(|p| p.counter)
+            })
+        };
+        let fresh = sts2_wire::state_from_json(&wire).expect("parses");
+        assert_eq!(count(&fresh), Some(0), "the board's bucket: no Attack");
+        let mut carried = fresh.clone();
+        for pu in carried.player_power_uids() {
+            if let Some(p) = carried.powers.get_mut_by_id(pu.0) {
+                if p.kind == sts2_core::powers::PowerKind::Juggling {
+                    p.counter = 1;
+                }
+            }
+        }
+        let carry = || Carry {
+            enemy_slots: None,
+            rng: false,
+            relic_counters: Vec::new(),
+            power_counters: Vec::new(),
+            turn_history: false,
+        };
+        let mut same_round = fresh.clone();
+        transplant_hidden(&mut same_round, &carried, carry()).expect("transplants");
+        assert_eq!(count(&same_round), Some(1), "the Hellraiser Strike counts");
+        let mut next_round = fresh.clone();
+        next_round.round += 1;
+        transplant_hidden(&mut next_round, &carried, carry()).expect("transplants");
+        assert_eq!(
+            count(&next_round),
+            Some(0),
+            "a new round starts from the board"
+        );
     }
 
     /// The board lists a lone bot before the Fabricator, and the rebuild

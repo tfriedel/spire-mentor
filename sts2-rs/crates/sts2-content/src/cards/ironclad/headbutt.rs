@@ -55,16 +55,17 @@ pub(crate) fn play_headbutt(state: &mut CombatState, target: Option<CreatureUid>
             source_pile: Some(sts2_core::cards::PileKind::Discard),
         });
     }
-    state.pending_choice = Some(sts2_core::PendingChoice {
-        kind: sts2_core::ChoiceKind::PutBack,
-        options,
-        min_select: 1,
-        max_select: 1,
-        can_skip: false,
-        post_effect: None,
-        // Single-pick: no sequential accumulation. Bead `sts2-rs-sopgf`.
-        picked: smallvec::SmallVec::new(),
-    });
+    // Open the select through the engine's one request site, not by writing
+    // `pending_choice` directly: that site ends the resolving card's
+    // `AttackCommand` first (`end_player_attack_command`), as C# has run
+    // `Hook.AfterAttack` before `CardSelectCmd.FromCombatPile` opens
+    // (`Headbutt.cs:26-29`: the `DamageCmd.Attack(...).Execute` precedes the
+    // select). The direct write left Vigor and Gigantification latched and
+    // unspent while the player picked (`VigorPower.cs:80-87`,
+    // `GigantificationPower.cs:68-75`), so the select's state showed buffs
+    // the game had already spent (Spire Bench seeds 180001296, 180001643,
+    // 180000158, 180001863, 180000220, ...).
+    state.request_card_choice(sts2_core::ChoiceKind::PutBack, options, 1, 1, false);
     EffectResult::Resolved
 }
 

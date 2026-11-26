@@ -213,6 +213,40 @@ def test_an_attack_shows_its_bestiary_base_damage():
     assert [i["base_damage"] for i in shown] == [i["base_damage"] for i in attacks]
 
 
+def test_a_status_intent_shows_its_card_count(game):
+    # The game draws the number of status cards on a status intent
+    # (NIntent.UpdateVisuals, FORMAT_STATUS_CARD_COUNT). Slimed Berserker
+    # opens with Vomit Ichor, a StatusIntent(10), on every build.
+    state = game.start(character="Ironclad", seed="STATUSCOUNT")
+    game.skip_neow(state)
+    r = game.set_player(hp=70, max_hp=80, deck=["DEFEND_IRONCLAD"] * 5, relics=[], potions=[])
+    assert r.get("type") != "error", r
+    view = game.enter_room("combat", encounter="SLIMED_BERSERKER_NORMAL")
+    intents = [i for e in view["enemies"] for i in e.get("intents") or []]
+    assert [i["type"] for i in intents] == ["StatusCard"], intents
+    assert intents[0].get("card_count") == 10
+    projected = _project(view)
+    assert projected["_unclassified"] == []
+    shown = [i for e in projected["enemies"] for i in e.get("intents") or []]
+    assert [i.get("card_count") for i in shown] == [10]
+
+
+def test_a_hidden_intent_is_sent_like_no_intent():
+    # HiddenIntent draws no icon, number or tooltip: the screen shows the
+    # same as for a move with no intents, so the view does too.
+    raw = _combat_payload()
+    shown = [i["type"] for i in raw["enemies"][0].get("intents") or []]
+    assert shown, "the enemy shows an intent; the test proves nothing"
+    raw["enemies"][0]["intents"].append({"type": "Hidden"})
+    view = _project(raw)
+    assert view["_unclassified"] == []
+    assert [i["type"] for i in view["enemies"][0]["intents"]] == shown
+    raw["enemies"][0]["intents"] = [{"type": "Hidden"}]
+    view = _project(raw)
+    assert view["_unclassified"] == []
+    assert "intents" not in view["enemies"][0]
+
+
 def _in_hand(view: dict, card: str) -> int | None:
     return next((i for i, c in enumerate(view.get("hand") or []) if c["id"] == card), None)
 

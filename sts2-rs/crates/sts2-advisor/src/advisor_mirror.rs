@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{json, Value};
 use sts2_core::CombatState;
 
+use crate::board_targets::BoardTargets;
 use crate::card_select::{self, StatePicker};
 use crate::combat_mirror::{CombatMirror, Divergence, MirrorError, Policy};
 use crate::i18n::{tr, tr_dyn, trf};
@@ -177,6 +178,9 @@ pub struct AdvisorMirror {
     mirror: Option<CombatMirror>,
     fork: Option<CombatMirror>,
     key: Option<(Value, Value)>,
+    /// The last combat advice's `best.target_index`, in board space (GH
+    /// #1918): the target a killing play reports as null.
+    last_advice_target: Option<Value>,
     stats: BTreeMap<&'static str, i64>,
     pub declines: BTreeMap<String, i64>,
     pub desync_paths: BTreeMap<String, i64>,
@@ -343,6 +347,7 @@ impl AdvisorMirror {
             mirror: None,
             fork: None,
             key: None,
+            last_advice_target: None,
             stats: STAT_KEYS.iter().map(|k| (*k, 0)).collect(),
             declines: BTreeMap::new(),
             desync_paths: BTreeMap::new(),
@@ -464,6 +469,21 @@ impl AdvisorMirror {
             On::Fork => self.fork.as_mut(),
         }
         .filter(|m| m.alive())
+    }
+
+    /// The mod's `target_index` (an index into the board's `enemies[]`) as
+    /// the `on` mirror's engine slot (`board_targets`): the carried fight
+    /// keeps corpses the game removed. Null stays null; an index with no
+    /// enemy behind it passes through, for the engine to refuse.
+    fn engine_target(&self, on: On, board: &Value) -> Value {
+        let Some(t) = as_int(board) else {
+            return Value::Null;
+        };
+        let slot = self
+            .target_state(on)
+            .and_then(|s| BoardTargets::of(s).to_engine(t))
+            .unwrap_or(t);
+        json!(slot)
     }
 
     fn target_state(&self, on: On) -> Option<&CombatState> {
@@ -653,6 +673,49 @@ impl AdvisorMirror {
         self.collect_divergences();
     }
 
+    /// Remember the last combat advice's board target (`best.target_index`);
+    /// null (an untargeted advice) is stored as nothing.
+    pub fn set_advice_target(&mut self, t: Value) {
+        self.last_advice_target = if t.is_null() { None } else { Some(t) };
+    }
+
+    /// GH #1918: the mod reports `target_index: null` for a card that killed
+    /// its target (the target has left the board). The mirror's board is the
+    /// pre-play one, so the target is still legal: recover an ENGINE slot
+    /// from the advised target, else the only legal one, else the first.
+    /// `Null` for a card with no legal target (not targeted: unchanged).
+    fn recover_card_target(&mut self, on: On, hand_idx: usize) -> Value {
+        let legal: Vec<i64> = match self.target_state(on) {
+            Some(s) => sts2_wire::emit::legal_actions(s)
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|a| {
+                    get(a, "action") == "play"
+                        && as_int(get(a, "card_index")) == i64::try_from(hand_idx).ok()
+                })
+                .filter_map(|a| as_int(get(a, "target_index")))
+                .collect(),
+            None => return Value::Null,
+        };
+        let Some(&first) = legal.first() else {
+            return Value::Null;
+        };
+        if let Some(t) = self.last_advice_target.clone() {
+            let slot = self.engine_target(on, &t);
+            if as_int(&slot).is_some_and(|s| legal.contains(&s)) {
+                return slot;
+            }
+        }
+        if legal.len() > 1 {
+            self.say(
+                Level::Debug,
+                format!("advisor mirror: null target, no advice to recover it from; guessing slot {first}"),
+            );
+        }
+        json!(first)
+    }
+
     /// `on_world_action`: advance the mirror through an action the world
     /// just committed (a `human_action`).
     pub fn on_world_action(&mut self, msg: &Value) {
@@ -715,7 +778,11 @@ impl AdvisorMirror {
             self.bump("unfollowable", 1);
             return;
         };
-        let target = as_int(get(msg, "target_index")).map_or(Value::Null, |t| json!(t));
+        let target = if get(msg, "target_index").is_null() {
+            self.recover_card_target(On::Live, idx)
+        } else {
+            self.engine_target(On::Live, get(msg, "target_index"))
+        };
         let mut action = json!({"action": "play", "card_index": idx, "target_index": target});
         if let Some(ally) = as_int(get(msg, "ally_index")) {
             action["ally_index"] = json!(ally);
@@ -790,8 +857,8 @@ impl AdvisorMirror {
                     && py::eq(get(a, "ally_index"), &ally)
             })?
             .clone();
-        if let Some(t) = as_int(target) {
-            action["target_index"] = json!(t);
+        if !target.is_null() {
+            action["target_index"] = self.engine_target(on, target);
         }
         Some(action)
     }
@@ -1227,7 +1294,7 @@ impl AdvisorMirror {
         };
         let mut told = kind == "card" && (!target_index.is_null() || !upgraded.is_null());
         if told {
-            let want_target = as_int(target_index).map_or(Value::Null, |t| json!(t));
+            let want_target = self.engine_target(on, target_index);
             let named: Vec<Value> = legal
                 .iter()
                 .filter(|a| {
@@ -1645,6 +1712,73 @@ mod tests {
             .declines
             .contains_key("a card is mid-play, so the turn is not ending"));
         assert_eq!(m.stats()["replays_attempted"], 0);
+    }
+
+    /// GH #1918: a killing play reports `target_index: null`; the advice's
+    /// target backfills it and the mirror keeps the fight.
+    fn rats_mirror(deck: &[&str]) -> (AdvisorMirror, Value) {
+        let deck: Vec<String> = deck.iter().map(|s| (*s).to_owned()).collect();
+        let cs = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &deck,
+            80,
+            80,
+            &[],
+            &[],
+            "TWO_TAILED_RATS_NORMAL",
+            10,
+            None,
+            None,
+        )
+        .expect("builds");
+        let wire = sts2_wire::emit::combat_state_to_value(&cs).expect("emits");
+        let mut m = AdvisorMirror::new(true, false);
+        assert!(m.on_combat_board(&wire, &json!({"act": 1, "floor": 3})));
+        (m, wire)
+    }
+
+    fn enemy_hps(m: &AdvisorMirror) -> Vec<i64> {
+        let wire = sts2_wire::emit::combat_state_to_value(m.live_state().unwrap()).unwrap();
+        wire["encounter"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["hp"].as_i64().unwrap())
+            .collect()
+    }
+
+    fn play_msg(id: &str, target: Value) -> Value {
+        json!({"decision_type": "combat_action", "action": "play",
+               "card": {"id": id, "upgraded": false}, "target_index": target})
+    }
+
+    #[test]
+    fn a_null_target_on_a_killing_play_is_backfilled_from_the_advice() {
+        let (mut m, _) = rats_mirror(&["STRIKE_IRONCLAD"; 5]);
+        let before = enemy_hps(&m);
+        assert!(before.len() >= 2, "a multi-enemy board");
+        m.set_advice_target(json!(1));
+        m.on_world_action(&play_msg("STRIKE_IRONCLAD", Value::Null));
+        assert!(m.live().is_some(), "the fight is kept");
+        assert_eq!(m.stats()["drops"], 0);
+        let after = enemy_hps(&m);
+        assert!(after[1] < before[1], "the advised enemy was hit");
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[2], before[2]);
+    }
+
+    #[test]
+    fn a_null_target_on_a_card_that_is_not_targeted_stays_null() {
+        let (mut m, _) = rats_mirror(&["DEFEND_IRONCLAD"; 5]);
+        m.set_advice_target(json!(1));
+        let before = enemy_hps(&m);
+        m.on_world_action(&play_msg("DEFEND_IRONCLAD", Value::Null));
+        assert!(m.live().is_some(), "no spurious drop");
+        assert_eq!(m.stats()["drops"], 0);
+        assert_eq!(enemy_hps(&m), before, "no target was invented");
+        assert_eq!(m.recover_card_target(On::Live, 0), Value::Null);
     }
 
     /// Gambler's Brew's hand in `wb-eb8f0e387af30b15` (GH #1770).

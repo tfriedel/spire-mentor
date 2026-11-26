@@ -70,6 +70,35 @@ fn lookup_relic_source(src: &str) -> Option<(&'static str, &'static str)> {
         .map(|(_, v)| *v)
 }
 
+/// A [`GENERATIVE_SOURCES`] kind by source name, as the world names it
+/// (`Splash`) or as the registry does (`SPLASH`, `CARD.SPLASH`).
+fn lookup_generative(src: &str) -> Option<&'static str> {
+    let src = src.strip_prefix("CARD.").unwrap_or(src);
+    if src.is_empty() {
+        return None;
+    }
+    let key = source_key(src);
+    GENERATIVE_SOURCES
+        .iter()
+        .find(|(k, _)| source_key(k) == key)
+        .map(|(_, v)| *v)
+}
+
+/// A screen the world named no source for, opened by the generative card
+/// in play: an autoplay (Imbued's turn-1 Splash, seed 180001961) captures no
+/// `source_model`. Without it the screen's shape read as Toolbox's offer
+/// (round 1, Toolbox owned): `add_generated_to_hand` instead of Splash's
+/// free card.
+fn generative_in_play(src: &str, wire: &Value) -> Option<&'static str> {
+    if !src.is_empty() {
+        return None;
+    }
+    list(get(wire, "deck"), "play_pile")
+        .iter()
+        .rev()
+        .find_map(|c| lookup_generative(&py::str_of(get(c, "id"))))
+}
+
 fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
     table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
 }
@@ -191,7 +220,7 @@ pub fn recognize_card_select(
     let mut block = None;
     if parked.is_none() {
         let src = str_or_empty(source_model);
-        if let Some(k) = lookup(&GENERATIVE_SOURCES, &src) {
+        if let Some(k) = lookup_generative(&src).or_else(|| generative_in_play(&src, wire)) {
             kind = k.to_string();
         } else if let Some((power_kind, power_id)) = lookup(&TURN_START_POWER_SOURCES, &src) {
             if locate_options_in_hand(options, board).unwrap_or(false) {
@@ -364,6 +393,7 @@ pub fn prepare_card_select(
     headless: &Value,
 ) -> Result<Arity, MirrorError> {
     mirror.reconcile(wire)?;
+    mirror.adopt_unseen_play(wire)?;
     let parked = mirror.parked_choice().cloned();
     let mut options = list(state, "cards")
         .iter()
@@ -641,6 +671,56 @@ mod tests {
             &Value::Null,
         );
         assert_eq!(kept.0, "put_back");
+    }
+
+    /// Seed 180001961: Imbued autoplays Splash on turn 1 of a Toolbox
+    /// fight. The world names no source; the card in play is Splash, whose
+    /// offer is free, not Toolbox's.
+    #[test]
+    fn an_unnamed_screen_takes_the_generative_card_in_play() {
+        let board = json!({"round": 1, "hand": [], "player": {"relics": [{"id": "TOOLBOX"}]}});
+        let screen = json!("FromChooseACardScreen");
+        let mut opts = vec![
+            json!({"id": "POKE", "upgraded": true}),
+            json!({"id": "HEGEMONY", "upgraded": true}),
+        ];
+        let splash = json!({"deck": {"play_pile": [{"id": "SPLASH"}]}, "encounter": []});
+        let recognized = recognize_card_select(
+            None,
+            &mut opts,
+            &board,
+            &splash,
+            0,
+            &Value::Null,
+            &Value::Null,
+            &screen,
+        );
+        assert_eq!(recognized.0, "add_generated_free_to_hand");
+        // Toolbox's own combat-start offer: nothing in play.
+        let toolbox = json!({"deck": {}, "encounter": []});
+        let shaped = recognize_card_select(
+            None,
+            &mut opts,
+            &board,
+            &toolbox,
+            0,
+            &Value::Null,
+            &Value::Null,
+            &screen,
+        );
+        assert_eq!(shaped.0, "add_generated_to_hand");
+        // A named source wins over the card in play.
+        let named = recognize_card_select(
+            None,
+            &mut opts,
+            &board,
+            &splash,
+            0,
+            &json!("Toolbox"),
+            &Value::Null,
+            &screen,
+        );
+        assert_eq!(named.0, "add_generated_to_hand");
     }
 
     /// GH #1746: Toolbox offered a Scrawl to a deck holding one. The

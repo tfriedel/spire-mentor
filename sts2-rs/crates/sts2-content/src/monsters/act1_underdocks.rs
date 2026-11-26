@@ -2651,11 +2651,13 @@ pub fn create_lagavulin_matriarch_ai() -> MonsterAi {
     // LagavulinMatriarch.cs:189, an anim/IsAwake flip with no combat-state
     // effect), then SLASHes. The core `asleep_wake_on_unblocked_damage`
     // reaction (hooks.rs) forces this state; it never enters via a normal
-    // transition.
-    s.insert(
-        "WAKE_UP_MOVE",
-        mv("WAKE_UP_MOVE", smallvec![Intent::Stun], "SLASH"),
-    );
+    // transition. `CreatureCmd.Stun` builds the stun `MoveState` with
+    // `MustPerformOnceBeforeTransitioning = true` (Creature.cs
+    // `StunInternal`), so a roll before the stunned turn is spent holds it:
+    // a wake from Demise's end-of-turn damage (`DemisePower.AfterSideTurnEnd`)
+    // comes before the enemy-intent roll, and without the flag the roll
+    // skipped the stun and the boss SLASHed that same turn.
+    s.insert("WAKE_UP_MOVE", stun_mv("WAKE_UP_MOVE", "SLASH"));
     s.insert(
         "SLEEP_CHECK",
         MonsterState::ConditionalBranch(ConditionalBranchState {
@@ -5655,6 +5657,60 @@ mod tests {
             ai.on_move_performed();
             assert_eq!(ai.roll_move_seeded(0).id, "SLASH");
         }
+    }
+
+    /// Spire Bench seeds 180001392 / 180001167 / 180000714 (A10, v0.111.0):
+    /// Demise's end-of-turn damage wakes the sleeping Matriarch AFTER her
+    /// SLEEP was performed and BEFORE the enemy-intent roll. C# stuns her
+    /// with `MustPerformOnceBeforeTransitioning` (Creature.cs `StunInternal`),
+    /// so the roll keeps WAKE_UP_MOVE and she SLASHes a turn later; the
+    /// recordings show round 2 STUNNED, round 3 SLASH_MOVE.
+    #[test]
+    fn lagavulin_matriarch_stun_survives_the_roll_before_it_is_spent() {
+        use sts2_core::damage::apply_damage;
+        use sts2_core::hooks::{CreatureRef, ValueProps};
+
+        let mut state = CombatState::default();
+        state.player.current_hp = 70;
+        state.player.max_hp = 70;
+        let uid = spawn_enemy_with_ai(
+            &mut state,
+            1,
+            MonsterKind::LagavulinMatriarch,
+            "LagavulinMatriarch",
+            220,
+            Some(create_lagavulin_matriarch_ai()),
+        );
+        sts2_core::card_effects::apply_power_to_creature(&mut state, uid, PowerKind::Asleep, 3);
+        // Round 1: SLEEP is performed (the enemy turn ran).
+        state
+            .creatures
+            .iter_mut()
+            .find(|c| c.id == uid.0)
+            .and_then(|c| c.ai.as_mut())
+            .unwrap()
+            .on_move_performed();
+        // Unblocked end-of-turn damage wakes her into the stun.
+        apply_damage(
+            &mut state,
+            CreatureRef::Player,
+            uid,
+            9,
+            ValueProps::MOVE,
+            None,
+        );
+        assert_eq!(current_state(&state, uid), Some("WAKE_UP_MOVE"));
+        let ai = state
+            .creatures
+            .iter_mut()
+            .find(|c| c.id == uid.0)
+            .and_then(|c| c.ai.as_mut())
+            .unwrap();
+        // The intent roll that follows the turn end must not skip the stun.
+        assert_eq!(ai.roll_move_seeded(0).id, "WAKE_UP_MOVE");
+        // Once the stunned turn is spent, SLASH.
+        ai.on_move_performed();
+        assert_eq!(ai.roll_move_seeded(0).id, "SLASH");
     }
 
     /// **RavenousPower ally-death devour** (C# `RavenousPower.cs:24-36`,

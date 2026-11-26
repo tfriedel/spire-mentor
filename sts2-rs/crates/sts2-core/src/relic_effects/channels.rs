@@ -3297,6 +3297,40 @@ pub fn dispatch_should_die_late(state: &mut CombatState) -> bool {
     ) == EffectResult::Resolved
 }
 
+/// Toy Box's melt (`ToyBox.AfterCombatEnd`, decomp ToyBox.cs) as the
+/// victory walk sees it. C# `CombatManager.EndCombatInternal` runs
+/// `Hook.AfterCombatEnd` (CombatManager.cs:1320) before
+/// `Hook.AfterCombatVictory` (:1331), and a melted relic leaves every hook
+/// list (`CombatState.cs:134`, `RunState.cs:148`). The engine melts run-side,
+/// after the fight (`run_bridge::exit_combat`); a wax relic that melts at
+/// this fight's end must already be out of the victory walk (Spire Bench
+/// seed 180001868: a wax Meat on the Bone melted by an act-2 boss fight
+/// healed nothing at 39/86). Marks the combat-side copy only: the run-side
+/// melt picks the same relic (the first wax, unmelted one, obtain order)
+/// and owns the count.
+///
+/// Returns the melted relic's index: C# `Hook.AfterCombatEnd` walks a list
+/// built before the pass (`RunState.IterateHookListeners`), so the relic
+/// Toy Box melts still hears that same `AfterCombatEnd` (a melted Shuriken
+/// or Pocketwatch clears its count, Spire Bench seeds 180000394,
+/// 180000811). The caller lets it.
+pub fn toy_box_melts_before_victory(state: &mut CombatState) -> Option<usize> {
+    /// `ToyBox.CanonicalVars["Combats"]`, both builds.
+    const TOY_BOX_COMBATS: i32 = 3;
+    let toy = state
+        .relics
+        .iter()
+        .find(|r| !r.is_melted && r.kind == crate::RelicKind::ToyBox)?;
+    // `CombatsSeen++` then the modulo test; once used up (v0.111.0) every
+    // wax relic has melted, so there is nothing left to find below.
+    if (toy.counter + 1) % TOY_BOX_COMBATS != 0 {
+        return None;
+    }
+    let i = state.relics.iter().position(|r| r.is_wax && !r.is_melted)?;
+    state.relics.set_melted(i, true);
+    Some(i)
+}
+
 /// Dispatch `after_combat_victory` to every registered listener.
 ///
 /// C# `Hook.AfterCombatVictory` (Hook.cs:496-508, v0.111.0; the same on

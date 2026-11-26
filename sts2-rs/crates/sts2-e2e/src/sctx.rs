@@ -419,8 +419,12 @@ impl Rl2 {
     /// `sts2_rs.rollout_features(bv, version=1)`.
     #[must_use]
     pub fn of(bv: &sts2_core::CombatState) -> Self {
-        let ex =
+        let mut ex =
             sts2_mcts::rollout_net::export_features_spec(bv, &sts2_mcts::rollout_net::FEATURES_V1);
+        // S04 reads the live max energy, as the game's screen does (Spire
+        // Bench seeds 180001392 / 180001167 / 180000714: a Pyre played on
+        // turn 1 read 4/3 natively, 5/3 on the real side).
+        sts2_mcts::rollout_net::set_live_max_energy(&mut ex.state, bv);
         let mut keys = Vec::with_capacity(ex.actions.len());
         let mut x = Vec::with_capacity(ex.actions.len());
         for (_a, k, xs) in ex.actions {
@@ -965,5 +969,26 @@ mod tests {
         let want = [601, 4, 299, 66, 272, 123, 25, 11, 16, 7, 14, 33, 8, 8, 1267];
         let got: Vec<usize> = vocab().tables.iter().map(Table::size).collect();
         assert_eq!(got, want);
+    }
+
+    /// RL2 S04 is the live max energy: a Pyre gained this turn counts at
+    /// once, though `player.max_energy` still holds the turn start's 3.
+    #[test]
+    fn rl2_max_energy_reads_a_pyre_gained_this_turn() {
+        crate::env::ensure_engine_installed();
+        let mut state = sts2_core::CombatState::default();
+        state.player.max_energy = 3;
+        let uid = sts2_core::PowerUid(std::num::NonZeroU32::new(1).expect("non-zero"));
+        state.powers.push(sts2_core::Power {
+            id: uid.0,
+            kind: sts2_core::PowerKind::Pyre,
+            amount: 1,
+            counter: 0,
+            applier: None,
+            skip_next_tick: false,
+        });
+        state.player.powers.push(uid);
+        let s04 = Rl2::of(&state).state[sts2_mcts::rollout_net::STATE_MAX_ENERGY];
+        assert!((s04 - 4.0 / 3.0).abs() < 1e-6, "S04 = {s04}");
     }
 }

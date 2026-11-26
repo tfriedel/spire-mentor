@@ -9,6 +9,7 @@
 
 use serde_json::{json, Value};
 use sts2_advisor::advise_combat::compute_combat_advice;
+use sts2_advisor::board_targets::BoardTargets;
 use sts2_advisor::combat_advice::instinct_combat_advice;
 use sts2_advisor::display_names::Names;
 use sts2_advisor::instinct::Pick;
@@ -85,7 +86,8 @@ fn instincts_fire_potion_names_the_enemy_it_is_thrown_at() {
         ms: 0.0,
     };
 
-    let advice = instinct_combat_advice(&pick, &board, &wire).expect("Instinct advises");
+    let advice = instinct_combat_advice(&pick, &board, &wire, &BoardTargets::default())
+        .expect("Instinct advises");
     let names = enemy_names(&board);
     assert_eq!(
         advice["best"],
@@ -117,6 +119,7 @@ fn the_searchs_fire_potion_rows_name_their_enemies() {
         &board,
         &RecommendConfig::default(),
         64,
+        sts2_advisor::turn_plan::PLAN_BUDGET_S,
         None,
         &Names::default(),
         &mut log,

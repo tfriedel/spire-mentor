@@ -320,6 +320,20 @@ _STALL_WINDOW = 80
 # ---------------------------------------------------------------------------
 
 
+def _purchase_repeats(
+    count: int, key: Any, last_key: Any, state_key: Any, prev_state_key: Any
+) -> int:
+    """How many times in a row the shop command ``key`` was sent with no effect.
+
+    Only a repeat that left the screen unchanged counts: a rejected purchase
+    (``buy_potion`` with a full belt). A purchase that went through changes
+    the gold and the stock, and The Courier refills the bought slot, so
+    buying slot 1 again is a new purchase; counted, the fourth one was
+    replaced by ``leave_room`` (Spire Bench seeds 180000567, 180000649).
+    """
+    return count + 1 if key == last_key and state_key == prev_state_key else 1
+
+
 def _plain_card_id(raw: Any) -> str:
     """``"CARD.STRIKE_IRONCLAD"`` / ``"STRIKE_IRONCLAD"`` -> plain entry id."""
     s = str(raw or "")
@@ -990,6 +1004,9 @@ def pick_card_select_mirrored(
         ascension=run_cfg.ascension,
     )
     mirror.reconcile(wire)
+    # A screen opened by a play the mirror never saw (Imbued's turn-1
+    # autoplay after a pre-draw Toolbox seed): take the world's board.
+    mirror.adopt_unseen_play(wire)
 
     parked = mirror.parked_choice()
     options = [
@@ -1908,7 +1925,9 @@ def play_one_headless_session(
                 command["action"],
                 json.dumps(command.get("args") or {}, sort_keys=True),
             )
-            repeat_count = repeat_count + 1 if key == last_cmd_key else 1
+            repeat_count = _purchase_repeats(
+                repeat_count, key, last_cmd_key, state_key, prev_state_key
+            )
             last_cmd_key = key
             if decision == "shop" and repeat_count >= 4 and command["action"] != "leave_room":
                 logger.warning(

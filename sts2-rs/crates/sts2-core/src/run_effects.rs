@@ -819,6 +819,14 @@ run_hook_channel!(
 /// Dispatch the run-side `modify_rest_site_heal_rewards` channel.
 /// Listeners may mutate `rewards` in place. Same accumulation
 /// convention as [`dispatch_after_obtained`].
+///
+/// Listeners run in the player's relic (acquisition) order, as C#
+/// `Hook.ModifyRestSiteHealRewards` walks `IterateHookListeners`
+/// (Hook.cs:2118-2129), not in `RelicId` order: the list order is the
+/// populate order (`RewardsSet.GenerateWithoutOffering`, RewardsSet.cs:135),
+/// so Dream Catcher's card and Tiny Mailbox's potions read the `Rewards`
+/// stream in the order the relics were obtained (Spire Bench seed
+/// 180000892: Dream Catcher before Tiny Mailbox rolls the card first).
 pub fn dispatch_modify_rest_site_heal_rewards(
     run_state: &mut RunState,
     rewards: &mut Vec<Reward>,
@@ -826,7 +834,16 @@ pub fn dispatch_modify_rest_site_heal_rewards(
     if is_empty_modify_rest_site_heal_rewards() {
         return EffectResult::NotImplemented;
     }
-    let listeners = listeners_modify_rest_site_heal_rewards();
+    let mut order: Vec<RelicId> = Vec::new();
+    for &id in run_state.active_relics().iter() {
+        if !order.contains(&id) {
+            order.push(id);
+        }
+    }
+    let listeners: Vec<(RelicId, ModifyRestSiteHealRewardsRunFn)> = order
+        .into_iter()
+        .filter_map(|id| lookup_modify_rest_site_heal_rewards(id).map(|f| (id, f)))
+        .collect();
     let mut any_resolved = false;
     for (_id, f) in listeners {
         if f(run_state, rewards) == EffectResult::Resolved {
@@ -2060,6 +2077,8 @@ mod tests {
             h_rest_site as ModifyRestSiteHealRewardsRunFn,
         );
         let mut rs = RunState::new();
+        // The dispatch walks the owned relics (C# `IterateHookListeners`).
+        rs.relics.push(RelicId::DreamCatcher);
         let mut rewards: Vec<Reward> = Vec::new();
         let result = dispatch_modify_rest_site_heal_rewards(&mut rs, &mut rewards);
         assert_eq!(result, EffectResult::Resolved);

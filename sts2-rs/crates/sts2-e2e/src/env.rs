@@ -98,6 +98,12 @@ pub const FACE_VARS: [&str; 7] = [
     "enchantment_used",
 ];
 
+/// Cards whose `generic` combat var is part of their face
+/// (`GENERIC_FACE_CARDS`, GH #1854): Mad Science keeps its TinkerTime mode
+/// (Attack / Skill / Power) and rider there. On every other card `generic` is
+/// a scratch counter, so it refines only these.
+pub const GENERIC_FACE_CARDS: [&str; 1] = ["MAD_SCIENCE"];
+
 /// The run-level forms of combat actions (`COMBAT_RUN_KINDS`). A fight's
 /// `discard_potion` rides on a run with the potion popup ("ooc-potion",
 /// GH #1606); the env plays combat from `cs.legal_actions()`, which has none.
@@ -755,7 +761,7 @@ pub fn bridge_action(a: &Value) -> R<Action> {
 const BASE_CLASS: &str = "ironclad";
 
 /// `_face_vars(raw_card, stars=)`: what refines a play key. The card's
-/// [`FACE_VARS`], and with `stars` its star cost now (`star_cost_live`) where
+/// [`FACE_VARS`] (and `generic` on a [`GENERIC_FACE_CARDS`] card), and with `stars` its star cost now (`star_cost_live`) where
 /// that is not the printed one (free this turn or this combat, Void Form,
 /// Brilliant Scarf). A copy at its printed cost adds nothing, so its key is
 /// the schema's.
@@ -765,6 +771,14 @@ fn face_vars(card: &Value, stars: bool) -> serde_json::Map<String, Value> {
     for k in FACE_VARS {
         if let Some(v) = get(&cv, k).filter(|v| truthy(v)) {
             out.insert(k.to_owned(), v.clone());
+        }
+    }
+    let generic_face = get(card, "id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| GENERIC_FACE_CARDS.contains(&id));
+    if generic_face {
+        if let Some(v) = get(&cv, "generic").filter(|v| truthy(v)) {
+            out.insert("generic".to_owned(), v.clone());
         }
     }
     if stars {
@@ -2032,6 +2046,23 @@ mod face_var_tests {
             serde_json::json!({"star_cost_live": 0})
         );
         assert!(face_vars(&free, false).is_empty());
+    }
+
+    /// GH #1854: Mad Science keeps its TinkerTime mode in `generic`, so a
+    /// moded copy and a default one are two classes; on another card
+    /// `generic` is a scratch counter and refines nothing. Mirrors
+    /// `test_mad_science_modes_split_the_play_class`.
+    #[test]
+    fn a_mad_science_mode_is_a_face_var() {
+        let plain = serde_json::json!({"id": "MAD_SCIENCE", "base_damage": 12});
+        let moded = serde_json::json!({"id": "MAD_SCIENCE", "base_damage": 12, "combat_vars": {"generic": 21}});
+        let other = serde_json::json!({"id": "GUILTY", "combat_vars": {"generic": 2}});
+        assert!(face_vars(&plain, false).is_empty());
+        assert!(face_vars(&other, true).is_empty());
+        assert_eq!(
+            Value::Object(face_vars(&moded, false)),
+            serde_json::json!({"generic": 21})
+        );
     }
 }
 

@@ -205,9 +205,37 @@ pub fn shop_removal_carry_index(
     (None, Some(warning))
 }
 
+/// [`apply_session_context`] for a message that is not the live decision:
+/// the coach projecting the map path of a choice the player already made.
+/// It reads the session and leaves it as it is. Folding a past message in
+/// moved the live map position back (and could drop a pending card skip or
+/// shop removal target) at whatever moment the coach's thread got there,
+/// so a served run's screen advice depended on thread timing (GH #1784).
+#[must_use]
+pub fn view_with_session_context(state: &Value, session: &Map<String, Value>) -> Option<Value> {
+    apply_session_context(state, &mut session.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_past_message_reads_the_session_without_moving_the_live_position() {
+        let mut session = Map::new();
+        let graph = |row: i64| json!({"nodes": [{"col": 1, "row": row}], "current": {"col": 1, "row": row}});
+        let _ = apply_session_context(
+            &json!({"type": "event", "act": 1, "map": graph(5)}),
+            &mut session,
+        );
+        let live = session.clone();
+        let past = json!({"type": "map_select", "act": 1, "map": graph(2)});
+        let _ = view_with_session_context(&past, &session);
+        assert_eq!(session, live);
+        let bare = json!({"type": "map_select", "act": 1});
+        let map = view_with_session_context(&bare, &session).unwrap();
+        assert_eq!(map["current"], json!({"col": 1, "row": 5}));
+    }
 
     #[test]
     fn a_bare_message_gets_the_cached_act_graph_at_the_last_position() {

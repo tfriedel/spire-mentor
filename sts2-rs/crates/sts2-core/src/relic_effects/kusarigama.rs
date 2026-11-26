@@ -17,6 +17,17 @@ pub(crate) fn on_after_turn_end_kusarigama(state: &mut CombatState, side: Side) 
     EffectResult::Resolved
 }
 
+/// C# `Kusarigama.BeforeCombatStart` (Kusarigama.cs:87-92): the count starts
+/// every combat at 0. Its `AfterCombatEnd` clears only the status, so the
+/// run carries the last combat's count into this one.
+pub(crate) fn on_before_combat_start_kusarigama(state: &mut CombatState) -> EffectResult {
+    let Some(r) = kusarigama_relic_mut(state) else {
+        return EffectResult::NotImplemented;
+    };
+    r.counter = 0;
+    EffectResult::Resolved
+}
+
 pub(crate) fn on_after_card_played_kusarigama(
     state: &mut CombatState,
     ctx: &CardEventCtx,
@@ -57,15 +68,11 @@ pub(crate) fn on_after_card_played_kusarigama(
     EffectResult::Resolved
 }
 
-pub(crate) fn on_after_combat_end_kusarigama(state: &mut CombatState) -> EffectResult {
-    let Some(r) = kusarigama_relic_mut(state) else {
-        return EffectResult::NotImplemented;
-    };
-    r.counter = 0;
-    EffectResult::Resolved
-}
-
 pub(crate) fn install() {
+    register_before_combat_start(
+        RelicId::Kusarigama,
+        on_before_combat_start_kusarigama as BeforeCombatStartFn,
+    );
     register_owned_after_turn_end(
         RelicId::Kusarigama,
         crate::RelicKind::Kusarigama,
@@ -74,10 +81,5 @@ pub(crate) fn install() {
     register_after_card_played(
         RelicId::Kusarigama,
         on_after_card_played_kusarigama as AfterCardPlayedFn,
-    );
-    register_owned_after_combat_end(
-        RelicId::Kusarigama,
-        crate::RelicKind::Kusarigama,
-        on_after_combat_end_kusarigama as AfterCombatEndFn,
     );
 }

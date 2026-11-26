@@ -181,6 +181,13 @@ class TestInstinct:
         grafted, _notes = ri.graft_run(msg)
         assert list(grafted.relics()) == [f"RELIC.{r}" for r in live]
 
+    def test_the_smoke_check_plays_the_shipped_net(self) -> None:
+        """`realgame_advisor --smoke` (the packaged exe's build gate) checks
+        Instinct with 20 self-play decisions. It read `INSTINCT._student`,
+        which went into Rust with the advisor core (GH #1426 step 4), and so
+        failed on every build that shipped the net."""
+        assert ra._smoke_instinct() == f"instinct OK ({WEIGHTS.name}, 20 decisions)"
+
     def test_binding_plays_like_the_native_env(self, student: Any) -> None:
         """The Python driver loop over the binding == the native env loop."""
         n = 80

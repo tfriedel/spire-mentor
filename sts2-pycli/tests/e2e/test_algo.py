@@ -2169,3 +2169,44 @@ def test_stats_means_divide_the_floor_by_floored_rows() -> None:
                           "fl_below": torch.tensor(6.0)})  # fmt: skip
     assert (m["n_fl"], m["fl_loss"], m["fl_below"]) == (4, 0.5, 1.5)
     assert math.isnan(algo.stats_means({"n_fl": 0.0, "fl_loss": 0.0})["fl_loss"])
+
+
+def test_vf_coef_run_weights_only_the_run_rows_value_loss() -> None:
+    """`LossCfg.vf_coef_run` scales the value loss of run rows; combat rows keep
+    `vf_coef`, and the value stats keep `vf_coef` on every row."""
+    from ppo.e2e.contracts import COMBAT_DTYPES
+
+    rows = _loss_rows(40, 5, seed=31)
+    combat = torch.isin(rows.dtype, torch.tensor(sorted(COMBAT_DTYPES)))
+    assert 0 < int(combat.sum()) < 40
+    value = torch.randn(40, generator=torch.Generator().manual_seed(32), requires_grad=True)
+    base = algo.ppo_losses(None, value, rows, policy_on=False)
+    run = algo.ppo_losses(
+        None, value, rows, policy_on=False, cfg=algo.LossCfg(vf_coef=0.5, vf_coef_run=2.0)
+    )
+    sq = (value.detach() - rows.target) ** 2
+    torch.testing.assert_close(base.loss, (0.5 * sq).sum() / 40)
+    want = (torch.where(combat, 0.5, 2.0) * sq).sum() / 40
+    torch.testing.assert_close(run.loss, want)
+    for k in ("vloss", "vloss_t", "n_v"):
+        torch.testing.assert_close(run.stats[k], base.stats[k])
+    (g,) = torch.autograd.grad(run.loss, value)
+    (g0,) = torch.autograd.grad(base.loss, value)
+    torch.testing.assert_close(g[combat], g0[combat])
+    torch.testing.assert_close(g[~combat], 4 * g0[~combat])
+    # equal to vf_coef: the same loss as unset
+    same = algo.ppo_losses(
+        None, value, rows, policy_on=False, cfg=algo.LossCfg(vf_coef=0.5, vf_coef_run=0.5)
+    )
+    torch.testing.assert_close(same.loss, base.loss)
+
+
+def test_learner_vf_coef_run_flag_reaches_the_loss_cfg() -> None:
+    from ppo.e2e import learner, update
+
+    assert update.loss_cfg(learner.Cfg(save_dir="")).vf_coef_run is None
+    args = learner.build_parser().parse_args(
+        [learner.OC.LEARNER_SUBCOMMAND, learner.OC.FLAG_SAVE_DIR, "x", "--vf-coef-run", "2.0"]
+    )
+    cfg = learner.cfg_from_args(args)
+    assert update.loss_cfg(cfg).vf_coef_run == pytest.approx(2.0)

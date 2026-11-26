@@ -37,6 +37,7 @@
     <Compile Include="../../TieBandText.cs" Link="TieBandText.cs" />
     <Compile Include="../../InstinctEstimateText.cs" Link="InstinctEstimateText.cs" />
     <Compile Include="../../RefusalWatch.cs" Link="RefusalWatch.cs" />
+    <Compile Include="../../RefusalFallback.cs" Link="RefusalFallback.cs" />
     <Compile Include="../../TravelGuard.cs" Link="TravelGuard.cs" />
     <Compile Include="../../BugReportDump.cs" Link="BugReportDump.cs" />
     <Compile Include="../../LinuxSignalRules.cs" Link="LinuxSignalRules.cs" />

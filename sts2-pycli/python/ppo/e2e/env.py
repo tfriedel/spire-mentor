@@ -304,6 +304,13 @@ FACE_VARS = (
     "enchantment_used",
 )
 
+# Cards whose `generic` combat var is part of their face (GH #1854). Mad Science keeps its
+# TinkerTime mode (Attack / Skill / Power) and rider there, run-persistent
+# (`mad_science.rs`); `generic` is a scratch counter on every other card, so it refines
+# only these. Two Mad Sciences of different modes are different cards: the RL2 action
+# features read the copy's card type, so merging them broke `check_members_identical`.
+GENERIC_FACE_CARDS = frozenset({"MAD_SCIENCE"})
+
 
 # Two shortcuts that change no stored row, class or trajectory (tests/e2e/test_env.py plays
 # whole segments both ways): a forced combat step inside a round that the fight's
@@ -320,12 +327,15 @@ _BASE_CLASS = "ironclad"
 
 
 def _face_vars(raw_card: dict[str, Any], *, stars: bool = False) -> dict[str, Any]:
-    """What refines a play key: the card's `FACE_VARS`, and with `stars` its star cost now
+    """What refines a play key: the card's `FACE_VARS` (and `generic` on a
+    `GENERIC_FACE_CARDS` card), and with `stars` its star cost now
     (`star_cost_live`) where that is not the printed one (free this turn or this combat,
     Void Form, Brilliant Scarf). A copy at its printed cost adds nothing, so its key is
     the schema's."""
     cv = raw_card.get("combat_vars") or {}
     fv = {k: cv[k] for k in FACE_VARS if cv.get(k)}
+    if cv.get("generic") and raw_card.get("id") in GENERIC_FACE_CARDS:
+        fv["generic"] = cv["generic"]
     if stars:
         live = raw_card.get("star_cost_live")
         if live is not None and live != raw_card.get("base_star_cost"):

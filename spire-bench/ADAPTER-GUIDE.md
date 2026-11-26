@@ -258,6 +258,14 @@ from what you have seen. `PROTOCOL.md` lists the derived values the referee
 already computes for you ("What is shown that the game's UI does not
 print"). Use those before deriving your own.
 
+Who keeps which state:
+
+| State | Where it lives |
+|---|---|
+| Exact values the game reads (the `player.*` counts, seen draw-pile positions) | The view. The referee computes them. |
+| Guesses about hidden state (enemy moves, enemy counters) | Your adapter. `bench_agents/move_infer.py` is ours; its output is a best guess, not ground truth. |
+| What earlier screens showed, and your own plans | Your agent's memory. |
+
 - **Enemy moves.** The view shows intents, not move ids. Keep a per-enemy
   move log keyed by `combat_id`. On each new telegraph, ask your simulator
   which moves can follow the last one, render each candidate's intents, and
@@ -274,8 +282,13 @@ print"). Use those before deriving your own.
   counts (Spite, Tear Asunder, Unmovable, Gang Up, extra turns) get them from
   `player.*` counters in the view. Anything else you need (cards played this
   turn, discard order), record yourself from the stream of observations.
-- **Encounter id.** Infer it from the enemy roster, the room type and the
-  act. Remember spawn-rolled rosters and event fights (section 3).
+- **Encounter id.** Infer it from the enemy roster at the start of the
+  fight, counting `removed_enemies[]` killed before your first decision.
+  Each starting roster belongs to one encounter (checked on v0.111.0 and
+  v0.113), so the match is exact once you compare monster counts as well as
+  kinds: Bowlbugs, Slimes, Corpse Slugs and the like differ between their
+  weak and normal encounters only in how many spawn. Remember spawn-rolled
+  rosters and event fights (section 3).
 - **Bestiary numbers.** An attack's base damage per hit is in
   `intents[].base_damage`. Strength, Weak and Vulnerable are visible powers,
   so you can check the shown damage against base and modifiers. A mismatch

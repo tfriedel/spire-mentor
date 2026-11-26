@@ -3956,11 +3956,13 @@ impl RunManager {
         // on a WON combat: the C# hook runs on loss too, but the dead
         // player's post-hook HP is unobservable (the headless pins death at
         // 0), and a +1 max-HP bump on a dead run made Rust report hp=1
-        // where C# shows 0. Ordering caveat: C# runs this BEFORE
-        // `AfterCombatVictory` (BurningBlood's heal), Rust models the
-        // victory heal combat-side — the swap only matters when the victory
-        // heal saturates at max HP in the same combat a max-HP listener
-        // fires (a 1-HP skew; revisit if a sweep pins it).
+        // where C# shows 0. Ordering: C# runs this BEFORE
+        // `AfterCombatVictory` (Burning Blood's heal), Rust runs the victory
+        // heals combat-side first. A capped heal totals the same either way
+        // (min(h + 1 + x, m + 1) = min(h + x, m) + 1); what reads the HP or
+        // the relic list in between is previewed combat-side: Meat on the
+        // Bone's half-HP check counts Chosen Cheese's +1, and
+        // `toy_box_melts_before_victory` takes this end's melt out first.
         let _ = crate::run_effects::dispatch_after_combat_end(&mut self.run_state);
         // Guilty's own AfterCombatEnd counts the combat and removes the curse
         // after its fifth (decomp `Models.Cards/Guilty.cs:46`, identical in
@@ -4138,8 +4140,14 @@ impl RunManager {
             self.populate_blitz_room_potion(reward_room_type);
             self.populate_fixed_extra_gold_rewards();
             // LavaRock's two act-1 boss relics, Wongo's three (`LavaRock.cs:38`,
-            // `WongosMysteryTicket.cs:80`).
+            // `WongosMysteryTicket.cs:80`). They are obtained after the boss
+            // card slate is rolled, so an egg among them upgrades the shown
+            // options (`CardReward.OnRelicObtained`, CardReward.cs:168-182),
+            // as on a Monster/Elite room (Spire Bench seed 180001039: Toxic
+            // Egg off Lava Rock upgrades Dominate / Impervious / Stoke).
+            let relics_before_card_reward = self.run_state.relics.len();
             self.populate_hook_rewards(reward_room_type, hook_relics.clone(), false);
+            self.apply_obtained_eggs_to_open_card_reward(relics_before_card_reward, &[]);
             self.fire_before_combat_reward_offered(
                 reward_room_type,
                 card_options,
@@ -10495,6 +10503,49 @@ mod tests {
         );
         let (monster_gained, _) = win_room_with_hook_relics(RoomType::Monster, &[LavaRock]);
         assert!(monster_gained.is_empty(), "LavaRock is boss-only");
+    }
+
+    /// An egg among LavaRock's boss relics is obtained after the boss card
+    /// slate is rolled, so it upgrades the shown options
+    /// (`CardReward.OnRelicObtained`, CardReward.cs:168-182). Before, only
+    /// the Monster/Elite path ran the eggs over the open reward (Spire Bench
+    /// seed 180001039, Toxic Egg off Lava Rock).
+    #[test]
+    #[serial_test::serial(global_registry)]
+    fn an_egg_off_lava_rock_upgrades_the_boss_card_reward() {
+        use crate::{RelicId, RelicRarity};
+        register_relic_reward_hook_stubs();
+        crate::run_effects::register_modify_card_reward_options_late(
+            RelicId::MoltenEgg,
+            upgrade_all_if_molten_egg as crate::run_effects::ModifyCardRewardOptionsLateRunFn,
+        );
+        let mut rm = RunManager::new(7, CharacterId::Ironclad)
+            .with_content_callbacks(drain_test_callbacks());
+        let mut by_rarity = std::collections::BTreeMap::new();
+        for rarity in [
+            RelicRarity::Common,
+            RelicRarity::Uncommon,
+            RelicRarity::Rare,
+        ] {
+            by_rarity.insert(rarity, vec![RelicId::MoltenEgg, RelicId::Anchor]);
+        }
+        rm.run_state
+            .populate_relic_grab_bag_by_rarity(by_rarity, Vec::new(), Vec::new());
+        rm.run_state.relics = vec![RelicId::LavaRock];
+        rm.run_state.act_index = 1;
+        rm.run_state.current_room =
+            Some(crate::runstate::Room::new(crate::runstate::RoomType::Boss));
+        rm.combat = Some(crate::CombatState {
+            is_over: true,
+            player_won: true,
+            ..crate::CombatState::default()
+        });
+        rm.set_phase(Phase::Combat);
+        let _ = rm.exit_combat_and_transition();
+        assert!(rm.run_state.relics.contains(&RelicId::MoltenEgg));
+        assert_eq!(rm.phase(), Phase::CardReward);
+        assert_eq!(rm.card_reward_options.len(), 3);
+        assert_eq!(rm.card_reward_upgraded, vec![true; 3]);
     }
 
     /// `Hook.ModifyRewards` walks the relics in acquisition order, so a

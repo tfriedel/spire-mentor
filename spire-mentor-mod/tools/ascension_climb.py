@@ -51,16 +51,32 @@ def _is_mod_line(line: str) -> bool:
     return "[SpireMentor]" in line
 
 
-def all_progress_saves() -> list[Path]:
-    """Every modded profile's `progress.save` (any Steam account)."""
+#: The profile directories a modded game can play, under
+#: `%APPDATA%/SlayTheSpire2/steam/`. A modded game writes `<id>/modded/profileN`
+#: of its own, unless a save-sharing mod points it at the unmodded
+#: `<id>/profileN` (2026-11-23: every run there came back `win=None`, its
+#: history record written where this driver never looked). Both are searched.
+PROFILE_DIR_GLOBS = ("*/modded/profile*", "*/profile*")
+
+
+def _profile_files(tail: str) -> list[Path]:
     root = APPDATA / "SlayTheSpire2" / "steam"
-    return [p for p in root.glob("*/modded/profile*/saves/progress.save") if p.is_file()]
+    try:
+        return [p for g in PROFILE_DIR_GLOBS for p in root.glob(f"{g}/{tail}") if p.is_file()]
+    except OSError:
+        return []
+
+
+def all_progress_saves() -> list[Path]:
+    """Every profile's `progress.save`, modded or shared (any Steam account)."""
+    return _profile_files("saves/progress.save")
 
 
 #: The game names the profile it plays every time it saves it:
-#: `Wrote N bytes to path=user://steam/<id>/modded/profile1/saves/progress.save`.
+#: `Wrote N bytes to path=user://steam/<id>/modded/profile1/saves/progress.save`,
+#: or `user://steam/<id>/profile1/...` with a save-sharing mod.
 PROFILE_WRITE_RE = re.compile(
-    r"path=user://steam/(\d+)/modded/(profile\d+)/saves/progress\.save"
+    r"path=user://steam/(\d+)/((?:modded/)?profile\d+)/saves/progress\.save"
 )
 
 
@@ -77,7 +93,7 @@ def profile_in_log(text: str) -> Path | None:
         return None
     steam_id, profile = found[-1]
     root = APPDATA / "SlayTheSpire2" / "steam"
-    return root / steam_id / "modded" / profile / "saves" / "progress.save"
+    return root / steam_id / profile / "saves" / "progress.save"
 
 
 def detect_progress_save() -> Path:
@@ -89,9 +105,10 @@ def detect_progress_save() -> Path:
     still read profile1. Nothing failed loudly -- `ladder()` reported another
     profile's ascensions and every run came back UNGRADED, because the run
     history record the game had just written was in a directory nobody looked
-    at. So detect it: newest `progress.save` under the MODDED tree wins (the
-    mod only runs there, and the loaded profile is rewritten every room, so the
-    newest is the live one). `STS2_PROGRESS_SAVE` still overrides.
+    at. So detect it: newest `progress.save` wins (the loaded profile is
+    rewritten every room, so the newest is the live one), in the modded tree or,
+    with a save-sharing mod, the unmodded one (`PROFILE_DIR_GLOBS`).
+    `STS2_PROGRESS_SAVE` still overrides.
     """
     env = os.environ.get("STS2_PROGRESS_SAVE")
     if env:
@@ -185,7 +202,14 @@ def this_run(text: str) -> str:
 
 
 RUNAWAY_RE = re.compile(r"has not moved after")
-REFUSED_RE = re.compile(r"changed nothing on the board|the game refuses")
+#: Every way the mod reports a refused AI move: silently dropped, refused by
+#: `CanPlay`, or aimed at a target that is gone. The target lines were missed,
+#: so a fight that ended turn after turn on "recommended target no longer
+#: hittable" reported "0 refusals" (2026-11-23).
+REFUSED_RE = re.compile(
+    r"changed nothing on the board|the game refuses"
+    r"|recommended target no longer hittable|no valid target for the recommended potion"
+)
 
 
 def now() -> str:
@@ -457,13 +481,18 @@ def launch_game(stdout_log: Path) -> None:
     silently never ran while a game was alive; every "the climb is stuck" on
     2026-08-06 was this one line. Handing the child DEVNULL is what makes the
     launch a launch.
+
+    `CLIMB_GAME_ARGS` (whitespace-separated) is passed on to the game, e.g.
+    `--spire-mentor-frame-port 47123` to drive the mod's actions (autobattle,
+    ai_once) through its frame link: hotkeys only reach a focused game window.
     """
     ensure_steam()
     subprocess.run(
         [
             "powershell", "-NoProfile", "-NonInteractive", "-Command",
             f"Start-Process -FilePath '{STEAM_EXE}' "
-            f"-ArgumentList '-applaunch','{STEAM_APPID}'",
+            f"-ArgumentList '-applaunch','{STEAM_APPID}'"
+            + "".join(f",'{a}'" for a in os.environ.get("CLIMB_GAME_ARGS", "").split()),
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -534,9 +563,9 @@ ADVISOR_LOG_ROTATED = ADVISOR_LOG.with_suffix(ADVISOR_LOG.suffix + ".1")
 #: The game's own end-of-run record. Carries `seed`, `ascension`, and a
 #: `map_point_history` with per-floor `player_stats` (deck / relics / hp /
 #: potions) -- i.e. everything needed to set the situation up again. Searched
-#: in EVERY modded profile (`history_files`): the slot the game plays is only
-#: known once it has saved, after the "before" snapshot was taken.
-HISTORY_GLOB = "*/modded/profile*/saves/history/*.run"
+#: in EVERY profile (`history_files`, `PROFILE_DIR_GLOBS`): the slot the game
+#: plays is only known once it has saved, after the "before" snapshot was taken.
+HISTORY_TAIL = "saves/history/*.run"
 
 
 def advisor_log_offset() -> int:
@@ -585,11 +614,8 @@ def read_advisor_since(offset: int) -> bytes:
 
 
 def history_files() -> list[Path]:
-    """Every run-history record of every modded profile."""
-    try:
-        return list((APPDATA / "SlayTheSpire2" / "steam").glob(HISTORY_GLOB))
-    except OSError:
-        return []
+    """Every run-history record of every profile, modded or shared."""
+    return _profile_files(HISTORY_TAIL)
 
 
 def history_snapshot() -> set[str]:
@@ -1016,9 +1042,7 @@ def play_one(
         detail=detail,
         floors=text.count("Takeover executed on NMapScreen:"),
         actions=text.count(TAKEOVER),
-        refusals=len(
-            re.findall(r"changed nothing on the board|the game refuses", text)
-        ),
+        refusals=len(REFUSED_RE.findall(text)),
         minutes=round((time.time() - started) / 60, 1),
         log=f"{tag}.godot.log",
         ascension_after=after,

@@ -248,6 +248,10 @@ class Cfg:
     # a base whose run seeds leave the lane's block is refused.
     run_seed_base: int = 0
     practice: bool = True
+    # Overrides of practice's schedule (`practice.check_practice_mix`): {"share": slots
+    # share, "boss": boss share of practice starts}; {} = the schedule. Any restart may
+    # change it (it only picks segments).
+    practice_mix: dict[str, float] = field(default_factory=dict)
     # F9 (FIDELITY.md): `invariants.KNOWN_ISSUES` keys the env checker tolerates
     # (["crossbow_hand_cap"] if G1 launches with engine fault E1); [] = strict.
     f9_tolerate: list[str] = field(default_factory=list)
@@ -409,6 +413,9 @@ class Cfg:
     is_cap: float = 2.0
     dual_clip: float = 3.0
     vf_coef: float = 0.5
+    # The value-loss coefficient of run (out-of-combat) rows; negative: `vf_coef`
+    # (`algo.LossCfg.vf_coef_run`).
+    vf_coef_run: float = -1.0
     grad_clip: float = 1.0
     weight_decay: float = 1e-4
     adv_decay: float = 5e-4
@@ -1142,6 +1149,12 @@ class Learner:
         # ... and the deck select screens iff declared (GH #1790).
         factory.set_fill_deck_select(C.FILL_DECK_SELECT in cfg.filled)
         try:
+            from .practice import check_practice_mix
+
+            cfg.practice_mix = check_practice_mix(dict(cfg.practice_mix))
+        except ValueError as e:
+            raise UsageError(f"--practice-mix {cfg.practice_mix}: {e}") from None
+        try:
             self.stamps = make_stamps(filled=cfg.filled)
         except sts2_client.GameVersionMismatch as e:
             raise UsageError(str(e)) from None
@@ -1583,6 +1596,7 @@ class Learner:
             "start_decisions": self.decisions,
             "seed": cfg.seed,
             "practice": cfg.practice,
+            "practice_mix": dict(cfg.practice_mix),
             "f9_tolerate": list(cfg.f9_tolerate),
             "teacher_rare": rare,
             "run_teacher_honest": bool(cfg.run_teacher_honest),

@@ -85,6 +85,7 @@ def _policy(picks: list[dict[str, Any]]) -> InstinctPolicy:
     pol.room_hp = None
     pol.fight_floor = None
     pol.last_room_type = None
+    pol.last_room_floor = None
     pol.event_button = None
     pol.last_view = None
     pol.act_end_view = None
@@ -288,6 +289,30 @@ def test_an_event_fights_first_decision_still_knows_its_button():
     assert pol.event_button is None
 
 
+def test_whispering_earrings_first_turn_in_an_event_fight_does_not_move_its_run_hp():
+    # Battleworn Dummy's fight starts on the event page's HP; Whispering
+    # Earring then plays the first turn before the first decision, and that
+    # turn cost HP (seed 180001585: page 97, first decision 96; seed
+    # 180001606: page 87, first decision 81). The engine's fight starts on
+    # the page's HP. Planisphere healed entering the `?` room, before the
+    # page, so it is not added again.
+    pol = _policy([])
+    relics = [{"id": "RELIC.WHISPERING_EARRING"}, {"id": "RELIC.PLANISPHERE"}]
+    pol.saw(
+        {
+            "decision": "event_choice",
+            "player": {"hp": 97, "max_hp": 99},
+            "context": {"room_type": "Event"},
+        }
+    )
+    pol.event_button = "BATTLEWORN_DUMMY.pages.INITIAL.options.SETTING_2"
+    fight = {"decision": "combat_play", "context": {"act": 3, "room_type": "Monster"}}
+    pol._name_encounter(fight, ["BattleFriendV2"], "unknown")
+    run = {"hp": 96, "max_hp": 99, "relics": relics}
+    msg = pol._fight_msg(fight, run, None, node="unknown")
+    assert msg["run_state"]["hp"] == 97
+
+
 def test_a_fight_does_not_start_again_when_its_mirror_was_dropped():
     # The driver calls `fight_started` whenever it meets a fight screen with
     # no live mirror. A mirror dropped in the middle of a fight (a desync)
@@ -336,6 +361,21 @@ def test_a_room_the_host_answered_still_names_the_next_map():
     )
     at_map = {"context": {"act": 1, "total_floor": 13, "room_type": "Map"}}
     assert pol.envelope(at_map, None)["current_room"] == "Treasure"
+
+
+def test_a_room_that_showed_no_screen_is_an_empty_chest():
+    # Spire Bench seed 180000315: under Silver Crucible the first chest holds
+    # nothing, so a `?` that rolled it shows no screen at all; the next map
+    # is a floor later, and the run stands in that treasure room, not the
+    # fight before it.
+    pol = _policy([])
+    fight = {"context": {"act": 1, "total_floor": 2, "room_type": "Monster"}}
+    assert pol.envelope(fight, None)["current_room"] == "Monster"
+    same_floor = {"context": {"act": 1, "total_floor": 2, "room_type": "Map"}}
+    assert pol.envelope(same_floor, None)["current_room"] == "Monster"
+    next_floor = {"context": {"act": 1, "total_floor": 3, "room_type": "Map"}}
+    assert pol.envelope(next_floor, None)["current_room"] == "Treasure"
+    assert pol.envelope(next_floor, None)["current_room"] == "Treasure"
 
 
 def test_an_in_fight_choice_is_asked_of_the_student(monkeypatch):

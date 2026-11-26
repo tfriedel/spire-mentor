@@ -24,6 +24,7 @@ pub const SRC_HASH: &str = env!("STS2_ADVISOR_SRC_HASH");
 pub mod advise_combat;
 pub mod advisor_mirror;
 pub mod board;
+pub mod board_targets;
 pub mod card_select;
 pub mod coach;
 pub mod coach_grader;

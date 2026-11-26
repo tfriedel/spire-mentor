@@ -2716,6 +2716,7 @@ public class RunSimulator
             }
             WaitForTask(task, 2000, "shop/unknown map-entry task");
             if (task.IsFaulted) task.GetAwaiter().GetResult();
+            SettleParasolPurchase();
         }
         else
         {
@@ -4525,6 +4526,12 @@ public class RunSimulator
             // card twice too: a Perfected Strike that left a Zapbot on 5 HP
             // killed it there (Spire Bench seed 170000220).
             ["THROWING_AXE"] = LatchField("ThrowingAxe", "_usedThisCombat"),
+            // Once per run: the death it prevented spends it (`_wasUsed`,
+            // `IsUsedUp`; the engine reads counter 1 as spent, lizard_tail.rs).
+            // With no counter on the wire a rebuilt fight re-armed it, so a
+            // lethal hit read as a 50% heal (Spire Bench seed 180001448,
+            // native S_HP_LOSS_END 0.3 vs real 0).
+            ["LIZARD_TAIL"] = LatchField("LizardTail", "_wasUsed"),
         };
 
     /// <summary>The counter a spent latch reads as, where the engine's is not
@@ -4637,6 +4644,19 @@ public class RunSimulator
                     total += e.Value is decimal v ? v : 0m;
                 d["Stolen"] = (int)(-total);
             }
+            // Test Subject's MULTI_CLAW grows a hit per use in private monster
+            // data (`_extraMultiClawCount`, TestSubject.cs:303). The engine
+            // keeps the count on Painful Stabs' counter: the power lives
+            // exactly as long as the second form, the one phase with
+            // MULTI_CLAW. Not on the wire, a rebuilt or reseeded fight read 0
+            // (Spire Bench seeds 180001932 / 180000915: native counter 1 / 2).
+            if (pw.GetType().Name == "PainfulStabsPower"
+                && pw.Owner?.Monster is object subject
+                && subject.GetType().Name == "TestSubject"
+                && subject.GetType()
+                    .GetField("_extraMultiClawCount", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    ?.GetValue(subject) is int extraClaws)
+                d["ExtraMultiClawCount"] = extraClaws;
             return d.Count > 0 ? d : null;
         }
         catch (Exception hostFault) { HostFaults.Swallowed(hostFault); return null; }
@@ -4919,6 +4939,11 @@ public class RunSimulator
                     }
                     catch (Exception hostFault) { HostFaults.Swallowed(hostFault); }
                 }
+                // The number the game draws on a status intent (NIntent.
+                // UpdateVisuals, FORMAT_STATUS_CARD_COUNT): how many status
+                // cards the move adds.
+                if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.StatusIntent status)
+                    intentInfo["card_count"] = status.CardCount;
                 intents.Add(intentInfo);
             }
         }
@@ -6800,6 +6825,37 @@ public class RunSimulator
     {
         DriveStashedTask(ref _pendingPurchaseTask, "shop purchase task");
         DriveStashedTask(ref _pendingMapEntryTask, "shop map-entry task");
+        SettleParasolPurchase();
+    }
+
+    /// <summary>
+    /// Run Lord's Parasol's buy-out on to its next stop before the host reports
+    /// a decision. <c>LordsParasol.AfterRoomEntered</c> starts
+    /// <c>PurchaseEverything</c> fire-and-forget (LordsParasol.cs:27), so no
+    /// task the host stashes is the buy-out itself. Under interactive rewards a
+    /// bought Orrery's reward screen (Orrery.cs:19-27) parks it on a TCS
+    /// (<c>PlayCustomRewardScreen</c>), so shop entry returns, nothing is
+    /// stashed, and the last reward's answer wakes the buy-out on another
+    /// thread. The host then read the shop while that thread was still buying
+    /// the remaining relics and potions, and reported a shop with its potions
+    /// unbought and a paid removal on offer; the forced, free removal
+    /// (LordsParasol.cs:106-111, <c>cancelable: false</c>) surfaced only on the
+    /// client's next shop command (GH #1908, Spire Bench seeds 180000148,
+    /// 180001197, 180001619). In the game the shop takes no input until the
+    /// buy-out ends (LordsParasol.cs:41-51, <c>BlockInput</c> until the
+    /// <c>finally</c>), so the removal screen is the next decision.
+    /// </summary>
+    private void SettleParasolPurchase()
+    {
+        if (YieldPatches.InFlightParasolPurchase is not { } purchase) return;
+        if (!purchase.Task.IsCompleted && ReferenceEquals(_runState?.CurrentRoom, purchase.Room))
+            WaitUntilOptionTaskSettles(purchase.Task, "Lord's Parasol buy-out (until its next selection or completion)");
+        if (!purchase.Task.IsCompleted && ReferenceEquals(_runState?.CurrentRoom, purchase.Room)) return;
+        // Done, or left behind by a run or room it no longer belongs to.
+        YieldPatches.InFlightParasolPurchase = null;
+        WaitForActionExecutor();
+        _syncCtx.Pump();
+        WaitForActionExecutor();
     }
 
     private void DriveStashedTask(ref Task? slot, string what)
@@ -9847,6 +9903,11 @@ public class RunSimulator
         internal static System.Reflection.MethodInfo? ParasolPurchaseEverything;
         private static readonly List<(RelicModel Relic, MerchantRoom Room)> DeferredParasolPurchases = new();
 
+        /// <summary>The buy-out started for the shop just entered, until it
+        /// finishes; see <c>RunSimulator.SettleParasolPurchase</c>.</summary>
+        internal sealed record ParasolPurchase(Task Task, MerchantRoom Room);
+        internal static volatile ParasolPurchase? InFlightParasolPurchase;
+
         /// <summary>Queue Lord's Parasol's shop buy-out instead of starting it inside
         /// the hook loop; see <c>PatchLordsParasolAfterRoomHooks</c>.</summary>
         public static bool LordsParasolDeferPrefix(RelicModel __instance, AbstractRoom room, ref Task __result)
@@ -9878,7 +9939,9 @@ public class RunSimulator
                     {
                         // Fire-and-forget, exactly as LordsParasol.cs:27 does.
                         var task = (Task?)ParasolPurchaseEverything!.Invoke(relic, new object[] { GameApi.LocalInventory(room) });
-                        if (task != null) TaskHelper.RunSafely(task);
+                        if (task == null) continue;
+                        if (!task.IsCompleted) InFlightParasolPurchase = new ParasolPurchase(task, room);
+                        TaskHelper.RunSafely(task);
                     }
                 }
             }

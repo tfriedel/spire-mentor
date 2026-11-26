@@ -110,6 +110,7 @@ internal static partial class ZhText
         ("— combat ended —", "— 战斗结束 —"),
         ("Auto-play off — run over", "自动游玩已关闭 — 本局结束"),
         ("AI move refused {0}x — ending turn", "AI 的操作被拒绝 {0} 次 — 结束回合"),
+        ("AI move '{0}' refused — playing '{1}' instead", "AI 的操作“{0}”被拒绝 — 改为执行“{1}”"),
         ("AI has no move {0}x — ending turn (co-op)", "AI 连续 {0} 次没有可行操作 — 结束回合（合作）"),
         ("looping event — forced option {0} instead of option {1}", "事件陷入循环 — 强制选择选项 {0} 而非选项 {1}"),
         ("stuck in a loop on {0} — the same choice came round {1} times; finish this screen by hand (F7 again to resume)",

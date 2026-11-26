@@ -344,6 +344,7 @@ def worker_main(wid: int, conn: Any, cfg: dict[str, Any]) -> None:
         worker=wid,
         seed=(int(cfg["seed"]) * 1_000_003 + int(cfg["start_it"])) & 0xFFFFFFFF,
         enabled=bool(cfg["practice"]),
+        mix=cfg.get("practice_mix") or None,
     )
     honest = bool(cfg.get("run_teacher_honest"))
 

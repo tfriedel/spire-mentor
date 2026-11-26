@@ -465,8 +465,10 @@ fn advisor_enemy_hp<'py>(py: Python<'py>, wire: &Bound<'py, PyAny>) -> PyResult<
 /// decision's config is `cfg` with that character and ascension, `sims`,
 /// and `c_puct=None`. `log` is what the advisor logs, as
 /// `(level, message)`; the mirror's own lines stay queued on it.
+/// `plan_budget_s` caps the turn plan's re-searches (infinite: no cap, as
+/// a replay wants).
 #[pyfunction]
-#[pyo3(signature = (state, cfg, sims, names, mirror = None))]
+#[pyo3(signature = (state, cfg, sims, names, mirror = None, plan_budget_s = sts2_advisor::turn_plan::PLAN_BUDGET_S))]
 #[allow(clippy::type_complexity)]
 fn advice_compute_combat<'py>(
     py: Python<'py>,
@@ -475,6 +477,7 @@ fn advice_compute_combat<'py>(
     sims: u32,
     names: &crate::display_names::PyDisplayNames,
     mirror: Option<&Bound<'py, PyAdvisorMirror>>,
+    plan_budget_s: f64,
 ) -> PyResult<(
     Bound<'py, PyAny>,
     PyCombatState,
@@ -490,7 +493,9 @@ fn advice_compute_combat<'py>(
     let core = held.as_deref_mut().map(|c| &mut c.core);
     let names = &names.names;
     let mut log = Vec::new();
-    let out = py.allow_threads(|| compute_combat_advice(&state, &cfg, sims, core, names, &mut log));
+    let out = py.allow_threads(|| {
+        compute_combat_advice(&state, &cfg, sims, plan_budget_s, core, names, &mut log)
+    });
     drop(held);
     let log = log
         .into_iter()
@@ -577,6 +582,7 @@ fn advice_from_result<'py>(
         sims,
         &names.names,
         research,
+        sts2_advisor::turn_plan::PLAN_BUDGET_S,
     )
     .map_err(|e| match e {
         AdviseError::Unmapped(m) => pyo3::exceptions::PyKeyError::new_err(m),

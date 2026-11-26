@@ -258,7 +258,11 @@ def build_advice(
 
 
 def compute_combat_advice(
-    state: dict[str, Any], cfg: RecommendConfig, sims: int, mirror: Any = None
+    state: dict[str, Any],
+    cfg: RecommendConfig,
+    sims: int,
+    mirror: Any = None,
+    plan_budget_s: float | None = None,
 ) -> tuple[dict[str, Any], Any, RecommendConfig, list[dict[str, Any]]]:
     """One full search for one ``advice_request`` wrapping a combat board, in
     Rust (``sts2_advisor::advise_combat``, GH #1426).
@@ -284,6 +288,9 @@ def compute_combat_advice(
             (a combat screen has no executable ``choose``), and a failed
             mirror search drops it and falls back to the rebuild. ``None``
             keeps the stateless rebuild.
+        plan_budget_s: Seconds the turn plan may re-search; `None` is the
+            engine's `TURN_PLAN_BUDGET_S`, `inf` no cap (a replay: a plan the
+            clock cut depends on the machine's load, GH #1784).
 
     Raises:
         UnsupportedGameVersionError: a build the engine has no rules for.
@@ -294,9 +301,11 @@ def compute_combat_advice(
     if state.get("type") == "combat_action":
         envelope_game_version(state)
     core = mirror._core if mirror is not None else None
+    if plan_budget_s is None:
+        plan_budget_s = sts2_rs.TURN_PLAN_BUDGET_S
     try:
         advice, cs, character, ascension, rows, log = sts2_rs.advice_compute_combat(
-            state, dataclasses.asdict(cfg), sims, _names(), core
+            state, dataclasses.asdict(cfg), sims, _names(), core, plan_budget_s
         )
     finally:
         if mirror is not None:
@@ -1367,7 +1376,11 @@ def build_coach(
             return None
         import realgame_ppo
 
-        state = realgame_ppo.apply_session_context({**msg, "type": "map_select"}, session)
+        # A copy: this is a past choice, and folding it into the live session
+        # moved the run's map position back (GH #1784).
+        state = realgame_ppo.apply_session_context(
+            {**msg, "type": "map_select"}, None if session is None else dict(session)
+        )
         character = (
             character_display_name((state.get("run_state") or {}).get("character")) or "Ironclad"
         )
@@ -1825,7 +1838,9 @@ def _handle_advice_request(
                 sims=sims,
             )
         elif advice_for == "combat_action":
-            advice, cs, call_cfg, rows = compute_combat_advice(state, fight_cfg, sims, mirror)
+            advice, cs, call_cfg, rows = compute_combat_advice(
+                state, fight_cfg, sims, mirror, getattr(args, "plan_budget_s", None)
+            )
             advice = apply_ally_wait(state, advice)
             LAST_COMBAT.put(state_id, cs, call_cfg)
             if args.log_search_tree > 0 and logged_step:
@@ -1941,6 +1956,34 @@ class _SmokeSkip(Exception):
     """A smoke step with nothing to check in this build."""
 
 
+def _smoke_instinct() -> str:
+    """The ``--smoke`` Instinct step: the bundled weights, the tokenizer's
+    baked-in tables and the forward, through 20 real decisions of the
+    campaign run -- the same path a live request takes past the graft.
+
+    The advisor's own student lives inside ``sts2_rs.InstinctAdvisorCore``
+    (GH #1426 step 4) and is not reachable from Python, so the self-play
+    loads the same weights file into a second ``sts2_rs.E2eStudent``. The
+    advisor's own load is checked through ``INSTINCT.available``.
+
+    Raises :class:`_SmokeSkip` for a build without the net (the public export
+    ships none, and the spec says so loudly at build time).
+    """
+    import sts2_rs
+
+    weights = INSTINCT._weights
+    if not weights.is_file():
+        print(f"instinct SKIP (no net at {weights})")
+        raise _SmokeSkip
+    if not INSTINCT.available:
+        raise RuntimeError(f"the advisor could not load {weights} (see the log above)")
+    student = sts2_rs.E2eStudent(str(weights))
+    played = sts2_rs.e2e_selfplay(student, 170000000, max_decisions=20)
+    if played.get("decisions") != 20 or played.get("error"):
+        raise RuntimeError(f"self-play stopped early: {played}")
+    return f"instinct OK ({weights.name}, 20 decisions)"
+
+
 def _smoke() -> int:
     """Deterministic self-check of the packaged exe (build gate, GH #380).
 
@@ -2016,22 +2059,7 @@ def _smoke() -> int:
         print(f"run policy FAIL: {e}")
 
     try:
-        # Instinct (the e2e student): the bundled weights, the tokenizer's
-        # baked-in tables and the forward, through 20 real decisions of the
-        # campaign run -- the same path a live request takes past the graft.
-        import sts2_rs
-
-        if not INSTINCT._weights.is_file():
-            # A build without the net (the public export ships none, and the
-            # spec says so loudly at build time): nothing to check here.
-            print(f"instinct SKIP (no net at {INSTINCT._weights})")
-            raise _SmokeSkip
-        if not INSTINCT.available:
-            raise RuntimeError(INSTINCT._error or "not loaded")
-        played = sts2_rs.e2e_selfplay(INSTINCT._student, 170000000, max_decisions=20)
-        if played.get("decisions") != 20 or played.get("error"):
-            raise RuntimeError(f"self-play stopped early: {played}")
-        print(f"instinct OK ({INSTINCT._weights.name}, 20 decisions)")
+        print(_smoke_instinct())
     except _SmokeSkip:
         pass
     except Exception as e:
@@ -2211,6 +2239,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Seconds after an end turn within which the coach must finish "
         "grading that turn; past it, or once the next turn's advice is "
         "requested, the turn stays ungraded and silent (never a late chip).",
+    )
+    parser.add_argument(
+        "--plan-budget-s",
+        type=float,
+        default=None,
+        help="Seconds the turn plan may spend re-searching (default: the "
+        "engine's TURN_PLAN_BUDGET_S; `inf`: no cap, for a test comparing "
+        "replies, since a clock cut depends on the load).",
     )
     parser.add_argument(
         "--smoke",

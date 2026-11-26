@@ -696,6 +696,22 @@ pub fn graft_run(state: &Value, version: &str) -> Result<(RunManager, Vec<String
         rm.run_state.remove_relic_from_grab_bags(id);
     }
     rm.run_state.relics = live;
+    // A wax relic Toy Box melted is still held but does nothing (C#
+    // `RelicModel.IsMelted`, the screen's `melted`). Left active, a melted
+    // Shovel or Girya added Dig / Lift the game's rest site does not show;
+    // the rest-site screen then read the missing button as used this visit
+    // and offered the student a Leave the game has not (Spire Bench seeds
+    // 180000913, 180000818, 180000916).
+    rm.run_state.melted_relics = py::list(py::get(state, "run_state"), "relics")
+        .iter()
+        .filter(|r| py::truthy(py::get(r, "melted")) || py::truthy(py::get(r, "is_melted")))
+        .filter_map(|r| {
+            let id = py::str_of(py::get(r, "id"));
+            sts2_content::names::relic_id_from_str_any_build(
+                id.strip_prefix("RELIC.").unwrap_or(&id),
+            )
+        })
+        .collect();
     rm.run_state.current_act_map = placed_map;
     // Golden Compass's act, which no screen names: this one when the screen's
     // map is its single path, an earlier one otherwise (none of a later
@@ -1160,6 +1176,27 @@ pub(crate) mod tests {
                 .values()
                 .any(|b| b.contains(&RelicId::BagOfPreparation));
         assert!(!pooled, "a held relic stays pooled");
+    }
+
+    /// A melted wax relic does nothing in the rebuilt run: a melted Shovel
+    /// adds no Dig to the rest site (Spire Bench seed 180000913).
+    #[test]
+    fn a_melted_wax_relic_is_inert_in_the_rebuild() {
+        sts2_e2e::env::ensure_engine_installed();
+        let dig = |melted: bool| {
+            let mut msg = seedless_message(&screen_map(&reference_run(1)), 1);
+            msg["run_state"]["relics"] = json!([
+                {"id": "BURNING_BLOOD"},
+                {"id": "SHOVEL", "melted": melted},
+            ]);
+            let (mut rm, _) = graft_run(&msg, "v0.111.0").expect("graft");
+            sts2_wire::graft::enter_rest_site(&mut rm, &[])
+                .expect("rest site")
+                .iter()
+                .any(|id| id.eq_ignore_ascii_case("dig"))
+        };
+        assert!(dig(false), "a live Shovel digs");
+        assert!(!dig(true), "a melted Shovel does not");
     }
 
     #[test]

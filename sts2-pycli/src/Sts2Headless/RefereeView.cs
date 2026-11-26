@@ -77,7 +77,12 @@ internal static class RefereeView
             reply.Remove(PotionBeltKey);
             var projected = (JsonObject?)Project(reply, "") ?? new JsonObject();
             SortDrawPile(projected);
-            if (projected["combat"] is JsonObject combat) SortDrawPile(combat);
+            DropHiddenIntents(projected);
+            if (projected["combat"] is JsonObject combat)
+            {
+                SortDrawPile(combat);
+                DropHiddenIntents(combat);
+            }
             var legal = LegalActions(projected, combatLegal);
             AddPotionBelt(legal, belt);
             if (record) lock (Gate) _lastLegal = (JsonArray)legal.DeepClone();
@@ -422,6 +427,30 @@ internal static class RefereeView
     /// The draw pile is public as a set and secret as a sequence: send it in
     /// an order that depends only on its contents.
     /// </summary>
+    /// <summary>
+    /// A <c>HiddenIntent</c> draws nothing: no sprite, no number, no tooltip
+    /// (decomp HiddenIntent: SpritePath null, HasIntentTip false). On screen
+    /// it looks like a move with no intents, so it is sent like one. On
+    /// v0.111.0 and v0.113 only the Architect (the victory event, no combat
+    /// decision) and test monsters use it.
+    /// </summary>
+    private static void DropHiddenIntents(JsonObject state)
+    {
+        foreach (string list in new[] { "enemies", "dead_enemies", "removed_enemies" })
+        {
+            if (state[list] is not JsonArray enemies) continue;
+            foreach (var enemy in enemies.OfType<JsonObject>())
+            {
+                if (enemy["intents"] is not JsonArray intents) continue;
+                var hidden = intents
+                    .Where(i => i is JsonObject o && o["type"]?.GetValue<string>() == "Hidden")
+                    .ToList();
+                foreach (var i in hidden) intents.Remove(i);
+                if (intents.Count == 0) enemy.Remove("intents");
+            }
+        }
+    }
+
     private static void SortDrawPile(JsonObject state)
     {
         if (state["draw_pile"] is not JsonArray pile) return;
@@ -515,19 +544,20 @@ internal static class RefereeView
         // Combat history a player watched happen (GH #1712, the mod's #989 keys).
         Add("player", "bound_card_played_this_turn hp_lost_this_turn unblocked_hits_this_combat"
             + " cards_exhausted_this_combat cards_exhausted_this_turn card_block_gains_this_turn"
-            + " extra_turns_taken_this_combat cards_drawn_this_combat");
+            + " extra_turns_taken_this_combat cards_drawn_this_combat cards_generated_this_combat"
+            + " discards_this_turn");
         Add("player.powered_hits_this_turn[]", "enemy hits");
         Add("player.potions[]", "entry name description index slot target_type vars vars.*");
         Add("player.relics[]", "id name description counter is_wax is_melted vars vars.*");
         Add("enemies[]", "id name index combat_id slot hp max_hp block intends_attack");
         // The card a thief holds, shown on it in the game (GH #1693).
         Add("enemies[].stolen_cards[]", "id upgraded");
-        Add("enemies[].intents[]", "type damage hits base_damage");
+        Add("enemies[].intents[]", "type damage hits base_damage card_count");
         Add("dead_enemies[]", "id name combat_id slot hp max_hp block is_dead");
-        Add("dead_enemies[].intents[]", "type damage hits base_damage");
+        Add("dead_enemies[].intents[]", "type damage hits base_damage card_count");
         // Enemies a player watched die and leave the board (GH #1716).
         Add("removed_enemies[]", "id name combat_id slot hp max_hp block is_dead");
-        Add("removed_enemies[].intents[]", "type damage hits base_damage");
+        Add("removed_enemies[].intents[]", "type damage hits base_damage card_count");
         Add("removed_enemies[].powers[]", power);
         Add("orbs[]", "name type index passive evoke");
         Add("osty", "name alive hp max_hp block");

@@ -449,6 +449,10 @@ pub fn replay(
         boss_sims: opts.boss_sims,
         threads: opts.threads,
         inline_coach: true,
+        // No wall-clock cuts: a plan or a coach turn the clock ends early
+        // depends on the machine's load, so the replies would too (GH #1784).
+        plan_budget_s: f64::INFINITY,
+        coach_budget_s: f64::INFINITY,
         ..Settings::default()
     };
     let mut advisor = build_advisor(data_root, settings, None, None, log);

@@ -221,18 +221,26 @@ def _fight_start_hp(
     imbued = any(
         (c or {}).get("enchantment") == "Imbued" for c in run_state.get("master_deck") or []
     )
-    earring = healed and ("WHISPERING_EARRING" in ids or imbued) and not from_event
+    earring = healed and ("WHISPERING_EARRING" in ids or imbued)
     # What heals between the screen before the fight and its first turn: a
-    # boss room's Pantograph, a `?` room's Planisphere.
-    entry = (_PANTOGRAPH_HEAL if boss and "PANTOGRAPH" in ids else 0) + (
-        _PLANISPHERE_HEAL if unknown and "PLANISPHERE" in ids else 0
+    # boss room's Pantograph, a `?` room's Planisphere. A fight an event
+    # button started has the event's own page before it, which already shows
+    # Planisphere's heal; and no such button moves HP itself (v0.111.0
+    # `EnterCombatWithoutExitingEvent` callers: Battleworn Dummy, Dense
+    # Vegetation's FIGHT after its REST page, Fake Merchant, The Lantern Key,
+    # Punch Off, The Architect).
+    entry = (
+        0
+        if from_event
+        else (_PANTOGRAPH_HEAL if boss and "PANTOGRAPH" in ids else 0)
+        + (_PLANISPHERE_HEAL if unknown and "PLANISPHERE" in ids else 0)
     )
     if earring and room_hp is not None and isinstance(max_hp, int):
         # Whispering Earring (or an Imbued card) played before this decision
         # (`AfterAutoPrePlayPhaseEnteredLate`), so the HP here is already the
         # fight's. The fight started on the HP of the screen before it, plus
-        # a boss room's Pantograph; not so a fight an event button started,
-        # whose own HP change is on no screen before it (GH #1751).
+        # a boss room's Pantograph (GH #1751); an event's fight on its page's
+        # (Battleworn Dummy: seeds 180001585, 180001606).
         return {"hp": min(max_hp, room_hp + entry), "max_hp": max_hp}
     heal = sum(_TURN_START_HEAL.get(i, 0) for i in ids) if healed else 0
     loss = sum(_TURN_START_DAMAGE.get(i, 0) for i in ids) if healed else 0
@@ -269,6 +277,8 @@ class InstinctPolicy:
         # The floor of the fight in progress, None outside one (GH #1752).
         self.fight_floor: int | None = None
         self.last_room_type: str | None = None
+        # The floor of the last screen that named its room (GH #1704).
+        self.last_room_floor: int | None = None
         # The event button last pressed, while no other screen followed it:
         # a fight that starts from it is that event's (GH #1676).
         self.event_button: str | None = None
@@ -290,6 +300,7 @@ class InstinctPolicy:
         self.room_hp = None
         self.fight_floor = None
         self.last_room_type = None
+        self.last_room_floor = None
         self.event_button = None
         self.event_fight = False
         self.last_view = None
@@ -314,11 +325,27 @@ class InstinctPolicy:
             self.fight_floor = None
             if isinstance(player.get("hp"), int):
                 self.room_hp = player["hp"]
-        room = (state.get("context") or {}).get("room_type")
+        ctx = state.get("context") or {}
+        room = ctx.get("room_type")
+        floor = ctx.get("total_floor")
         if room == "Map":
             self.event_fight = False
+            # A map on a later floor than the last room's screen: the room
+            # between showed none. Only an empty chest does that (Silver
+            # Crucible's first, `SilverCrucible.ShouldGenerateTreasure`), so
+            # the run stands in a treasure room, whatever the `?` read
+            # (Spire Bench seed 180000315).
+            if (
+                isinstance(floor, int)
+                and self.last_room_floor is not None
+                and floor > self.last_room_floor
+            ):
+                self.last_room_type = "Treasure"
+                self.last_room_floor = floor
         elif room:
             self.last_room_type = "Event" if self.event_fight and room == "Monster" else str(room)
+            if isinstance(floor, int):
+                self.last_room_floor = floor
 
     def envelope(self, state: dict[str, Any], bridge_map: dict[str, Any] | None) -> dict[str, Any]:
         """The seedless fields a request needs on top of the screen's envelope."""
@@ -390,11 +417,11 @@ class InstinctPolicy:
         if _is_boss_relic_offer(bridge_state) and end is not None:
             prev_state, prev_map = end
             if act_of(end) == here["act"] - 1:
-                room = self.last_room_type
+                room, room_floor = self.last_room_type, self.last_room_floor
                 try:
                     return self.envelope(prev_state, prev_map)
                 finally:
-                    self.last_room_type = room
+                    self.last_room_type, self.last_room_floor = room, room_floor
         return here
 
     def potion_swap(

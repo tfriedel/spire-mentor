@@ -44,6 +44,7 @@ import ast
 import gzip
 import json
 import logging
+import math
 import re
 import sys
 import tempfile
@@ -154,7 +155,10 @@ def replay(
         threads=threads,
         log_search_tree=0,
         coach_catchup_sims=2000,
-        coach_budget_s=6.0,
+        # No wall-clock cuts: a plan or a coach turn the clock ends early
+        # depends on the machine's load, so the replies would too (GH #1784).
+        coach_budget_s=math.inf,
+        plan_budget_s=math.inf,
     )
     cfg = RecommendConfig(
         sims=sims,

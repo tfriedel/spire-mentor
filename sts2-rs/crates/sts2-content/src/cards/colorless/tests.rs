@@ -3198,6 +3198,40 @@ fn play_dual_wield_clones_leftmost_attack_or_power() {
     );
 }
 
+/// C# `DualWield.OnUpgrade` `Cards.UpgradeValueBy(1)`: Dual Wield+ adds two
+/// copies of the picked card (Spire Bench 180000428: one Strike became three).
+#[test]
+fn play_upgraded_dual_wield_adds_two_copies() {
+    use sts2_core::cards::{Card, CardType, TargetType};
+    use sts2_core::CardUid;
+    install_pool();
+    let (mut state, _euid) = fresh_state(CardId::DualWield, 0, 0);
+    let dw_uid = *state.player.play.last().expect("DualWield on Play");
+    state.cards[dw_uid.0.get() as usize - 1].upgraded = true;
+    let raw = u32::try_from(state.cards.len() + 1).unwrap();
+    let uid = CardUid(NonZeroU32::new(raw).unwrap());
+    state.cards.push(Card {
+        uid,
+        card_id: CardId::StrikeIronclad,
+        cost: sts2_core::CardEnergyCost::new(1),
+        card_type: CardType::Attack,
+        target_type: TargetType::Enemy,
+        upgraded: false,
+        base_damage: 6,
+        base_block: 0,
+        ..Card::pod_defaults()
+    });
+    state.player.hand.push(uid);
+    let hand_before = state.player.hand.len();
+    let f = lookup(CardId::DualWield).expect("registered");
+    f(&mut state, None);
+    assert_eq!(
+        state.player.hand.len(),
+        hand_before + 2,
+        "Dual Wield+ adds two clones"
+    );
+}
+
 #[test]
 fn play_dual_wield_with_no_attack_or_power_is_noop() {
     use sts2_core::cards::{Card, CardType, TargetType};

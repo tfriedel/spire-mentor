@@ -11,6 +11,7 @@ use sts2_core::CombatState;
 
 use crate::advisor_mirror::{AdvisorMirror, Level, On};
 use crate::board::{self, BoardError};
+use crate::board_targets::BoardTargets;
 use crate::combat_advice::{self as ca, Unmapped};
 use crate::combat_mirror::{build_state, MirrorError, Mirrored};
 use crate::display_names::Names;
@@ -92,7 +93,8 @@ pub fn decision_cfg(state: &Value, cfg: &RecommendConfig, sims: u32) -> Recommen
 
 /// `compute_combat_advice`. `log` collects what the advisor logs on the
 /// way (the board import's warnings, a failed mirror search); the mirror
-/// keeps its own log.
+/// keeps its own log. `plan_budget_s` caps the turn plan's re-searches
+/// ([`turn_plan::PLAN_BUDGET_S`] live; infinite in a replay).
 ///
 /// # Errors
 ///
@@ -103,6 +105,7 @@ pub fn compute_combat_advice(
     state: &Value,
     cfg: &RecommendConfig,
     sims: u32,
+    plan_budget_s: f64,
     mirror: Option<&mut AdvisorMirror>,
     names: &Names,
     log: &mut Vec<(Level, String)>,
@@ -181,6 +184,7 @@ pub fn compute_combat_advice(
         sims,
         names,
         Some(&mut research),
+        plan_budget_s,
     )?;
     Ok(CombatAdvice {
         advice,
@@ -192,7 +196,8 @@ pub fn compute_combat_advice(
 
 /// The advice and regret rows for a search `result` over `fight` (the
 /// engine fight of `wire`, the board `state` imports as): ranked, vetoed,
-/// labelled, with the turn plan, which `research` continues past the PV.
+/// labelled, with the turn plan, which `research` continues past the PV
+/// for at most `plan_budget_s` seconds.
 ///
 /// # Errors
 ///
@@ -207,8 +212,15 @@ pub fn advice_from_result(
     sims: u32,
     names: &Names,
     research: Option<&mut dyn FnMut(&CombatState) -> Option<Vec<Value>>>,
+    plan_budget_s: f64,
 ) -> Result<(Value, Vec<Value>), AdviseError> {
     let hand = py::list(get(wire, "deck"), "hand");
+    // The search ranked the engine fight, whose enemy slots can still hold
+    // a corpse the game removed (a mirror's carried fight): its rows name
+    // the board's slots from here on (`board_targets`).
+    let targets = BoardTargets::of(fight);
+    let engine_result = result;
+    let result = &targets.board_result(engine_result);
     let (tags, dropped) = ca::tags_from_result(result, hand).map_err(|e| {
         AdviseError::Unmapped(match e {
             Unmapped::Unmappable(m) | Unmapped::Unknown(m) => m,
@@ -221,8 +233,15 @@ pub fn advice_from_result(
             tags.len()
         );
     }
-    let pv: Vec<Value> = py::list(result, "pv").to_vec();
-    let labels = ca::pv_labels(&pv[..pv.len().min(4)], state);
+    // The PV stays in engine slots (the turn plan replays it on `fight`);
+    // its labels name the board's.
+    let pv: Vec<Value> = py::list(engine_result, "pv").to_vec();
+    let pv_board: Vec<Value> = pv
+        .iter()
+        .take(4)
+        .map_while(|a| targets.board_action(a))
+        .collect();
+    let labels = ca::pv_labels(&pv_board, state);
     let mut advice = ca::build_advice(
         tags,
         state,
@@ -233,15 +252,7 @@ pub fn advice_from_result(
     );
     let rows = ca::combat_rows(result, headless, &mut advice);
     let best = get(&advice, "best").clone();
-    let plan = turn_plan::search_plan(
-        fight,
-        &pv,
-        wire,
-        state,
-        &best,
-        research,
-        turn_plan::PLAN_BUDGET_S,
-    );
+    let plan = turn_plan::search_plan(fight, &pv, wire, state, &best, research, plan_budget_s);
     if !plan.is_empty() {
         advice["plan"] = Value::Array(plan);
     }

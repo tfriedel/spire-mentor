@@ -891,6 +891,14 @@ class CombatMirror:
 
     # -- choices -----------------------------------------------------------
 
+    def adopt_unseen_play(self, wire: dict[str, Any]) -> bool:
+        """Seed from ``wire`` when it shows a card in play the mirror never
+        played (``sts2_advisor::combat_mirror::CombatMirror::adopt_unseen_play``):
+        Imbued's turn-1 autoplay opening a screen after a pre-draw seed.
+        Call after :meth:`reconcile`, before reading :meth:`parked_choice`.
+        """
+        return bool(self._call("adopt_unseen_play", wire, wire=wire))
+
     def parked_choice(self) -> dict[str, Any] | None:
         """The choice the engine derived on its own, or ``None``.
 

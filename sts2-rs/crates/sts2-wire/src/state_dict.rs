@@ -515,6 +515,14 @@ fn attacks_this_turn(buckets: Option<[u32; 6]>) -> i32 {
 /// * `cards_drawn_this_combat`: the cards the player drew this combat (C#
 ///   `CardDrawnEntry` count, Murder's multiplier; the engine's
 ///   `CombatState::cards_drawn`). Main seat only.
+/// * `cards_generated_this_combat`: the cards generated for the player this
+///   combat (C# `CardGeneratedEntry` with the player as Creator,
+///   Supermassive's multiplier; the engine's
+///   `PlayerState::generated_cards_this_combat`). Main seat only.
+/// * `discards_this_turn`: the cards the player discarded this turn (C#
+///   `CardDiscardedEntry` count, Memento Mori's multiplier; the engine's
+///   `TurnEvents::cards_discarded_this_turn`). The emitter has written it
+///   since GH #1197; the parse dropped it. Main seat only.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SeatHistory {
     pub unblocked_hits_this_combat: u32,
@@ -524,6 +532,8 @@ pub struct SeatHistory {
     pub card_block_gains_this_turn: u32,
     pub extra_turns_taken_this_combat: u16,
     pub cards_drawn_this_combat: u32,
+    pub cards_generated_this_combat: u32,
+    pub discards_this_turn: u32,
 }
 
 /// The play tag a board's earlier card block gains carry in
@@ -563,6 +573,14 @@ fn parse_seat_history<V: WireValue>(d: &V, path: &str) -> WireResult<SeatHistory
         Some(_) => extract_u32(d, path, "cards_drawn_this_combat")?,
         None => 0,
     };
+    let cards_generated_this_combat = match extract_optional(d, "cards_generated_this_combat") {
+        Some(_) => extract_u32(d, path, "cards_generated_this_combat")?,
+        None => 0,
+    };
+    let discards_this_turn = match extract_optional(d, "discards_this_turn") {
+        Some(_) => extract_u32(d, path, "discards_this_turn")?,
+        None => 0,
+    };
     let mut powered_hits_this_turn = Vec::new();
     if let Some(v) = extract_optional(d, "powered_hits_this_turn") {
         let list_path = format!("{path}.powered_hits_this_turn");
@@ -582,6 +600,8 @@ fn parse_seat_history<V: WireValue>(d: &V, path: &str) -> WireResult<SeatHistory
         card_block_gains_this_turn,
         extra_turns_taken_this_combat,
         cards_drawn_this_combat,
+        cards_generated_this_combat,
+        discards_this_turn,
     })
 }
 
@@ -1378,6 +1398,9 @@ fn apply_seat_histories(state: &mut CoreCombatState, parsed: &ParsedState) {
     state.combat_log.cards_exhausted_this_combat = h.cards_exhausted_this_combat;
     state.combat_log.extra_turns_taken_this_combat = h.extra_turns_taken_this_combat;
     state.cards_drawn = u16::try_from(h.cards_drawn_this_combat).unwrap_or(u16::MAX);
+    state.player.generated_cards_this_combat = h.cards_generated_this_combat;
+    state.combat_log.cards_discarded_this_turn =
+        u16::try_from(h.discards_this_turn).unwrap_or(u16::MAX);
     seed_turn_history(&mut state.combat_log, h);
     state.player.powered_hits_by_target_this_turn = tally(h);
     for (i, a) in parsed.allies.iter().enumerate() {
@@ -3187,6 +3210,12 @@ fn build_card(
                 // while it lasts; the engine reads that off the affliction,
                 // so a grant here would outlive the Hex (GH #1707).
                 "ethereal" if parsed.affliction.as_deref() == Some("Hexed") => {}
+                // The card's own Ethereal (Void Form, Ascender's Bane, ...) is
+                // already in its keyword set; stamping the per-fight grant on
+                // top made it outlive an upgrade that removes the keyword
+                // (C# `VoidForm.OnUpgrade` `RemoveKeyword(Ethereal)`, shown
+                // Ethereal after Armaments+, Spire Bench 180000322).
+                "ethereal" if sts2_core::card_effects::card_ethereal_inst(&card) => {}
                 "ethereal" => card.set_combat_var(VarKey::EtherealThisCombat, 1),
                 "free_turn" => card.set_to_free_this_turn(),
                 "free_once" => card.cost.set_until_played(0, false),
@@ -6535,5 +6564,20 @@ mod tests {
         assert!(extract_label_damage("Attack").is_none());
         assert!(extract_label_damage("").is_none());
         assert!(extract_label_damage("Defend").is_none());
+    }
+
+    /// A melted relic's count is the game's: the engine keeps a melted
+    /// Ornamental Fan's frozen count too (Spire Bench seeds 180000070,
+    /// 180001922).
+    #[test]
+    fn a_melted_per_turn_relic_keeps_its_count() {
+        let relics = serde_json::json!([
+            {"id": "ORNAMENTAL_FAN", "counter": 1, "is_wax": true, "is_melted": true},
+            {"id": "KUSARIGAMA", "counter": 2, "is_wax": true, "is_melted": false},
+            {"id": "PEN_NIB", "counter": 3, "is_wax": true, "is_melted": true},
+        ]);
+        let parsed = parse_relic_list(&&relics, "$.player.relics").expect("parses");
+        let counters: Vec<Option<i32>> = parsed.iter().map(|r| r.counter).collect();
+        assert_eq!(counters, [Some(1), Some(2), Some(3)]);
     }
 }

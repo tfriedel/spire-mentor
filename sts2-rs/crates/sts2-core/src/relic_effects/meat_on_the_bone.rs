@@ -19,7 +19,16 @@ pub(crate) fn on_after_combat_victory_meat_on_the_bone(state: &mut CombatState) 
         .iter()
         .find(|c| c.id == uid.0)
         .map_or((0, 0), |c| (c.current_hp, c.max_hp));
-    if mx > 0 && cur <= mx * 50 / 100 {
+    // C# `CombatManager.EndCombatInternal` runs `Hook.AfterCombatEnd`
+    // (CombatManager.cs:1320) before `Hook.AfterCombatVictory` (:1331), so
+    // Chosen Cheese's +1 max HP (`ChosenCheese.AfterCombatEnd`,
+    // `CreatureCmd.GainMaxHp`: +1 max, heal 1) is in before this check. The
+    // engine grants it run-side after the fight; read the HP as it will
+    // leave it (Spire Bench seed 180000504: 45/90 is 46/91, over the half,
+    // so no 12). Heals after it total the same either way:
+    // min(h + 1 + x, m + 1) = min(h + x, m) + 1.
+    let cheese = i32::from(player_owns_relic(state, crate::RelicKind::ChosenCheese));
+    if mx > 0 && cur + cheese <= (mx + cheese) * 50 / 100 {
         state.creature_heal(uid, 12);
     }
     EffectResult::Resolved

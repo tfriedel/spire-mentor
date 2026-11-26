@@ -915,7 +915,9 @@ class TestAutopsy:
 def test_main_loop_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
     import realgame_advisor as ra
 
-    def _fake(state: dict[str, Any], cfg: Any, sims: int, mirror: Any) -> tuple:
+    def _fake(
+        state: dict[str, Any], cfg: Any, sims: int, mirror: Any, plan_budget_s: float | None = None
+    ) -> tuple:
         return {"note": "searched", "options": []}, object(), cfg, []
 
     monkeypatch.setattr(ra, "compute_combat_advice", _fake)

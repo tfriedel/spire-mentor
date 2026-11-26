@@ -236,7 +236,9 @@ def fake_search(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Replace the search with a recorder; returns the boards it was asked about."""
     seen: list[dict[str, Any]] = []
 
-    def _fake(state: dict[str, Any], cfg: Any, sims: int, mirror: Any) -> tuple[Any, Any, Any, Any]:
+    def _fake(
+        state: dict[str, Any], cfg: Any, sims: int, mirror: Any, plan_budget_s: float | None = None
+    ) -> tuple[Any, Any, Any, Any]:
         seen.append(state)
         return {"note": "searched", "options": []}, object(), cfg, []
 
@@ -342,7 +344,9 @@ class TestAdvisorRouting:
 def ranked_search(monkeypatch: pytest.MonkeyPatch) -> None:
     """A search whose rows crown end turn -- enough for the coach to grade."""
 
-    def _fake(state: dict[str, Any], cfg: Any, sims: int, mirror: Any) -> tuple[Any, Any, Any, Any]:
+    def _fake(
+        state: dict[str, Any], cfg: Any, sims: int, mirror: Any, plan_budget_s: float | None = None
+    ) -> tuple[Any, Any, Any, Any]:
         rows = [
             {"stable_idx": -1, "target_index": None, "win_prob": 0.9, "visits": 300,
              "is_best": True, "mean_final_hp": 50.0, "hp_n": 300, "action": "end turn"},

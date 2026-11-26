@@ -160,6 +160,51 @@ fn blocked_auto_play_does_not_latch_vigor() {
     }
 }
 
+/// Headbutt attacks, then opens its discard select (`Headbutt.cs:26-29`: the
+/// `DamageCmd.Attack` runs before `CardSelectCmd.FromCombatPile`). Its
+/// `AttackCommand` has ended by then, so `VigorPower.AfterAttack` and
+/// `GigantificationPower.AfterAttack` have spent both while the player picks
+/// (Spire Bench seeds 180001296 Vigor, 180001863 Gigantification: the game's
+/// select screen shows neither).
+#[test]
+#[serial_test::serial(global_registry)]
+fn headbutt_spends_vigor_and_gigantification_before_its_select() {
+    for version in VERSIONS {
+        let mut state = fresh(version, 200);
+        let headbutt = mint(&mut state, CardId::Headbutt);
+        state.player.hand.push(headbutt);
+        for _ in 0..2 {
+            let uid = mint(&mut state, CardId::DefendIronclad);
+            state.player.discard.push(uid);
+        }
+        give_player_power(&mut state, PowerKind::Vigor, 5);
+        give_player_power(&mut state, PowerKind::Gigantification, 1);
+        let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+        assert!(
+            state.pending_choice.is_some(),
+            "{version:?}: two discard cards open the put-back select"
+        );
+        assert_eq!(
+            state.player_power_amount(PowerKind::Vigor),
+            0,
+            "{version:?}: Vigor is spent before the select"
+        );
+        assert_eq!(
+            state.player_power_amount(PowerKind::Gigantification),
+            0,
+            "{version:?}: Gigantification is spent before the select"
+        );
+        assert_eq!(state.player.vigor_latch_card, None, "{version:?}");
+        assert!(
+            state
+                .creatures
+                .iter()
+                .any(|c| c.max_hp == 200 && c.current_hp < 200 - 9),
+            "{version:?}: the hit carried the buffs"
+        );
+    }
+}
+
 // ── Item 1: draws issued once combat is ending move no card ───────────────
 
 /// `CardPileCmd.Draw` (CardPileCmd.cs:822 v0.107.1, :1012 v0.111.0) returns an

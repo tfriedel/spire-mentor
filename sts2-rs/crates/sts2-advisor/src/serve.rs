@@ -402,6 +402,9 @@ pub struct Settings {
     pub log_search_tree: u32,
     pub coach_catchup_sims: u32,
     pub coach_budget_s: f64,
+    /// Wall-clock cap on the turn plan's re-searches (`f64::INFINITY`: none,
+    /// as a replay wants, GH #1784).
+    pub plan_budget_s: f64,
     pub no_mirror: bool,
     /// Run the coach's jobs inline (a replay) instead of on its thread.
     pub inline_coach: bool,
@@ -418,9 +421,49 @@ impl Default for Settings {
             log_search_tree: 0,
             coach_catchup_sims: 2000,
             coach_budget_s: 6.0,
+            plan_budget_s: crate::turn_plan::PLAN_BUDGET_S,
             no_mirror: false,
             inline_coach: false,
             divergence_log: None,
+        }
+    }
+}
+
+/// GH #1917: the engine keeps `run_state.current_hp` at its pre-fight value
+/// for the whole fight (a fight's damage folds into run HP when it ends; the
+/// fight's own HP is the combat player's), so the net trained on RUNCTX
+/// `R_HP` = the HP the fight STARTED on. The mod sends the LIVE run HP on
+/// every in-fight decision; this rewrites `state.run_state.{hp,max_hp}` to the
+/// fight-entry value. `room_hp` is the last out-of-fight `(hp, max_hp)`,
+/// `fight_hp` the frozen value (cleared outside a fight). Only `run_state` is
+/// touched; the `combat` block keeps the live fight HP. Matches the bench's
+/// `_fight_start_hp` (`instinct_policy.py`) minus its Pantograph (+25 boss)
+/// and Planisphere (+5 `?` room) room-entry heals: a boss fight holding an
+/// unmelted Pantograph therefore reads 25 HP low (residual, left on #1917).
+fn freeze_fight_run_hp(
+    room_hp: &mut Option<(i64, i64)>,
+    fight_hp: &mut Option<(i64, i64)>,
+    state: &mut Value,
+) {
+    let in_fight = get(state, "combat").is_object();
+    let live = {
+        let rs = get(state, "run_state");
+        get(rs, "hp").as_i64().zip(get(rs, "max_hp").as_i64())
+    };
+    if !in_fight {
+        *fight_hp = None;
+        if live.is_some() {
+            *room_hp = live;
+        }
+        return;
+    }
+    if fight_hp.is_none() {
+        *fight_hp = room_hp.or(live);
+    }
+    if let Some((hp, max_hp)) = *fight_hp {
+        if let Some(rs) = state.get_mut("run_state").and_then(Value::as_object_mut) {
+            rs.insert("hp".into(), json!(hp));
+            rs.insert("max_hp".into(), json!(max_hp));
         }
     }
 }
@@ -433,6 +476,10 @@ pub struct Advisor {
     pub policies: Arc<PolicyCache>,
     pub instinct: Arc<InstinctAdvisor>,
     pub mirror: AdvisorMirror,
+    /// `(hp, max_hp)` of the last out-of-fight screen (GH #1917).
+    room_hp: Option<(i64, i64)>,
+    /// `(hp, max_hp)` the run held when the current fight began (GH #1917).
+    fight_hp: Option<(i64, i64)>,
     pub session: Arc<Mutex<Map<String, Value>>>,
     pub tree: Arc<LiveRunTree>,
     pub control: Arc<ControlState>,
@@ -498,6 +545,8 @@ impl Advisor {
         let damage_trace = std::env::var("STS2_MIRROR_DAMAGE_TRACE").is_ok_and(|v| v == "1");
         Self {
             mirror: AdvisorMirror::new(!settings.no_mirror, damage_trace),
+            room_hp: None,
+            fight_hp: None,
             settings,
             cfg,
             names,
@@ -683,7 +732,7 @@ impl Advisor {
             let mut state = msg.as_object()?.clone();
             state.insert("type".into(), json!("map_select"));
             let mut state = Value::Object(state);
-            if let Some(map) = crate::session::apply_session_context(&state, &mut lock(&session)) {
+            if let Some(map) = crate::session::view_with_session_context(&state, &lock(&session)) {
                 state["map"] = map;
             }
             let character =
@@ -1094,6 +1143,7 @@ impl Advisor {
         if let Some(m) = state.as_object_mut() {
             m.insert("type".into(), json!(advice_for));
         }
+        freeze_fight_run_hp(&mut self.room_hp, &mut self.fight_hp, state);
         let is_boss = get(state, "room_type").as_str() == Some("Boss");
         let sims = if is_boss {
             self.settings.boss_sims
@@ -1159,6 +1209,7 @@ impl Advisor {
                 state,
                 &fight_cfg,
                 sims,
+                self.settings.plan_budget_s,
                 Some(&mut self.mirror),
                 &self.names,
                 &mut log,
@@ -1174,6 +1225,9 @@ impl Advisor {
                 e => Refusal::Error(e.to_string()),
             })?;
             let advice = crate::coop::apply_ally_wait(state, out.advice);
+            // GH #1918: `best.target_index` is already in board space.
+            self.mirror
+                .set_advice_target(get(get(&advice, "best"), "target_index").clone());
             *lock(&self.last_combat) = Some(LastCombat {
                 state_id: get(msg, "state_id").clone(),
                 fight: out.fight.clone(),
@@ -1352,6 +1406,47 @@ pub fn prune_tree(tree: &Value, min_visits: i64, max_nodes: usize) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fight_msg(hp: i64) -> Value {
+        json!({"run_state": {"hp": hp, "max_hp": 80}, "combat": {"player": {"hp": hp}}})
+    }
+
+    #[test]
+    fn run_hp_is_frozen_at_fight_entry() {
+        // (a) an out-of-fight screen records room_hp and clears fight_hp.
+        let (mut room, mut fight) = (None, Some((1, 1)));
+        let mut shop = json!({"run_state": {"hp": 70, "max_hp": 80}});
+        freeze_fight_run_hp(&mut room, &mut fight, &mut shop);
+        assert_eq!((room, fight), (Some((70, 80)), None));
+        // (b) the first in-fight decision: fight_hp == room_hp, run_state
+        // rewritten, combat untouched.
+        let mut first = fight_msg(70);
+        freeze_fight_run_hp(&mut room, &mut fight, &mut first);
+        assert_eq!(fight, room);
+        assert_eq!(first["run_state"], json!({"hp": 70, "max_hp": 80}));
+        // (c) later decisions keep it as the live run HP falls.
+        let mut later = fight_msg(61);
+        freeze_fight_run_hp(&mut room, &mut fight, &mut later);
+        assert_eq!(later["run_state"], json!({"hp": 70, "max_hp": 80}));
+        assert_eq!(later["combat"], json!({"player": {"hp": 61}}));
+        // The next fight starts from the new room_hp.
+        let mut rest = json!({"run_state": {"hp": 61, "max_hp": 80}});
+        freeze_fight_run_hp(&mut room, &mut fight, &mut rest);
+        let mut next = fight_msg(55);
+        freeze_fight_run_hp(&mut room, &mut fight, &mut next);
+        assert_eq!(next["run_state"]["hp"], 61);
+    }
+
+    #[test]
+    fn a_fight_with_no_prior_screen_falls_back_to_its_own_run_hp() {
+        let (mut room, mut fight) = (None, None);
+        let mut m = fight_msg(64);
+        freeze_fight_run_hp(&mut room, &mut fight, &mut m);
+        assert_eq!(fight, Some((64, 80)));
+        let mut m2 = fight_msg(50);
+        freeze_fight_run_hp(&mut room, &mut fight, &mut m2);
+        assert_eq!(m2["run_state"]["hp"], 64);
+    }
 
     #[test]
     fn the_fool_is_advised_from_v0_113_and_refused_before_it() {

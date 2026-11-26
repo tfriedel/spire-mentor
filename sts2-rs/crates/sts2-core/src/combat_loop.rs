@@ -8361,17 +8361,36 @@ fn check_combat_end_full(state: &mut CombatState) -> StepResult {
         crate::coop::revive_the_dead(state);
         state.is_over = true;
         state.player_won = true;
+        // C# runs `Hook.AfterCombatEnd` before `Hook.AfterCombatVictory`
+        // (CombatManager.cs:1320/1331): a Toy Box melt at this fight's end
+        // is out of the victory walk (the run side does the melt itself).
+        let melted = crate::relic_effects::toy_box_melts_before_victory(state);
+        // The relic it melted still hears this combat's end (C# builds the
+        // listener list before the `AfterCombatEnd` pass), not the victory.
+        let end_with_melted = |state: &mut CombatState, end: fn(&mut CombatState)| {
+            if let Some(i) = melted {
+                state.relics.set_melted(i, false);
+            }
+            end(state);
+            if let Some(i) = melted {
+                state.relics.set_melted(i, true);
+            }
+        };
         // Order matters: Python fires `after_combat_victory` BEFORE
         // `after_combat_end` (combat.py:2456-2457). The two dispatchers
         // walk the same powers-then-relics listener set; victory-only
         // listeners (e.g., BurningBlood's HEAL=6) fire here, then the
         // generic combat-end listeners fire below.
         hooks::dispatch_after_combat_victory(state, &CombatLifecycleCtx::default());
-        hooks::dispatch_after_combat_end(state, &CombatLifecycleCtx::default());
+        end_with_melted(state, |s| {
+            hooks::dispatch_after_combat_end(s, &CombatLifecycleCtx::default());
+        });
         // Bead `sts2-rs-j87`: parallel relic-effects bus drain. Order
         // matches the legacy hooks call: victory THEN end.
         let _ = crate::relic_effects::dispatch_after_combat_victory(state);
-        let _ = crate::relic_effects::dispatch_after_combat_end(state);
+        end_with_melted(state, |s| {
+            let _ = crate::relic_effects::dispatch_after_combat_end(s);
+        });
         crate::coop::teammates_hear_the_win(state);
         return StepResult::CombatWon;
     }

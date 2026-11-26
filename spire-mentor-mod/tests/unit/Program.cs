@@ -563,6 +563,48 @@ Check("refusal: potion pick still open", Judge(5, 5, true, 0, 1), "WaitForPick")
 Check("refusal: pick answered, card not landed yet", Judge(5, 5, false, 0, 1), "WaitForPick");
 Check("refusal: nothing moved, nothing pending", Judge(5, 5, false, 3, 3), "Refused");
 
+// RefusalFallback: a refused pick falls back to the advice's next-best move,
+// not to ending the turn (autobattle, 2026-11-23).
+MarkOption Opt(string label, string action, int? card = null, int? target = null, int? slot = null,
+    bool best = false, double? share = null, int? rank = null) =>
+    new(label, action, card, target, null, slot, null, best, false, share, null, rank);
+var ranked = new List<MarkOption>
+{
+    Opt("Pommel Strike -> Shield", "play", card: 3, target: 1, best: true, share: 0.6),
+    Opt("End turn", "end_turn", share: 0.1),
+    Opt("Fight Me! -> Turret", "play", card: 1, target: 0, share: 0.3),
+    Opt("Block Potion", "potion", slot: 0, share: 0.2),
+    Opt("Old-advisor row", "", card: 2, share: 0.9),
+};
+string NextLabel(RefusalFallback f, int mark) => f.Next(mark, ranked)?.Label ?? "none";
+var fallback = new RefusalFallback();
+Check("fallback: nothing refused yet keeps the pick", NextLabel(fallback, 7), "Pommel Strike -> Shield");
+fallback.Refuse(7, RefusalFallback.Key(ranked[0]));
+Check("fallback: a refused pick hands over by share", NextLabel(fallback, 7), "Fight Me! -> Turret");
+Check("fallback: the best action's key matches its option",
+    fallback.IsRefused(7, RefusalFallback.Key("play", 3, 1, -1, -1)).ToString(), "True");
+fallback.Refuse(7, RefusalFallback.Key(ranked[2]));
+Check("fallback: then a potion", NextLabel(fallback, 7), "Block Potion");
+fallback.Refuse(7, RefusalFallback.Key(ranked[3]));
+Check("fallback: ending the turn is an option too", NextLabel(fallback, 7), "End turn");
+Check("fallback: counts the refusals on this board", fallback.RefusedOn(7).ToString(), "3");
+fallback.Refuse(7, RefusalFallback.Key(ranked[1]));
+Check("fallback: a row with no action is never played", NextLabel(fallback, 7), "none");
+Check("fallback: a board that moved forgets the refusals", NextLabel(fallback, 8), "Pommel Strike -> Shield");
+Check("fallback: ... and counts none there", fallback.RefusedOn(8).ToString(), "0");
+fallback.Refuse(8, RefusalFallback.Key(ranked[1]));
+Check("fallback: refusing on a new board starts over", fallback.RefusedOn(8).ToString(), "1");
+Check("fallback: the old board's refusals are gone", fallback.IsRefused(8, RefusalFallback.Key(ranked[0])).ToString(), "False");
+var enginePicked = new List<MarkOption>
+{
+    Opt("Share leader", "play", card: 0, share: 0.9),
+    Opt("Engine pick", "play", card: 1, share: 0.1, rank: 0),
+    Opt("Engine second", "play", card: 2, share: 0.05, rank: 1),
+};
+var byRank = new RefusalFallback();
+byRank.Refuse(1, RefusalFallback.Key(enginePicked[1]));
+Check("fallback: the engine's pick order beats share", byRank.Next(1, enginePicked)?.Label ?? "none", "Engine second");
+
 // TravelGuard: nothing is described mid-travel; a stuck flag gives up once
 // per move (GH #987).
 var travel = new TravelGuard();

@@ -17,6 +17,7 @@ use sts2_e2e::tokens::TokCache;
 
 use crate::advisor_mirror::AdvisorMirror;
 use crate::board::{self, BoardError};
+use crate::board_targets::BoardTargets;
 use crate::combat_advice::instinct_combat_advice;
 use crate::combat_mirror::{build_state, MirrorError, Mirrored};
 use crate::headless;
@@ -221,18 +222,21 @@ pub fn advise_combat(
     if let Some(pairs) = remap {
         driver.remap_enemies(&pairs);
     }
+    // Before the fight moves into the run: a mirror's carried fight keeps
+    // corpses the game removed, so its enemy slots are not the board's.
+    let targets = BoardTargets::of(&fight);
     if let Some(note) = enter_live_combat(rm, fight, state, room_kind(state)) {
         log.push(note);
     }
     let expect = ["COMBAT_TURN".to_string(), "COMBAT_CHOICE".to_string()];
     let Evaluated { pick, estimate } =
         evaluate(net, driver, cache, rm, &expect).map_err(InstinctCombatError::Unavailable)?;
-    let mut advice =
-        instinct_combat_advice(&pick, state, &wire).map_err(InstinctCombatError::Unavailable)?;
+    let mut advice = instinct_combat_advice(&pick, state, &wire, &targets)
+        .map_err(InstinctCombatError::Unavailable)?;
     let best = get(&advice, "best").clone();
     // A drawing must never cost the advice.
     let mut plan_failed = None;
-    match combat_plan(net, driver, cache, rm, state, &wire, &pick, &best) {
+    match combat_plan(net, driver, cache, rm, state, &wire, &targets, &pick, &best) {
         Ok(plan) if !plan.is_empty() => advice["plan"] = Value::Array(plan),
         Ok(_) => {}
         Err(why) => plan_failed = Some(why),
@@ -280,6 +284,7 @@ pub fn combat_plan(
     rm: &RunManager,
     state: &Value,
     wire: &Value,
+    targets: &BoardTargets,
     pick: &crate::instinct::Pick,
     best: &Value,
 ) -> Result<Vec<Value>, String> {
@@ -292,7 +297,7 @@ pub fn combat_plan(
     if !matches!(dtype, Some("COMBAT_TURN" | "FORCED")) {
         return Ok(alone());
     }
-    let mut walk = PlanWalk::new(wire, state);
+    let mut walk = PlanWalk::new(wire, state).with_targets(targets.clone());
     let mut sim = rm.clone();
     let mut probe = driver.clone();
     let mut probe_cache = cache.clone();
@@ -463,6 +468,13 @@ pub fn student_choice_picks(
                     ApplyKind::Run { .. } => ApplyKind::Run { strict: false },
                 };
                 probe.apply(rm, &f.action, kind).map_err(value_err)?;
+                // A forced pick that fills the screen ends it: the next
+                // COMBAT_CHOICE is a LATER screen (a second Burning Pact),
+                // and asking the net there dumped a spurious row and set the
+                // first pick from it (seed 180000859).
+                if i64::try_from(picks.len()).unwrap_or(i64::MAX) >= max_select {
+                    break;
+                }
             }
             Next::Decision(d) => {
                 let dec = d.to_value();

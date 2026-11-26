@@ -579,7 +579,8 @@ class Player:
     def advance(self) -> list[tuple[int, dict[str, Any]]]:
         """One decision of every open run, from one `act_decisions` call; returns
         the (seed, row) of the runs that ended. A run that raises is booked as its
-        error; a policy call that raises books every run it was asked about."""
+        error; when a batched policy call raises, each run is asked again alone and
+        only the runs whose own call raises are booked (GH #1854)."""
         done, self._done = self._done, []
         live: list[_Game] = []
         for g in self._games:
@@ -609,8 +610,21 @@ class Player:
         except BaseException as e:
             if isinstance(e, (KeyboardInterrupt, SystemExit)):
                 raise
-            why = self._error(-1)["error"]
-            return done + [(g.seed, error_row(g.seed, self.policy_spec, why)) for g in live]
+            # GH #1854: one bad decision must not cost the whole batch. Ask again one
+            # run at a time; only the runs whose own call still raises are errors.
+            choices = []
+            ok: list[_Game] = []
+            for g in live:
+                try:
+                    (c,) = self.policy.act_decisions([g.out])
+                except BaseException as e1:
+                    if isinstance(e1, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    done.append((g.seed, self._error(g.seed)))
+                    continue
+                ok.append(g)
+                choices.append(c)
+            live = ok
         for g, choice in zip(live, choices, strict=True):
             try:
                 self._step(g, choice)

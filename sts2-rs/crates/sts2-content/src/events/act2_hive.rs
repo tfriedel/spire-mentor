@@ -617,6 +617,30 @@ fn conveyor_store(state: &mut RunState, belt: ConveyorBelt, rng: sts2_core::dotn
 /// C# `CalculateVars` → `RollDish()` at event start, on the state the
 /// player enters with (before any out-of-combat potion use could open a
 /// slot). Idempotent per event visit.
+/// A seedless rebuild's Endless Conveyor page (GH #1739 family): put the
+/// dish the screen's button names (`loc_key`, the game's
+/// `ENDLESS_CONVEYOR.pages.ALL.options.<DISH>`) on the belt as the
+/// `grabs + 1`-th roll. The belt's dish rolls on the event's dice and reads
+/// the run's HP, gold and belt at every grab, so a placeholder replay of a
+/// long visit rarely rolls the game's dish; the screen names it. Returns
+/// whether `loc_key` names a dish.
+///
+/// Reconstruction surface, never call on a recorded or parity-pinned run.
+pub fn endless_conveyor_graft_dish(state: &mut RunState, grabs: usize, loc_key: &str) -> bool {
+    let Some(dish) = ConveyorDish::ALL
+        .into_iter()
+        .find(|d| d.loc_key().eq_ignore_ascii_case(loc_key))
+    else {
+        return false;
+    };
+    let (mut belt, rng) = conveyor_belt_and_rng(state);
+    belt.num_grabs = i16::try_from(grabs + 1).unwrap_or(i16::MAX);
+    belt.last = dish as i16;
+    belt.current = dish as i16;
+    conveyor_store(state, belt, rng);
+    true
+}
+
 pub fn endless_conveyor_before_event_started(state: &mut RunState) {
     if state.event_state.scratch.is_empty() {
         let (belt, rng) = conveyor_belt_and_rng(state);

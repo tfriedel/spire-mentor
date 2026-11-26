@@ -153,11 +153,17 @@ pub fn card_reward(
     }
     let (mut rm, _notes) = graft_run(state, version)?;
     // The room the game names first: Neow's card (an event room, GH #1664)
-    // has no fight before it.
-    let room = crate::graft::live_room(state)
-        .or(last_room)
-        .unwrap_or("monster");
-    sts2_wire::graft::set_room_type(&mut rm, room).map_err(GraftError::Value)?;
+    // has no fight before it. A later act's entrance stands in no room in
+    // the engine, whatever the game names (GH #1646, #1732): Glass Eye's
+    // card rewards at Orobas read X_ROOM none natively (Spire Bench seed
+    // 180001539), as `graft_screen_run` keeps a deck screen there.
+    let at_later_entrance = rm.run_state.act_floor == 0 && rm.run_state.current_room.is_none();
+    if !at_later_entrance {
+        let room = crate::graft::live_room(state)
+            .or(last_room)
+            .unwrap_or("monster");
+        sts2_wire::graft::set_room_type(&mut rm, room).map_err(GraftError::Value)?;
+    }
     // Out of a fight, a choose-a-card screen adds to the deck (Lead
     // Paperweight, Hefty Tablet): the engine's run-effect choose screen,
     // offered as the CARD_REWARD the student saw in training.
@@ -599,9 +605,23 @@ fn find_card(cards: &[&Value], key: &CardKey) -> Option<usize> {
 /// k-th copy in the master deck: a screen can put other cards first (a
 /// removal lists the curses first) or leave some out (GH #1767). Left as
 /// they are when the deck holds fewer copies than the screen.
+///
+/// An enchant screen offers no enchanted card at all: `EnchantmentModel.
+/// CanEnchant` refuses a card whose `Enchantment` is set unless it is the
+/// same stackable kind, and no v0.111.0 enchantment is stackable. Its k-th
+/// Defend is the k-th UNenchanted one, so pairing it with the deck's k-th
+/// Defend stamped a Spiral (Nimble, Adroit) the card does not have onto the
+/// first one: the engine's pick, the first plain Defend, then matched the
+/// second, and the game enchanted another copy than the engine (corpus seeds
+/// 180000183, 180000190, 180001030, 180001720: the enchanted Defend drew a
+/// turn early or late).
 fn with_deck_enchantments(state: &Value) -> Vec<Value> {
     let cards: Vec<Value> = dicts(state, "cards").into_iter().cloned().collect();
     if cards.iter().any(|c| c.get("enchantment").is_some()) {
+        return cards;
+    }
+    let prompt = py::get(state, "prompt_key");
+    if py::truthy(prompt) && py::str_of(prompt).to_uppercase() == "TO_ENCHANT" {
         return cards;
     }
     let deck = dicts(py::get(state, "run_state"), "master_deck");
@@ -981,6 +1001,17 @@ pub fn deck_select(
                     } else {
                         sts2_core::cards::CardTag::Defend
                     });
+                } else {
+                    // Pael's Tooth removes its five from the upgradable cards
+                    // only (`PaelsTooth.AfterObtained`, filter
+                    // `c.IsUpgradable`): the screen's cards are those when
+                    // the deck's removable ones are more (Spire Bench seed
+                    // 180000416 offered the upgraded cards too).
+                    let plain = rm.run_state.removal_offer_order().len();
+                    rm.run_state.pending_removal_paels_tooth = true;
+                    let upgradable = rm.run_state.removal_offer_order().len();
+                    rm.run_state.pending_removal_paels_tooth =
+                        plain != all_cards.len() && upgradable == all_cards.len();
                 }
                 rm.debug_queue_deck_removals(count);
                 "CARD_REMOVE"
@@ -1349,7 +1380,15 @@ fn rolled_golds_placeholder(page: &RunManager, options: &[&Value]) -> Option<Str
 /// A later page replayed on the engine's dice may have rolled the earlier
 /// picks differently from the game (Tablet of Truth's random upgrade); the
 /// screen's own deck, HP and gold are what the run holds now (GH #1689).
+///
+/// An earlier page's pick may also have queued a choice the game already
+/// resolved on its own screen before showing this page (Endless Conveyor's
+/// Jelly Liver transform, Suspicious Condiment's potion reward): the screen
+/// is the event page, so nothing is pending. Left queued, the rebuilt run
+/// stands at that choice (`CARD_TRANSFORM`) instead of the page, and
+/// Instinct cannot answer.
 fn restore_screen_run(page: &mut RunManager, state: &Value) -> Result<()> {
+    page.debug_clear_pending_choices();
     let run = py::get(state, "run_state");
     if let Some(deck) = py::get(run, "master_deck").as_array() {
         let specs: Vec<Value> = deck
@@ -1829,6 +1868,24 @@ pub fn event(
             page.ok_or_else(|| unavailable(tr("the rebuilt event does not show this page")))?;
         if !trail.is_empty() {
             restore_screen_run(&mut page, state)?;
+            // Endless Conveyor's dish after a grab: the placeholder replay of
+            // a long visit runs out of gold or rolls other dishes, and the
+            // page found stands with another dish than the screen's (Spire
+            // Bench seeds 180000706, 180000544, 180001732). The screen names
+            // the dish; put it on the belt.
+            if norm_str(&event_id) == "ENDLESSCONVEYOR" {
+                if let Some(dish) = options
+                    .iter()
+                    .map(|o| py::str_of(py::get(o, "text_key")))
+                    .find(|k| k.contains(".pages.ALL.options."))
+                {
+                    sts2_content::events::act2_hive::endless_conveyor_graft_dish(
+                        &mut page.run_state,
+                        trail.len(),
+                        &dish,
+                    );
+                }
+            }
         }
         let slot_option = match_options(&engine_event_tails(&page), &options);
         let pick = ev
@@ -3039,6 +3096,86 @@ mod tests {
         assert_eq!(probe.0, Some(2), "the whole deck");
     }
 
+    /// Pael's Tooth lists only the deck's upgradable cards
+    /// (`PaelsTooth.AfterObtained`, filter `c.IsUpgradable`); the engine's
+    /// removal then offers those, not every removable one (Spire Bench seed
+    /// 180000416).
+    #[test]
+    fn an_upgradable_only_removal_screen_offers_only_the_upgradable_cards() {
+        use crate::graft::tests::{reference_run, screen_map, seedless_message};
+        let mut state = seedless_message(&screen_map(&reference_run(1)), 1);
+        state["run_state"]["master_deck"] = json!([
+            {"id": "STRIKE_IRONCLAD", "upgraded": 1},
+            {"id": "STRIKE_IRONCLAD", "upgraded": 0},
+            {"id": "BASH", "upgraded": 0}
+        ]);
+        state["type"] = json!("card_select");
+        state["prompt_key"] = json!("TO_REMOVE");
+        state["cards"] = json!([
+            {"index": 0, "id": "STRIKE_IRONCLAD"},
+            {"index": 1, "id": "BASH"}
+        ]);
+        state["min_count"] = json!(1);
+        state["max_count"] = json!(1);
+        struct Offer(Option<usize>);
+        impl Evaluator for Offer {
+            fn evaluate(
+                &mut self,
+                rm: &mut RunManager,
+                _: &[&str],
+            ) -> std::result::Result<Pick, String> {
+                self.0 = Some(rm.run_state.removal_offer_order().len());
+                Err("probe".into())
+            }
+        }
+        let mut probe = Offer(None);
+        let _ = deck_select(&mut probe, &state, "v0.111.0", None, None);
+        assert_eq!(probe.0, Some(2), "the upgradable Strike and Bash");
+        // A screen listing every removable card is a plain removal.
+        state["cards"] = json!([
+            {"index": 0, "id": "STRIKE_IRONCLAD", "upgraded": true},
+            {"index": 1, "id": "STRIKE_IRONCLAD"},
+            {"index": 2, "id": "BASH"}
+        ]);
+        let _ = deck_select(&mut probe, &state, "v0.111.0", None, None);
+        assert_eq!(probe.0, Some(3), "the whole deck");
+    }
+
+    /// GH #1732: a card reward at a later act's entrance (Glass Eye's five
+    /// at Orobas) stands in no room, as the engine does, though the mod
+    /// names the Ancient's event room (Spire Bench seed 180001539).
+    #[test]
+    fn a_card_reward_at_a_later_acts_entrance_stands_in_no_room() {
+        use crate::graft::tests::{reference_run, screen_map, seedless_message};
+        let reference = reference_run(2);
+        let start = sts2_wire::emit::run_manager::full_map(&reference)["rows"][0][0].clone();
+        let mut msg = seedless_message(&screen_map(&reference), 2);
+        msg["map"]["current"] = json!({"col": start["col"], "row": 0});
+        msg["map"]["visited"] = json!([]);
+        msg["floor"] = json!(i64::from(reference.run_state.total_floor) + 2);
+        msg["current_room"] = json!("Event");
+        msg["type"] = json!("card_reward");
+        msg["cards"] = json!([
+            {"index": 0, "id": "POMMEL_STRIKE"},
+            {"index": 1, "id": "ANGER"},
+            {"index": 2, "id": "TREMBLE"}
+        ]);
+        struct Room(Option<Option<sts2_core::runstate::RoomType>>);
+        impl Evaluator for Room {
+            fn evaluate(
+                &mut self,
+                rm: &mut RunManager,
+                _: &[&str],
+            ) -> std::result::Result<Pick, String> {
+                self.0 = Some(rm.run_state.current_room.map(|r| r.room_type));
+                Err("probe".into())
+            }
+        }
+        let mut probe = Room(None);
+        let got = card_reward(&mut probe, &msg, "v0.111.0", Some("Event"));
+        assert_eq!(probe.0, Some(None), "asked in no room: {got:?}");
+    }
+
     /// GH #1763: a deck screen's card takes its deck card's enchantment, in
     /// deck order.
     #[test]
@@ -3090,6 +3227,42 @@ mod tests {
             .collect();
         assert_eq!(keys[1].2, norm_id(&json!("Spiral")));
         assert_eq!(keys[2].2, "");
+    }
+
+    /// Corpus seed 180000183: Spiraling Whirlpool's screen leaves out the
+    /// Nimble Defend (an enchanted card cannot take a second enchantment), so
+    /// its first Defend is the deck's SECOND one. The engine's pick (the first
+    /// plain Defend) must land on screen index 5, not 6.
+    #[test]
+    fn an_enchant_screens_cards_are_all_unenchanted() {
+        let strike = || json!({"id": "CARD.STRIKE_IRONCLAD", "upgraded": false});
+        let defend = || json!({"id": "CARD.DEFEND_IRONCLAD", "upgraded": false});
+        let mut deck: Vec<Value> = (0..5).map(|_| strike()).collect();
+        deck.push(json!({"id": "CARD.DEFEND_IRONCLAD", "upgraded": false, "enchantment": "Nimble", "enchantment_amount": 2}));
+        deck.extend((0..3).map(|_| defend()));
+        let mut cards: Vec<Value> = (0..5).map(|_| strike()).collect();
+        cards.extend((0..3).map(|_| defend()));
+        for (i, c) in cards.iter_mut().enumerate() {
+            c["index"] = json!(i);
+        }
+        let state = json!({
+            "prompt_key": "TO_ENCHANT",
+            "source_model": "SPIRAL",
+            "cards": cards,
+            "run_state": {"master_deck": deck},
+        });
+        let enriched = with_deck_enchantments(&state);
+        assert!(
+            enriched.iter().all(|c| c.get("enchantment").is_none()),
+            "no enchant-screen card is enchanted: {enriched:?}"
+        );
+        let refs: Vec<&Value> = enriched.iter().collect();
+        let plain_defend = wire_card_key(&defend());
+        assert_eq!(
+            find_card(&refs, &plain_defend),
+            Some(5),
+            "the first Defend on the screen"
+        );
     }
 
     /// GH #1750: Dolly's Mirror's copy is the engine's card grant.
@@ -3472,6 +3645,123 @@ mod tests {
             let _ = event(&mut probe, &state, "v0.111.0", Some(&track));
             assert_eq!(probe.0.as_deref(), Some(key.as_str()), "{dish}");
         }
+    }
+
+    /// A grab whose dish queues a deck choice (Jelly Liver's transform) is
+    /// resolved on the game's own card screen before the belt's next page
+    /// shows. The page replayed from the event's first one must not keep
+    /// that transform queued: the rebuilt run would stand at
+    /// `CARD_TRANSFORM`, not the page (Spire Bench seeds 180001043,
+    /// 180000804 and 15 more, corpus r5).
+    #[test]
+    fn a_conveyor_page_after_jelly_liver_has_no_pending_transform() {
+        use crate::graft::tests::{reference_run, screen_map, seedless_message};
+        sts2_e2e::env::ensure_engine_installed();
+        let mut msg = seedless_message(&screen_map(&reference_run(2)), 2);
+        // Two cards: with one, the transform's select takes it on its own
+        // and nothing stays queued.
+        msg["run_state"]["master_deck"] =
+            json!([{"id": "BASH", "upgraded": 0}, {"id": "STRIKE_IRONCLAD", "upgraded": 0}]);
+        let jelly = "ENDLESS_CONVEYOR.pages.ALL.options.JELLY_LIVER";
+        let leave = "ENDLESS_CONVEYOR.pages.GRAB_SOMETHING_OFF_THE_BELT.options.LEAVE";
+        // A placeholder whose first page offers Jelly Liver, and the dish
+        // the belt holds after it.
+        let (origin, next) = (1..=512)
+            .find_map(|n| {
+                let mut origin = msg.clone();
+                origin["type"] = json!("event");
+                origin["seedless_seed"] = json!(format!("{}-j{n}", crate::graft::SEEDLESS_SEED));
+                let (mut rm, _) = graft_run(&origin, "v0.111.0").ok()?;
+                sts2_wire::graft::enter_event(&mut rm, "ENDLESS_CONVEYOR").ok()?;
+                let first = event_infos(&rm)
+                    .first()
+                    .map(|i| py::str_of(py::get(i, "loc_key")))?;
+                if first != jelly {
+                    return None;
+                }
+                assert!(choose_event(&mut rm, 0) && in_event(&rm));
+                assert!(
+                    !rm.run_state.pending_deck_transforms.is_empty()
+                        || rm.run_state.has_pending_grant_choice(),
+                    "the engine queues Jelly Liver's transform"
+                );
+                let next = event_infos(&rm)
+                    .first()
+                    .map(|i| py::str_of(py::get(i, "loc_key")))?;
+                Some((origin, next))
+            })
+            .expect("a placeholder rolls Jelly Liver first");
+        struct PendingProbe(Option<(String, bool)>);
+        impl Evaluator for PendingProbe {
+            fn evaluate(
+                &mut self,
+                rm: &mut RunManager,
+                _: &[&str],
+            ) -> std::result::Result<Pick, String> {
+                let key = event_infos(rm)
+                    .first()
+                    .map(|i| py::str_of(py::get(i, "loc_key")))
+                    .unwrap_or_default();
+                self.0 = Some((key, rm.run_state.has_pending_grant_choice()));
+                Err("probe".into())
+            }
+        }
+        let mut state = origin.clone();
+        state["options"] = json!([
+            {"index": 0, "label": "dish", "event_id": "ENDLESS_CONVEYOR", "text_key": next},
+            {"index": 1, "label": "Leave", "event_id": "ENDLESS_CONVEYOR", "text_key": leave},
+        ]);
+        let track = json!({
+            "key": [py::get(&state, "seed"), py::get(&state, "floor"), "ENDLESSCONVEYOR"],
+            "trail": [0], "pending": null, "origin": origin,
+        });
+        let mut probe = PendingProbe(None);
+        let _ = event(&mut probe, &state, "v0.111.0", Some(&track));
+        let (key, pending) = probe.0.expect("the page is evaluated");
+        assert_eq!(key, next, "the belt's next page");
+        assert!(!pending, "the game resolved the transform before this page");
+    }
+
+    /// The belt's dish is the screen's even when no placeholder replay can
+    /// roll it: the run stands at full HP, so the engine's pool holds no
+    /// Clam Roll after the first grab, while the game's player (who lost
+    /// HP since) was offered one (seeds 180000706, 180000544, 180001732
+    /// rolled other dishes on long visits).
+    #[test]
+    fn a_conveyor_page_shows_the_screens_dish() {
+        use crate::graft::tests::{reference_run, screen_map, seedless_message};
+        sts2_e2e::env::ensure_engine_installed();
+        let mut origin = seedless_message(&screen_map(&reference_run(2)), 2);
+        origin["type"] = json!("event");
+        origin["run_state"]["hp"] = json!(80);
+        let clam = "ENDLESS_CONVEYOR.pages.ALL.options.CLAM_ROLL";
+        let leave = "ENDLESS_CONVEYOR.pages.GRAB_SOMETHING_OFF_THE_BELT.options.LEAVE";
+        struct DishProbe(Option<String>);
+        impl Evaluator for DishProbe {
+            fn evaluate(
+                &mut self,
+                rm: &mut RunManager,
+                _: &[&str],
+            ) -> std::result::Result<Pick, String> {
+                self.0 = event_infos(rm)
+                    .first()
+                    .map(|i| py::str_of(py::get(i, "loc_key")));
+                Err("probe".into())
+            }
+        }
+        let mut state = origin.clone();
+        state["run_state"]["hp"] = json!(70);
+        state["options"] = json!([
+            {"index": 0, "label": "dish", "event_id": "ENDLESS_CONVEYOR", "text_key": clam},
+            {"index": 1, "label": "Leave", "event_id": "ENDLESS_CONVEYOR", "text_key": leave},
+        ]);
+        let track = json!({
+            "key": [py::get(&state, "seed"), py::get(&state, "floor"), "ENDLESSCONVEYOR"],
+            "trail": [0], "pending": null, "origin": origin,
+        });
+        let mut probe = DishProbe(None);
+        let _ = event(&mut probe, &state, "v0.111.0", Some(&track));
+        assert_eq!(probe.0.as_deref(), Some(clam));
     }
 
     /// GH #1605: on Trial's REJECT page the engine (agent mode) offers only

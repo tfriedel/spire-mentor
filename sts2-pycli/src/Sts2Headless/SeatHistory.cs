@@ -33,10 +33,21 @@ internal static class SeatHistory
             e.Receiver == creature && e.Result.UnblockedDamage > 0);
         summary["cards_exhausted_this_combat"] = exhausts.Count(e => e.Actor == creature);
         summary["cards_exhausted_this_turn"] = exhausts.Count(e => e.HappenedThisTurn(state) && e.Actor == creature);
+        // The cards the player discarded this turn (`CardDiscardedEntry`,
+        // Memento Mori's multiplier). A discard before the first screen
+        // (Whispering Earring's turn-1 auto-plays) is otherwise lost.
+        summary["discards_this_turn"] = history.Entries.OfType<CardDiscardedEntry>()
+            .Count(e => e.HappenedThisTurn(state) && e.Actor == creature);
         // Murder's multiplier (`Murder.cs`: every `CardDrawnEntry` whose Actor
         // is the owner, this combat). The card's `calculateddamage` stat is
         // the unscaled base, so without this count a rebuilt Murder hits for 1.
         summary["cards_drawn_this_combat"] = history.Entries.OfType<CardDrawnEntry>().Count(e => e.Actor == creature);
+        // Supermassive's multiplier (`Supermassive.cs`: every
+        // `CardGeneratedEntry` whose Creator is the owner). A card generated
+        // before the first screen (Radiant Pearl's Luminesce) is otherwise
+        // missing from a rebuilt fight.
+        summary["cards_generated_this_combat"] = history.Entries.OfType<CardGeneratedEntry>()
+            .Count(e => e.Creator != null && e.Creator.Creature == creature);
 
         var finished = history.CardPlaysFinished
             .Where(f => f.CardPlay != null).Select(f => f.CardPlay).ToHashSet();

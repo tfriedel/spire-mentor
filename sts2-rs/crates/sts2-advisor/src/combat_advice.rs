@@ -12,6 +12,7 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::board_targets::BoardTargets;
 use crate::display_names::Names;
 use crate::i18n::{is_zh, join_list, tr, tr_dyn, trf};
 use crate::instinct::Pick;
@@ -832,12 +833,19 @@ pub fn build_advice(
 /// Instinct's fight `advice` (`realgame_instinct.combat_advice`), in the
 /// search's option shape: each merged class one row named by its
 /// representative, mapped through the same stable indices; a class the game
-/// would refuse hands the crown to the student's next choice.
+/// would refuse hands the crown to the student's next choice. `targets`
+/// maps the engine fight's enemy slots onto the board's (`board_targets`):
+/// a class aimed at a corpse the game removed has no mod form.
 ///
 /// # Errors
 ///
 /// The player-facing reason Instinct cannot answer here.
-pub fn instinct_combat_advice(pick: &Pick, state: &Value, wire: &Value) -> Result<Value, String> {
+pub fn instinct_combat_advice(
+    pick: &Pick,
+    state: &Value,
+    wire: &Value,
+    targets: &BoardTargets,
+) -> Result<Value, String> {
     let hand = py::list(py::get(wire, "deck"), "hand");
     let mut order: Vec<usize> = (0..pick.probs.len()).collect();
     order.sort_by(|&a, &b| pick.probs[b].total_cmp(&pick.probs[a]));
@@ -848,9 +856,11 @@ pub fn instinct_combat_advice(pick: &Pick, state: &Value, wire: &Value) -> Resul
         let Some(action) = py::as_list(py::get(cls, "actions"))
             .first()
             .filter(|a| a.is_object())
+            .and_then(|a| targets.board_action(a))
         else {
             continue;
         };
+        let action = &action;
         let Ok(stable_idx) = stable_idx_for_action(action, hand) else {
             continue; // a class with no mod form
         };

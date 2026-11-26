@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import io
 import json
 import os
 import re
@@ -800,7 +801,20 @@ def gate(
     return 0 if not bad else 1
 
 
+def _utf8_stdio() -> None:
+    """Write stdout/stderr as UTF-8.
+
+    Redirected to a file on Windows (as `just event-parity` does), they default
+    to cp1252, which has no ``✓``: a clean sweep crashed on its verdict line
+    and the gate read it as a failure (GH #1781).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper) and stream.encoding.lower() != "utf-8":
+            stream.reconfigure(encoding="utf-8")
+
+
 def main() -> int:
+    _utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--character", default="Ironclad")
     ap.add_argument("--all-characters", action="store_true", help="run all 5 characters")

@@ -16,7 +16,7 @@ gateway, verifier and SDK in `sts2-pycli/python/spire_bench/`.
 One process plays one episode. Newline-delimited JSON on stdin and stdout.
 
 1. Start the host with `STS2_REFEREE=1`. It prints
-   `{"type":"ready","referee":true,"game_version":"v0.107.1"}`.
+   `{"type":"ready","referee":true,"game_version":"v0.111.0"}`.
 2. Send `start_run`. The reply is the first decision.
 3. Send one `action` per decision until the reply is `decision: "game_over"`.
 4. Send `quit`.
@@ -93,7 +93,7 @@ the corpses that stay on the board because they come back.
 |---|---|
 | Draw pile order | `draw_pile[]` sorted by content, without positions. Its contents and size are public, as in the game's draw pile view. |
 | RNG seed, stream counters, episode key | Nothing. |
-| Enemy AI state: move log, forced next move, current move id | `enemies[].intents[]` (type, damage, hits, base_damage) and visible powers. |
+| Enemy AI state: move log, forced next move, current move id | `enemies[].intents[]` (type, damage, hits, base_damage, card_count) and visible powers. |
 | Future rooms, rewards, shop stock, event outcomes | Each appears only on the screen that shows it. |
 
 ### What is shown that the game's UI does not print
@@ -103,11 +103,30 @@ when a player could work it out from public information: the bestiary, the
 card and relic texts, and what the run has shown so far. It never carries
 anything a player could not know (the hidden column above).
 
+A value joins the table below only when all three hold:
+
+1. **Exact, not likely.** A player who took perfect notes could compute it
+   with certainty. A value that is right in most cases fails: the cases
+   where it is uncertain are the ones where sending it leaks. Enemy move ids
+   fail this (two moves can show the same intent), so they stay hidden.
+2. **A fact, not analysis.** The view carries game state, never a
+   conclusion drawn from it: no draw odds, lethal checks or expected
+   damage. Working those out is what the benchmark measures.
+3. **The game reads it.** Some card, relic or power text refers to it, and a
+   client could only rebuild it by tracking earlier observations.
+
+Anything on a screen the player can open (the deck, a relic's counter, the
+draw pile's contents, the map) needs none of this: it is in the view as
+shown. The table stays a short closed list, because the referee has to
+compute each entry correctly for good. A field is added when two
+independent adapters would otherwise write the same exact tracker.
+
 | Field | What it is |
 |---|---|
 | `enemies[].intents[].base_damage` | An attack's own damage per hit, before the attacker's Strength, Weak and the like and before your Vulnerable: the bestiary number for the move at this ascension. `damage` is the number the game shows; it floors at 0, which hides the base when Strength loss outweighs it. |
 | `draw_pile_top[]`, `draw_pile_bottom[]` | Draw-pile cards whose position you saw: put on top (Headbutt) or at the bottom, and not drawn or moved since. Top first and bottom first. A shuffle clears both, and so does a card shuffled in at a random spot, since you cannot tell where it landed. `draw_pile[]` itself stays sorted. |
-| `player.hp_lost_this_turn`, `player.unblocked_hits_this_combat`, `player.cards_exhausted_this_combat`, `player.cards_exhausted_this_turn`, `player.card_block_gains_this_turn`, `player.powered_hits_this_turn[]`, `player.extra_turns_taken_this_combat` | Counts of things that happened in front of you this turn or this combat, which cards and powers read (Spite, Tear Asunder, Midnight, Evil Eye, Unmovable, Gang Up, extra-turn relics). |
+| `player.hp_lost_this_turn`, `player.unblocked_hits_this_combat`, `player.cards_exhausted_this_combat`, `player.cards_exhausted_this_turn`, `player.card_block_gains_this_turn`, `player.powered_hits_this_turn[]`, `player.extra_turns_taken_this_combat`, `player.cards_drawn_this_combat`, `player.cards_generated_this_combat`, `player.discards_this_turn`, `player.bound_card_played_this_turn` | Counts of things that happened in front of you this turn or this combat, which cards and powers read (Spite, Tear Asunder, Midnight, Evil Eye, Unmovable, Gang Up, extra-turn relics, Murder, Supermassive, Memento Mori). |
+| `enemies[].powers[]` Painful Stabs `vars.ExtraMultiClawCount` | Test Subject's extra Multi Claw hits: one more for each Multi Claw you watched it use in its second form. |
 
 Anything else a bot has seen stays its own to remember; the referee tracks
 only the fields listed above.
@@ -314,9 +333,10 @@ request) and `random_action` (a random legal action).
 
 ## Open questions for review
 
-1. **Enemy move ids.** Hidden for now. A human who knows a monster can usually
-   infer the move from the intent; a bot's simulator may want the id. Publish
-   it, or keep it inferred?
+1. ~~**Enemy move ids.**~~ Settled: hidden. A player can usually infer the
+   move from the intent, but two moves can show the same intent, and then
+   the id says more than the screen does. A client infers it
+   (`ADAPTER-GUIDE.md`, section 4).
 2. ~~**Second boss at high ascension.**~~ Settled: the game shows it from act
    entry (top-bar icon and map node), so `map.second_boss` is sent from then
    (GH #1662).
@@ -326,5 +346,21 @@ request) and `random_action` (a random legal action).
 5. **Headless modelling choices** that differ from the real game and need a
    decision each. Both settled: the Crystal Sphere minigame is the client's
    (see above) and `Trial.DoubleDown` abandons the run, as in the game.
-6. **Intent-hiding effects.** Not checked whether the host's `intents[]`
-   respects effects that hide intents from the player.
+6. ~~**Intent-hiding effects.**~~ Settled: on v0.111.0 and v0.113 no
+   power, relic, card, affliction, enchantment or modifier hides or alters an
+   enemy's intent; the screen always draws the monster's next move
+   (`NCreature.UpdateIntent` reads `Monster.NextMove.Intents`). The view sends
+   what the screen draws: the type, for an attack the number shown
+   (`AttackIntent.GetSingleDamage`) and the hit count, for a status intent
+   the card count. `UnknownIntent` (the "?" icon) is never used. The one
+   intent the screen hides, `HiddenIntent` (no icon, number or tooltip; only
+   the Architect and test monsters), is dropped from the view, so it reads
+   like a move with no intents. A later build that adds an intent-hiding
+   effect reopens this.
+7. **Relic status.** `player.relics[]` carries the counter the game draws on
+   the icon, but not the icon's state: pulsing while an effect is pending
+   (Venerable Tea Set after a rest site), greyed out once it is used up.
+   That is on screen, so it belongs in the view. Not built (GH #1882).
+8. **Encounter id.** Not in the view. Every starting roster belongs to one
+   encounter (checked on v0.111.0 and v0.113), so the id is exact and could
+   be sent as a derived value. Send it, or leave it to the client?

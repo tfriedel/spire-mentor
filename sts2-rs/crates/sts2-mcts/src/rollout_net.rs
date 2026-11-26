@@ -2884,6 +2884,26 @@ pub struct ExportedFeatures {
     pub species: [Option<MonsterKind>; MONSTER_SLOTS],
 }
 
+/// Index of `max_energy / 3` in the v1 / v2 state block.
+pub const STATE_MAX_ENERGY: usize = 4;
+
+/// Overwrites the state block's max energy with the live value
+/// ([`sts2_core::combat_loop::effective_max_energy`]). `player.max_energy`
+/// holds what the last turn start computed, so a max-energy modifier gained
+/// this turn (Pyre, `PyrePower.ModifyMaxEnergy`) shows natively only from the
+/// next turn, while the game (and a fight rebuilt from its screen) reads the
+/// live value at once. The Instinct tokenizer applies it (sts2-e2e `Rl2::of`,
+/// `rollout_features(..., live_max_energy=True)`); the rollout nets keep the
+/// turn-start value they were trained on.
+pub fn set_live_max_energy(state: &mut [f32], bv: &CombatState) {
+    if let Some(s) = state.get_mut(STATE_MAX_ENERGY) {
+        #[allow(clippy::cast_precision_loss)]
+        {
+            *s = sts2_core::combat_loop::effective_max_energy(bv).max(0) as f32 / 3.0;
+        }
+    }
+}
+
 /// The features of `spec`'s version at `state`, for the training data.
 #[must_use]
 pub fn export_features_spec(state: &CombatState, spec: &FeatureSpec) -> ExportedFeatures {

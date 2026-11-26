@@ -78,16 +78,6 @@ pub(crate) fn on_after_card_played_letter_opener(
     EffectResult::Resolved
 }
 
-/// `LetterOpener.after_combat_end` — `_skills_this_turn = 0`
-/// (`uncommon.py::LetterOpener`, line 361). Bead `sts2-rs-7po6`.
-pub(crate) fn on_after_combat_end_letter_opener(state: &mut CombatState) -> EffectResult {
-    let Some(r) = letter_opener_relic_mut(state) else {
-        return EffectResult::NotImplemented;
-    };
-    r.counter = 0;
-    EffectResult::Resolved
-}
-
 pub(crate) fn install() {
     register_before_combat_start(
         RelicId::LetterOpener,
@@ -100,10 +90,5 @@ pub(crate) fn install() {
     register_after_card_played(
         RelicId::LetterOpener,
         on_after_card_played_letter_opener as AfterCardPlayedFn,
-    );
-    register_owned_after_combat_end(
-        RelicId::LetterOpener,
-        crate::RelicKind::LetterOpener,
-        on_after_combat_end_letter_opener as AfterCombatEndFn,
     );
 }

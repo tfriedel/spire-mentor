@@ -765,3 +765,28 @@ def test_fill_check_declared(monkeypatch: pytest.MonkeyPatch) -> None:
         rb["cont"][tok, C.XF[alias]] = 1.0
         rep = FC.check(rb, wp)
         assert C.FILL_CHARS in rep.stray, alias
+
+
+def _mad_science_modes(sd: dict[str, Any]) -> None:
+    # The TinkerTime packing (`pack_tinker_time`): mode << 4 | rider. 21 is a Skill (the
+    # GH #1854 eval card), 33 a Power; both play untargeted, so only the mode tells them
+    # apart. The rest of the hand stays default (Attack, targeted).
+    hand = sd["deck"]["hand"]
+    hand[0].setdefault("combat_vars", {})["generic"] = 21
+    hand[1].setdefault("combat_vars", {})["generic"] = 33
+    hand[2].setdefault("combat_vars", {})["generic"] = 21
+
+
+def test_mad_science_modes_split_the_play_class() -> None:
+    """GH #1854: Mad Science keeps its TinkerTime mode in the copy's `generic` combat
+    var. Two copies of different modes are two play classes (their RL2 action features
+    read the copy's card type, so one class broke `check_members_identical`: Regent
+    held-out seed 160000304); two of the same mode still merge."""
+    assert E._face_vars({"id": "MAD_SCIENCE", "combat_vars": {"generic": 21}}) == {"generic": 21}
+    assert E._face_vars({"id": "MAD_SCIENCE"}) == {}
+    assert E._face_vars({"id": "GUILTY", "combat_vars": {"generic": 2}}, stars=True) == {}
+    d, t = _scripted("Regent", _fight("Regent", "MAD_SCIENCE", "DIVINE_RIGHT", _mad_science_modes))
+    plays = _play_classes(d)
+    assert plays[0, None] == plays[2, None], "two Skill copies merge"
+    assert plays[0, None] != plays[1, None], "a Skill and a Power copy are two classes"
+    K.check_members_identical(t, d.members)

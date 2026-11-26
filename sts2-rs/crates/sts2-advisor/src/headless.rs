@@ -257,14 +257,7 @@ fn translate_relic(relic: &Value) -> Value {
     let counter = get(relic, "counter");
     let rid = get(relic, "id").as_str().unwrap_or("");
     let rid = rid.strip_prefix("RELIC.").unwrap_or(rid);
-    if is_int(counter)
-        && truthy(get(relic, "is_melted"))
-        && sts2_e2e::snapshot::melted_count_engine_clears(rid)
-    {
-        // The count it melted with, which the engine cleared at the end of
-        // that combat.
-        out["counter"] = json!(0);
-    } else if is_int(counter) {
+    if is_int(counter) {
         // The game's own number, in the engine's terms (GH #1684).
         let shown = py::int_of(counter);
         let id = rid;
@@ -485,6 +478,7 @@ fn translate_ally(a: &Value, next: &mut usize) -> Value {
             "card_block_gains_this_turn",
             "extra_turns_taken_this_combat",
             "cards_drawn_this_combat",
+            "cards_generated_this_combat",
         ] {
             if truthy(get(a, key)) {
                 ally[key] = get(a, key).clone();
@@ -589,6 +583,8 @@ pub fn to_headless_combat_play(state: &Value) -> Result<Value, HeadlessError> {
         "card_block_gains_this_turn",
         "extra_turns_taken_this_combat",
         "cards_drawn_this_combat",
+        "cards_generated_this_combat",
+        "discards_this_turn",
     ] {
         player_out[key] = get(player, key).clone();
     }
@@ -730,14 +726,14 @@ mod tests {
         assert_eq!(other["counter"], json!(7));
     }
 
-    /// A melted Kusarigama keeps the count it melted with in C#; the engine
-    /// cleared it when that combat ended.
+    /// A melted Kusarigama keeps the count it melted with, in C# and in the
+    /// engine.
     #[test]
-    fn a_melted_kusarigama_shows_the_engines_cleared_count() {
+    fn a_melted_kusarigama_keeps_its_count() {
         let melted = translate_relic(&json!(
             {"id": "KUSARIGAMA", "name": "k", "counter": 1, "is_wax": true, "is_melted": true}
         ));
-        assert_eq!(melted["counter"], json!(0));
+        assert_eq!(melted["counter"], json!(1));
         let live = translate_relic(&json!({"id": "KUSARIGAMA", "name": "k", "counter": 1}));
         assert_eq!(live["counter"], json!(1));
     }

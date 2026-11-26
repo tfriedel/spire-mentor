@@ -54,6 +54,17 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
         // Bead `sts2-rs-z13x4`: C# `Bombardment.cs` damage 18 → 24.
         // Bead `sts2-rs-h4ect`: C# `Bury.cs` `DamageVar(52m)` with
         // `OnUpgrade UpgradeValueBy(11m)` → 52 base / 63 upgraded.
+        // C# `BoneShards.cs` OnUpgrade: OstyDamage and Block both
+        // `UpgradeValueBy(3m)`, 9 → 12. The handler still reads 12 from
+        // `current_card_upgraded`; the spec delta is what every reader of the
+        // card's stats sees (the BLK token, Thrash's fold). Missing, an
+        // upgraded Bone Shards showed block 9 (corpus seed 180001034).
+        CardId::BoneShards => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(12),
+            base_block: Some(12),
+            keywords: None,
+        }),
         CardId::Bury => Some(CardUpgradeDelta {
             cost: None,
             base_damage: Some(63),
@@ -981,5 +992,18 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
         }),
         // v0.113.0 Fool cards: `crate::cards::fool::specs::upgrade_delta`.
         _ => super::fool::specs::upgrade_delta(card_id),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Corpus seed 180001034: an upgraded Bone Shards reads block 12 in the
+    /// game and 9 in the engine's card stats.
+    #[test]
+    fn an_upgraded_bone_shards_has_twelve_damage_and_block() {
+        let d = upgrade_delta(CardId::BoneShards).expect("Bone Shards upgrades");
+        assert_eq!((d.base_damage, d.base_block), (Some(12), Some(12)));
     }
 }

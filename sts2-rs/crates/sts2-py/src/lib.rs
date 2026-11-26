@@ -2338,17 +2338,24 @@ pub const SRC_HASH: &str = env!("STS2_PY_SRC_HASH");
 /// each by default the engine's encounter tables ([`monster_acts`],
 /// [`encounter_acts`]); `monsters` lists the species of the first enemies in
 /// play (the encounter embedding's input; all `None` under v1).
+/// `live_max_energy` reads the state block's max energy live
+/// ([`sts2_mcts::rollout_net::set_live_max_energy`]); the Instinct tokenizer
+/// sets it, the rollout nets keep the turn-start value.
 #[pyfunction]
-#[pyo3(signature = (state, version = 1, monster_act = None, encounter_act = None))]
+#[pyo3(signature = (state, version = 1, monster_act = None, encounter_act = None, live_max_energy = false))]
 fn rollout_features<'py>(
     py: Python<'py>,
     state: &PyCombatState,
     version: u32,
     monster_act: Option<std::collections::BTreeMap<String, u8>>,
     encounter_act: Option<Vec<(u8, Vec<String>)>>,
+    live_max_energy: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
     let spec = feature_spec_for(version, monster_act, encounter_act)?;
-    let ex = sts2_mcts::rollout_net::export_features_spec(state.inner_ref(), &spec);
+    let mut ex = sts2_mcts::rollout_net::export_features_spec(state.inner_ref(), &spec);
+    if live_max_energy {
+        sts2_mcts::rollout_net::set_live_max_energy(&mut ex.state, state.inner_ref());
+    }
     let d = PyDict::new(py);
     d.set_item("state", ex.state)?;
     let actions = PyList::empty(py);

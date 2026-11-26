@@ -562,3 +562,38 @@ def test_evaluate_refuses_zero_games(capsys, tmp_path):
         "--procs", 1, "--games", 0, "--evals", tmp_path, *LOOSE,
     )  # fmt: skip
     assert r.returncode == 2 and "--games must be positive" in r.stderr
+
+
+def test_a_bad_decision_costs_only_its_own_run_in_a_batch(monkeypatch):
+    """GH #1854: when the batched policy call raises on one run's decision, the
+    `Player` asks again one run at a time, books only that run as an error and
+    keeps the others open (it used to book every run of the call)."""
+    monkeypatch.setattr(E, "eval_stamps", lambda: {})
+
+    class Env:
+        def __init__(self, seed):
+            self.seed, self.rm = seed, None
+
+        def reset(self):
+            return SimpleNamespace(members=[[0], [1]], seed=self.seed)
+
+        def step(self, choice):
+            return self.reset()
+
+    class Policy:
+        def act_decisions(self, decisions):
+            if any(d.seed == 2 for d in decisions):
+                raise ValueError("members of one class tokenize differently")
+            return [0] * len(decisions)
+
+    pl = E.Player.__new__(E.Player)
+    pl.policy_spec, pl.make_env, pl.policy, pl.sink = "fake", Env, Policy(), None
+    pl._games, pl._done = [], []
+    monkeypatch.setattr(E, "BossTracker", lambda: SimpleNamespace(observe=lambda rm: None))
+    for s in (1, 2, 3):
+        pl.start(s)
+    done = pl.advance()
+    assert [seed for seed, _ in done] == [2]
+    assert done[0][1]["outcome"] == "error" and "tokenize differently" in done[0][1]["error"]
+    assert sorted(g.seed for g in pl._games) == [1, 3]
+    assert all(g.decisions == 1 for g in pl._games)

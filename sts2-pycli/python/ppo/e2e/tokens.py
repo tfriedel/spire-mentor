@@ -1271,7 +1271,8 @@ def encode_combat(d: Any, *, rare: Any = None, priv: bool = True, check: bool = 
         snap = TC.live_snapshot(snap, bv, d_bv)
     buf, _deck, _ench = _head(d, run, snap, d.room, player)
     hcat, hcont, hsec, hflags = buf.arrays()
-    rf = sts2_rs.rollout_features(bv, version=1)
+    # S04 is the live max energy (a Pyre gained this turn counts at once).
+    rf = sts2_rs.rollout_features(bv, version=1, live_max_energy=True)
     tk = T.tokens(snap, acts, rf, "S_ctx")
     cat15 = tk["cat"]
     sec = tk["sec"]

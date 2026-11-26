@@ -85,6 +85,10 @@ struct Args {
     coach_catchup_sims: u32,
     #[arg(long, default_value_t = 6.0)]
     coach_budget_s: f64,
+    /// Seconds the turn plan may spend re-searching (`inf`: no cap, which a
+    /// test that compares replies wants: a clock cut depends on the load).
+    #[arg(long, default_value_t = sts2_advisor::turn_plan::PLAN_BUDGET_S)]
+    plan_budget_s: f64,
     /// Replay a recorded corpus offline instead of serving.
     #[arg(long)]
     replay: Option<PathBuf>,
@@ -310,6 +314,7 @@ fn serve(args: &Args, root: &std::path::Path, log: &sts2_advisor::serve::Logger)
         log_search_tree: args.log_search_tree,
         coach_catchup_sims: args.coach_catchup_sims,
         coach_budget_s: args.coach_budget_s,
+        plan_budget_s: args.plan_budget_s,
         no_mirror: args.no_mirror,
         inline_coach: false,
         divergence_log: Some(

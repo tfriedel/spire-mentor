@@ -203,7 +203,11 @@ def test_the_copy_picked_from_the_draw_pile_is_the_one_the_next_draws_miss():
     assert hr._pile_picks(pile, [1, 4, 6], 1, coming) == (1,)
     # A pick that turns the copies into another card leaves them in place.
     coming = ["DEFEND", "BOMB", "SOUL", "TOUCH", "BOMB", "ASH"]
-    assert hr._pile_picks(pile, [1, 4, 6], 2, coming) == (1, 4)
+    assert hr._pile_picks(pile, [1, 4, 6], 2, coming, stays=True) == (1, 4)
+    # A card that leaves is not drawn as another: with the Strike on top
+    # drawn next, the one exhausted lay further down.
+    pile = ["SLIMED", "STRIKE", "DEFEND", "UNLEASH", "STRIKE", "SLIMED"]
+    assert hr._pile_picks(pile, [1, 4], 1, ["SLIMED", "STRIKE", "DEFEND", "UNLEASH"]) == (4,)
     # Draws that fit two choices alike decide nothing.
     assert hr._pile_picks(pile, [1, 4, 6], 1, ["DEFEND"]) is None
 
@@ -243,6 +247,25 @@ def test_a_card_picked_from_the_discard_pile_is_not_ranked_by_the_draws_to_come(
     r.rows, r.combat_end, r.next_choice = rows, len(rows), 3
     assert r.drawn_rank(2, "DEFEND_REGENT") is None
     assert r.track.hand_rank(2, 2) == 1
+
+
+def test_a_copy_put_back_on_the_pile_is_not_ranked_among_the_piles():
+    # Charge turns two of the pile's Defends into another card; Photon Cut
+    # then puts the Defend in hand on the pile, and it is drawn before them.
+    rows = [
+        {"t": "combat_start"},
+        {"t": "shuffle", "order_c": [1, 2, 3]},
+        {"t": "draw", "c": 9, "id": "DEFEND_REGENT"},
+        {"t": "pick", "cards": [{"c": 3, "id": "DEFEND_REGENT"}]},
+        {"t": "draw", "c": 9, "id": "DEFEND_REGENT"},
+        {"t": "draw", "c": 1, "id": "DEFEND_REGENT"},
+        {"t": "draw", "c": 2, "id": "DEFEND_REGENT"},
+        {"t": "draw", "c": 3, "id": "DEFEND_REGENT"},
+    ]
+    r = _replayer(rows[:3])
+    r.track.ids.update({1: "DEFEND_REGENT", 2: "DEFEND_REGENT", 3: "DEFEND_REGENT"})
+    r.rows, r.combat_end, r.next_choice = rows, len(rows), 3
+    assert r.drawn_rank(3, "DEFEND_REGENT") == 2
 
 
 def test_no_character_is_unlocked_behind_a_locked_one():

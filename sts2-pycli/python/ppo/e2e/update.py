@@ -182,6 +182,7 @@ def loss_cfg(cfg: Any) -> A.LossCfg:
         is_clamp=float(cfg.is_cap),
         dual_clip=float(cfg.dual_clip),
         vf_coef=float(cfg.vf_coef),
+        vf_coef_run=None if float(cfg.vf_coef_run) < 0 else float(cfg.vf_coef_run),
     )
 
 

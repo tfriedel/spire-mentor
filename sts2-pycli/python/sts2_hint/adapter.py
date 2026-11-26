@@ -614,6 +614,18 @@ _POWER_VAR_TO_ENGINE_FIELD = {
     # engine counts it on `Power.counter` (`record_possess_steal`).
     ("POSSESS_STRENGTH", "Stolen"): "counter",
     ("POSSESS_SPEED", "Stolen"): "counter",
+    # TheBombPower is instanced and keeps each play's damage in
+    # `DynamicVars.Damage` (`SetDamage`); `amount` is the turns left. The
+    # engine keeps the damage on `Power.counter`. Rebuilt at 0, only the
+    # first Bomb got the carried damage back and a second one dealt nothing
+    # (Spire Bench seeds 180000175, 180000052).
+    ("THE_BOMB", "Damage"): "counter",
+    # Test Subject's MULTI_CLAW growth (`_extraMultiClawCount`, private
+    # monster data), sent with Painful Stabs' vars; the engine keeps it on
+    # that power's `counter` (`test_subject_multi_claw_effect`) and adds it to
+    # MULTI_CLAW's hits. Rebuilt at 0, the student read a fresh count
+    # (Spire Bench seeds 180001932, 180000915).
+    ("PAINFUL_STABS", "ExtraMultiClawCount"): "counter",
 }
 
 
@@ -1359,6 +1371,42 @@ def _translate_enemy(
 # ---------------------------------------------------------------------------
 
 
+def _stamp_generated_in_combat(piles: list[list[dict[str, Any]]], deck_raw: Any) -> None:
+    """Mark the pile cards the run's deck does not account for as generated.
+
+    Counted by id against the master deck (``player.deck``, which still lists
+    a card stolen or exhausted this combat). Among identical copies the
+    excess is taken from the last piles in ``piles`` order (draw before
+    discard before hand: a generated copy usually lands in the hand or the
+    discard). A card that already carries the var keeps it. No deck, no
+    stamp: a producer without one gets exactly today's behaviour.
+    """
+    if not isinstance(deck_raw, list) or not deck_raw:
+        return
+    if not all(isinstance(raw, dict) and raw.get("id") is not None for raw in deck_raw):
+        return  # an unreadable deck says nothing
+    # The piles' own translator, so a curse reads the same in both lists.
+    # (A deck entry has no board ``index``; it is not one.)
+    deck = _soft_translate_list(
+        [{**raw, "index": i} for i, raw in enumerate(deck_raw)],
+        _translate_card,
+        "$.player.deck",
+    )
+    if len(deck) != len(deck_raw):
+        return
+    budget: dict[str, int] = {}
+    for spec in deck:
+        budget[spec["id"]] = budget.get(spec["id"], 0) + 1
+    hand, draw, discard, exhaust, play = piles
+    for card in [*draw, *discard, *exhaust, *play, *hand]:
+        cid = card.get("id")
+        if budget.get(cid, 0) > 0:
+            budget[cid] -= 1
+            continue
+        cv = card.setdefault("combat_vars", {})
+        cv.setdefault("generated_in_combat", 1)
+
+
 def translate(
     state: dict[str, Any],
     *,
@@ -1472,6 +1520,17 @@ def translate(
     discard = _soft_translate_list(discard_raw, _translate_card, "$.discard_pile")
     exhaust = _soft_translate_list(exhaust_raw, _translate_card, "$.exhaust_pile")
     play = _soft_translate_list(play_raw, _translate_card, "$.play_pile")
+    # C# `CardModel.DeckVersion == null` (a card made this combat: Vexing
+    # Puzzlebox, Anger's copy, Infernal Blade) is the engine's
+    # `generated_in_combat` var, and no producer sends it. A state rebuilt
+    # without it treats every generated card as a deck card, which Thieving
+    # Hopper's steal (`ThievingHopper.cs:203`, `where c.DeckVersion != null`)
+    # then counts: the candidate list grows, `NextItem` lands on another card
+    # (corpus r6 seed 180000462: a Puzzlebox Flame Barrier made the mirror
+    # steal Forgotten Ritual where the game stole Spite). The run's deck says
+    # which cards are the deck's: whatever the piles hold beyond it was made
+    # this combat.
+    _stamp_generated_in_combat([hand, draw, discard, exhaust, play], player_raw.get("deck"))
     master_deck: list[dict[str, Any]] | None = None
     if master_deck_raw is not None:
         master_deck = _soft_translate_list(master_deck_raw, _translate_card, "$.master_deck")
@@ -1777,6 +1836,8 @@ def _copy_seat_history(src: dict[str, Any], out: dict[str, Any]) -> None:
         "card_block_gains_this_turn",
         "extra_turns_taken_this_combat",
         "cards_drawn_this_combat",
+        "cards_generated_this_combat",
+        "discards_this_turn",
     ):
         n = src.get(key)
         if isinstance(n, int) and not isinstance(n, bool) and (n > 0 or key in TURN_HISTORY_KEYS):

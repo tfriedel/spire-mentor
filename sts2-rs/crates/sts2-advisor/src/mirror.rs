@@ -458,7 +458,58 @@ pub fn enemy_alignment(world_wire: &Value, mirror_wire: &Value) -> Vec<Option<us
         })
         .collect();
     pair_living_by_hp(enc, list(mirror_wire, "encounter"), &mut out);
+    align_missed_kills(enc, list(mirror_wire, "encounter"), &mut out);
     out
+}
+
+/// Re-pair the enemies of a kind that died in the world while the carried
+/// fight still has them alive (a kill the mirror missed). The world board
+/// here carries the corpses the game reports removed (`removed_roster`,
+/// GH #1716), each in its slot, so it holds a `#dead` entry the carried
+/// fight numbers as living: their living counts differ, the kind is
+/// unalignable, and every one of them lost its carried state, its uid with
+/// it. The intent log then followed the next rebuild's uid shift onto the
+/// wrong creatures (Spire Bench seeds 180000392 / 180000817: the dead
+/// Scroll's history went to its neighbour; 180001103: The Lost's dropped).
+///
+/// * The kind has as many entries in both (no summon): a corpse keeps its
+///   slot, so the kind's list order names the same creatures.
+/// * Every carried one of the kind died and the world has more: the world's
+///   living ones are summons, its corpses the carried ones (an Axebot's
+///   Stock respawn, `StockPower.AfterDeath`; seed 180001314: the respawn
+///   took its dead owner's place and history).
+///
+/// Anything else stays as the `#nth` pass left it.
+fn align_missed_kills(world: &[Value], carried: &[Value], out: &mut [Option<usize>]) {
+    let dead = |e: &Value| truthy(get(e, "is_dead"));
+    let kinds: BTreeSet<String> = world
+        .iter()
+        .filter(|e| dead(e))
+        .map(|e| str_of(get(e, "kind")))
+        .collect();
+    for kind in kinds {
+        let of = |src: &[Value]| -> Vec<usize> {
+            (0..src.len())
+                .filter(|&i| str_of(get(&src[i], "kind")) == kind)
+                .collect()
+        };
+        let (ws, cs) = (of(world), of(carried));
+        let w_dead = ws.iter().filter(|&&i| dead(&world[i])).count();
+        let c_dead = cs.iter().filter(|&&i| dead(&carried[i])).count();
+        if w_dead <= c_dead {
+            continue;
+        }
+        if ws.len() == cs.len() {
+            for (&w, &c) in ws.iter().zip(&cs) {
+                out[w] = Some(c);
+            }
+        } else if w_dead == cs.len() {
+            let mut was = cs.iter().copied();
+            for &w in &ws {
+                out[w] = if dead(&world[w]) { was.next() } else { None };
+            }
+        }
+    }
 }
 
 /// Re-pair the living enemies of one kind by HP where it is unambiguous.
@@ -584,13 +635,33 @@ pub fn with_reported_corpses(world_wire: &Value, seeded: Value) -> Value {
     with_carried_corpses(world_wire, &json!({ "encounter": roster }))
 }
 
-/// `_undisclosed_relic_counters`: relics the wire named without a `counter`.
+/// Relics whose undisclosed counter `state_from_dict` derives from the wire
+/// (`sts2_wire::state_dict`): Red Skull from HP, Toy Box as spent, and,
+/// where the board carries `cards_played_this_turn`, Ripple Basin's Attacks
+/// and Brilliant Scarf's plays this turn. A carry must not override them:
+/// the carried mirror's Ripple Basin count is the mirror's own, and a mirror
+/// that missed an Attack the board counts gave no turn-end block (Spire Bench
+/// seeds 180000177 / 180000614: the board counted 1 Attack, the carry put 0
+/// back, real S_HP_LOSS_END 4 HP over native).
+fn derived_relic_counter(wire: &Value, id: &str) -> bool {
+    match id {
+        "RED_SKULL" | "TOY_BOX" => true,
+        "RIPPLE_BASIN" | "BRILLIANT_SCARF" => {
+            mget(obj(wire, "player"), "cards_played_this_turn").is_array()
+        }
+        _ => false,
+    }
+}
+
+/// `_undisclosed_relic_counters`: relics the wire named without a `counter`,
+/// minus those `state_from_dict` derives.
 #[must_use]
 pub fn undisclosed_relic_counters(wire: &Value) -> Vec<String> {
     as_list(mget(obj(wire, "player"), "relics"))
         .iter()
         .filter(|r| r.is_object() && truthy(get(r, "id")) && get(r, "counter").is_null())
         .map(|r| str_of(get(r, "id")))
+        .filter(|id| !derived_relic_counter(wire, id))
         .collect()
 }
 
@@ -734,8 +805,76 @@ fn multiset_difference<'a>(a: &'a [Value], b: &'a [Value]) -> (Vec<&'a Value>, V
 mod tests {
     use super::*;
 
+    /// Ripple Basin's count is derived from the board's Attack bucket when
+    /// the board has one, so the carried mirror's count must not replace it.
+    #[test]
+    fn a_derived_relic_counter_is_not_carried() {
+        let relics = json!([
+            {"id": "RIPPLE_BASIN", "counter": null},
+            {"id": "RED_SKULL", "counter": null},
+            {"id": "LIZARD_TAIL", "counter": null},
+        ]);
+        let with_bucket = json!({"player": {
+            "relics": relics, "cards_played_this_turn": [1, 0, 0, 0, 0, 0],
+        }});
+        assert_eq!(
+            undisclosed_relic_counters(&with_bucket),
+            vec!["LIZARD_TAIL".to_owned()]
+        );
+        let without = json!({"player": {"relics": relics}});
+        assert_eq!(
+            undisclosed_relic_counters(&without),
+            vec!["RIPPLE_BASIN".to_owned(), "LIZARD_TAIL".to_owned()],
+        );
+    }
+
     fn corpse_test_enemy(kind: &str, dead: bool) -> Value {
         json!({"kind": kind, "is_dead": dead, "uid": 0})
+    }
+
+    fn hp_enemy(kind: &str, hp: i64, dead: bool) -> Value {
+        json!({"kind": kind, "hp": hp, "max_hp": 40, "is_dead": dead, "uid": 0})
+    }
+
+    /// Spire Bench seeds 180000392 / 180000817: the world killed the first
+    /// of three Scrolls the mirror still had alive. With the reported corpse
+    /// in its slot, each Scroll is the carried one in the same place.
+    #[test]
+    fn a_kill_the_mirror_missed_keeps_every_slot_aligned() {
+        let carried = json!({"encounter": [
+            hp_enemy("ScrollOfBiting", 37, false),
+            hp_enemy("ScrollOfBiting", 33, false),
+            hp_enemy("ScrollOfBiting", 36, false),
+        ]});
+        let world = json!({"encounter": [
+            hp_enemy("ScrollOfBiting", 0, true),
+            hp_enemy("ScrollOfBiting", 9, false),
+            hp_enemy("ScrollOfBiting", 25, false),
+        ]});
+        assert_eq!(
+            enemy_alignment(&world, &carried),
+            vec![Some(0), Some(1), Some(2)]
+        );
+        // Seed 180001103: a lone enemy of its kind.
+        let carried = json!({"encounter": [
+            hp_enemy("TheLost", 11, false), hp_enemy("TheForgotten", 111, false),
+        ]});
+        let world = json!({"encounter": [
+            hp_enemy("TheLost", 0, true), hp_enemy("TheForgotten", 111, false),
+        ]});
+        assert_eq!(enemy_alignment(&world, &carried), vec![Some(0), Some(1)]);
+    }
+
+    /// Seed 180001314: the mirror's Axebot died in the world and its Stock
+    /// respawn stands ahead of the corpse. The corpse is the carried Axebot;
+    /// the respawn is new.
+    #[test]
+    fn a_respawn_is_not_the_creature_it_replaced() {
+        let carried = json!({"encounter": [hp_enemy("Axebot", 3, false)]});
+        let world = json!({"encounter": [
+            hp_enemy("Axebot", 88, false), hp_enemy("Axebot", 0, true),
+        ]});
+        assert_eq!(enemy_alignment(&world, &carried), vec![None, Some(0)]);
     }
 
     /// GH #1656: a corpse the board dropped goes back before the first enemy

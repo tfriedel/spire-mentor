@@ -2538,6 +2538,38 @@ mod tests {
         );
     }
 
+    /// The rest-site rewards are listed (and so populated, RewardsSet.cs:135)
+    /// in relic acquisition order: C# `Hook.ModifyRestSiteHealRewards` walks
+    /// `IterateHookListeners` (Hook.cs:2118). Dream Catcher obtained before
+    /// Tiny Mailbox rolls its card before the two potions; the dispatch ran
+    /// in `RelicId` order and always put the potions first, shifting both
+    /// rolls on the Rewards stream (Spire Bench seed 180000892).
+    #[test]
+    fn rest_site_rewards_follow_relic_acquisition_order() {
+        crate::relics::dispatch::ensure_installed();
+        let kinds = |relics: &[RelicId]| {
+            let mut rs = RunState::new();
+            rs.relics = relics.to_vec();
+            let mut rewards: Vec<Reward> = Vec::new();
+            let _ = sts2_core::run_effects::dispatch_modify_rest_site_heal_rewards(
+                &mut rs,
+                &mut rewards,
+            );
+            rewards
+                .iter()
+                .map(|r| matches!(r, Reward::Card(_)))
+                .collect::<Vec<bool>>()
+        };
+        assert_eq!(
+            kinds(&[RelicId::DreamCatcher, RelicId::TinyMailbox]),
+            vec![true, false, false]
+        );
+        assert_eq!(
+            kinds(&[RelicId::TinyMailbox, RelicId::DreamCatcher]),
+            vec![false, false, true]
+        );
+    }
+
     /// No-op when the relic is not owned: rewards list untouched.
     #[test]
     fn listener_tiny_mailbox_is_noop_without_ownership() {

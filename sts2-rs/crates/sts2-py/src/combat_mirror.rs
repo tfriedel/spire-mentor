@@ -254,6 +254,11 @@ impl PyCombatMirror {
         desyncs_to_py(py, &desyncs)
     }
 
+    fn adopt_unseen_play(&mut self, py: Python<'_>, wire: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let wire = json(wire, "wire")?;
+        self.core.adopt_unseen_play(&wire).map_err(|e| err(py, e))
+    }
+
     fn advance(&mut self, py: Python<'_>, action: &Bound<'_, PyAny>) -> PyResult<&'static str> {
         let action = json(action, "action")?;
         self.core.advance(&action).map_err(|e| err(py, e))

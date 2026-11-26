@@ -16,13 +16,18 @@ pub(crate) fn play_dual_wield(state: &mut CombatState, _t: Option<CreatureUid>) 
         let ty = state.cards[idx].card_type;
         ty == CardType::Attack || ty == CardType::Power
     });
+    // C# `CardsVar(1)`, `OnUpgrade` `UpgradeValueBy(1)`: Dual Wield+ adds
+    // two copies (DualWield.cs:34-38).
+    let copies = if current_upgraded(state) { 2 } else { 1 };
     if let Some(uid) = template_uid {
         let idx = uid.0.get() as usize - 1;
-        // C# `CreateClone()` of the picked card (DualWield.cs).
-        let template = state.cards[idx].create_clone();
-        let copy = sts2_core::card_effects::spawn_card_into_hand(state, template);
-        // `CreateClone` keeps the pick's Retain / Sly flags.
-        state.inherit_clone_flags(uid, copy);
+        for _ in 0..copies {
+            // C# `CreateClone()` of the picked card (DualWield.cs).
+            let template = state.cards[idx].create_clone();
+            let copy = sts2_core::card_effects::spawn_card_into_hand(state, template);
+            // `CreateClone` keeps the pick's Retain / Sly flags.
+            state.inherit_clone_flags(uid, copy);
+        }
     }
     EffectResult::Resolved
 }

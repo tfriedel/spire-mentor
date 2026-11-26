@@ -280,20 +280,6 @@ pub fn engine_counter(relic_id: &str, shown: i64) -> Option<i64> {
     }
 }
 
-/// Relics whose per-turn count C# keeps past the end of a combat (reset only
-/// at `BeforeCombatStart` / the next turn: Kusarigama, Letter Opener,
-/// Ornamental Fan) but the engine clears at `AfterCombatEnd`. The two agree
-/// on every live relic, since the next combat resets the count before it
-/// shows. A relic Toy Box melts gets no hook again (C# `CombatState.cs:133`),
-/// so the game shows the count it melted with for the rest of the run and
-/// the engine a 0: the board's number of a MELTED one of these is read as
-/// the engine's 0 (Spire Bench seeds 180000090, 180000670, 180000811,
-/// 180000070, 180001922). The relic does nothing either way.
-#[must_use]
-pub fn melted_count_engine_clears(relic_id: &str) -> bool {
-    matches!(relic_id, "KUSARIGAMA" | "LETTER_OPENER" | "ORNAMENTAL_FAN")
-}
-
 /// The engine counter of a relic the game shows *without* a counter, where
 /// that is not the pickup value (`None` elsewhere). Wongo's ticket hides its
 /// counter once five combats are done (`ShowCounter => DisplayAmount > 0`),
@@ -1100,12 +1086,5 @@ mod tests {
         assert_eq!(display_counter("DIAMOND_DIADEM", 2), None);
         assert_eq!(display_counter("BURNING_BLOOD", 2), None);
         assert_eq!(display_counter("SWORD_OF_STONE", 5), Some(0));
-    }
-
-    #[test]
-    fn a_melted_per_turn_count_is_the_engines_zero() {
-        assert!(melted_count_engine_clears("KUSARIGAMA"));
-        assert!(melted_count_engine_clears("ORNAMENTAL_FAN"));
-        assert!(!melted_count_engine_clears("JOSS_PAPER"), "kept by both");
     }
 }
