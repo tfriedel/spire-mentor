@@ -27,6 +27,7 @@ using MegaCrit.Sts2.Core.AutoSlay;
 using MegaCrit.Sts2.Core.AutoSlay.Handlers;
 using MegaCrit.Sts2.Core.AutoSlay.Handlers.Screens;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -747,9 +748,12 @@ public class SimAutoSlayer
     /// <summary>True when there is a run to attach to (main thread).</summary>
     internal static bool RunInProgress => CurrentRunState() != null;
 
+    /// <summary>A fight with an overlay screen up, which an attach refuses (main thread).</summary>
+    internal static bool OverlayInFight() => CombatManager.Instance.IsInProgress && SimRoomNodes.OverlayUp();
+
     /// <summary>Where an attach would start, from what is on screen (main thread).</summary>
     internal static AttachEntry CurrentAttachEntry() =>
-        AutopilotAttach.Entry(MapIsOpen(), TopOverlay() is NRewardsScreen);
+        AutopilotAttach.Entry(MapIsOpen(), SimRoomNodes.OverlayUp(), CombatManager.Instance.IsInProgress);
 
     /// <summary>
     /// Services every overlay screen currently stacked, top first, by

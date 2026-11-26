@@ -18,13 +18,22 @@ internal static class AutopilotAttachTests
         check("attach: no run beats every other reason", Show(AutopilotAttach.Check(false, true, true, false)), "NoRun");
         check("attach: co-op beats a running loop", Show(AutopilotAttach.Check(true, true, true, false)), "Multiplayer");
         check("attach: a running loop beats no client", Show(AutopilotAttach.Check(true, false, true, false)), "AlreadyRunning");
+        // A potion's "choose a card" opened before the attach: nothing would answer it.
+        check("attach: a screen open in a fight", Show(AutopilotAttach.Check(true, false, false, true, overlayInFight: true)), "ScreenOpenInFight");
+        check("attach: no client beats an open screen", Show(AutopilotAttach.Check(true, false, false, false, overlayInFight: true)), "NoClient");
 
         // A room that is over must not be played again: the combat handler
         // would wait for a fight that already ended ("Combat never started").
-        check("attach entry: mid-room", AutopilotAttach.Entry(mapOpen: false, rewardsScreenOpen: false).ToString(), "PlayCurrentRoom");
-        check("attach entry: rewards screen up", AutopilotAttach.Entry(mapOpen: false, rewardsScreenOpen: true).ToString(), "FinishCurrentRoom");
-        check("attach entry: map open", AutopilotAttach.Entry(mapOpen: true, rewardsScreenOpen: false).ToString(), "FinishCurrentRoom");
-        check("attach entry: map over rewards", AutopilotAttach.Entry(mapOpen: true, rewardsScreenOpen: true).ToString(), "FinishCurrentRoom");
+        check("attach entry: mid-room", AutopilotAttach.Entry(mapOpen: false, overlayUp: false, combatInProgress: false).ToString(), "PlayCurrentRoom");
+        check("attach entry: mid-fight", AutopilotAttach.Entry(mapOpen: false, overlayUp: false, combatInProgress: true).ToString(), "PlayCurrentRoom");
+        check("attach entry: rewards screen up", AutopilotAttach.Entry(mapOpen: false, overlayUp: true, combatInProgress: false).ToString(), "FinishCurrentRoom");
+        check("attach entry: map open", AutopilotAttach.Entry(mapOpen: true, overlayUp: false, combatInProgress: false).ToString(), "FinishCurrentRoom");
+        check("attach entry: map over rewards", AutopilotAttach.Entry(mapOpen: true, overlayUp: true, combatInProgress: false).ToString(), "FinishCurrentRoom");
+        // #1943: the Crystal Sphere (an overlay over an event room) hides the
+        // event options; the overlay drain, then the rest of the event, runs.
+        check("attach entry: an event overlay (Crystal Sphere) up", AutopilotAttach.Entry(mapOpen: false, overlayUp: true, combatInProgress: false).ToString(), "FinishCurrentRoom");
+        // An overlay inside a fight is refused by Check; the entry stays the fight's.
+        check("attach entry: an overlay mid-fight", AutopilotAttach.Entry(mapOpen: false, overlayUp: true, combatInProgress: true).ToString(), "PlayCurrentRoom");
 
         // After the run: back to the player's mode, unless it was Autopilot already.
         check("attach end: from Off/Advisor hands back", AutopilotAttach.HandsBackAfterRun(attachedFromAutopilot: false).ToString(), "True");

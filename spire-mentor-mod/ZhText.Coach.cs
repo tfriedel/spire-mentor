@@ -227,6 +227,7 @@ internal static partial class ZhText
         ("Autopilot plays single-player runs only.", "自动驾驶只玩单人对局。"),
         ("Autopilot is already playing.", "自动驾驶已在游玩。"),
         ("No bridge agent connected: connect one, then attach.", "没有已连接的桥接代理：请先连接一个，再接管。"),
+        ("Finish the open screen first, then attach.", "请先完成当前打开的界面，再接管。"),
 
         // Local screen advice notes (SimScreenAdvice)
         ("treasure: open the chest", "宝箱：打开宝箱"),

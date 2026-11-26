@@ -253,7 +253,8 @@ public static class MainFile
             runInProgress: SimAutoSlayer.RunInProgress,
             multiplayer: SimMp.IsMultiplayer,
             loopRunning: SimAutoSlayer.LoopRunning,
-            clientConnected: BridgeServer.Instance.IsClientConnected);
+            clientConnected: BridgeServer.Instance.IsClientConnected,
+            overlayInFight: SimAutoSlayer.OverlayInFight());
         if (refusal != null)
         {
             Logger.Log($"Attach refused: {refusal}");

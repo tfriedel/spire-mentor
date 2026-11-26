@@ -310,9 +310,11 @@ a co-op benchmark can flip.
   no main menu and no `run_config`. Use it to give a run back to the agent
   after taking over with F8, or to start an agent on floor 35 (continue a save)
   without replaying floors 1–34. It refuses with no run open, in co-op, while
-  Autopilot is still playing (or still stopping), or with no bridge client
-  connected. On a room that is already over (its rewards screen or the map is
-  up) it starts at the rewards and the map. When the run ends, the mod goes
+  Autopilot is still playing (or still stopping), with no bridge client
+  connected, or in a fight with a screen open (a potion's "choose a card":
+  finish it, then attach). Outside a fight, with the map or an overlay screen up (the
+  rewards, the Crystal Sphere), it starts with that screen and the rest of the
+  room, then the map. When the run ends, the mod goes
   back to the mode it was attached from (Off / Coach / Hints); it does not
   start the configured `num_runs`. An attach from Autopilot stays in Autopilot.
 

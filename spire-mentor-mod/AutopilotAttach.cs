@@ -29,6 +29,15 @@ public enum AttachRefusal
     /// one would sit inside the run's handlers while the player clicks.
     /// </summary>
     NoClient,
+    /// <summary>
+    /// A fight with an overlay screen up (a potion's "choose a card"). The
+    /// screen opened before Autopilot, so the agent-backed selector never saw
+    /// it and nothing would answer it: every play the agent sends queues
+    /// behind it and none resolves (PR #1944 live test, Attack/Skill Potion).
+    /// The stock overlay handler would pick at random, which the bridge never
+    /// does, so the player finishes the screen and attaches after.
+    /// </summary>
+    ScreenOpenInFight,
 }
 
 /// <summary>Where the attached run's room loop starts.</summary>
@@ -37,10 +46,13 @@ public enum AttachEntry
     /// <summary>The current room is still being played (a fight, an event page, a shop): play it.</summary>
     PlayCurrentRoom,
     /// <summary>
-    /// The current room is over: its rewards screen is up or the map is open.
-    /// Playing the room again would wait for a fight that already ended
-    /// ("Combat never started"), so only its tail runs: the rewards, the
-    /// post-boss transition, then the map.
+    /// The room's own handler cannot start here: the map is open, or an
+    /// overlay screen is up outside a fight (the rewards screen, the Crystal
+    /// Sphere minigame, a game-over screen). Playing the room again would wait
+    /// for something already past -- a fight that ended ("Combat never
+    /// started"), or event options hidden under the overlay ("Event options
+    /// never appeared", #1943). So only its tail runs: the overlay drain,
+    /// the rest of an event, the post-boss transition, then the map.
     /// </summary>
     FinishCurrentRoom,
 }
@@ -48,7 +60,8 @@ public enum AttachEntry
 public static class AutopilotAttach
 {
     /// <summary>The first reason an attach cannot go ahead, or null.</summary>
-    public static AttachRefusal? Check(bool runInProgress, bool multiplayer, bool loopRunning, bool clientConnected)
+    public static AttachRefusal? Check(bool runInProgress, bool multiplayer, bool loopRunning, bool clientConnected,
+        bool overlayInFight = false)
     {
         if (!runInProgress)
             return AttachRefusal.NoRun;
@@ -58,12 +71,23 @@ public static class AutopilotAttach
             return AttachRefusal.AlreadyRunning;
         if (!clientConnected)
             return AttachRefusal.NoClient;
+        if (overlayInFight)
+            return AttachRefusal.ScreenOpenInFight;
         return null;
     }
 
-    /// <summary>Picks the loop entry from what is on screen.</summary>
-    public static AttachEntry Entry(bool mapOpen, bool rewardsScreenOpen) =>
-        mapOpen || rewardsScreenOpen ? AttachEntry.FinishCurrentRoom : AttachEntry.PlayCurrentRoom;
+    /// <summary>
+    /// Picks the loop entry from what is on screen. A fight in progress is
+    /// always played by the combat handler (with an overlay up, Check has
+    /// refused already): the room tail would skip to the map with the fight
+    /// still running.
+    /// </summary>
+    public static AttachEntry Entry(bool mapOpen, bool overlayUp, bool combatInProgress)
+    {
+        if (combatInProgress)
+            return AttachEntry.PlayCurrentRoom;
+        return mapOpen || overlayUp ? AttachEntry.FinishCurrentRoom : AttachEntry.PlayCurrentRoom;
+    }
 
     /// <summary>
     /// Whether the mode goes back to what it was once the attached run ends.
@@ -80,6 +104,7 @@ public static class AutopilotAttach
         AttachRefusal.Multiplayer => L10n.T("Autopilot plays single-player runs only."),
         AttachRefusal.AlreadyRunning => L10n.T("Autopilot is already playing."),
         AttachRefusal.NoClient => L10n.T("No bridge agent connected: connect one, then attach."),
+        AttachRefusal.ScreenOpenInFight => L10n.T("Finish the open screen first, then attach."),
         _ => refusal.ToString(),
     };
 }
