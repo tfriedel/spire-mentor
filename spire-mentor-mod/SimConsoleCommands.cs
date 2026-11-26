@@ -22,9 +22,9 @@ public class SpireMentorConsoleCmd : AbstractConsoleCmd
 {
     public override string CmdName => "spirementor";
 
-    public override string Args => "[mode off|advisor|hints|coach] [speed <0.1-8.0>] [hud on|off] [log] [bugreport [note...]] [waitmult <f>] [animmult <f>]";
+    public override string Args => "[mode off|advisor|hints|coach] [attach] [speed <0.1-8.0>] [hud on|off] [log] [bugreport [note...]] [waitmult <f>] [animmult <f>]";
 
-    public override string Description => L10n.T("Spire Mentor control: show status, switch mode, set game speed / HUD / autopilot multipliers.");
+    public override string Description => L10n.T("Spire Mentor control: show status, switch mode, hand the run to Autopilot, set game speed / HUD / autopilot multipliers.");
 
     public override bool IsNetworked => false;
 
@@ -45,6 +45,8 @@ public class SpireMentorConsoleCmd : AbstractConsoleCmd
         {
             case "mode":
                 return SetMode(value);
+            case "attach":
+                return Attach();
             case "speed":
                 if (!TryParseFloat(value, out float speed))
                 {
@@ -98,7 +100,7 @@ public class SpireMentorConsoleCmd : AbstractConsoleCmd
         if (args.Length <= 1)
         {
             return CompleteArgument(
-                ["mode", "speed", "hud", "log", "waitmult", "animmult"],
+                ["mode", "attach", "speed", "hud", "log", "waitmult", "animmult"],
                 [], args.Length == 1 ? args[0] : "");
         }
         if (args.Length == 2)
@@ -146,10 +148,32 @@ public class SpireMentorConsoleCmd : AbstractConsoleCmd
                 return new CmdResult(success: true, $"mode -> Advisor ({SimRuntime.Style}){note}");
             case "autopilot":
                 return new CmdResult(success: false,
-                    L10n.T("Autopilot cannot be entered at runtime (needs auto_start=true in SpireMentor.conf at launch)."));
+                    L10n.T("Autopilot starts new runs only with auto_start=true in SpireMentor.conf at launch; 'spirementor attach' hands it the run in progress."));
             default:
                 return new CmdResult(success: false, L10n.F("usage: {0}", "spirementor mode off|advisor|hints|coach"));
         }
+    }
+
+    /// <summary>
+    /// Hands the run in progress to Autopilot (MainFile.AttachAutopilot): the
+    /// connected bridge agent plays it from here. The way back after F8, and
+    /// how to start a bridge agent on floor 35 without replaying floors 1-34.
+    /// </summary>
+    private static CmdResult Attach()
+    {
+        AttachRefusal? refusal;
+        try
+        {
+            refusal = MainFile.AttachAutopilot();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[SpireMentor] Attach failed: {ex}");
+            return new CmdResult(success: false, L10n.T("Autopilot could not attach (see the log)."));
+        }
+        return refusal is AttachRefusal r
+            ? new CmdResult(success: false, AutopilotAttach.Message(r))
+            : new CmdResult(success: true, L10n.T("Autopilot attached: the bridge agent plays this run from here."));
     }
 
     private static bool TryParseFloat(string? value, out float result)

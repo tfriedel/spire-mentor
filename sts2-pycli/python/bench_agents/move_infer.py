@@ -31,7 +31,12 @@ def _shown(intents: list[dict[str, Any]] | None) -> list[tuple[str, int | None, 
     """The referee's intents as comparable tuples."""
     out = []
     for it in intents or []:
-        out.append((str(it.get("type")), it.get("damage"), int(it.get("hits") or 1)))
+        kind = str(it.get("type"))
+        # The engine has no CardDebuff intent and reads it as Debuff
+        # (`state_dict.rs` `parse_intent`): the Queen's opening Puppet
+        # Strings (GH #1933).
+        kind = "Debuff" if kind == "CardDebuff" else kind
+        out.append((kind, it.get("damage"), int(it.get("hits") or 1)))
     return sorted(out, key=repr)
 
 
@@ -101,7 +106,7 @@ class MoveTracker:
 
     def _catalog_fit(self, kind: str, move: str, shown: list) -> tuple[int, int]:
         """``_distance`` of a catalog move's base intent to the shown ones."""
-        for mv in sts2_rs.monster_moves(kind, self.ascension):
+        for mv in sts2_rs.monster_moves(kind, self.ascension, self.game_version):
             if mv["id"] == move and mv.get("intent"):
                 return _distance(_rendered([mv["intent"]]), shown)
         return (99, 999)
@@ -116,7 +121,7 @@ class MoveTracker:
         kinds = {k for k, _, _ in shown}
         best: tuple | None = None
         pick = None
-        for order, mv in enumerate(sts2_rs.monster_moves(kind, self.ascension)):
+        for order, mv in enumerate(sts2_rs.monster_moves(kind, self.ascension, self.game_version)):
             it = mv.get("intent") or {}
             if it.get("kind") not in kinds:
                 continue

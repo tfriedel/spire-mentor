@@ -42,8 +42,9 @@ public sealed class SpireMentorModConfig : SimpleModConfig
     /// <summary>
     /// Off &lt;-&gt; Advisor toggle. Turning it on while the mod booted in
     /// Autopilot (auto_start=true) STOPS the autopilot session and hands the
-    /// game back -- see MainFile.StopAutopilot. Autopilot itself can only be
-    /// entered at launch, from the config file.
+    /// game back -- see MainFile.StopAutopilot. Autopilot starts new runs
+    /// only from the config file at launch; `spirementor attach` hands it the
+    /// run in progress (MainFile.AttachAutopilot).
     /// </summary>
     [ConfigIgnore]
     public static bool AdvisorMode

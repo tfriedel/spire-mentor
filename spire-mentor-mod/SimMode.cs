@@ -24,7 +24,8 @@
 // actually connected (see AutopilotEngaged) -- until then the game stays
 // completely vanilla, so booting with auto_start=true and playing by hand is
 // safe. Leaving Autopilot at runtime (F8 / console / settings) stops the
-// SimAutoSlayer rather than being refused.
+// SimAutoSlayer rather than being refused; `spirementor attach` re-enters it
+// on the run in progress, with a bridge client connected (AutopilotAttach.cs).
 //
 // Startup mapping preserves every existing invocation: auto_start=true (the
 // sweep lane) => Autopilot, auto_start=false => Off. A human launch then

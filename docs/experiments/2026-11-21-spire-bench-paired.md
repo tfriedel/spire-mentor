@@ -33,9 +33,32 @@ Caveats:
 
 - **The net changed between v2 and v3.** Main moved the e2e net from d500 to `allchar_e2e_d2250_ema0999` before v3 ran. Both v3 arms use the new net, so the paired difference holds, but v3's absolute rates are not comparable with v1/v2's. The v2 → v3 change in the gap therefore mixes the parity fixes with the net change.
 - **The v3 referee arm ran in two passes.** The first launch used 20 processes against 16 gateway slots, and 60 referee episodes were refused at start (HTTP 429, 0 decisions). Their rows were dropped and episodes 240–299 were rerun with 4 processes. Refusal happened before any decision, so the rerun introduces no outcome bias.
-- **Search arm.** An earlier search-agent pair (`search`, MCTS 1000/4000, 150 pairs) read referee 8.0% vs full view 14.0%, −6.0 pp (±5.3, p 0.049). It was not re-run after #1720. `search_v2` holds identical rows and is not an independent run.
+- **Search arm.** The first search-agent pair (`search`, MCTS 1000/4000, 150 pairs) read referee 8.0% vs full view 14.0%, −6.0 pp (±5.3, p 0.049). `search_v2` holds identical rows and is not an independent run. Re-run after corpus batches 7–10 below (`search_v4`).
 
 **Reading.** On 300 pairs the referee costs Instinct −1.3 pp, and the 95% CI is ±3.8 pp. The measure cannot tell this from zero. It rules out a loss larger than about 5 pp.
+
+## Search agent after corpus batches 7–10 (`search_v4`, 2026-11-26)
+
+Same pairing, search agent (MCTS 1000/4000 sims, `beliefdraw`), Ironclad A10, v0.111.0, 300 pairs (12 processes × 25; `all_v4.sh`, `all_v4_referee.sh`), main at `7ed0663b3` (after #1932). The first launch's referee arm met a stale gateway on port 8652 (HTTP 500 on all 300, 0 decisions); its rows were dropped and the referee arm was re-run alone on a fresh gateway. The local arm is the first launch's.
+
+| Run | Pairs | Referee | Full view | Referee − full view (paired 95% CI) | McNemar p |
+|---|---|---|---|---|---|
+| `search` (before #1720) | 150 | 8.0% | 14.0% | −6.0 pp (±5.3) | 0.049 |
+| `search_v4` | 300 | 7.7% (5.2–11.2) | 12.0% (8.8–16.2) | −4.3 pp (±4.4) | 0.072 |
+| **`search_v5` (after #1935)** | **300** | **11.0%** (7.9–15.0) | **12.0%** (8.8–16.2) | **−1.0 pp (±4.7)** | **0.78** |
+
+- 45 discordant pairs: 16 won only on the referee, 29 only on the full view. No errors, no fallbacks.
+- The combat mirror desyncs on 23.9% of reconciles on the referee (26,760 / 111,931) and 5.1% on the full view (5,592 / 109,790).
+- Most of that is the hidden draw order, by design: 21,657 of the referee's desyncs touch only the piles (the mirror sampled another draw and reseeds from the observation); 2,319 of the full view's do.
+- Outside the piles the referee has 1.5× the full view's desyncs (5,103 vs 3,298). The largest excesses: enemy intents 2,841 vs 1,652, player powers 960 vs 280, player block 581 vs 103, enemy HP 2,693 vs 1,878. Split by time from `logs/diag/mirror_divergences.jsonl` (both arms share mirror labels).
+
+**`search_v5`, after #1935** (main `ee2039134`, `all_v5.sh`, one launch). #1935 builds the move tracker's catalog for the fight's own build. Before it, on v0.111.0 the tracker named moves the fight's machine lacks: the rebuilt enemy was AI-less and telegraphed the engine's stand-in `Attack 5` (`MonsterKind::roll_intent`), and search planned against it. The full-view arm is deterministic and replays `search_v4` exactly (36/300, 5,592 desyncs).
+
+- 51 discordant pairs: 24 won only on the referee, 27 only on the full view. No errors, no fallbacks.
+- Stand-in `Attack 5` predictions in the mirror log: 384 → 180 (both arms). TorchHeadAmalgam and the Queen are gone from the list. Test Subject (94), Parafright (23), BattleFriend V1/V2 (31) and EyeWithTeeth (11) remain (#1933).
+- The overall desync rate is unchanged at 23.9%, because the hidden-draw desyncs dominate it.
+
+**Reading.** The search agent's referee cost went −6.0 → −4.3 → −1.0 pp. After #1935 it cannot be told from zero on 300 pairs (CI ±4.7 pp). Instinct's, on the same pairing, is −1.3 pp (±3.8). Most of the −4.3 pp came from the AI-less rebuilds #1935 removed; the stand-ins left (#1933) are the next candidate.
 
 ## Real game vs native (same seeds)
 

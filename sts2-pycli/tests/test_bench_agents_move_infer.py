@@ -86,3 +86,38 @@ def test_an_enemy_is_tracked_by_its_combat_id_through_another_ones_death():
         e["index"] = i
     tracker.infer(later)
     assert tracker.enemies[12] is survivor
+
+
+@pytest.mark.parametrize("encounter", ["QUEEN_BOSS", "TEST_SUBJECT_BOSS"])
+def test_an_act3_boss_fight_is_tracked_on_its_own_build(game, encounter):
+    """GH #1933: the catalog is the fight's build's (v0.111.0 renamed the
+    TorchHeadAmalgam's moves), and the Queen's CardDebuff opening matches.
+    A move the fight's machine lacks left the rebuilt enemy AI-less, rolling
+    a stand-in Attack 5 every turn."""
+    import json as _json
+
+    from test_referee_rng import Host
+
+    aliases = _aliases()
+    state = game.start(character="Ironclad", seed="MVBOSS", ascension=10)
+    game.skip_neow(state)
+    game.set_player(hp=999, max_hp=999, deck=["DEFEND_IRONCLAD"] * 10, relics=[], potions=[])
+    full = game.enter_room("combat", encounter=encounter)
+    tracker = MoveTracker("Ironclad", 10, "v0.111.0")
+    wrong, total = [], 0
+    with Host(referee=True) as host:
+        for _ in range(8):
+            if full.get("decision") != "combat_play":
+                break
+            view = _json.loads(host.send(cmd="referee_project", payload=full)["view"])
+            got = tracker.infer(view)
+            for enemy, guess in zip(full["enemies"], got, strict=True):
+                kind = enemy["id"].title().replace("_", "")
+                total += 1
+                if _norm(aliases, kind, enemy["move_state"]) != _norm(
+                    aliases, kind, guess["move_state"]
+                ):
+                    wrong.append((enemy["id"], enemy["move_state"], guess["move_state"]))
+            full = game.end_turn()
+    assert total >= 8
+    assert not wrong, wrong

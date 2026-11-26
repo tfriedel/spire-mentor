@@ -55,5 +55,6 @@
     <Compile Include="../../PotionSwapAdvice.cs" Link="PotionSwapAdvice.cs" />
     <Compile Include="../../AdviceMarks.cs" Link="AdviceMarks.cs" />
     <Compile Include="../../FrameLaunchRules.cs" Link="FrameLaunchRules.cs" />
+    <Compile Include="../../AutopilotAttach.cs" Link="AutopilotAttach.cs" />
   </ItemGroup>
 </Project>

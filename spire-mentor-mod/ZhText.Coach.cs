@@ -208,8 +208,6 @@ internal static partial class ZhText
         ("go lane", "行动通道"),
 
         // Console command (SimConsoleCommands)
-        ("Spire Mentor control: show status, switch mode, set game speed / HUD / autopilot multipliers.",
-            "Spire Mentor 控制：显示状态、切换模式、设置游戏速度 / HUD / 自动驾驶倍率。"),
         ("usage: {0}", "用法：{0}"),
         ("toggled action-log panel", "已切换操作日志面板"),
         ("opened the bug report dialog", "已打开问题报告对话框"),
@@ -219,8 +217,16 @@ internal static partial class ZhText
         ("animmult -> {0:0.###} (applies while Autopilot)", "animmult -> {0:0.###}（自动驾驶时生效）"),
         ("unknown subcommand '{0}'. {1}", "未知子命令“{0}”。{1}"),
         (" (autopilot stopped)", "（自动驾驶已停止）"),
-        ("Autopilot cannot be entered at runtime (needs auto_start=true in SpireMentor.conf at launch).",
-            "无法在运行中进入自动驾驶（需要在启动时于 SpireMentor.conf 中设置 auto_start=true）。"),
+        ("Autopilot starts new runs only with auto_start=true in SpireMentor.conf at launch; 'spirementor attach' hands it the run in progress.",
+            "自动驾驶只有在启动时于 SpireMentor.conf 中设置 auto_start=true 才会开始新的对局；“spirementor attach”可把当前对局交给它。"),
+        ("Spire Mentor control: show status, switch mode, hand the run to Autopilot, set game speed / HUD / autopilot multipliers.",
+            "Spire Mentor 控制：显示状态、切换模式、把对局交给自动驾驶、设置游戏速度 / HUD / 自动驾驶倍率。"),
+        ("Autopilot attached: the bridge agent plays this run from here.", "自动驾驶已接管：桥接代理从这里继续这局。"),
+        ("Autopilot could not attach (see the log).", "自动驾驶无法接管（见日志）。"),
+        ("No run in progress to attach to: start or continue a run first.", "没有进行中的对局可接管：请先开始或继续一局。"),
+        ("Autopilot plays single-player runs only.", "自动驾驶只玩单人对局。"),
+        ("Autopilot is already playing.", "自动驾驶已在游玩。"),
+        ("No bridge agent connected: connect one, then attach.", "没有已连接的桥接代理：请先连接一个，再接管。"),
 
         // Local screen advice notes (SimScreenAdvice)
         ("treasure: open the chest", "宝箱：打开宝箱"),

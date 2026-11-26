@@ -577,12 +577,17 @@ class InstinctPolicy:
         if self.encounter is not None:
             return
         ctx = state.get("context") or {}
-        # A full view names it (the paired control arm); the referee's
-        # does not, so it is read off the roster.
+        # The host names it (`encounter_id`, PROTOCOL question 8); an older
+        # view does not, and then it is read off the roster. Whether an event
+        # started the fight is the event's either way: the student reads such
+        # a fight's room as `event` (GH #1937: once the id was sent, this was
+        # skipped and every event fight tokenized as a `monster` room).
         named = state.get("encounter_id")
-        if not (isinstance(named, str) and named) and self.event_button:
-            named = event_encounter(self.event_button, self.game_version)
-            self.event_fight = named is not None
+        if self.event_button:
+            from_event = event_encounter(self.event_button, self.game_version)
+            self.event_fight = from_event is not None
+            if not (isinstance(named, str) and named):
+                named = from_event
         # `event_button` is cleared by `_fight_msg`, which still reads it for
         # the fight's starting HP (it runs after this, GH #1751).
         self.encounter = (

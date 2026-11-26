@@ -223,15 +223,79 @@ public class SimAutoSlayer
         _mapHandler = new SimMapHandler();
     }
 
+    private static int _loopRunning; // int-backed bool for Interlocked
+
+    /// <summary>
+    /// True while ANY slayer's run loop (Start's multi-run loop, or one
+    /// attached run) is still running -- including a stopped one that is
+    /// still unwinding: its teardown clears the shared run token and
+    /// watchdog, so a new loop must not start under it. A slayer whose loop
+    /// has finished stays armed (IsActive) but idle at the main menu, so
+    /// this, not IsActive, says whether a second loop would fight the first
+    /// one for the game.
+    /// </summary>
+    public static bool LoopRunning => Volatile.Read(ref _loopRunning) != 0;
+
     /// <summary>Arms the slayer and starts the multi-run loop in the background.</summary>
     public void Start()
     {
+        CancellationToken ct = Arm();
+        _ = TaskHelper.RunSafely(TrackLoopAsync(RunLoopAsync(ct)));
+    }
+
+    /// <summary>
+    /// Arms the slayer on the run already in progress -- no main menu, no
+    /// run_config handshake, no new seed -- and plays it to its end, through
+    /// the same lifecycle as a run it started itself (<see cref="RunOnceAsync"/>).
+    /// The caller has checked the preconditions (<see cref="AutopilotAttach.Check"/>)
+    /// on the main thread; <paramref name="entry"/> says whether the current
+    /// room still has to be played or only its tail (rewards, map).
+    /// <paramref name="onRunEnded"/> runs once the run is over (victory,
+    /// defeat, failure) -- not after a player takeover, whose own path
+    /// (F8 / console / settings) already set the mode.
+    /// </summary>
+    public void StartAttached(AttachEntry entry, Action? onRunEnded = null)
+    {
+        CancellationToken ct = Arm();
+        _ = TaskHelper.RunSafely(TrackLoopAsync(AttachedLoopAsync(entry, onRunEnded, ct)));
+    }
+
+    private CancellationToken Arm()
+    {
+        if (Interlocked.Exchange(ref _loopRunning, 1) != 0)
+            throw new InvalidOperationException("SimAutoSlayer: a run loop is already playing");
         _stopRequested = false;
         IsActive = true;
         _active = this;
         SetNonInteractiveCheck(true);
-        _runCts = new CancellationTokenSource();
-        _ = TaskHelper.RunSafely(RunLoopAsync(_runCts.Token));
+        var cts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _runCts, cts)?.Dispose();
+        return cts.Token;
+    }
+
+    private async Task TrackLoopAsync(Task loop)
+    {
+        try
+        {
+            await loop;
+        }
+        finally
+        {
+            Volatile.Write(ref _loopRunning, 0);
+        }
+    }
+
+    private async Task AttachedLoopAsync(AttachEntry entry, Action? onRunEnded, CancellationToken ct)
+    {
+        _runCompleteSent = false;
+        SimGameOverScreenHandler.Observed = false;
+        SimGameOverScreenHandler.LastWasVictory = false;
+        string seed = CurrentRunState()?.Rng?.StringSeed ?? "";
+        Logger.Log($"[SimAutoSlayer] Attached to the run in progress (seed: {seed}, entry: {entry})");
+        await RunOnceAsync(seed, runCt => AttachRunAsync(entry, runCt), ct);
+        Logger.Log("[SimAutoSlayer] Attached run finished.");
+        if (!_stopRequested)
+            onRunEnded?.Invoke();
     }
 
     /// <summary>
@@ -309,7 +373,7 @@ public class SimAutoSlayer
             // earlier write is clobbered, see NCharacterSelectScreen.cs:1102).
             Logger.Log($"[SimAutoSlayer] Starting run {runIndex + 1}/{numRuns}" +
                 (_config.ClientRunConfig ? " (seed: negotiated with client)" : $" with seed: {seed}"));
-            await RunOnceAsync(seed, ct);
+            await RunOnceAsync(seed, runCt => PlayRunAsync(seed, runCt), ct);
         }
         Logger.Log("[SimAutoSlayer] All configured runs completed.");
     }
@@ -317,15 +381,17 @@ public class SimAutoSlayer
 
     /// <summary>
     /// Plays one run under the per-run time budget and always leaves the
-    /// per-run state torn down with exactly one run_complete sent.
+    /// per-run state torn down with exactly one run_complete sent. Both
+    /// entries go through here: a run started from the menu
+    /// (<see cref="PlayRunAsync"/>) and an attached one (<see cref="AttachRunAsync"/>).
     /// </summary>
-    private async Task RunOnceAsync(string provisionalSeed, CancellationToken ct)
+    private async Task RunOnceAsync(string provisionalSeed, Func<CancellationToken, Task> playRun, CancellationToken ct)
     {
         TimeSpan budget = TimeSpan.FromMinutes(Math.Max(1, _config.RunTimeoutMinutes));
         _playedSeed = provisionalSeed;
         try
         {
-            await WaitHelper.WithTimeout(runCt => PlayRunAsync(provisionalSeed, runCt), budget, ct);
+            await WaitHelper.WithTimeout(playRun, budget, ct);
             Logger.Log($"[SimAutoSlayer] Run completed with seed: {_playedSeed}");
         }
         catch (Exception) when (_stopRequested)
@@ -386,7 +452,12 @@ public class SimAutoSlayer
     // One run
     // ----------------------------------------------------------------
 
-    private async Task PlayRunAsync(string provisionalSeed, CancellationToken ct)
+    /// <summary>
+    /// The per-run setup both entries share: the run token, game prefs, the
+    /// handlers' Rng, the agent-backed card selector and the watchdog.
+    /// <see cref="RunOnceAsync"/>'s finally undoes all of it.
+    /// </summary>
+    private async Task ArmRunAsync(string rngSeed, CancellationToken ct)
     {
         // Game callbacks without a token of their own (SimCardSelector) bind
         // to this run through it.
@@ -397,18 +468,35 @@ public class SimAutoSlayer
 
         ApplyGamePreferences();
         ApplyTimeScale();
-        RevealCharacterEpochs();
 
         // Handlers receive this Rng per the IHandler contract; the Sim
         // handlers do not draw from it.
         // Seeded the way the game's own AutoSlayer seeds its Rng.
-        _rng = SimGameApi.RngFromSeedString(provisionalSeed);
+        _rng = SimGameApi.RngFromSeedString(rngSeed);
 
         _selectorOverride = SimGameApi.UseSelector(new SimCardSelector());
 
         var watchdog = SimGameApi.NewWatchdog();
         PublishWatchdog(watchdog);
         StartWatchdogKeepAlive(watchdog, ct);
+    }
+
+    /// <summary>
+    /// An attached run: the run already exists, so there is no menu, no
+    /// run_config and no HP cheat (that one is for fresh runs). Starts the
+    /// room loop at the current room, or past it when it is already over.
+    /// </summary>
+    private async Task AttachRunAsync(AttachEntry entry, CancellationToken ct)
+    {
+        await ArmRunAsync(string.IsNullOrEmpty(_playedSeed) ? SeedHelper.GetRandomSeed() : _playedSeed, ct);
+        _hpCheatPending = false;
+        await PlayRoomsAsync(ct, entry);
+    }
+
+    private async Task PlayRunAsync(string provisionalSeed, CancellationToken ct)
+    {
+        await ArmRunAsync(provisionalSeed, ct);
+        RevealCharacterEpochs();
 
         // Settle what to play before touching the menu: the negotiation can
         // block for a long time, and menu nodes may be rebuilt meanwhile.
@@ -499,8 +587,14 @@ public class SimAutoSlayer
     /// or by the final-act victory; falls out to an abandon only when the
     /// runaway floor guard trips.
     /// </summary>
-    private async Task PlayRoomsAsync(CancellationToken ct)
+    /// <param name="entry">
+    /// Only an attached run passes <see cref="AttachEntry.FinishCurrentRoom"/>:
+    /// the first iteration then skips playing the room (it is over) and
+    /// starts at its rewards / post-boss / map tail.
+    /// </param>
+    private async Task PlayRoomsAsync(CancellationToken ct, AttachEntry entry = AttachEntry.PlayCurrentRoom)
     {
+        bool roomAlreadyPlayed = entry == AttachEntry.FinishCurrentRoom;
         // CLEANROOM-Q4: a vanished RunState ends the loop like the floor guard does.
         while (CurrentRunState() is { } runState && runState.TotalFloor < MaxRunFloorGuard)
         {
@@ -509,14 +603,22 @@ public class SimAutoSlayer
 
             RoomType roomType = runState.CurrentRoom?.RoomType ?? RoomType.Unassigned;
             CurrentWatchdog?.Reset(EnteringActivity(runState, roomType));
-            Logger.Log($"[SimAutoSlayer] Entering {roomType} (Act {runState.CurrentActIndex + 1}, Floor {runState.ActFloor})");
-
-            await PlayRoomAsync(roomType, ct);
-
-            if (IsFightRoom(roomType))
-                await AwaitRewardsScreenAsync(ct);
+            if (roomAlreadyPlayed)
+            {
+                Logger.Log($"[SimAutoSlayer] Resuming after {roomType} (Act {runState.CurrentActIndex + 1}, Floor {runState.ActFloor})");
+                roomAlreadyPlayed = false;
+            }
             else
-                await Task.Delay(RoomSettleMs, ct);
+            {
+                Logger.Log($"[SimAutoSlayer] Entering {roomType} (Act {runState.CurrentActIndex + 1}, Floor {runState.ActFloor})");
+
+                await PlayRoomAsync(roomType, ct);
+
+                if (IsFightRoom(roomType))
+                    await AwaitRewardsScreenAsync(ct);
+                else
+                    await Task.Delay(RoomSettleMs, ct);
+            }
 
             await ClearOverlaysAsync(ct);
 
@@ -641,6 +743,13 @@ public class SimAutoSlayer
     }
 
     private static bool MapIsOpen() => NMapScreen.Instance?.IsOpen ?? false;
+
+    /// <summary>True when there is a run to attach to (main thread).</summary>
+    internal static bool RunInProgress => CurrentRunState() != null;
+
+    /// <summary>Where an attach would start, from what is on screen (main thread).</summary>
+    internal static AttachEntry CurrentAttachEntry() =>
+        AutopilotAttach.Entry(MapIsOpen(), TopOverlay() is NRewardsScreen);
 
     /// <summary>
     /// Services every overlay screen currently stacked, top first, by

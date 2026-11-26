@@ -116,11 +116,15 @@ pub fn carry_corpse_intents(
             continue;
         };
         let intent = src.intent;
-        if let Some(c) = fresh
-            .creatures
-            .iter_mut()
-            .find(|c| c.id == dst.0 && c.current_hp <= 0 && c.intent.is_none())
-        {
+        // Only a corpse still on the board can be a reviver. A removed one
+        // (a split slime) is telegraphed by the host with its damage
+        // recomputed against the live board (a Vulnerable player reads 6 for
+        // a Tackle of 4); the engine froze it at death (cmp_v9: 1,983 of
+        // 2,000 runs).
+        let board_telegraphs = !fresh.is_removed_corpse(dst);
+        if let Some(c) = fresh.creatures.iter_mut().find(|c| {
+            c.id == dst.0 && c.current_hp <= 0 && !(board_telegraphs && c.intent.is_some())
+        }) {
             c.intent = intent;
         }
     }
@@ -1980,7 +1984,55 @@ mod tests {
     #[test]
     fn a_reviving_corpse_keeps_the_telegraph_the_board_shows() {
         use sts2_core::Intent;
-        let carried = sts2_wire::scenario::build_scenario_state_for_version(
+        let mut carried = sts2_wire::scenario::build_scenario_state_for_version(
+            sts2_core::GameVersion::V0_111_0,
+            7,
+            "Ironclad",
+            &["StrikeIronclad".to_owned()],
+            80,
+            80,
+            &[],
+            &[],
+            "TEST_SUBJECT_BOSS",
+            10,
+            None,
+            None,
+        )
+        .expect("scenario");
+        let u0 = carried.enemy_uids[0];
+        for c in &mut carried.creatures {
+            if c.id == u0.0 {
+                c.intent = Some(Intent::Attack { damage: 22 });
+            }
+        }
+        let mut fresh = carried.clone();
+        for c in &mut fresh.creatures {
+            if c.id == u0.0 {
+                c.current_hp = 0;
+                c.intent = Some(Intent::Heal); // the board's respawn telegraph
+            }
+        }
+        assert!(
+            !fresh.is_removed_corpse(u0),
+            "a knocked-out Test Subject stays"
+        );
+        let slots: Vec<Option<usize>> = (0..fresh.enemy_uids.len()).map(Some).collect();
+        carry_corpse_intents(&mut fresh, &carried, &slots);
+        let intent = fresh
+            .creatures
+            .iter()
+            .find(|c| c.id == u0.0)
+            .and_then(|c| c.intent);
+        assert_eq!(intent, Some(Intent::Heal), "the board's telegraph stands");
+    }
+
+    /// A removed corpse keeps the intent it died with, whatever the board
+    /// telegraphs for it (GH #1669; cmp_v9's split slimes, whose Tackle the
+    /// host recomputes against a Vulnerable player).
+    #[test]
+    fn a_removed_corpse_keeps_the_intent_it_died_with() {
+        use sts2_core::Intent;
+        let mut carried = sts2_wire::scenario::build_scenario_state_for_version(
             sts2_core::GameVersion::V0_111_0,
             7,
             "Ironclad",
@@ -1995,42 +2047,32 @@ mod tests {
             None,
         )
         .expect("scenario");
-        let mut carried = carried;
         let (u0, u1) = (carried.enemy_uids[0], carried.enemy_uids[1]);
         for c in &mut carried.creatures {
             if c.id == u0.0 || c.id == u1.0 {
-                c.intent = Some(Intent::Attack { damage: 22 });
+                c.intent = Some(Intent::Attack { damage: 4 });
             }
         }
         let mut fresh = carried.clone();
         for c in &mut fresh.creatures {
             if c.id == u0.0 {
                 c.current_hp = 0;
-                c.intent = Some(Intent::Heal); // the board's respawn telegraph
+                c.intent = Some(Intent::Attack { damage: 6 }); // recomputed live
             } else if c.id == u1.0 {
                 c.current_hp = 0;
-                c.intent = None; // an ordinary corpse: no telegraph
+                c.intent = None; // no telegraph
             }
         }
         let slots: Vec<Option<usize>> = (0..fresh.enemy_uids.len()).map(Some).collect();
         carry_corpse_intents(&mut fresh, &carried, &slots);
-        let intent = |u: sts2_core::CreatureUid| {
-            fresh
+        for u in [u0, u1] {
+            let intent = fresh
                 .creatures
                 .iter()
                 .find(|c| c.id == u.0)
-                .and_then(|c| c.intent)
-        };
-        assert_eq!(
-            intent(u0),
-            Some(Intent::Heal),
-            "the board's telegraph stands"
-        );
-        assert_eq!(
-            intent(u1),
-            Some(Intent::Attack { damage: 22 }),
-            "a silent corpse keeps the one it died with (GH #1669)"
-        );
+                .and_then(|c| c.intent);
+            assert_eq!(intent, Some(Intent::Attack { damage: 4 }));
+        }
     }
 
     /// Corpus seeds 180000995 (Spite) and 180000111 (Supermassive): the

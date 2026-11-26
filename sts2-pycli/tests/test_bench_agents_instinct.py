@@ -694,3 +694,20 @@ def test_an_event_fights_extra_potion_is_taken_before_its_card():
         order.append(pick)
         obs["rewards"] = [r for r in obs["rewards"] if r["index"] != pick]
     assert order == [2, 0, 1, 3]
+
+
+def test_an_event_fight_the_host_names_is_still_an_event_fight():
+    # GH #1937: once the host sent `encounter_id` (#1925), the event button
+    # was no longer read, so an event-started fight lost `event_fight` and the
+    # student read its room as `monster` (Spire Bench cmp_v10: 306 runs, first
+    # difference RUNCTX X_ROOM event -> monster).
+    pol = _policy([])
+    pol.event_button = "BATTLEWORN_DUMMY.pages.INITIAL.options.SETTING_2"
+    fight = {
+        "decision": "combat_play",
+        "encounter_id": "BATTLEWORN_DUMMY_EVENT_ENCOUNTER",
+        "context": {"act": 3, "room_type": "Monster"},
+    }
+    pol._name_encounter(fight, ["BattleFriendV2"], "unknown")
+    assert pol.encounter == "BATTLEWORN_DUMMY_EVENT_ENCOUNTER"
+    assert pol.event_fight

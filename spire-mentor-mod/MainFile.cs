@@ -241,6 +241,69 @@ public static class MainFile
     }
 
     /// <summary>
+    /// Hand the run in progress to Autopilot: the connected bridge agent plays
+    /// it from the current floor to its end (AutopilotAttach.cs). The way back
+    /// after <see cref="StopAutopilot"/>, and the way to start Autopilot on a
+    /// run that did not begin under it. Returns null on success, else why it
+    /// refused (nothing changed then). Main thread: it reads the screen.
+    /// </summary>
+    public static AttachRefusal? AttachAutopilot()
+    {
+        AttachRefusal? refusal = AutopilotAttach.Check(
+            runInProgress: SimAutoSlayer.RunInProgress,
+            multiplayer: SimMp.IsMultiplayer,
+            loopRunning: SimAutoSlayer.LoopRunning,
+            clientConnected: BridgeServer.Instance.IsClientConnected);
+        if (refusal != null)
+        {
+            Logger.Log($"Attach refused: {refusal}");
+            return refusal;
+        }
+        AttachEntry entry = SimAutoSlayer.CurrentAttachEntry();
+        SimMode previousMode = SimRuntime.Mode;
+        AdviceStyle previousStyle = SimRuntime.Style;
+        // An idle slayer (its loop finished) is reused; Start/StartAttached
+        // re-arm it either way.
+        SimAutoSlayer slayer = _autoSlayer ?? new SimAutoSlayer(SimConfig.Instance);
+        slayer.StartAttached(entry, () => HandBackAfterAttachedRun(slayer, previousMode, previousStyle));
+        _autoSlayer = slayer;
+        // Leaving Advisor mode disarms F7 autoplay and autobattle by itself.
+        SimRuntime.Mode = SimMode.Autopilot;
+        Logger.Log($"Autopilot attached to the run in progress ({entry}).");
+        return null;
+    }
+
+    /// <summary>
+    /// After an attached run ends, give the game back in the mode it was
+    /// attached from. Left armed, the slayer kept AutoSlayerCheck live, so a
+    /// bridge client connecting later would flip the player's own next run
+    /// non-interactive (waits and animations skipped) with no loop driving
+    /// it -- seen in the PR #1941 live test. An attach from Autopilot (a
+    /// sweep session) stays in Autopilot, as before.
+    /// </summary>
+    private static void HandBackAfterAttachedRun(SimAutoSlayer slayer, SimMode previousMode, AdviceStyle previousStyle)
+    {
+        if (!AutopilotAttach.HandsBackAfterRun(attachedFromAutopilot: previousMode == SimMode.Autopilot))
+        {
+            return;
+        }
+        if (Interlocked.CompareExchange(ref _autoSlayer, null, slayer) != slayer)
+        {
+            return; // a takeover or a new session already replaced it
+        }
+        try
+        {
+            slayer.Stop();
+            SimRuntime.SetModeAndStyle(previousMode, previousStyle);
+            Logger.Log($"Attached run over: back to {previousMode} ({previousStyle}).");
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"Hand-back after the attached run failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Stop the autopilot session without the "handed back to the player"
     /// framing -- the player is leaving, not taking over. Used by
     /// <see cref="SimShutdown"/>.

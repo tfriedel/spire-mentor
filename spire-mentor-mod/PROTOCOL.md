@@ -460,6 +460,14 @@ Fire-and-forget, no `request_id`.
 |---|---|---|
 | `result` | string | `"victory"` \| `"defeat"` \| `"terminated"`. |
 
+**Attached runs.** `spirementor attach` (README "In-game controls") hands a
+run already in progress to Autopilot. The client sees no `run_config`: the
+next message is the decision on screen, from whatever floor the run is on.
+The run ends like any other, with exactly one `run_complete`. A player
+takeover (F8) before the attach sent `run_complete` `"terminated"` for the
+same run, so a client that should play on after a handback must keep reading
+past that `run_complete` instead of disconnecting.
+
 ### `run_config` -- new, phase 1b
 
 Only ever sent when `SpireMentor.conf`'s `client_run_config` is `true`, once

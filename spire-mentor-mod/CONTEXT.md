@@ -24,6 +24,10 @@ _Avoid_: API, interface, wire format
 The mode where the bridge acts on the advisor's recommendations itself, without a human in the loop.
 _Avoid_: bot mode, auto, AI mode
 
+**Attach**:
+Handing a run already in progress to **Autopilot** (`spirementor attach`), so the connected bridge agent plays it from the current floor without the main menu or `run_config`. The way back after an F8 takeover; Autopilot otherwise only plays runs it started from the menu.
+_Avoid_: resume (that is the game's own Continue), reconnect
+
 **Autobattle**:
 Autoplay limited to the fights: the AI plays every combat, and every run-level decision waits for the human, with a chip saying what changed since the last one. The in-game twin of the workbench's autobattle mode.
 _Avoid_: auto-battler, combat autoplay

@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use sts2_advisor::mirror_state::choice_kind_from_python_name;
 use sts2_content::cards::dispatch as card_dispatch;
 use sts2_content::cards::ironclad_basic::ironclad_starter_deck;
-use sts2_content::monster_dispatch::{build_ai_with_ascension, MonsterSpawnArgs, SpawnPosition};
+use sts2_content::monster_dispatch::{MonsterSpawnArgs, SpawnPosition};
 use sts2_core::cards::Card;
 #[cfg(test)]
 use sts2_core::cards::CardType;
@@ -4257,7 +4257,11 @@ pub struct MonsterMoveInfo {
 /// # Errors
 ///
 /// An unknown monster name (PascalCase or UPPER_SNAKE both accepted).
-pub fn monster_moves_impl(kind: &str, ascension: u8) -> Result<Vec<MonsterMoveInfo>, String> {
+pub fn monster_moves_impl(
+    kind: &str,
+    ascension: u8,
+    version: sts2_core::GameVersion,
+) -> Result<Vec<MonsterMoveInfo>, String> {
     let species = crate::state_dict::monster_kind_from_python_name(kind)
         .ok_or_else(|| format!("unknown monster {kind:?}"))?;
     let position = SpawnPosition {
@@ -4266,7 +4270,16 @@ pub fn monster_moves_impl(kind: &str, ascension: u8) -> Result<Vec<MonsterMoveIn
         back: false,
         index: 0,
     };
-    let ai = build_ai_with_ascension(species, MonsterSpawnArgs::default(), position, ascension);
+    // At the fight's build (GH #1933): v0.111.0 renamed and renumbered
+    // moves (TorchHeadAmalgam opens on STRONG_TACKLE, not TACKLE_1), and an
+    // id the fight's machine lacks leaves the rebuilt enemy AI-less.
+    let ai = sts2_content::monster_dispatch::build_ai_for_version(
+        species,
+        MonsterSpawnArgs::default(),
+        position,
+        ascension,
+        version,
+    );
     let out = ai
         .states
         .iter()
@@ -4282,14 +4295,22 @@ pub fn monster_moves_impl(kind: &str, ascension: u8) -> Result<Vec<MonsterMoveIn
     Ok(out)
 }
 
-/// Python: `monster_moves(kind, ascension=0) -> [{id, initial, intent}]`.
+/// Python: `monster_moves(kind, ascension=0, game_version=None) -> [{id,
+/// initial, intent}]`, the machine of `game_version` (default: the legacy
+/// build, as `parse_game_version`).
 ///
 /// `intent` is the bare wire intent (`{kind, amount?, times?}`) or `None`.
 #[pyfunction]
-#[pyo3(signature = (kind, ascension = 0))]
-fn monster_moves(py: Python<'_>, kind: &str, ascension: u8) -> PyResult<Vec<Py<PyDict>>> {
-    let moves =
-        monster_moves_impl(kind, ascension).map_err(pyo3::exceptions::PyValueError::new_err)?;
+#[pyo3(signature = (kind, ascension = 0, game_version = None))]
+fn monster_moves(
+    py: Python<'_>,
+    kind: &str,
+    ascension: u8,
+    game_version: Option<&str>,
+) -> PyResult<Vec<Py<PyDict>>> {
+    let version = parse_game_version(game_version)?;
+    let moves = monster_moves_impl(kind, ascension, version)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let mut out = Vec::with_capacity(moves.len());
     for mv in moves {
         let d = PyDict::new(py);
@@ -4425,10 +4446,12 @@ fn list_encounters(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
 #[cfg(test)]
 mod sandbox_catalog_tests {
     use super::*;
+    use sts2_content::monster_dispatch::build_ai_with_ascension;
 
     #[test]
     fn monster_moves_lists_forceable_move_states() {
-        let moves = monster_moves_impl("Nibbit", 0).expect("Nibbit is a known monster");
+        let moves = monster_moves_impl("Nibbit", 0, sts2_core::GameVersion::default())
+            .expect("Nibbit is a known monster");
         assert!(!moves.is_empty());
         // Every listed id must be accepted by the reconstruction path a
         // sandbox position rides in on.
@@ -4452,13 +4475,37 @@ mod sandbox_catalog_tests {
             );
         }
         // UPPER_SNAKE spelling (the wire dialect) resolves to the same table.
-        assert_eq!(monster_moves_impl("NIBBIT", 0).unwrap(), moves);
-        assert!(monster_moves_impl("NotAMonster", 0).is_err());
+        assert_eq!(
+            monster_moves_impl("NIBBIT", 0, sts2_core::GameVersion::default()).unwrap(),
+            moves
+        );
+        assert!(monster_moves_impl("NotAMonster", 0, sts2_core::GameVersion::default()).is_err());
+    }
+
+    /// GH #1933: the catalog is the fight's build's machine. On v0.111.0
+    /// TorchHeadAmalgam opens on STRONG_TACKLE (32 at A10,
+    /// `TorchHeadAmalgam.cs:32`); the legacy build's TACKLE_1 is no state of
+    /// it, so a tracker matching against the legacy catalog rebuilt the
+    /// enemy AI-less.
+    #[test]
+    fn monster_moves_follows_the_game_version() {
+        let v111 =
+            monster_moves_impl("TorchHeadAmalgam", 10, sts2_core::GameVersion::V0_111_0).unwrap();
+        let opening = v111.iter().find(|m| m.initial).expect("an initial move");
+        assert_eq!(opening.id, "STRONG_TACKLE");
+        assert_eq!(
+            opening.intent,
+            Some(sts2_core::Intent::Attack { damage: 32 })
+        );
+        let legacy =
+            monster_moves_impl("TorchHeadAmalgam", 10, sts2_core::GameVersion::V0_107_1).unwrap();
+        assert!(legacy.iter().any(|m| m.initial && m.id == "TACKLE_1"));
     }
 
     #[test]
     fn monster_moves_carries_the_head_intent() {
-        let moves = monster_moves_impl("FuzzyWurmCrawler", 0).unwrap();
+        let moves =
+            monster_moves_impl("FuzzyWurmCrawler", 0, sts2_core::GameVersion::default()).unwrap();
         assert!(
             moves.iter().any(|m| m.intent.is_some()),
             "a crawler telegraphs something"
