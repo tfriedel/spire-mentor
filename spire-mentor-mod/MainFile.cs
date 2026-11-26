@@ -382,6 +382,30 @@ public static class MainFile
     }
 
     /// <summary>
+    /// Hands control back to the AI on the run that is already in progress
+    /// (after the player played a screen by hand). Returns false when there is no
+    /// run to attach to.
+    /// </summary>
+    public static bool StartAutopilotAttached()
+    {
+        try
+        {
+            var slayer = _autoSlayer ?? new SimAutoSlayer(SimConfig.Instance);
+            if (!slayer.StartAttached())
+            {
+                return false;
+            }
+            _autoSlayer = slayer;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("[SpireMentor] Attach failed: " + ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Waits for the game node and a visible main menu, then starts the
     /// autopilot. Timeouts propagate to TaskHelper.RunSafely (no retry).
     /// </summary>

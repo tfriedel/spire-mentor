@@ -235,6 +235,47 @@ public class SimAutoSlayer
     }
 
     /// <summary>
+    /// Arms the slayer against the run that is already in progress: no menu, no
+    /// new run. Used to hand control back to the AI after the player played a
+    /// screen by hand (our fork, AlphaDefect issue #65).
+    /// </summary>
+    public bool StartAttached()
+    {
+        if (RunManager.Instance.DebugOnlyGetState() == null)
+        {
+            Logger.Log("[SimAutoSlayer] Attach refused: no run in progress");
+            return false;
+        }
+        _stopRequested = false;
+        IsActive = true;
+        _active = this;
+        SetNonInteractiveCheck(true);
+        var cts = new CancellationTokenSource();
+        _runCts = cts;
+        _ = TaskHelper.RunSafely(AttachedLoopAsync(cts.Token));
+        Logger.Log("[SimAutoSlayer] Attached to the run in progress");
+        return true;
+    }
+
+    private async Task AttachedLoopAsync(CancellationToken ct)
+    {
+        CurrentRunToken = ct;
+        await WaitHelper.Until(() => NGame.Instance != null, ct,
+            AutoSlayConfig.gameInitTimeout, "NGame.Instance never became available");
+        ApplyGamePreferences();
+        ApplyTimeScale();
+        _rng = SimGameApi.RngFromSeedString(SeedHelper.GetRandomSeed());
+        _selectorOverride = SimGameApi.UseSelector(new SimCardSelector());
+        var watchdog = SimGameApi.NewWatchdog();
+        PublishWatchdog(watchdog);
+        StartWatchdogKeepAlive(watchdog, ct);
+        RunState? state = CurrentRunState();
+        if (state != null && !string.IsNullOrEmpty(state.Rng?.StringSeed))
+            _playedSeed = state.Rng.StringSeed;
+        await PlayRoomsAsync(ct);
+    }
+
+    /// <summary>
     /// Hands the game back to the human right away. Never throws: each step
     /// is isolated so one failure cannot leave the game half-automated.
     /// </summary>
