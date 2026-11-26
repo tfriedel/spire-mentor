@@ -887,6 +887,18 @@ public static class SimStateExtractor
     private static readonly System.Reflection.FieldInfo? UnsettlingLampLatch =
         LatchField("UnsettlingLamp", "_isFinishedTriggering");
 
+    // First card of a combat is played twice; it stops glowing once fired.
+    // Rebuilt unspent, the mirror played the next card twice too (Spire Bench
+    // seed 170000220, GH #1745). Same entry as RunSimulator's.
+    private static readonly System.Reflection.FieldInfo? ThrowingAxeLatch =
+        LatchField("ThrowingAxe", "_usedThisCombat");
+
+    // Once per run: the death it prevented spends it (`_wasUsed`). Rebuilt
+    // unspent, a lethal hit read as a 50% heal (Spire Bench seed 180001448).
+    // Same entry as RunSimulator's.
+    private static readonly System.Reflection.FieldInfo? LizardTailLatch =
+        LatchField("LizardTail", "_wasUsed");
+
     private static System.Reflection.FieldInfo? LatchField(string typeName, string fieldName)
     {
         try
@@ -1013,6 +1025,8 @@ public static class SimStateExtractor
                 "PERMAFROST" => (PermafrostLatch, 1),
                 "CENTENNIAL_PUZZLE" => (CentennialPuzzleLatch, 1),
                 "UNSETTLING_LAMP" => (UnsettlingLampLatch, 2),
+                "THROWING_AXE" => (ThrowingAxeLatch, 1),
+                "LIZARD_TAIL" => (LizardTailLatch, 1),
                 _ => (null, 0),
             };
             if (latch == null) return null;
@@ -1045,6 +1059,11 @@ public static class SimStateExtractor
                 ["stack_count"] = relic.StackCount,
                 ["is_wax"] = relic.IsWax,
                 ["is_melted"] = relic.IsMelted,
+                // The icon's state (`RelicModel.Status`): Active pulses while
+                // an effect is pending (Venerable Tea Set's +2 Energy),
+                // Disabled greys out a used-up relic. Same key and lowercase
+                // values as the host's (RunSimulator.cs, GH #1882/#1923).
+                ["status"] = relic.Status.ToString().ToLowerInvariant(),
             };
         }
         catch (Exception ex)
@@ -1161,6 +1180,18 @@ public static class SimStateExtractor
                     total += e.Value is decimal v ? v : 0m;
                 d["Stolen"] = (int)(-total);
             }
+            // Test Subject's MULTI_CLAW grows a hit per use in private monster
+            // data (`_extraMultiClawCount`); the engine keeps the count on
+            // Painful Stabs (the power lives exactly as long as the MULTI_CLAW
+            // form). Same var as RunSimulator.PowerVars (GH #1897): without
+            // it a rebuilt Test Subject fight read 0 claws.
+            if (power.GetType().Name == "PainfulStabsPower"
+                && power.Owner?.Monster is object subject
+                && subject.GetType().Name == "TestSubject"
+                && subject.GetType()
+                    .GetField("_extraMultiClawCount", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    ?.GetValue(subject) is int extraClaws)
+                d["ExtraMultiClawCount"] = extraClaws;
             return d.Count > 0 ? d : null;
         }
         catch { return null; }

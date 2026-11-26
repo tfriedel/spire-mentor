@@ -183,9 +183,7 @@ def envelope_game_version(msg: dict[str, Any]) -> str:
         raise UnsupportedGameVersionError(raw) from None
     if raw.strip().lstrip("vV") != version.lstrip("v") and raw not in _HOTFIXES_LOGGED:
         _HOTFIXES_LOGGED.add(raw)
-        logger.info(
-            "game build %s is a hotfix of %s; advising with the %s engine", raw, version, version
-        )
+        logger.info("game build %s plays as %s; advising with the %s engine", raw, version, version)
     return version
 
 

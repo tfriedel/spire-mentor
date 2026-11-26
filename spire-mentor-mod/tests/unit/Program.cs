@@ -73,7 +73,10 @@ Check("engine: raw hotfix spelling", GameVersionFormat.EngineBuild(" 0.113.12 ",
 Check("engine: hotfix of an older line", GameVersionFormat.EngineBuild("v0.107.3", supportedBuilds), "v0.107.1");
 Check("engine: v0.111.1 stable", GameVersionFormat.EngineBuild("v0.111.1", supportedBuilds), "v0.111.0");
 Check("engine: newest base of the line", GameVersionFormat.EngineBuild("v0.113.5", new[] { "v0.113.0", "v0.113.4", "v0.113.6" }), "v0.113.4");
-Check("engine: new minor", GameVersionFormat.EngineBuild("v0.114.0", supportedBuilds), null);
+Check("engine: new minor", GameVersionFormat.EngineBuild("v0.115.0", supportedBuilds), null);
+Check("engine: plays-as line", GameVersionFormat.EngineBuild("v0.114.0", supportedBuilds), "v0.113.0");
+Check("engine: plays-as hotfix", GameVersionFormat.EngineBuild("0.114.2", supportedBuilds), "v0.113.0");
+Check("engine: plays-as build not listed", GameVersionFormat.EngineBuild("v0.114.0", new[] { "v0.111.0" }), null);
 Check("engine: older than the line", GameVersionFormat.EngineBuild("v0.107.0", supportedBuilds), null);
 Check("engine: suffix", GameVersionFormat.EngineBuild("v0.113.1-beta", supportedBuilds), null);
 Check("engine: null", GameVersionFormat.EngineBuild(null, supportedBuilds), null);

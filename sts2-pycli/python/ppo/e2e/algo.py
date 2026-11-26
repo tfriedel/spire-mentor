@@ -93,6 +93,8 @@ __all__ = [
     "ACTOR_COMBAT_TEACHER",
     "ACTOR_RUN_TEACHER",
     "ACTOR_STUDENT",
+    "ADV_FILTER_EWMA",
+    "ADV_FILTER_MODES",
     "ADV_MIN_ROWS",
     "CELL_NONE",
     "COLUMNS",
@@ -108,6 +110,7 @@ __all__ = [
     "LossOut",
     "LossRows",
     "Returns",
+    "adv_filter_keep",
     "clip_and_step",
     "compute_returns",
     "entropy_by_type",
@@ -461,6 +464,46 @@ def compute_returns(
         succ=back(succ_s),
         order=order,
     )
+
+
+#: `Cfg.adv_filter`'s values.
+ADV_FILTER_MODES = ("off", "pi", "pi+v")
+#: The weight of an iteration's max |advantage| in the filter's running maximum
+#: (Gigaflow's beta, arXiv 2502.03349 appendix C).
+ADV_FILTER_EWMA = 0.25
+#: `Cfg.adv_filter_beta_cap`'s default: the most the rescale multiplies a type's
+#: entropy coefficient by.
+ADV_FILTER_BETA_CAP = 4.0
+
+
+def adv_filter_keep(
+    adv: np.ndarray,
+    trained: np.ndarray,
+    a_max_prev: float | None,
+    *,
+    frac: float,
+    ewma: float = ADV_FILTER_EWMA,
+) -> tuple[np.ndarray, float, float]:
+    """Gigaflow's advantage filter (GH #1538): ``(keep, a_max, eta)``.
+
+    ``a_max`` is the running maximum of |raw advantage| over an iteration's trained
+    rows: the iteration's own maximum the first time (``a_max_prev`` None), then
+    ``(1 - ewma) * a_max_prev + ewma * max``. ``eta = frac * a_max``, and ``keep``
+    marks the trained rows with |advantage| >= eta. An iteration without a trained
+    row keeps ``a_max_prev``.
+    """
+    tr = np.asarray(trained, bool)
+    a = np.abs(np.asarray(adv, np.float64))
+    if not tr.any():
+        return np.zeros(len(tr), bool), (math.nan if a_max_prev is None else a_max_prev), math.nan
+    if not np.isfinite(a[tr]).all():
+        raise ValueError("advantages of trained rows must be finite")
+    top = float(a[tr].max())
+    a_max = top if a_max_prev is None else (1.0 - ewma) * float(a_max_prev) + ewma * top
+    eta = float(frac) * a_max
+    keep = tr.copy()
+    keep[tr] = a[tr] >= eta
+    return keep, a_max, eta
 
 
 def explained_variance(target: np.ndarray, values: np.ndarray, mask: np.ndarray) -> float:
@@ -1502,6 +1545,9 @@ class AlgoState:
         self.hold = HoldBack(hold_iters)
         self.sched: IterSchedule | None = None
         self._normalized = False
+        # The advantage filter's running max |advantage| (`adv_filter_keep`); None
+        # until a filtered update has run, and then saved under "adv_max".
+        self.adv_max: float | None = None
 
     # The iteration protocol (see the module docstring).
 
@@ -1536,6 +1582,14 @@ class AlgoState:
             ret.adv, _col(table, "dtype", np.int64), ret.pi, _col(table, "is_combat", bool)
         )
 
+    def filter_rows(self, ret: Returns, frac: float) -> tuple[np.ndarray, float]:
+        """The trained rows the advantage filter keeps and its threshold (`adv_filter_keep`);
+        advances the running maximum. Call it once per iteration, after `normalize`."""
+        keep, a_max, eta = adv_filter_keep(ret.adv, ret.trained, self.adv_max, frac=frac)
+        if math.isfinite(a_max):
+            self.adv_max = a_max
+        return keep, eta
+
     def end(
         self,
         table: Mapping[str, Any],
@@ -1561,7 +1615,7 @@ class AlgoState:
     def to_dict(self) -> dict[str, Any]:
         if self.sched is not None:
             raise RuntimeError("save between iterations (after end())")
-        return {
+        d = {
             "version": self.VERSION,
             "cfg": self.cfg.to_dict(),
             "n_types": self.n_types,
@@ -1574,6 +1628,10 @@ class AlgoState:
             "adv": self.adv.to_dict(),
             "hold": self.hold.to_dict(),
         }
+        # Optional, so a state no filtered update touched equals an older one's.
+        if self.adv_max is not None:
+            d["adv_max"] = float(self.adv_max)
+        return d
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], cfg: ScheduleCfg | None = None) -> AlgoState:
@@ -1592,4 +1650,6 @@ class AlgoState:
         s.collapse = EntropyCollapse.from_dict(d["collapse"])
         s.adv = AdvNorm.from_dict(d["adv"])
         s.hold = HoldBack.from_dict(d["hold"])
+        if d.get("adv_max") is not None:
+            s.adv_max = float(d["adv_max"])
         return s

@@ -59,8 +59,10 @@ internal static class GameVersionFormat
     /// that line whose patch is not above it (<c>"v0.113.0"</c>). The game
     /// ships hotfixes as bug-fix updates, and the advisor runs them on the
     /// base build's engine (<c>sts2_client.hotfix_base</c>). Null when no
-    /// build fits: a new minor is a content update, not a hotfix. Both sides
-    /// are compared in wire form (<see cref="Normalize"/>).
+    /// build fits: a new minor is a content update, not a hotfix, unless
+    /// <see cref="PlaysAs"/> names its line (<c>"v0.114.0"</c> plays as
+    /// <c>"v0.113.0"</c> when that is listed). Both sides are compared in wire
+    /// form (<see cref="Normalize"/>).
     /// </summary>
     public static string? EngineBuild(string? version, IEnumerable<string> builds)
     {
@@ -68,6 +70,13 @@ internal static class GameVersionFormat
         if (wire == null || !TryParts(wire, out long major, out long minor, out long patch))
         {
             return null;
+        }
+        foreach (var (line, engine) in PlaysAs)
+        {
+            if (line == (major, minor))
+            {
+                return builds.Select(Normalize).Contains(engine) ? engine : null;
+            }
         }
         string? best = null;
         long bestPatch = -1;
@@ -83,6 +92,17 @@ internal static class GameVersionFormat
         }
         return best;
     }
+
+    /// <summary>
+    /// Game lines the advisor has no build of yet, each with the build it
+    /// plays on, for every patch of the line. v0.114.0 (public-beta
+    /// 2026-11-25) runs on the v0.113.0 engine until it has its own. Twins:
+    /// <c>sts2_client.PLAYS_AS</c>, Rust <c>game_version::PLAYS_AS</c>.
+    /// </summary>
+    public static readonly ((long Major, long Minor) Line, string Engine)[] PlaysAs =
+    {
+        ((0, 114), "v0.113.0"),
+    };
 
     /// <summary>The three numbers of a wire-form build (<c>"v0.113.1"</c>).</summary>
     private static bool TryParts(string wire, out long major, out long minor, out long patch)

@@ -842,6 +842,11 @@ public class SimCombatHandler : IRoomHandler, IHandler
                 // (Unmovable), which a rebuilt board cannot recount (GH #989).
                 ["cards_exhausted_this_turn"] = SimCombatLog.CardsExhaustedThisTurn(creature),
                 ["card_block_gains_this_turn"] = SimCombatLog.CardBlockGainsThisTurn(creature),
+                // Memento Mori's discards, Murder's draws and Supermassive's
+                // generated cards, the host's keys (GH #1906).
+                ["discards_this_turn"] = SimCombatLog.DiscardsThisTurn(creature),
+                ["cards_drawn_this_combat"] = SimCombatLog.CardsDrawnThisCombat(creature),
+                ["cards_generated_this_combat"] = SimCombatLog.CardsGeneratedThisCombat(creature),
                 // TurnNumber - RoundNumber: the turn-number gates read the
                 // turn, and a rebuilt board otherwise sets it to the round.
                 ["extra_turns_taken_this_combat"] = ExtraTurnsTakenThisCombat(pcs, combatState),
@@ -979,6 +984,9 @@ public class SimCombatHandler : IRoomHandler, IHandler
                     ["cards_exhausted_this_combat"] = SimCombatLog.CardsExhaustedThisCombat(c),
                     ["cards_exhausted_this_turn"] = SimCombatLog.CardsExhaustedThisTurn(c),
                     ["card_block_gains_this_turn"] = SimCombatLog.CardBlockGainsThisTurn(c),
+                    ["discards_this_turn"] = SimCombatLog.DiscardsThisTurn(c),
+                    ["cards_drawn_this_combat"] = SimCombatLog.CardsDrawnThisCombat(c),
+                    ["cards_generated_this_combat"] = SimCombatLog.CardsGeneratedThisCombat(c),
                     ["extra_turns_taken_this_combat"] = ExtraTurnsTakenThisCombat(
                         pcs, CombatManager.Instance.DebugOnlyGetState()),
                     // Their belt, slot by slot as ours is: a replay plays a

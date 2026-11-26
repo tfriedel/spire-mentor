@@ -535,7 +535,7 @@ internal static class RefereeView
         Add("enemies[].powers[]", power);
         Add("dead_enemies[].powers[]", power);
 
-        Add("", "type decision act act_name ascension floor victory abandoned round energy max_energy stars " +
+        Add("", "type decision act act_name ascension floor victory abandoned round encounter_id energy max_energy stars " +
                 "orb_slots draw_pile_count discard_pile_count exhaust_pile_count " +
                 "can_leave can_skip cancelable from_event gold_earned card_removal_cost " +
                 "min_select max_select prompt_key source source_model enchantment_amount description event_name potion");
@@ -548,7 +548,7 @@ internal static class RefereeView
             + " discards_this_turn");
         Add("player.powered_hits_this_turn[]", "enemy hits");
         Add("player.potions[]", "entry name description index slot target_type vars vars.*");
-        Add("player.relics[]", "id name description counter is_wax is_melted vars vars.*");
+        Add("player.relics[]", "id name description counter is_wax is_melted status vars vars.*");
         Add("enemies[]", "id name index combat_id slot hp max_hp block intends_attack");
         // The card a thief holds, shown on it in the game (GH #1693).
         Add("enemies[].stolen_cards[]", "id upgraded");

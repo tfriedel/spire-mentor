@@ -17,6 +17,8 @@ import dataclasses
 import io
 import itertools
 import math
+import types
+import typing
 from dataclasses import dataclass
 
 import numpy as np
@@ -2169,6 +2171,46 @@ def test_stats_means_divide_the_floor_by_floored_rows() -> None:
                           "fl_below": torch.tensor(6.0)})  # fmt: skip
     assert (m["n_fl"], m["fl_loss"], m["fl_below"]) == (4, 0.5, 1.5)
     assert math.isnan(algo.stats_means({"n_fl": 0.0, "fl_loss": 0.0})["fl_loss"])
+
+
+# ── the advantage filter (GH #1538) ──────────────────────────────────────
+
+
+def test_the_advantage_filter_keeps_rows_at_or_above_a_share_of_the_running_max() -> None:
+    adv = np.array([0.5, -0.004, 0.0051, np.nan, -1.0, 0.02])
+    trained = np.array([True, True, True, False, True, True])
+    keep, a_max, eta = algo.adv_filter_keep(adv, trained, None, frac=0.01)
+    assert a_max == pytest.approx(1.0) and eta == pytest.approx(
+        0.01
+    )  # the first iteration's own max
+    assert keep.tolist() == [True, False, False, False, True, True]
+    # Later iterations move the maximum by `ewma` of the way to their own.
+    keep, a_max, eta = algo.adv_filter_keep(adv * 0.2, trained, 1.0, frac=0.01)
+    assert a_max == pytest.approx(0.75 * 1.0 + 0.25 * 0.2) and eta == pytest.approx(0.008)
+    assert keep.tolist() == [True, False, False, False, True, False]
+    # frac 0 keeps every trained row, and never an untrained one.
+    assert algo.adv_filter_keep(adv, trained, None, frac=0.0)[0].tolist() == trained.tolist()
+
+
+def test_the_advantage_filter_without_trained_rows_keeps_its_maximum() -> None:
+    none = np.zeros(3, bool)
+    keep, a_max, eta = algo.adv_filter_keep(np.full(3, np.nan), none, 0.4, frac=0.01)
+    assert not keep.any() and a_max == pytest.approx(0.4) and math.isnan(eta)
+    assert math.isnan(algo.adv_filter_keep(np.full(3, np.nan), none, None, frac=0.01)[1])
+    with pytest.raises(ValueError, match="finite"):
+        algo.adv_filter_keep(np.array([np.nan]), np.array([True]), None, frac=0.01)
+
+
+def test_the_filters_maximum_is_saved_only_once_a_filtered_update_ran() -> None:
+    s = algo.AlgoState()
+    assert "adv_max" not in s.to_dict()  # an unfiltered state equals an older code's
+    ret = types.SimpleNamespace(adv=np.array([0.3, -0.001]), trained=np.array([True, True]))
+    keep, eta = s.filter_rows(typing.cast("algo.Returns", ret), 0.01)
+    assert keep.tolist() == [True, False] and eta == pytest.approx(0.003)
+    d = s.to_dict()
+    assert d["adv_max"] == pytest.approx(0.3)
+    assert algo.AlgoState.from_dict(d).adv_max == pytest.approx(0.3)
+    assert algo.AlgoState.from_dict({k: v for k, v in d.items() if k != "adv_max"}).adv_max is None
 
 
 def test_vf_coef_run_weights_only_the_run_rows_value_loss() -> None:

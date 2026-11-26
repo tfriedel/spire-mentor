@@ -146,7 +146,8 @@ mod tests {
         assert_eq!(resolve(Some("v0.113.0")), Ok(GameVersion::V0_113_0));
         assert_eq!(resolve(Some("0.113.1")), Ok(GameVersion::V0_113_0));
         assert!(resolve(Some("v0.107.1")).is_err());
-        assert!(resolve(Some("v0.114.0")).is_err());
+        assert_eq!(resolve(Some("v0.114.0")), Ok(GameVersion::V0_113_0));
+        assert!(resolve(Some("v0.115.0")).is_err());
     }
 
     #[test]

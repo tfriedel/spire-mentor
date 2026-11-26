@@ -253,9 +253,11 @@ public static class SimHotkeys
 
 }
 
-// v0.111.0 only: v0.107.1 has no ClearHotkeys and never drops the bindings, so
-// the patch looks the method up by name and sits out when it is absent. One DLL
-// serves both builds, so a compile-time reference would not build on v0.107.1.
+// v0.111.0 and v0.113.0 only: v0.107.1 has no ClearHotkeys and never drops the
+// bindings, and v0.114.0 removed it (a binding there lives as long as its owner
+// node, SimGameApi.PushHotkeyPressedBinding), so the patch looks the method up
+// by name and sits out when it is absent. One DLL serves every build, so a
+// compile-time reference would not build on v0.107.1.
 [HarmonyPatch]
 internal static class HotkeyResetPatch
 {

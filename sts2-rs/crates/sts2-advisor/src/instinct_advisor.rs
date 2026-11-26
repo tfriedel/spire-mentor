@@ -1001,6 +1001,24 @@ mod tests {
         assert_eq!(engine_game_version(&ok), "v0.113.0");
     }
 
+    /// v0.114.0 has no engine build of its own (`game_version::PLAYS_AS`):
+    /// the advisor reads it as v0.113.0, and Instinct plays it there, the
+    /// Fool on the v0.113.0 Fool net.
+    #[test]
+    fn a_plays_as_build_is_advised_on_its_engine_build() {
+        let silent = json!({"run_state": {"character": "SILENT"}, "game_version": "v0.114.0"});
+        assert_eq!(
+            crate::headless::game_version(&silent).unwrap(),
+            Some("v0.113.0")
+        );
+        assert_eq!(InstinctAdvisor::eligibility(&silent), None);
+        assert_eq!(engine_game_version(&silent), "v0.113.0");
+        let fool = json!({"run_state": {"character": "FOOL"}, "game_version": "v0.114.0"});
+        assert_eq!(InstinctAdvisor::eligibility(&fool), None);
+        let unknown = json!({"run_state": {"character": "SILENT"}, "game_version": "v0.115.0"});
+        assert!(crate::headless::game_version(&unknown).is_err());
+    }
+
     #[test]
     fn a_coop_run_is_more_than_one_player() {
         assert!(is_coop(&json!({"player_count": 2})));

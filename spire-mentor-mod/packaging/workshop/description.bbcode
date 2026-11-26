@@ -2,7 +2,7 @@
 
 Spire Mentor rates your options while you play: a score on every card in hand, a ranked list of the moves the AI considered, a win-chance bar, and the map route it likes. It can also take a single decision for you, or play on until you stop it.
 
-The advice comes from [b]Instinct[/b], a trained network that makes every decision of the run, fights included, with no search, for every character on v0.111.0 and v0.113.0 (The Fool: v0.113.0). Where it cannot answer, a search stands in and the advice says so: a Monte Carlo tree search over a full simulation of the fight, and a trained run policy for the map, rewards, shops, events and rest sites.
+The advice comes from [b]Instinct[/b], a trained network that makes every decision of the run, fights included, with no search, for every character on v0.111.0, v0.113.0 and v0.114.0 (The Fool: v0.113.0 and v0.114.0). Where it cannot answer, a search stands in and the advice says so: a Monte Carlo tree search over a full simulation of the fight, and a trained run policy for the map, rewards, shops, events and rest sites.
 Instinct's A10 win rate in our simulator: Ironclad 79.9%, Defect 71.8%, Regent 65.8%, Silent 60.8%, Necrobinder 52.8%, The Fool 59.4%.
 
 It has two styles, picked in the badge's [b]Mode[/b] switch:
@@ -16,7 +16,7 @@ It has two styles, picked in the badge's [b]Mode[/b] switch:
 [h2]Requirements[/h2]
 [list]
 [*][b]Windows or Linux[/b] (x86-64, glibc 2.28+). On a Mac the coach cannot start. On Linux the panels' window also needs python3, PyGObject, GTK 3 and WebKitGTK, and the game on X11/XWayland (its default).
-[*][b]Game builds v0.111.1 (stable) and v0.113.0 (public beta), and their hotfixes (e.g. v0.113.1).[/b] No trained advice covers the Blitz merchant (the AI takes uncursed wares by a simple rule). A game update can break the mod until a new version is out.
+[*][b]Game builds v0.111.1 (stable), v0.113.1 and the v0.114.0 public beta, and their hotfixes.[/b] v0.114.0 is advised with v0.113 rules for now, so its changes (most of The Fool's cards) are not yet simulated. No trained advice covers the Blitz merchant (the AI takes uncursed wares by a simple rule). A game update can break the mod until a new version is out.
 [*][b]BaseLib[/b] (by Alchyr), which Steam installs alongside this mod as a required item.
 [/list]
 

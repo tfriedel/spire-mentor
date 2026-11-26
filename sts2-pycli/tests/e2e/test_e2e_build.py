@@ -34,7 +34,8 @@ def test_resolve_names_a_build_or_refuses() -> None:
     with pytest.raises(ValueError):
         build.resolve("v0.107.1")  # a supported game build, but no e2e lane plays it
     with pytest.raises(ValueError):
-        build.resolve("v0.114.0")
+        build.resolve("v0.115.0")
+    assert build.resolve("v0.114.0") == "v0.113.0"  # sts2_client.PLAYS_AS
 
 
 def test_the_fool_plays_from_v0113_on() -> None:

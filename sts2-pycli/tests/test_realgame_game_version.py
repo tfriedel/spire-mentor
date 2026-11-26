@@ -88,14 +88,19 @@ class TestEnvelopeGameVersion:
 
     @pytest.mark.parametrize(
         ("raw", "want"),
-        [("v0.113.1", "v0.113.0"), ("0.113.7", "v0.113.0"), ("v0.111.2", "v0.111.0")],
+        [
+            ("v0.113.1", "v0.113.0"),
+            ("0.113.7", "v0.113.0"),
+            ("v0.111.2", "v0.111.0"),
+            ("v0.114.0", "v0.113.0"),  # PLAYS_AS
+        ],
     )
     def test_a_hotfix_plays_on_its_base_build(self, raw: str, want: str) -> None:
         # v0.113.1 (2026-11-14) was refused outright until hotfixes mapped.
         assert envelope_game_version({"game_version": raw}) == want
 
     @pytest.mark.parametrize(
-        "raw", ["v0.112.0", "v0.114.0", "v0.103.2", "v0.107.0", "v0.111.0-beta", "banana"]
+        "raw", ["v0.112.0", "v0.115.0", "v0.103.2", "v0.107.0", "v0.111.0-beta", "banana"]
     )
     def test_an_unknown_build_is_refused_by_name(self, raw: str) -> None:
         with pytest.raises(UnsupportedGameVersionError) as info:

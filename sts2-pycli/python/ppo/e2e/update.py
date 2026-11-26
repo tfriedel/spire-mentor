@@ -365,6 +365,68 @@ def type_dict(v: np.ndarray, dtypes: tuple[str, ...]) -> dict[str, float]:
     return out
 
 
+#: `_adv_diag`'s candidate filter thresholds, as fractions of the iteration's max |advantage|.
+ADV_DIAG_FRACS = (0.001, 0.003, 0.01, 0.03, 0.1)
+
+
+def _adv_diag(
+    a: A.AlgoState,
+    table: dict[str, np.ndarray],
+    ret: A.Returns,
+    values: np.ndarray,
+    v_behav: np.ndarray,
+    it: int,
+    dtype: np.ndarray,
+    dtypes: tuple[str, ...],
+) -> dict[str, Any]:
+    """`Cfg.adv_diag` (stats only, GH #1538 / #1550): what the advantage filter and the
+    reused pre-pass would do to this iteration, without doing it.
+
+    - ``below``: per candidate fraction of the max |advantage|, the share of trained
+      rows under it, overall and per decision type; ``q``: quantiles of |advantage|.
+    - ``reuse``: this iteration's rows take ``v_behav`` for their value, the returns
+      are computed again, and the two sets of advantages are compared on the
+      student rows (correlation, sign agreement, mean absolute difference), next
+      to the value gap itself.
+    """
+    tr = ret.trained
+    out: dict[str, Any] = {}
+    if not tr.any():
+        return out
+    aa = np.abs(ret.adv[tr])
+    top = float(aa.max())
+    dt = dtype[tr]
+    n_t = len(dtypes)
+    cnt = np.maximum(np.bincount(dt, minlength=n_t), 1)
+    out["a_max"] = top
+    out["q"] = {f"p{q}": float(np.quantile(aa, q / 100)) for q in (10, 25, 50, 75, 90, 99)}
+    out["below"] = {
+        str(f): {
+            "all": float((aa < f * top).mean()),
+            "t": type_dict(np.bincount(dt[aa < f * top], minlength=n_t) / cnt, dtypes),
+        }
+        for f in ADV_DIAG_FRACS
+    }
+    fresh = np.asarray(table["iter"], np.int64) == it
+    v_mix = np.where(fresh, v_behav.astype(np.float64), values)
+    ret_b = a.returns(table, v_mix)
+    m = ret.pi & fresh
+    if int(m.sum()) > 2:
+        x, y = ret.adv[m], ret_b.adv[m]
+        dv = v_behav[m].astype(np.float64) - values[m]
+        out["reuse"] = {
+            "rows": int(m.sum()),
+            "v_gap_mean": float(dv.mean()),
+            "v_gap_abs": float(np.abs(dv).mean()),
+            "v_gap_p99": float(np.quantile(np.abs(dv), 0.99)),
+            "adv_corr": float(np.corrcoef(x, y)[0, 1]),
+            "adv_sign": float((np.sign(x) == np.sign(y)).mean()),
+            "adv_gap_abs": float(np.abs(x - y).mean()),
+            "adv_abs": float(np.abs(x).mean()),
+        }
+    return out
+
+
 class Rank:
     """One update rank. `world == 1` needs no torch.distributed."""
 
@@ -599,18 +661,38 @@ class Rank:
         # the same forward after the epoch.
         packed = bool(getattr(cfg, "packed_prepass", False))
         fwd = self._fwd_packed if packed else self._fwd
-        if packed:
-            tr = trained_idx[np.argsort(n_tok[trained_idx], kind="stable")]
+        # `prepass_reuse` (GH #1550): this iteration's rows keep what the serving net
+        # wrote, so only the carried rows and the teacher-acted ones get a forward.
+        # The probe strata then get their own forward (as with `packed_prepass`),
+        # which is also the entropy sample: a random 24 strata of the trained rows.
+        reuse = bool(getattr(cfg, "prepass_reuse", False))
+        v_behav = np.asarray(table["v_behav"], np.float32)
+        lp_behav = np.asarray(table["logp_behav"], np.float32)
+        served = np.zeros(n, bool)  # rows that take the serving net's value and log-prob
+        if reuse:
+            fresh_rows = np.asarray(table["iter"], np.int64) == it
+            student = np.asarray(table["actor"], np.int64) == A.ACTOR_STUDENT
+            served = fresh_rows & (student | ~masks.trained)
+            other = other[~served[other]]
+            chunks = [other[i : i + step] for i in range(0, len(other), step)]
+        own_probe = packed or reuse  # the probe strata get a forward of their own
+        if own_probe:
+            tr = trained_idx[~served[trained_idx]]
+            tr = tr[np.argsort(n_tok[tr], kind="stable")]
             pre = [tr[i : i + step] for i in range(0, len(tr), step)]
         else:
             pre = strata
+        n_fwd = int(sum(len(x) for x in pre) + sum(len(x) for x in chunks))
 
-        def absorb(idx: np.ndarray, out: Any) -> None:
+        def absorb(idx: np.ndarray, out: Any, *, store: bool = True, ent: bool = True) -> None:
             nonlocal ent_s, ent_c, ent_n, ent_n_ct
             ti = upload(idx, dev)
             nc = upload(nc_all[idx], dev)
-            values[ti] = out.value.float()
-            lp_prox[ti] = A.logp_of(out.logits, nc, upload(act_all[idx], dev))
+            if store:
+                values[ti] = out.value.float()
+                lp_prox[ti] = A.logp_of(out.logits, nc, upload(act_all[idx], dev))
+            if not ent:
+                return
             es, ec = A.entropy_by_type(
                 out.logits,
                 nc,
@@ -629,13 +711,16 @@ class Rank:
                 if j % world != rank or not len(idx):
                     continue
                 out = fwd(rows, idx)
-                absorb(idx, out)
-                if not packed and j in probe:
+                absorb(idx, out, ent=not reuse)
+                if not own_probe and j in probe:
                     probe_prox[j] = (idx, out.logits.float())
-            if packed:
+            if own_probe:
                 for j in sorted(probe):
                     if j % world == rank and len(strata[j]):
-                        probe_prox[j] = (strata[j], self._fwd(rows, strata[j]).logits.float())
+                        out = self._fwd(rows, strata[j])
+                        probe_prox[j] = (strata[j], out.logits.float())
+                        if reuse:
+                            absorb(strata[j], out, store=False)
             for c, idx in enumerate(chunks):
                 if c % world == rank:
                     values[upload(idx, dev)] = fwd(rows, idx).value.float()
@@ -648,8 +733,17 @@ class Rank:
         ent_c_np = flat[o + n_types : o + 2 * n_types].double().cpu().numpy()
         ent_n_np = flat[o + 2 * n_types : o + 3 * n_types].double().cpu().numpy()
         ent_n_ct_np = flat[o + 3 * n_types :].double().cpu().numpy()
+        if reuse:
+            values_np[served] = v_behav[served]
+            lp_prox_np[served] = lp_behav[served]
         # The pre-pass covers the strata, i.e. the trained rows: their counts per bin.
-        pi_tr = trained_idx[masks.pi[trained_idx]]
+        # (With `prepass_reuse` the entropy sample is the probe strata's rows.)
+        ent_rows = (
+            np.concatenate([strata[j] for j in sorted(probe)] or [trained_idx[:0]])
+            if reuse
+            else trained_idx
+        )
+        pi_tr = ent_rows[masks.pi[ent_rows]]
         ent_c_ct_np = np.bincount(ct_all[pi_tr], minlength=n_ct).astype(np.float64)
         prepass_s = time.time() - tp
         nonfinite: list[str] = []
@@ -664,9 +758,57 @@ class Rank:
         if not (np.array_equal(ret.trained, masks.trained) and np.array_equal(ret.pi, masks.pi)):
             raise RuntimeError("the loss masks moved with the values")
         adv = a.normalize(table, ret)
+        # `adv_filter` (GH #1538), after the moments: the rows under the threshold lose
+        # their policy terms ("pi") or leave the minibatches ("pi+v"). `ret` itself
+        # stays whole for the hold-back, the probe and the statistics.
+        flt = str(getattr(cfg, "adv_filter", "off"))
+        if flt not in A.ADV_FILTER_MODES:
+            raise ValueError(f"adv_filter {flt!r}: one of {A.ADV_FILTER_MODES}")
+        pi_rows, train_strata = ret.pi, strata
+        flt_stats: dict[str, Any] | None = None
+        if flt != "off":
+            keep, eta = a.filter_rows(ret, float(cfg.adv_filter_frac))
+            n_tr = max(1, len(trained_idx))
+            flt_stats = {
+                "mode": flt,
+                "eta": eta,
+                "a_max": a.adv_max,
+                "keep": float(keep.sum()) / n_tr,
+                "rows_kept": int(keep.sum()),
+                "keep_t": type_dict(
+                    np.bincount(dt_all[keep], minlength=n_types)
+                    / np.maximum(np.bincount(dt_all[ret.trained], minlength=n_types), 1),
+                    self.dtypes,
+                ),
+            }
+            if flt == "pi":
+                pi_rows = ret.pi & keep
+            else:
+                kept = trained_idx[keep[trained_idx]]
+                n_mb_k = max(1, round(len(kept) / max(1, int(cfg.minibatch))))
+                train_strata = [kept[s] for s in A.length_strata(n_tok[kept], per_mb * n_mb_k)]
+        diag = (
+            _adv_diag(a, table, ret, values_np, v_behav, it, dt_all, self.dtypes)
+            if (rank == 0 and bool(getattr(cfg, "adv_diag", False)))
+            else None
+        )
         applied = A.set_lr(self.opt, sched.lr_frac)
         has_t = np.asarray(table["has_t"], bool)
         beta = sched.beta_rows(dt_all, comb_all)
+        # `adv_filter_beta_rescale`: the filter takes the entropy bonus away with the
+        # rows it drops (the screen's arm C lost a quarter of its combat entropy). Scale
+        # the kept rows' coefficient per decision type by policy rows / kept policy rows,
+        # so each type's summed coefficient is what it is without the filter.
+        if flt_stats is not None and bool(getattr(cfg, "adv_filter_beta_rescale", False)):
+            n_pi_t = np.bincount(dt_all[ret.pi], minlength=n_types).astype(np.float64)
+            n_kept_t = np.bincount(dt_all[ret.pi & keep], minlength=n_types).astype(np.float64)
+            cap = max(1.0, float(getattr(cfg, "adv_filter_beta_cap", A.ADV_FILTER_BETA_CAP)))
+            scale_t = np.minimum(n_pi_t / np.maximum(n_kept_t, 1.0), cap)
+            scale_t[n_pi_t == 0] = 1.0
+            beta = (beta * scale_t[dt_all]).astype(beta.dtype)
+            flt_stats["beta_scale_t"] = type_dict(
+                np.where(n_pi_t > 0, scale_t, np.nan), self.dtypes
+            )
         ks = sched.ks_rows(dt_all, has_t)
         floor_p = sched.floor_rows(dt_all, nc_all)
         floor_w = None
@@ -674,7 +816,6 @@ class Rank:
             floor_w = np.full(n, sched.floor_coef, np.float32)
         else:
             floor_p = None
-        lp_behav = np.asarray(table["logp_behav"], np.float32)
         target = ret.target
         use_teacher = bool(np.any(sched.ks_types > 0))
         # Learner-side distillation (ScheduleCfg.distill_*): the frozen teacher's probs
@@ -738,7 +879,7 @@ class Rank:
                 lp_behav=lp_behav[idx],
                 adv=adv[idx],
                 target=target[idx],
-                pi=ret.pi[idx],
+                pi=pi_rows[idx],
                 v=ret.trained[idx],
                 beta=beta[idx],
                 ks=ks_i,
@@ -782,7 +923,7 @@ class Rank:
             if not trained_idx.size or nonfinite:
                 break
             mbs = A.epoch_minibatches(
-                strata, seed=cfg.seed, it=it, epoch=epoch, per_mb=per_mb, world=world
+                train_strata, seed=cfg.seed, it=it, epoch=epoch, per_mb=per_mb, world=world
             )
             mine = [idx for mb in mbs for idx in groups(mb)]
             batches = ahead(lambda idx: build(rows, idx), mine)
@@ -863,12 +1004,19 @@ class Rank:
                 "padding": A.padding_ratio(n_tok, strata),
                 "held_dropped": dropped,
                 "prepass_s": prepass_s,
+                "prepass_rows_fwd": n_fwd,
                 "update_s": update_s,
                 "rank_s": time.time() - t0,
                 "nonfinite": nonfinite,
             }
         )
         stats.update(ret.stats(table))
+        if flt_stats is not None:
+            stats["adv_filter"] = flt_stats
+        if reuse:
+            stats["prepass_rows_served"] = int(served.sum())
+        if diag is not None:
+            stats["adv_diag"] = diag
         for k, v in means.items():
             if isinstance(v, np.ndarray):
                 if k not in ("n_pi_t", "n_v_t", "n_ks_t"):

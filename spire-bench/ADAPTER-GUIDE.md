@@ -220,8 +220,8 @@ the game case that showed it in brackets.
   own (Jungle Maze's gold).
 - **Replayed pages.** If you rebuild a multi-page event by replaying earlier
   pages, the replay must hold the screen's deck, HP and gold at each page.
-- **Fight-starting events.** An event that starts a fight needs the
-  encounter id your simulator would use for that event's fight.
+- **Fight-starting events.** The fight's `encounter_id` names the event's
+  encounter (section 4).
 - **Event-specific special cases.** Some events change the run in a way your
   simulator models with a special rule (Wood Carvings only transforms Basic
   cards). Check each event your simulator special-cases.
@@ -282,13 +282,8 @@ Who keeps which state:
   counts (Spite, Tear Asunder, Unmovable, Gang Up, extra turns) get them from
   `player.*` counters in the view. Anything else you need (cards played this
   turn, discard order), record yourself from the stream of observations.
-- **Encounter id.** Infer it from the enemy roster at the start of the
-  fight, counting `removed_enemies[]` killed before your first decision.
-  Each starting roster belongs to one encounter (checked on v0.111.0 and
-  v0.113), so the match is exact once you compare monster counts as well as
-  kinds: Bowlbugs, Slimes, Corpse Slugs and the like differ between their
-  weak and normal encounters only in how many spawn. Remember spawn-rolled
-  rosters and event fights (section 3).
+- **Encounter id.** The view sends it (`encounter_id` on combat decisions),
+  derived from the starting roster, event fights included. No lookup needed.
 - **Bestiary numbers.** An attack's base damage per hit is in
   `intents[].base_damage`. Strength, Weak and Vulnerable are visible powers,
   so you can check the shown damage against base and modifiers. A mismatch

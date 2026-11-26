@@ -1064,3 +1064,38 @@ def test_an_enemy_keeps_its_combat_id_when_another_dies():
                     seen[e["combat_id"]] = (e["index"], e["id"])
             state = host.send(**referee_spike.choose(state, rnd))
     assert shifted > 0, "no death moved an enemy; pick another seed"
+
+
+def test_a_relic_shows_its_icon_status(game):
+    # GH #1882: Venerable Tea Set's icon pulses (RelicStatus.Active) while its
+    # +2 Energy is pending after a rest site, and has no counter, so only the
+    # status tells a player the charge is there.
+    state = game.start(character="Ironclad", seed="TEASTATUS")
+    game.skip_neow(state)
+    r = game.set_player(relics=["VENERABLE_TEA_SET"])
+    assert r.get("type") != "error", r
+    tea = [x for x in r["player"]["relics"] if x["id"] == "VENERABLE_TEA_SET"]
+    assert tea, r["player"]["relics"]
+    assert tea[0]["status"] == "normal"
+    view = game.enter_room("rest_site")
+    tea = [x for x in view["player"]["relics"] if x["id"] == "VENERABLE_TEA_SET"]
+    assert tea[0]["status"] == "active", tea
+    projected = _project(view)
+    assert projected["_unclassified"] == []
+    shown = [x for x in projected["player"]["relics"] if x["id"] == "VENERABLE_TEA_SET"]
+    assert shown[0]["status"] == "active"
+
+
+def test_a_fight_names_its_encounter(game):
+    # PROTOCOL question 8: the encounter id is sent as a derived value; each
+    # starting roster belongs to one encounter, so it says nothing the
+    # screen does not.
+    state = game.start(character="Ironclad", seed="ENCOUNTERID")
+    game.skip_neow(state)
+    r = game.set_player(hp=70, max_hp=80, deck=["STRIKE_IRONCLAD"] * 10, relics=[], potions=[])
+    assert r.get("type") != "error", r
+    view = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+    assert view.get("encounter_id") == "SHRINKER_BEETLE_WEAK", view.get("encounter_id")
+    projected = _project(view)
+    assert projected["_unclassified"] == []
+    assert projected.get("encounter_id") == "SHRINKER_BEETLE_WEAK"

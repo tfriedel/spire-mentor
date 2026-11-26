@@ -52,6 +52,13 @@ GAME_VERSION_ENV = "STS2_GAME_VERSION"
 
 _BUILD_RE = re.compile(r"v(\d{1,9})\.(\d{1,9})\.(\d{1,9})")
 
+#: Game lines the engine has no build of yet, each with the build it plays
+#: on: ``(major, minor)`` -> engine build, for every patch of the line.
+#: v0.114.0 (public-beta 2026-11-25) reworks the Fool and changes a few shared
+#: rules; until it has a build of its own the advisor runs it as v0.113.0.
+#: Rust twin: ``game_version::PLAYS_AS``; mod twin: ``GameVersionFormat.PlaysAs``.
+PLAYS_AS: dict[tuple[int, int], str] = {(0, 114): "v0.113.0"}
+
 
 def hotfix_base(version: str) -> str | None:
     """The supported build a hotfix of it plays on, or None.
@@ -60,14 +67,17 @@ def hotfix_base(version: str) -> str | None:
     (``v0.113.1`` after ``v0.113.0``). The game ships those as bug-fix
     updates, so the engine of the newest supported build in the same line,
     patch not above the hotfix's, is the right one: ``v0.113.1`` →
-    ``v0.113.0``. A new minor (``v0.114.0``) is a content update and maps to
-    nothing; neither does a build older than every supported one of its line.
+    ``v0.113.0``. A new minor is a content update and maps to nothing unless
+    :data:`PLAYS_AS` names its line (``v0.114.0`` -> ``v0.113.0``); neither
+    does a build older than every supported one of its line.
     Rust twin: ``GameVersion::from_str`` (``sts2-core/src/game_version.rs``).
     """
     m = _BUILD_RE.fullmatch(version.strip())
     if m is None:
         return None
     major, minor, patch = (int(g) for g in m.groups())
+    if (major, minor) in PLAYS_AS:
+        return PLAYS_AS[major, minor]
     best: tuple[int, str] | None = None
     for supported in SUPPORTED_GAME_VERSIONS:
         sm = _BUILD_RE.fullmatch(supported)

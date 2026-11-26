@@ -300,6 +300,80 @@ internal static class SimCombatLog
     }
 
     /// <summary>
+    /// The cards <paramref name="creature"/>'s player discarded this turn
+    /// (`CardDiscardedEntry`, Memento Mori's multiplier). A discard before the
+    /// first screen (Whispering Earring's turn-1 auto-plays) is otherwise lost.
+    /// On the board as `discards_this_turn`, the host's key
+    /// (`Sts2Headless/SeatHistory.cs`, GH #1895). 0 on any error.
+    /// </summary>
+    internal static int DiscardsThisTurn(Creature? creature)
+    {
+        try
+        {
+            CombatState? state = CombatManager.Instance?.DebugOnlyGetState();
+            if (creature == null || state == null)
+            {
+                return 0;
+            }
+            return CombatManager.Instance!.History.Entries.OfType<CardDiscardedEntry>()
+                .Count(e => e.HappenedThisTurn(state) && e.Actor == creature);
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// The cards <paramref name="creature"/>'s player drew this combat: C#
+    /// `Murder`'s multiplier (every `CardDrawnEntry` whose Actor is the
+    /// owner). The card's `calculateddamage` stat is the unscaled base, so a
+    /// rebuilt Murder without this count hits for 1. On the board as
+    /// `cards_drawn_this_combat`, the host's key (GH #1868). 0 on any error.
+    /// </summary>
+    internal static int CardsDrawnThisCombat(Creature? creature)
+    {
+        try
+        {
+            if (creature == null || CombatManager.Instance?.DebugOnlyGetState() == null)
+            {
+                return 0;
+            }
+            return CombatManager.Instance.History.Entries.OfType<CardDrawnEntry>()
+                .Count(e => e.Actor == creature);
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// The cards generated for <paramref name="creature"/>'s player this
+    /// combat: C# `Supermassive`'s multiplier (every `CardGeneratedEntry`
+    /// whose Creator is the owner). A card generated before the first screen
+    /// (Radiant Pearl's Luminesce) is otherwise missing from a rebuilt fight.
+    /// On the board as `cards_generated_this_combat`, the host's key. 0 on any
+    /// error.
+    /// </summary>
+    internal static int CardsGeneratedThisCombat(Creature? creature)
+    {
+        try
+        {
+            if (creature == null || CombatManager.Instance?.DebugOnlyGetState() == null)
+            {
+                return 0;
+            }
+            return CombatManager.Instance.History.Entries.OfType<CardGeneratedEntry>()
+                .Count(e => e.Creator != null && e.Creator.Creature == creature);
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
     /// The powered hits <paramref name="dealer"/> landed on each enemy this
     /// turn, as `[{enemy, hits}]` by the enemy's place in
     /// <paramref name="enemies"/>: what a teammate's C# `GangUp` counts. On the

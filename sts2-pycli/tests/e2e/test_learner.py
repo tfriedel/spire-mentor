@@ -2144,7 +2144,7 @@ def test_a_lane_draws_its_run_seeds_from_its_prereg_block(tmp_path: Path) -> Non
 
     student, throwaway = P.STUDENT_TRAINER_SEEDS, P.THROWAWAY_TRAINER_SEEDS
     # The production iteration size: the span covers 7 seeds per iteration up to 2x the
-    # budget's iterations (a campaign of 40 workers fits, plan's B-T0).
+    # budget's iterations (a campaign of 80 workers of 32 slots fits; GH #1538).
     campaign = {
         "max_iters": 0,
         "iter_decisions": 131_072,
@@ -2154,6 +2154,8 @@ def test_a_lane_draws_its_run_seeds_from_its_prereg_block(tmp_path: Path) -> Non
         ("campaign", campaign, student.start),
         ("smoke", {}, throwaway.start),
         ("explicit", dict(campaign, run_seed_base=student.start + 5), student.start + 5),
+        # A worker's slots span `n_envs` seed blocks, not 64: 80 workers of 32 fit.
+        ("wide", dict(campaign, workers=80, n_envs=32), student.start),
     ):
         lr = make_learner(make_cfg(tmp_path / sub, **kw))
         try:
@@ -2165,7 +2167,7 @@ def test_a_lane_draws_its_run_seeds_from_its_prereg_block(tmp_path: Path) -> Non
         ("student", {"run_seed_base": student.start}),
         ("span", dict(campaign, run_seed_base=student.stop - 1_000_000)),
         ("slots", {"n_envs": 65}),
-        ("workers", dict(campaign, workers=41)),
+        ("workers", dict(campaign, workers=81, n_envs=32)),
     ):
         with pytest.raises(L.UsageError, match=r"run seeds|n-envs"):
             make_learner(make_cfg(tmp_path / sub, **kw))
@@ -3368,3 +3370,119 @@ def test_the_character_and_the_chars_event_come_together(
     lr = make_learner(make_cfg(tmp_path / "d", character="Necrobinder", filled=["chars"]))
     assert lr.stamps["filled"] == ["chars"] and lr.cfg.character == "Necrobinder"
     factory.set_fill_chars(False)
+
+
+# ── the advantage filter and the reused pre-pass (GH #1538, #1550) ────────
+
+
+def _train(tmp_path: Path, name: str, **kw: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # No teacher and no warm-up: the student acts and the policy terms are on at once.
+    sched = dict(SCHED, u0_end=1, ks_end=2, value_only_iters=0)
+    lr = make_learner(make_cfg(tmp_path / name, max_iters=3, sched=sched, **kw), teachers=False)
+    lr.train()
+    net = {k: v.detach().clone() for k, v in lr.net_inf.state_dict().items()}
+    return [r["update"] for r in lr.stats_rows], net
+
+
+def _same_nets(a: dict[str, Any], b: dict[str, Any]) -> None:
+    assert a.keys() == b.keys()
+    for k, v in a.items():
+        assert torch.equal(v, b[k]), k
+
+
+def test_a_filter_that_keeps_every_row_and_the_diagnostic_train_as_the_plain_update(
+    tmp_path: Path,
+) -> None:
+    """With both flags off nothing of them shows; a filter at fraction 0 keeps every
+    row and the diagnostic only reads: both leave the very same nets."""
+    base, net = _train(tmp_path, "off")
+    assert all("adv_filter" not in u and "adv_diag" not in u for u in base)
+    assert all(u["prepass_rows_fwd"] == u["n_table"] - u["rows_dormant"] for u in base)
+    for mode in ("pi", "pi+v"):
+        rows, n2 = _train(tmp_path, mode, adv_filter=mode, adv_filter_frac=0.0)
+        _same_nets(net, n2)
+        assert [u["steps"] for u in rows] == [u["steps"] for u in base]
+        assert all(u["adv_filter"]["rows_kept"] == u["rows_trained"] for u in rows)
+    rows, n3 = _train(tmp_path, "diag", adv_diag=True)
+    _same_nets(net, n3)
+    d = rows[0]["adv_diag"]
+    assert d["a_max"] > 0 and 0.0 <= d["below"]["0.01"]["all"] <= d["below"]["0.1"]["all"] <= 1.0
+    assert -1.0 <= d["reuse"]["adv_corr"] <= 1.0 and d["reuse"]["rows"] > 0
+
+
+def test_the_advantage_filter_drops_rows_from_the_steps_but_not_from_the_table(
+    tmp_path: Path,
+) -> None:
+    """ "pi+v" takes the rows under the threshold out of the minibatches (fewer rows
+    in the value loss); "pi" keeps their value loss and drops their policy terms.
+    The table, the trained rows and the hold-back are the unfiltered update's."""
+    base, _ = _train(tmp_path, "off")
+    both, _ = _train(tmp_path, "both", adv_filter="pi+v", adv_filter_frac=0.5)
+    pi, _ = _train(tmp_path, "pi", adv_filter="pi", adv_filter_frac=0.5)
+    b0, f0, p0 = base[0], both[0], pi[0]
+    for u in (f0, p0):  # the first table is the same rows in all three
+        assert u["rows_trained"] == b0["rows_trained"] and u["rows_held"] == b0["rows_held"]
+        assert 0 < u["adv_filter"]["rows_kept"] < u["rows_trained"]
+        assert u["adv_filter"]["keep"] == pytest.approx(
+            u["adv_filter"]["rows_kept"] / u["rows_trained"]
+        )
+        assert u["adv_filter"]["eta"] == pytest.approx(0.5 * u["adv_filter"]["a_max"])
+    epochs = f0["epochs_run"]
+    assert f0["n_v"] == epochs * f0["adv_filter"]["rows_kept"] and f0["steps"] <= b0["steps"]
+    assert p0["n_v"] == b0["n_v"] and 0 < p0["n_pi"] < b0["n_pi"] and p0["steps"] == b0["steps"]
+    assert all(math.isfinite(u["vloss"]) and not u["nonfinite"] for u in both + pi)
+
+
+def test_the_filters_entropy_rescale_is_one_when_every_row_stays_and_above_one_otherwise(
+    tmp_path: Path,
+) -> None:
+    """`adv_filter_beta_rescale` multiplies a type's entropy coefficient by policy rows /
+    kept policy rows: 1 (the very same nets) at fraction 0, in (1, cap] for a type that
+    lost rows."""
+    _, net = _train(tmp_path, "off")
+    rows, n2 = _train(
+        tmp_path, "all", adv_filter="pi+v", adv_filter_frac=0.0, adv_filter_beta_rescale=True
+    )
+    _same_nets(net, n2)
+    assert all(
+        v == pytest.approx(1.0) for u in rows for v in u["adv_filter"]["beta_scale_t"].values()
+    )
+    plain, _ = _train(tmp_path, "plain", adv_filter="pi+v", adv_filter_frac=0.5)
+    assert all("beta_scale_t" not in u["adv_filter"] for u in plain)
+    resc, _ = _train(
+        tmp_path, "resc", adv_filter="pi+v", adv_filter_frac=0.5, adv_filter_beta_rescale=True
+    )
+    scales = [v for u in resc for v in u["adv_filter"]["beta_scale_t"].values()]
+    assert all(1.0 <= v <= A.ADV_FILTER_BETA_CAP for v in scales) and max(scales) > 1.0
+    plain_net = _train(tmp_path, "plain2", adv_filter="pi+v", adv_filter_frac=0.5)[1]
+    capped, cnet = _train(
+        tmp_path,
+        "cap",
+        adv_filter="pi+v",
+        adv_filter_frac=0.5,
+        adv_filter_beta_rescale=True,
+        adv_filter_beta_cap=1.0,
+    )
+    _same_nets(plain_net, cnet)  # a cap of 1 is no rescale
+    assert all(
+        v == pytest.approx(1.0) for u in capped for v in u["adv_filter"]["beta_scale_t"].values()
+    )
+    assert all(not u["nonfinite"] for u in resc)
+
+
+def test_the_reused_prepass_takes_fresh_rows_from_the_serving_net(tmp_path: Path) -> None:
+    """`prepass_reuse`: the first table has no carried row, so only the teacher-acted
+    rows and the probe get a forward, every PPO row's importance weight is exactly 1
+    (log pi_prox is the acting log-prob) and the entropy sample is the probe's rows."""
+    base, _ = _train(tmp_path, "off")
+    rows, _ = _train(tmp_path, "reuse", prepass_reuse=True)
+    b0, r0 = base[0], rows[0]
+    assert r0["rows_trained"] == b0["rows_trained"] and r0["steps"] == b0["steps"]
+    assert r0["prepass_rows_fwd"] < b0["prepass_rows_fwd"] and r0["prepass_rows_served"] > 0
+    # The updates are synchronous here, so the serving net is the pre-pass's net.
+    assert r0["vloss"] == pytest.approx(b0["vloss"], rel=1e-3, abs=1e-6)
+    assert r0["isw"] == pytest.approx(1.0, abs=1e-6) and r0["is_clamped"] == pytest.approx(0.0)
+    assert all(math.isfinite(u["vloss"]) and not u["nonfinite"] for u in rows)
+    assert any(math.isfinite(v) for v in r0["ent_prox_t"].values())
+    # Later tables carry held run rows: those still get their forward.
+    assert any(u["prepass_rows_fwd"] > 0 for u in rows[1:])

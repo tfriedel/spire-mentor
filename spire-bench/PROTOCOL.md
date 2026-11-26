@@ -126,6 +126,7 @@ independent adapters would otherwise write the same exact tracker.
 | `enemies[].intents[].base_damage` | An attack's own damage per hit, before the attacker's Strength, Weak and the like and before your Vulnerable: the bestiary number for the move at this ascension. `damage` is the number the game shows; it floors at 0, which hides the base when Strength loss outweighs it. |
 | `draw_pile_top[]`, `draw_pile_bottom[]` | Draw-pile cards whose position you saw: put on top (Headbutt) or at the bottom, and not drawn or moved since. Top first and bottom first. A shuffle clears both, and so does a card shuffled in at a random spot, since you cannot tell where it landed. `draw_pile[]` itself stays sorted. |
 | `player.hp_lost_this_turn`, `player.unblocked_hits_this_combat`, `player.cards_exhausted_this_combat`, `player.cards_exhausted_this_turn`, `player.card_block_gains_this_turn`, `player.powered_hits_this_turn[]`, `player.extra_turns_taken_this_combat`, `player.cards_drawn_this_combat`, `player.cards_generated_this_combat`, `player.discards_this_turn`, `player.bound_card_played_this_turn` | Counts of things that happened in front of you this turn or this combat, which cards and powers read (Spite, Tear Asunder, Midnight, Evil Eye, Unmovable, Gang Up, extra-turn relics, Murder, Supermassive, Memento Mori). |
+| `encounter_id` | The fight's encounter, exact from the starting roster (each roster belongs to one encounter). Event fights carry the event's encounter. |
 | `enemies[].powers[]` Painful Stabs `vars.ExtraMultiClawCount` | Test Subject's extra Multi Claw hits: one more for each Multi Claw you watched it use in its second form. |
 
 Anything else a bot has seen stays its own to remember; the referee tracks
@@ -357,10 +358,11 @@ request) and `random_action` (a random legal action).
    the Architect and test monsters), is dropped from the view, so it reads
    like a move with no intents. A later build that adds an intent-hiding
    effect reopens this.
-7. **Relic status.** `player.relics[]` carries the counter the game draws on
-   the icon, but not the icon's state: pulsing while an effect is pending
-   (Venerable Tea Set after a rest site), greyed out once it is used up.
-   That is on screen, so it belongs in the view. Not built (GH #1882).
-8. **Encounter id.** Not in the view. Every starting roster belongs to one
-   encounter (checked on v0.111.0 and v0.113), so the id is exact and could
-   be sent as a derived value. Send it, or leave it to the client?
+7. ~~**Relic status.**~~ Built: `player.relics[].status` is the icon's
+   state (`RelicModel.Status`): `normal`, `active` (pulsing while an effect
+   is pending, as Venerable Tea Set after a rest site) or `disabled` (greyed
+   out once used up), beside the `counter` the icon draws (GH #1882).
+8. ~~**Encounter id.**~~ Built: `encounter_id` (combat decisions) is sent as a
+   derived value. Every starting roster belongs to one encounter (checked on
+   v0.111.0 and v0.113), so the id is exact and tells a bot nothing the
+   screen does not; sending it saves every adapter the roster lookup.

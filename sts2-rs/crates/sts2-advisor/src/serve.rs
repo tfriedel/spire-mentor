@@ -437,9 +437,10 @@ impl Default for Settings {
 /// fight-entry value. `room_hp` is the last out-of-fight `(hp, max_hp)`,
 /// `fight_hp` the frozen value (cleared outside a fight). Only `run_state` is
 /// touched; the `combat` block keeps the live fight HP. Matches the bench's
-/// `_fight_start_hp` (`instinct_policy.py`) minus its Pantograph (+25 boss)
-/// and Planisphere (+5 `?` room) room-entry heals: a boss fight holding an
-/// unmelted Pantograph therefore reads 25 HP low (residual, left on #1917).
+/// `_fight_start_hp` (`instinct_policy.py`): the fight-entry run HP is the
+/// last out-of-fight value plus what heals on entering the room
+/// (`room_entry_heal`). A reconnect with no prior screen falls back to the
+/// message's own value, already past any such heal.
 fn freeze_fight_run_hp(
     room_hp: &mut Option<(i64, i64)>,
     fight_hp: &mut Option<(i64, i64)>,
@@ -458,13 +459,46 @@ fn freeze_fight_run_hp(
         return;
     }
     if fight_hp.is_none() {
-        *fight_hp = room_hp.or(live);
+        *fight_hp = match *room_hp {
+            Some((hp, max_hp)) => Some(((hp + room_entry_heal(state)).min(max_hp), max_hp)),
+            None => live,
+        };
     }
     if let Some((hp, max_hp)) = *fight_hp {
         if let Some(rs) = state.get_mut("run_state").and_then(Value::as_object_mut) {
             rs.insert("hp".into(), json!(hp));
             rs.insert("max_hp".into(), json!(max_hp));
         }
+    }
+}
+
+/// HP that heals on entering the fight's room, after the last out-of-fight
+/// screen and before the first decision (the bench's `_fight_start_hp`
+/// `entry`). Pantograph heals 25 entering a boss fight
+/// (`Pantograph.BeforeCombatStart`); a boss is never event-started, so no page
+/// before it already shows the heal and the pre-fight `room_hp` is always
+/// below it. Planisphere's +5 on a `?` room is deliberately left out: that
+/// room's own event page may already carry the heal, so adding it
+/// unconditionally would double-count — the conservative choice is to omit it
+/// (minor residual on #1917; a `?`-room fight with Planisphere reads 5 low).
+fn room_entry_heal(state: &Value) -> i64 {
+    let is_boss = get(state, "room_type")
+        .as_str()
+        .is_some_and(|r| r.eq_ignore_ascii_case("boss"));
+    if !is_boss {
+        return 0;
+    }
+    let holds_unmelted_pantograph = py::list(get(state, "run_state"), "relics").iter().any(|r| {
+        get(r, "id").as_str().is_some_and(|id| {
+            id.strip_prefix("RELIC.")
+                .unwrap_or(id)
+                .eq_ignore_ascii_case("PANTOGRAPH")
+        }) && !truthy(get(r, "is_melted"))
+    });
+    if holds_unmelted_pantograph {
+        25
+    } else {
+        0
     }
 }
 
@@ -1446,6 +1480,48 @@ mod tests {
         let mut m2 = fight_msg(50);
         freeze_fight_run_hp(&mut room, &mut fight, &mut m2);
         assert_eq!(m2["run_state"]["hp"], 64);
+    }
+
+    fn boss_msg(hp: i64, relics: Value) -> Value {
+        json!({"room_type": "Boss",
+               "run_state": {"hp": hp, "max_hp": 80, "relics": relics},
+               "combat": {"player": {"hp": hp}}})
+    }
+
+    #[test]
+    fn a_boss_fight_with_pantograph_adds_its_entry_heal() {
+        // Entering a boss room heals 25 (`Pantograph::after_room_entered`),
+        // after the last out-of-fight screen's HP: fight_hp = room_hp + 25.
+        let (mut room, mut fight) = (Some((50, 80)), None);
+        let mut boss = boss_msg(50, json!([{"id": "PANTOGRAPH", "is_melted": false}]));
+        freeze_fight_run_hp(&mut room, &mut fight, &mut boss);
+        assert_eq!(fight, Some((75, 80)));
+        assert_eq!(boss["run_state"]["hp"], 75);
+        // The heal is capped at max HP.
+        let (mut room2, mut fight2) = (Some((70, 80)), None);
+        let mut boss2 = boss_msg(70, json!([{"id": "RELIC.PANTOGRAPH"}]));
+        freeze_fight_run_hp(&mut room2, &mut fight2, &mut boss2);
+        assert_eq!(fight2, Some((80, 80)));
+    }
+
+    #[test]
+    fn no_entry_heal_off_a_boss_or_from_a_melted_pantograph() {
+        // A non-boss room: no Pantograph heal.
+        let (mut room, mut fight) = (Some((50, 80)), None);
+        let mut monster = fight_msg(50);
+        monster["run_state"]["relics"] = json!([{"id": "PANTOGRAPH"}]);
+        freeze_fight_run_hp(&mut room, &mut fight, &mut monster);
+        assert_eq!(fight, Some((50, 80)));
+        // A melted Pantograph does nothing.
+        let (mut room2, mut fight2) = (Some((50, 80)), None);
+        let mut boss = boss_msg(50, json!([{"id": "PANTOGRAPH", "is_melted": true}]));
+        freeze_fight_run_hp(&mut room2, &mut fight2, &mut boss);
+        assert_eq!(fight2, Some((50, 80)));
+        // No Pantograph held.
+        let (mut room3, mut fight3) = (Some((50, 80)), None);
+        let mut boss2 = boss_msg(50, json!([{"id": "BURNING_BLOOD"}]));
+        freeze_fight_run_hp(&mut room3, &mut fight3, &mut boss2);
+        assert_eq!(fight3, Some((50, 80)));
     }
 
     #[test]

@@ -33,6 +33,14 @@
 //                                                                  Action<string> error, ...)
 //   the shared watchdog               AutoSlayer.CurrentWatchdog  Watchdog.Current
 //
+// v0.114.0 (beta):
+//
+//   member                            v0.113.0                    v0.114.0
+//   NHotkeyManager.PushHotkey-        (string, Action,            (string, Node owner,
+//     PressedBinding                   long sequence = 0)          Action, long sequence = 0)
+//   NHotkeyManager.ClearHotkeys       exists                      gone (bindings of freed
+//                                                                  owners are pruned instead)
+//
 // Sources: decomp v0.107.1 Core.Random/Rng.cs, Core.Runs/RunRngSet.cs,
 // Core.Commands/CardSelectCmd.cs; the same files in v0.111.0; v0.113.0
 // Core.CardSelection/CardSelectorStack.cs, Core.Multiplayer.Game/
@@ -273,28 +281,63 @@ internal static class SimGameApi
 
     // ── Hotkeys ─────────────────────────────────────────────────────────
 
-    private static readonly MethodInfo PushHotkeyMethod =
-        typeof(NHotkeyManager).GetMethods(Instance)
+    /// <summary>
+    /// <c>PushHotkeyPressedBinding(string, Action, optional...)</c>, or
+    /// v0.114.0's <c>(string, Node owner, Action, optional...)</c>. Resolved
+    /// lazily, so a build with neither fails the hotkey install by name
+    /// instead of SimGameApi's type initializer (which would take the RNG,
+    /// selector and merchant members down with it).
+    /// </summary>
+    private static MethodInfo? _pushHotkeyMethod;
+
+    private static MethodInfo PushHotkeyMethod =>
+        _pushHotkeyMethod ??= typeof(NHotkeyManager).GetMethods(Instance)
             .FirstOrDefault(m =>
             {
                 ParameterInfo[] p = m.GetParameters();
+                int action = HotkeyActionIndex(p);
                 return m.Name == "PushHotkeyPressedBinding"
-                    && p.Length >= 2
+                    && action > 0
                     && p[0].ParameterType == typeof(string)
-                    && p[1].ParameterType == typeof(Action)
-                    && p.Skip(2).All(x => x.IsOptional);
+                    && p.Skip(action + 1).All(x => x.IsOptional);
             })
-        ?? throw Missing("NHotkeyManager.PushHotkeyPressedBinding(string, Action)");
+        ?? throw Missing("NHotkeyManager.PushHotkeyPressedBinding(string, [Node,] Action)");
 
-    /// <summary><c>manager.PushHotkeyPressedBinding(hotkey, action)</c> at top priority.</summary>
+    /// <summary>Where the <c>Action</c> sits: 1, or 2 after a <c>Node</c> owner; -1 otherwise.</summary>
+    private static int HotkeyActionIndex(ParameterInfo[] p)
+    {
+        if (p.Length >= 2 && p[1].ParameterType == typeof(Action))
+        {
+            return 1;
+        }
+        if (p.Length >= 3 && p[1].ParameterType == typeof(Godot.Node) && p[2].ParameterType == typeof(Action))
+        {
+            return 2;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// <c>manager.PushHotkeyPressedBinding(hotkey, action)</c> at top priority.
+    /// On a build whose bindings carry an owner node (v0.114.0: a binding
+    /// fires only while its owner is in the tree, visible and not behind a
+    /// capstone), the owner is the manager itself: it lives under NGame for
+    /// the whole session, so the mod's hotkeys stay global as before.
+    /// </summary>
     public static void PushHotkeyPressedBinding(NHotkeyManager manager, string hotkey, Action action)
     {
-        ParameterInfo[] p = PushHotkeyMethod.GetParameters();
+        MethodInfo method = PushHotkeyMethod;
+        ParameterInfo[] p = method.GetParameters();
+        int at = HotkeyActionIndex(p);
         var args = new object?[p.Length];
         args[0] = hotkey;
-        args[1] = action;
-        for (int i = 2; i < p.Length; i++) args[i] = p[i].DefaultValue;
-        Invoke(PushHotkeyMethod, manager, args);
+        if (at == 2)
+        {
+            args[1] = manager;
+        }
+        args[at] = action;
+        for (int i = at + 1; i < p.Length; i++) args[i] = p[i].DefaultValue;
+        Invoke(method, manager, args);
     }
 
     // ── AutoSlay watchdog ───────────────────────────────────────────────

@@ -35,7 +35,7 @@ never in `python -c`):
   `mix.draw_character`); `info["feats"]` asks for the run teacher's inputs.
 
 Run seeds follow #1081's slot layout (plan §3.1 "Other seeds"):
-`run_seed_base + 7 * start_it + (wid * 64 + slot) * 100,000 + run count`.
+`run_seed_base + 7 * start_it + (wid * n_envs + slot) * 100,000 + run count`.
 Segment uids (the row batch's `run_uid`) are the learner's, unique across
 sessions: `(session << 48) | (wid << 40) | (slot << 24) | segment count`,
 where `session` is the iteration the learner started at. A resumed learner
@@ -99,7 +99,7 @@ def run_seed(cfg: dict[str, Any], wid: int, slot: int, count: int) -> int:
     return (
         int(cfg["run_seed_base"])
         + 7 * int(cfg["start_it"])
-        + (wid * 64 + slot) * 100_000
+        + (wid * int(cfg["n_envs"]) + slot) * 100_000
         + int(count)
     )
 

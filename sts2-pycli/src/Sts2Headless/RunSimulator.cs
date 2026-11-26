@@ -5350,6 +5350,10 @@ public class RunSimulator
             ["decision"] = "combat_play",
             ["context"] = RunContext(),
             ["round"] = combatState?.RoundNumber ?? 0,
+            // The fight's encounter (PROTOCOL question 8): derived, exact,
+            // since each starting roster belongs to one encounter. Sent so
+            // that every adapter need not write the roster lookup.
+            ["encounter_id"] = combatState?.Encounter?.Id.Entry,
             ["energy"] = pcs?.Energy ?? 0,
             ["max_energy"] = pcs?.MaxEnergy ?? 0,
             ["hand"] = hand,
@@ -7190,6 +7194,11 @@ public class RunSimulator
                     // the live bridge (SimStateExtractor.cs).
                     ["is_wax"] = r.IsWax,
                     ["is_melted"] = r.IsMelted,
+                    // The icon's state (`RelicModel.Status`, GH #1882): Active
+                    // pulses while an effect is pending (Venerable Tea Set's
+                    // +2 Energy), Disabled greys out a used-up relic. On
+                    // screen, so in the view.
+                    ["status"] = r.Status.ToString().ToLowerInvariant(),
                 };
             }).ToList(),
             ["potions"] = player.Potions?.Select((p, i) =>

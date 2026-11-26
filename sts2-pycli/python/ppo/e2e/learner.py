@@ -406,6 +406,31 @@ class Cfg:
     # into near-equal pieces of at most this many. The lane's 3 ranks get ~2,730 rows
     # a step each; one rank gets all 8,192, which does not fit a 24 GB device at once.
     update_chunk: int = 3072
+    # Gigaflow's advantage filter (GH #1538, `algo.adv_filter_keep`): rows whose raw
+    # |advantage| is below `adv_filter_frac` times a running maximum leave the update.
+    # "pi": they keep their value loss and lose the policy terms (PPO, entropy bonus).
+    # "pi+v": they leave the minibatches, so the gradient pass shrinks with them
+    # (the minibatch size holds: fewer steps an iteration). The pre-pass, the
+    # advantage moments, the KL probe and the hold-back see every row either way.
+    adv_filter: str = "off"
+    adv_filter_frac: float = 0.01
+    # Give the kept rows the dropped rows' entropy coefficient, per decision type
+    # (times policy rows / kept policy rows, capped at `adv_filter_beta_cap`).
+    adv_filter_beta_rescale: bool = False
+    # The rescale's largest factor (GH #1538: about 2.0 on combat lifted allchar-main's
+    # combat entropy 15%; 1.0 is no rescale).
+    adv_filter_beta_cap: float = 4.0
+    # The pre-pass takes this iteration's rows' value and log pi_prox from what the
+    # serving net wrote (`v_behav`, `logp_behav`) instead of a forward (GH #1550's
+    # last lead). Carried run rows and teacher-acted rows keep the forward, and the
+    # KL probe's strata too: under this flag they are also the entropy sample. The
+    # serving net is one update behind (`staleness_fresh_mean`), so the advantages
+    # come from a slightly older critic and the PPO ratio is against the acting
+    # policy (the IS weight is 1 on those rows).
+    prepass_reuse: bool = False
+    # Stats only: the share of trained rows under candidate filter thresholds and
+    # how far the reused pre-pass would move values and advantages (`adv_diag`).
+    adv_diag: bool = False
     hold_iters: int = A.HOLD_ITERS
     lam_c: float = A.LAM_C
     lam_r: float = A.LAM_R
@@ -1405,7 +1430,7 @@ class Learner:
 
         PREREG P1: a campaign lane's runs come from `panels.STUDENT_TRAINER_SEEDS`,
         every other lane's from `THROWAWAY_TRAINER_SEEDS`. Every seed the lane can draw
-        (`actors.run_seed`: base + 7 * iteration + (worker * 64 + slot) * 100,000 + run
+        (`actors.run_seed`: base + 7 * iteration + (worker * n_envs + slot) * 100,000 + run
         count, up to its last iteration) must lie in that block (UsageError)."""
         from . import panels
 
@@ -1416,7 +1441,9 @@ class Learner:
         if cfg.n_envs > 64:
             raise UsageError(f"--n-envs {cfg.n_envs} > 64: two slots would share run seeds")
         iters = cfg.max_iters or 2 * math.ceil(budget / max(1, cfg.iter_decisions))
-        hi = base + 7 * iters + cfg.workers * 64 * 100_000
+        # Each worker's slots take `n_envs` blocks of 100,000 (GH #1538: a stride of 64
+        # held the campaign block to 40 workers; 32-slot workers now fit about 80).
+        hi = base + 7 * iters + cfg.workers * cfg.n_envs * 100_000
         if not (block.start <= base and hi <= block.stop):
             lane = "a campaign lane" if campaign else f"a {cfg.mode} lane that is not the campaign"
             raise UsageError(

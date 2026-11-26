@@ -219,6 +219,19 @@ impl fmt::Display for GameVersion {
     }
 }
 
+/// Game lines the engine has no build of yet, each with the build it plays
+/// on: `(major, minor)` → the engine build. Every patch of the line maps.
+///
+/// v0.114.0 (Steam public-beta 2026-11-25, commit `a7b9a9c0`) reworks the
+/// Fool's cards and changes a few shared rules (Hard to Kill caps HP loss
+/// instead of damage, Happy Flower's energy moves to the player's turn start,
+/// Pael's Growth loses the Clone rest-site option); everything else plays as
+/// v0.113.1. Running it on `V0_113_0` keeps the advisor and Instinct
+/// answering on it until it gets a build of its own (GH #1924 lists what
+/// differs).
+/// Python twin: `sts2_client.PLAYS_AS`; mod twin: `GameVersionFormat.PlaysAs`.
+pub const PLAYS_AS: [((u32, u32), GameVersion); 1] = [((0, 114), GameVersion::V0_113_0)];
+
 /// Error from parsing an unknown game-version string.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("unknown game version {0:?} (expected one of: v0.107.1, v0.111.0, v0.113.0)")]
@@ -234,10 +247,10 @@ impl FromStr for GameVersion {
     /// e.g. `v0.113.1` — parses as the newest supported build of that line
     /// whose patch is not above it (`V0_113_0`). The game ships those as
     /// bug-fix updates, and refusing them left the live advisor dead for
-    /// every player the moment Steam patched the game. A new minor
-    /// (`v0.114.0`) is a content update and still fails, as does a build
-    /// older than every supported one of its line. Python twin:
-    /// `sts2_client.hotfix_base`.
+    /// every player the moment Steam patched the game. A new minor is a
+    /// content update and fails, as does a build older than every supported
+    /// one of its line, unless [`PLAYS_AS`] names the build its line plays
+    /// on (`v0.114.0` → `V0_113_0`). Python twin: `sts2_client.hotfix_base`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let trimmed = s.trim();
         let bare = trimmed
@@ -246,6 +259,12 @@ impl FromStr for GameVersion {
             .unwrap_or(trimmed);
         let err = || ParseGameVersionError(s.to_string());
         let (major, minor, patch) = parse_triple(bare).ok_or_else(err)?;
+        if let Some(&(_, v)) = PLAYS_AS
+            .iter()
+            .find(|((ma, mi), _)| (*ma, *mi) == (major, minor))
+        {
+            return Ok(v);
+        }
         GameVersion::ALL
             .into_iter()
             .filter_map(|v| {
@@ -315,9 +334,10 @@ mod tests {
             "0.111",
             "latest",
             "v0.111.0.1",
-            // A new minor is a content update, not a hotfix.
-            "v0.114.0",
+            // A new minor is a content update, not a hotfix (unless
+            // PLAYS_AS names its line).
             "v0.112.0",
+            "v0.115.0",
             // Older than every supported build of its line.
             "v0.107.0",
             "v0.113.-1",
@@ -343,6 +363,19 @@ mod tests {
             ("v0.107.2", GameVersion::V0_107_1),
         ] {
             assert_eq!(raw.parse::<GameVersion>(), Ok(want), "{raw:?}");
+        }
+    }
+
+    /// A line with no build of its own plays on the one `PLAYS_AS` names:
+    /// v0.114.0 (and its hotfixes) on `V0_113_0`.
+    #[test]
+    fn parse_maps_a_plays_as_line_to_its_engine_build() {
+        for raw in ["v0.114.0", "0.114.0", "v0.114.3"] {
+            assert_eq!(
+                raw.parse::<GameVersion>(),
+                Ok(GameVersion::V0_113_0),
+                "{raw:?}"
+            );
         }
     }
 

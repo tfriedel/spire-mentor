@@ -105,7 +105,7 @@ const ORB_TITLE_TO_ID: [(&str, &str); 6] = [
 
 /// `sts2_hint.adapter._POWER_VAR_TO_ENGINE_FIELD`: (engine power id, C#
 /// `DynamicVar`) → the engine field holding the same quantity.
-const POWER_VAR_TO_ENGINE_FIELD: [((&str, &str), &str); 8] = [
+const POWER_VAR_TO_ENGINE_FIELD: [((&str, &str), &str); 9] = [
     (("CRIMSON_MANTLE", "SelfDamage"), "counter"),
     (("INFERNO", "SelfDamage"), "counter"),
     (("SKITTISH", "HasGainedBlockThisTurn"), "counter"),
@@ -114,6 +114,8 @@ const POWER_VAR_TO_ENGINE_FIELD: [((&str, &str), &str); 8] = [
     (("POSSESS_STRENGTH", "Stolen"), "counter"),
     (("POSSESS_SPEED", "Stolen"), "counter"),
     (("THE_BOMB", "Damage"), "counter"),
+    // Test Subject's Multi Claw growth (GH #1897, the mod since #1906).
+    (("PAINFUL_STABS", "ExtraMultiClawCount"), "counter"),
 ];
 
 // ── registries and title maps (cached once per process) ─────────────────
@@ -1092,6 +1094,9 @@ fn copy_seat_history(src: &Value, out: &mut Map<String, Value>, truthy_only: boo
         "cards_exhausted_this_turn",
         "card_block_gains_this_turn",
         "extra_turns_taken_this_combat",
+        "cards_drawn_this_combat",
+        "cards_generated_this_combat",
+        "discards_this_turn",
     ] {
         let Some(n) = int_of(src.get(key)) else {
             continue;
@@ -1836,7 +1841,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p["counter"], 40);
+        // GH #1906: Test Subject's Multi Claw growth, sent by the mod as a
+        // Painful Stabs var, as `adapter.py` already maps it (#1897).
+        let p = translate_power(
+            &json!({"id": "PAINFUL_STABS_POWER", "name": "Painful Stabs", "amount": 1,
+            "vars": {"ExtraMultiClawCount": 2}}),
+            "$",
+        )
+        .unwrap();
+        assert_eq!(p["counter"], 2);
         assert!(translate_power(&json!({"id": "X", "name": "Not A Power"}), "$").is_err());
+    }
+
+    /// GH #1906: the seat-history counts the mod now sends reach the board,
+    /// as `adapter._copy_seat_history` keeps them.
+    #[test]
+    fn the_newer_seat_history_counts_are_kept() {
+        let src = json!({"cards_drawn_this_combat": 9, "cards_generated_this_combat": 2,
+            "discards_this_turn": 3});
+        let mut out = Map::new();
+        copy_seat_history(&src, &mut out, false);
+        assert_eq!(out.get("cards_drawn_this_combat"), Some(&json!(9)));
+        assert_eq!(out.get("cards_generated_this_combat"), Some(&json!(2)));
+        assert_eq!(out.get("discards_this_turn"), Some(&json!(3)));
     }
 
     #[cfg(workbench_game_data)] // asserts on real game text (see build.rs)
