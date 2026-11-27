@@ -254,6 +254,7 @@ const zh: Record<string, string> = {
   "v0.107.1 (previous stable)": "v0.107.1（上一稳定版）",
   "v0.111 (stable)": "v0.111（稳定版）",
   "v0.113.0 (beta, + the Fool)": "v0.113.0（测试版，+ 愚者）",
+  "v0.114.0 (beta, Fool rework)": "v0.114.0（测试版，愚者重做）",
   "no live-game bridge configured": "未配置实时游戏桥接",
   "nothing to capture": "没有可捕获的内容",
   "this report carries no run to load": "这份报告不含可载入的对局",

@@ -190,8 +190,22 @@ release() {
     # The push's own error is shown: a silent failure here is what hid the
     # cloud proxy's refusal of the old ref delete.
     if ! err=$(git push -q --force-with-lease="$LOCK_REF:$head" origin "$c:$LOCK_REF" 2>&1); then
-      echo >&2 "land: could not release the lock; it goes stale in ${STALE}s"
-      [ -z "$err" ] || sed 's/^/  /' <<<"$err" >&2
+      # The ref moved past $headfile (GH #1939: a heartbeat push recorded
+      # nowhere, cause unknown). Still ours if it names this holder and is
+      # not released: release it under a lease on what it is now.
+      local st cur
+      st=$(lock_state)
+      cur=${st%% *}
+      if [ -n "$cur" ] && ! released "$st" &&
+        tail -n +2 <<<"$st" | grep -qxF "holder: $(hostname) (pid $$)"; then
+        c=$({ lock_msg; echo "state: released"; echo "released: $(date -Is)"; } |
+          git commit-tree "$empty_tree" -p "$cur")
+        git push -q --force-with-lease="$LOCK_REF:$cur" origin "$c:$LOCK_REF" 2>/dev/null && err=
+      fi
+      if [ -n "$err" ]; then
+        echo >&2 "land: could not release the lock; it goes stale in ${STALE}s"
+        sed 's/^/  /' <<<"$err" >&2
+      fi
     fi
   fi
   rm -f "$lost" "$headfile"

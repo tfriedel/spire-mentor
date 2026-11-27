@@ -298,7 +298,9 @@ class BranchingLiveSession:
         # symbol (kept patchable so tests can inject a FakeGame); other
         # backends go through the factory. ``make_backend`` validates the name.
         self._backend_cls = (
-            Game if backend == "csharp" else make_backend(backend, game_version=version)
+            Game
+            if backend == "csharp"
+            else make_backend(backend, game_version=version, human_play=True)
         )
         # The driver for the current run. Always a ``GameBackend`` — whatever
         # ``_backend_cls`` produces is adapted in :meth:`_spawn_game`, so the

@@ -813,3 +813,36 @@ def test_instinct_names_content_the_engine_lacks(message: str, reason: str) -> N
 def test_instinct_still_reports_a_real_error() -> None:
     assert ra.engine_missing_content(ValueError("index out of range")) is None
     assert ra.engine_missing_content(KeyError('unknown card id "X"')) is None
+
+
+def test_fight_run_hp_freezes_at_fight_entry_with_the_pantograph_heal() -> None:
+    """GH #1917/#1947: the twin of the native `freeze_fight_run_hp` tests."""
+    import realgame_advisor as ra
+
+    hp = ra.FightRunHp()
+    shop = {"run_state": {"hp": 70, "max_hp": 80}}
+    hp.freeze(shop)
+    assert (hp.room, hp.fight) == ((70, 80), None)
+    first = {"run_state": {"hp": 70, "max_hp": 80}, "combat": {"player": {"hp": 70}}}
+    hp.freeze(first)
+    assert first["run_state"]["hp"] == 70 and hp.fight == (70, 80)
+    later_rs = {"hp": 55, "max_hp": 80}
+    later = {"run_state": later_rs, "combat": {"player": {"hp": 55}}}
+    hp.freeze(later)
+    assert later["run_state"]["hp"] == 70, "frozen at entry"
+    assert later_rs["hp"] == 55, "the message's own run_state is not mutated"
+    assert later["combat"]["player"]["hp"] == 55, "the combat block keeps live HP"
+    hp.freeze({"run_state": {"hp": 50, "max_hp": 80}})
+    assert hp.fight is None
+    boss = {
+        "room_type": "Boss",
+        "run_state": {"hp": 50, "max_hp": 80, "relics": [{"id": "RELIC.PANTOGRAPH"}]},
+        "combat": {},
+    }
+    hp.freeze(boss)
+    assert boss["run_state"]["hp"] == 75
+    # A reconnect mid-fight with no prior screen takes the message's own value.
+    fresh = ra.FightRunHp()
+    msg = {"run_state": {"hp": 40, "max_hp": 80}, "combat": {}}
+    fresh.freeze(msg)
+    assert fresh.fight == (40, 80)

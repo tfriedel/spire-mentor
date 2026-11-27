@@ -1951,10 +1951,12 @@ fn thrash_folds_calculated_damage_of_exhausted_mind_blast() {
 }
 
 /// Thrash folds an Osty attack's `OstyDamage.BaseValue` (`Thrash.cs:62-65`),
-/// which `OnUpgrade` raises (`BoneShards.cs:48` +3, ...). Rust keeps those
-/// cards' `base_damage` at the printed value and applies the upgrade in the
-/// handler, so the fold must add it: Bone Shards+ folds 12, not 9
-/// (Ironclad-8019 act3#b2 @1078). Same values in v0.107.1.
+/// which `OnUpgrade` raises (`BoneShards.cs:48` +3, ...): Bone Shards+ folds
+/// 12, not 9 (Ironclad-8019 act3#b2 @1078). Same values in v0.107.1. The
+/// cards are the factory's, so a card whose upgrade delta is in its stats
+/// (Bone Shards since #1884, Poke / Snap since GH #1907) folds it once: the
+/// fold's hand-kept bump covered the missing delta and, left in, folded
+/// Bone Shards+ as 15.
 #[test]
 fn thrash_folds_upgraded_osty_damage() {
     for (card_id, base, upgraded) in [
@@ -1975,9 +1977,10 @@ fn thrash_folds_upgraded_osty_damage() {
             let (mut state, enemy) = fresh_state_with_enemy(200);
             let thrash = push_play_card(&mut state, CardId::Thrash, /*base_damage=*/ 4, 0);
             let pick = push_hand_card(&mut state, card_id);
-            let card = &mut state.cards[pick.0.get() as usize - 1];
-            card.base_damage = base;
-            card.upgraded = up;
+            let mut pod =
+                crate::cards::spec_index::card_pod_from_id(card_id, up).expect("factory card");
+            pod.uid = pick;
+            state.cards[pick.0.get() as usize - 1] = pod;
             let _ = dispatch(&mut state, CardId::Thrash, Some(enemy));
             assert_eq!(
                 state.cards[thrash.0.get() as usize - 1].base_damage,
@@ -1986,6 +1989,32 @@ fn thrash_folds_upgraded_osty_damage() {
             );
         }
     }
+}
+
+/// A Thrash that exhausts another Thrash folds that card's decimal
+/// `Damage.BaseValue`, fraction included (`Thrash.cs:60`): 4.5 + 4.5 is 9,
+/// not the 8 and a half the whole-part fold gave (Spire Bench seed
+/// 180001591, GH #1907).
+#[test]
+fn thrash_folds_an_exhausted_thrashs_fraction() {
+    install_pool();
+    let (mut state, enemy) = fresh_state_with_enemy(200);
+    let thrash = push_play_card(&mut state, CardId::Thrash, /*base_damage=*/ 4, 0);
+    let other = push_hand_card(&mut state, CardId::Thrash);
+    for uid in [thrash, other] {
+        let card = &mut state.cards[uid.0.get() as usize - 1];
+        card.base_damage = 4;
+        card.set_combat_var(VarKey::ThrashFoldRemNum, 1);
+        card.set_combat_var(VarKey::ThrashFoldRemDen, 2);
+    }
+    let _ = dispatch(&mut state, CardId::Thrash, Some(enemy));
+    let card = &state.cards[thrash.0.get() as usize - 1];
+    assert_eq!(card.base_damage, 4 + 5, "4.5 + 4.5 = 9");
+    assert_eq!(
+        card.combat_var(VarKey::ThrashFoldRemNum),
+        0,
+        "no fraction left"
+    );
 }
 
 /// GH #558: Thrash's fold is a NULL-target `Hook.ModifyDamage` (`Thrash.cs:67`),

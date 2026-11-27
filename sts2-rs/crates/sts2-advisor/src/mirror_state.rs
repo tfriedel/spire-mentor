@@ -620,9 +620,9 @@ pub fn transplant_hidden(
     // reconstruction has just reallocated, and
     // `chains_bound_card_played_this_turn` IS on the wire, so reality
     // must keep winning on it. `unmovable_card_block_plays` is safe
-    // between plays: every finished play's tag is the uid-free
-    // `UNMOVABLE_EARLIER_PLAY` (only a play still resolving holds its
-    // card's uid) — Unmovable rebuilt without it doubled EVERY
+    // between plays: every finished play's tag is uid-free, a distinct
+    // value at or above `UNMOVABLE_RETIRED_FLOOR` (only a play still
+    // resolving holds its card's uid) — Unmovable rebuilt without it doubled EVERY
     // block card instead of only the turn's first (30 of the 140
     // on-play `$.player.block` divergences on the v27wr sweep).
     // The History Course slots' cards (below), paired before the log is

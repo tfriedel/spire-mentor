@@ -7,7 +7,9 @@ use sts2_core::cards::{CardTag, PileKind};
 use sts2_core::fool;
 use sts2_core::{CardUid, CombatState, CreatureUid, DrawThen, PowerKind};
 
-use super::helpers::{apply_to_player, current_block, current_damage, damage_all_enemies, var};
+use super::helpers::{
+    apply_to_player, current_block, current_damage, damage_all_enemies, v0114, var, var_by,
+};
 
 fn target(t: Option<CreatureUid>, card: &str) -> CreatureUid {
     t.unwrap_or_else(|| panic!("{card}: AnyEnemy-targeted"))
@@ -30,11 +32,13 @@ pub(crate) fn play_cho_limbs(state: &mut CombatState, _t: Option<CreatureUid>) -
 }
 
 /// `HarmonicShield.cs`: `GainBlock(0 + 5 (+2) x MelodiesThisTurn)`, Move.
+/// v0.114.0: `4 (+2) + 4 (+2) x MelodiesThisTurn`.
 pub(crate) fn play_harmonic_shield(
     state: &mut CombatState,
     _t: Option<CreatureUid>,
 ) -> EffectResult {
-    let b = var(state, 5, 7) * fool::melodies_this_turn(state);
+    let base = var_by(state, (0, 0), (4, 6));
+    let b = base + var_by(state, (5, 7), (4, 6)) * fool::melodies_this_turn(state);
     let _ = card_effects::gain_block_player(state, b);
     EffectResult::Resolved
 }
@@ -75,7 +79,8 @@ pub(crate) fn play_steady_cadence(state: &mut CombatState, t: Option<CreatureUid
 /// `KiRest.cs`: `EnergyNextTurn` 5 (+1); `RetainHand` 1 once Wah or Cho was
 /// played this turn.
 pub(crate) fn play_ki_rest(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    let e = var(state, 5, 6);
+    // v0.114.0 `KiRest.cs`: `EnergyVar(4)`, +1.
+    let e = var_by(state, (5, 6), (4, 5));
     apply_to_player(state, PowerKind::EnergyNextTurn, e);
     if fool::played_this_turn(state, CardTag::Wah) || fool::played_this_turn(state, CardTag::Cho) {
         apply_to_player(state, PowerKind::RetainHand, 1);
@@ -100,8 +105,11 @@ pub(crate) fn play_wah_blast(state: &mut CombatState, _t: Option<CreatureUid>) -
 }
 
 /// `WahSymphony.cs`: all enemies, `6 + 4 (+2) x` the player's cards (every
-/// combat pile) carrying Wah, Cho or Ki.
+/// combat pile) carrying Wah, Cho or Ki. v0.114.0 counts Cho or Ki only:
+///
+/// [decompiled C# omitted — see the cited path]
 pub(crate) fn play_wah_symphony(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    let cho_or_ki = v0114(state);
     let p = &state.player;
     let notes = p
         .hand
@@ -110,7 +118,14 @@ pub(crate) fn play_wah_symphony(state: &mut CombatState, _t: Option<CreatureUid>
         .chain(p.discard.iter())
         .chain(p.exhaust.iter())
         .chain(p.play.iter())
-        .filter(|u| state.cards[u.0.get() as usize - 1].tags.has_melody())
+        .filter(|u| {
+            let tags = state.cards[u.0.get() as usize - 1].tags;
+            if cho_or_ki {
+                tags.contains(CardTag::Cho) || tags.contains(CardTag::Ki)
+            } else {
+                tags.has_melody()
+            }
+        })
         .count();
     let n = i32::try_from(notes).unwrap_or(i32::MAX);
     let dmg = 6 + var(state, 4, 6).saturating_mul(n);

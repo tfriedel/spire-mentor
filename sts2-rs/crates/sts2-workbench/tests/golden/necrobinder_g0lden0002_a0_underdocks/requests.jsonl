@@ -160,7 +160,7 @@
 {"i": 159, "method": "POST", "route": "/api/live/auto-action", "body": null, "status": 409, "sha256": "8aeb877b1b3453e271ea7e45e2781190d904c81c3bcbd9d9f63e051c0f393e7b", "decision": null}
 {"i": 160, "method": "POST", "route": "/api/live/quit", "body": null, "status": 200, "sha256": "4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93", "decision": null}
 {"i": 161, "method": "GET", "route": "/api/runs", "body": null, "status": 200, "sha256": "6fdcc2cc1ddaf2d6d0d20c51326e2ee08f10e4168828ac081742cfb33283cefe", "decision": null}
-{"i": 162, "method": "GET", "route": "/api/runs/stat?path=<work>/logs/20260101_000000_Necrobinder_G0LDEN0002_2.jsonl", "body": null, "status": 200, "sha256": "74f56624383f6029ff5d334a62a3892de2dd1376d022a886549fbe7437275101", "decision": null}
+{"i": 162, "method": "GET", "route": "/api/runs/stat?path=<work>/logs/20260101_000000_Necrobinder_G0LDEN0002_2.jsonl", "body": null, "status": 200, "sha256": "29ab8f835b9770a669b7e48866096599e6a68113ab08149b11c6742b3e091428", "decision": null}
 {"i": 163, "method": "POST", "route": "/api/load", "body": {"path": "<work>/logs/20260101_000000_Necrobinder_G0LDEN0002_2.jsonl"}, "status": 200, "sha256": "2ff69bae4ce04476d63bcedf0a938543df6a2ca319c8fb1667c8d9d6f750570b", "decision": null}
 {"i": 164, "method": "GET", "route": "/api/timeline", "body": null, "status": 200, "sha256": "4279d6a331930761b0bf73601c34e53cf637065e9fbd5168fd35d5aac63d89ce", "decision": null}
 {"i": 165, "method": "GET", "route": "/api/map", "body": null, "status": 200, "sha256": "3e2e324bec86c5c7bb577d2765c1eaba276a11752947eb8fdd5b708a7a8681f5", "decision": null}

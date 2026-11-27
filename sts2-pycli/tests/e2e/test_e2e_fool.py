@@ -102,13 +102,15 @@ print(json.dumps({
 
 
 @pytest.mark.slow
-def test_a_v0113_fool_run_carries_the_event() -> None:
-    """Random v0.113.0 Fool runs: every combat row has its arrows and the melody, an
-    away arrow is impaled in an enemy, and the fill check ties the event to the rows."""
+@pytest.mark.parametrize("build", ["v0.113.0", "v0.114.0"])
+def test_a_later_fool_run_carries_the_event(build: str) -> None:
+    """Random Fool runs on v0.113.0 and on v0.114.0 (the reworked Fool): every combat
+    row has its arrows and the melody, an away arrow is impaled in an enemy, and the
+    fill check ties the event to the rows."""
     env = {
         **os.environ,
-        "STS2_E2E_GAME_VERSION": "v0.113.0",
-        "STS2_GAME_VERSION": "v0.113.0",
+        "STS2_E2E_GAME_VERSION": build,
+        "STS2_GAME_VERSION": build,
         "STS2_E2E_CHARS": "1",
         "STS2_E2E_CHARACTER": "Fool",
         "CUDA_VISIBLE_DEVICES": "",

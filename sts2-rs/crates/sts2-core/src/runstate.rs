@@ -1992,7 +1992,26 @@ pub struct RunState {
     /// exit from the Trial that the e2e net took in 3.1% of its TEST runs.
     /// Default `false` is the parity mode: the headless C# oracle still
     /// shows the option (and no-ops the popup).
+    ///
+    /// The flag also withholds every other option the game flags
+    /// `WillKillPlayer` (`ThatDoesDamage` at `CurrentHp <= damage`,
+    /// `ThatDecreasesMaxHp` at `MaxHp <= loss`) while another enabled option
+    /// survives, for the same reason (GH #1907: Room Full of Cheese's Search
+    /// at 14 HP or less). The predicates live in
+    /// `sts2_content::events::dispatch::option_will_kill_player`. A human
+    /// host keeps those on screen with [`Self::offer_lethal_event_options`].
     pub withhold_abandon_run_options: bool,
+
+    /// When `true`, an agent-mode run still offers the event options the game
+    /// flags `WillKillPlayer` (Room Full of Cheese's Search at 14 HP or less,
+    /// ...), as the game shows them to a human. Trial's Double Down stays
+    /// withheld: the engine cannot abandon the run. A per-host flag outside
+    /// [`Self::set_agent_decisions`], like [`Self::ooc_potion_actions`]: the
+    /// workbench's human play turns it on, and every policy acting on such a
+    /// run still drops those options
+    /// (`sts2_content::events::dispatch::agent_withheld_event_options`), so
+    /// the AI sees what it sees in training. Default `false`.
+    pub offer_lethal_event_options: bool,
 
     /// When `true`, the run loop offers the potion belt the way the game's
     /// potion popup does (GH #1606, `NPotionPopup.cs`): out of combat, Use
@@ -2590,6 +2609,7 @@ impl Default for RunState {
             direct_event_relic_grant: false,
             crystal_sphere_digger: false,
             withhold_abandon_run_options: false,
+            offer_lethal_event_options: false,
             ooc_potion_actions: false,
             deck_select_screens: false,
             deck_select_picked: Vec::new(),
@@ -2713,7 +2733,8 @@ impl RunState {
     ///
     /// `interactive_potion_swap` is deliberately NOT part of the bundle: the
     /// hosts disagree on it on purpose (env-gated in the arena / PPO env, off
-    /// in the workbench). Neither is `ooc_potion_actions` (GH #1606): a host
+    /// in the workbench). Neither is `offer_lethal_event_options`, which only
+    /// the workbench's human play sets. Nor is `ooc_potion_actions` (GH #1606): a host
     /// turns the potion popup on only when its policy has rows for it.
     pub fn set_agent_decisions(&mut self) {
         self.interactive_card_removal = true;
@@ -4129,12 +4150,22 @@ impl RunState {
         // The hook runs once per listener with no dedupe, so EACH egg card in
         // the deck adds its own Hatch option (two eggs: Heal, Smith, Hatch,
         // Hatch; Ironclad-8178 act2#b1 step 878).
-        for _ in self
-            .master_deck
-            .iter()
-            .filter(|c| c.card_id == crate::cards::CardId::ByrdonisEgg)
-        {
-            options.push(RestSiteOption::Hatch);
+        //
+        // From v0.114.0 the `Clone` enchantment adds the Clone option itself
+        // (`Clone.TryModifyRestSiteOptions`, Clone.cs: once, skipped when one
+        // is already there), in the same walk right after its card; Pael's
+        // Growth no longer does.
+        let clone_enchants = self.game_version >= crate::GameVersion::V0_114_0;
+        for card in &self.master_deck {
+            if card.card_id == crate::cards::CardId::ByrdonisEgg {
+                options.push(RestSiteOption::Hatch);
+            }
+            if clone_enchants
+                && card.has_enchantment(EnchantmentId::Clone)
+                && !options.contains(&RestSiteOption::Clone)
+            {
+                options.push(RestSiteOption::Clone);
+            }
         }
         let _ = crate::run_effects::dispatch_modify_rest_site_options(self, &mut options);
         // MiniatureTent's second pick: C# removes only the chosen option
@@ -6898,6 +6929,8 @@ mod tests {
         assert!(rs.withhold_abandon_run_options);
         // Potion swap and the potion popup are separate, per-host decisions.
         assert!(!rs.ooc_potion_actions);
+        // So is showing a human the lethal event options (the workbench).
+        assert!(!rs.offer_lethal_event_options);
         // Potion swap is a separate, per-host decision.
         assert!(!rs.interactive_potion_swap);
         rs.interactive_card_upgrade = false;

@@ -125,8 +125,8 @@ def xxh64(data: bytes, seed: int = 0) -> int:
 
 
 #: Builds with ``ulong`` seeds and the XxHash64 string hash (v0.111.0 on;
-#: v0.113.0 left the seeding unchanged).
-_U64_SEED_BUILDS = frozenset({"v0.111.0", "v0.113.0"})
+#: v0.113.0 and v0.114.0 left the seeding unchanged).
+_U64_SEED_BUILDS = frozenset({"v0.111.0", "v0.113.0", "v0.114.0"})
 
 
 def seed_hash(text: str, game_version: str) -> int:

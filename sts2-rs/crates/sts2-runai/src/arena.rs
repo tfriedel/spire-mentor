@@ -1806,7 +1806,11 @@ mod tests {
                 Act1Choice::Roll,
                 GameVersion::V0_107_1,
             );
-            for version in [GameVersion::V0_111_0, GameVersion::V0_113_0] {
+            for version in [
+                GameVersion::V0_111_0,
+                GameVersion::V0_113_0,
+                GameVersion::V0_114_0,
+            ] {
                 let rm = new_arena_run_manager(
                     seed,
                     CharacterId::Ironclad,

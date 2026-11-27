@@ -1409,9 +1409,28 @@ impl Card {
         }
     }
 
-    /// [`Self::downgrade`] in game build `version` — the exact inverse of
-    /// [`Self::upgrade_for`]. The default build is exactly [`Self::downgrade`].
+    /// C# `CardCmd.Downgrade` in game build `version`: every upgrade level
+    /// through v0.113 ([`Self::remove_all_upgrades_for`]); from v0.114.0 one
+    /// level, `DowngradeInternal(1)` resetting to 0 and replaying
+    /// `level - 1` silent upgrades (CardModel.cs:2344-2371). Only a card past
+    /// level 1 (Dingy Dagger) tells the two apart.
     pub fn downgrade_for(&mut self, version: crate::GameVersion) -> bool {
+        let level = self.upgrade_level();
+        if !self.remove_all_upgrades_for(version) {
+            return false;
+        }
+        if version >= crate::GameVersion::V0_114_0 {
+            for _ in 1..level {
+                self.upgrade_for(version);
+            }
+        }
+        true
+    }
+
+    /// C# `CardCmd.RemoveAllUpgrades` (and, through v0.113, `Downgrade`) in
+    /// game build `version` — the exact inverse of [`Self::upgrade_for`]. The
+    /// default build is exactly [`Self::downgrade`].
+    pub fn remove_all_upgrades_for(&mut self, version: crate::GameVersion) -> bool {
         if version.is_default() {
             return self.downgrade();
         }
@@ -1507,6 +1526,18 @@ impl Card {
                 (factory(self.card_id, false), factory(self.card_id, true))
             {
                 self.apply_upgrade_delta(&base, &upgraded);
+                // An `OnUpgrade` that calls `RemoveKeyword(Ethereal)` (Echo
+                // Form, Void Form, Apparition) takes it out of `LocalKeywords`,
+                // which also holds an Ethereal `CardCmd.ApplyKeyword` added
+                // (Ghost Seed, Music Box): C# `RemoveKeyword` drops it whatever
+                // its source (CardModel.cs, all builds; v0.113 keeps the
+                // outside set only for a later downgrade, which restores the
+                // base card's own Ethereal anyway). GH #1907, from #1895.
+                if crate::card_effects::card_ethereal_inst(&base)
+                    && !crate::card_effects::card_ethereal_inst(&upgraded)
+                {
+                    self.combat_vars.zero(VarKey::EtherealThisCombat);
+                }
             }
         }
         true
@@ -2918,7 +2949,11 @@ fn reshuffle_rank(card_id: CardId) -> u16 {
         // LATEST build, or a v0.113 card (MyShinies) indexes past the end.
         // Adding names only shifts ranks uniformly; the relative order of
         // older cards, which is all the sort compares, is unchanged.
-        let all = CardId::all_for(crate::GameVersion::V0_113_0);
+        // v0.114.0 drops RapidShot from `all_for`, so take v0.113.0's list
+        // and append the v0.114.0-only ids: the table is indexed by
+        // discriminant and must cover every variant.
+        let mut all = CardId::all_for(crate::GameVersion::V0_113_0);
+        all.extend_from_slice(&CardId::V0114_ONLY);
         let mut by_name: Vec<CardId> = all.clone();
         by_name.sort_by(|a, b| card_model_entry(*a).cmp(card_model_entry(*b)));
         // `presort_small_stable` packs a rank into 10 bits, below 1023.
@@ -4769,7 +4804,7 @@ mod tests {
     ///    `UnstableShuffle` (no pre-sort).
     #[test]
     fn compare_ranks_cover_the_v0113_only_cards() {
-        for id in CardId::V0113_ONLY {
+        for id in CardId::V0113_ONLY.into_iter().chain(CardId::V0114_ONLY) {
             let c = Card {
                 card_id: id,
                 ..Card::pod_defaults()
@@ -7440,6 +7475,41 @@ mod tests {
             1,
             "other instance state survives"
         );
+    }
+
+    /// Echo Form's `OnUpgrade` is `RemoveKeyword(Ethereal)`, which drops an
+    /// Ethereal `CardCmd.ApplyKeyword` added as well (one `LocalKeywords`
+    /// set, all builds; GH #1907). A card whose upgrade keeps Ethereal keeps
+    /// the applied flag.
+    #[test]
+    fn an_upgrade_that_removes_ethereal_drops_the_applied_one() {
+        let factory = |id, up: bool| {
+            Some(Card {
+                card_id: id,
+                keyword_override: Some(if up && id == CardId::EchoFormCard {
+                    KeywordOverride::NONE
+                } else {
+                    KeywordOverride::ETHEREAL
+                }),
+                ..Card::pod_defaults()
+            })
+        };
+        let mut echo = Card {
+            card_id: CardId::EchoFormCard,
+            card_type: CardType::Power,
+            ..Card::pod_defaults()
+        };
+        echo.set_combat_var(VarKey::EtherealThisCombat, 1);
+        assert!(echo.upgrade_with(factory));
+        assert_eq!(echo.combat_var(VarKey::EtherealThisCombat), 0);
+
+        let mut kept = Card {
+            card_id: CardId::StrikeIronclad,
+            ..Card::pod_defaults()
+        };
+        kept.set_combat_var(VarKey::EtherealThisCombat, 1);
+        assert!(kept.upgrade_with(factory));
+        assert_eq!(kept.combat_var(VarKey::EtherealThisCombat), 1);
     }
 
     /// v0.113 `DowngradeInternal` re-adds `_keywordsAddedFromOutside`: Ghost

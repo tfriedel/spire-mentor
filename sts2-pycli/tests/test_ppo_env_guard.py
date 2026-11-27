@@ -222,6 +222,7 @@ _COVER_SEEDS_BY_VERSION = {
     "v0.107.1": (3, 5, 8, 15, 17),
     "v0.111.0": (11, 12, 17, 18, 22),
     "v0.113.0": (11, 14, 16, 17, 18),
+    "v0.114.0": (11, 14, 16, 17, 18),
 }
 _COVER_SEEDS = _COVER_SEEDS_BY_VERSION[sts2_client.GAME_VERSION]
 _DECK_MUTATION_KINDS = frozenset(

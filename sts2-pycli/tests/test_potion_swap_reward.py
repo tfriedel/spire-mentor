@@ -21,6 +21,7 @@ _BOTTLE_POTION = {
     "v0.107.1": ("STABLE_SERUM", "Stable Serum"),
     "v0.111.0": ("CLARITY", "Clarity Extract"),
     "v0.113.0": ("ATTACK_POTION", "Attack Potion"),  # C# headless, v0.113.0
+    "v0.114.0": ("ATTACK_POTION", "Attack Potion"),
 }
 
 

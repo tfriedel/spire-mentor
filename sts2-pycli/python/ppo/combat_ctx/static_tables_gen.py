@@ -16,6 +16,7 @@ exactly (`tests/e2e/test_e2e_static_tables.py`). For v0.111.0 it writes
 
     python -m ppo.combat_ctx.static_tables_gen v0.111.0 [--check]
     python -m ppo.combat_ctx.static_tables_gen v0.113.0 [--check]
+    python -m ppo.combat_ctx.static_tables_gen v0.114.0 [--check]
 
 `--check` writes nothing and exits 1 if the committed module differs. The
 decompilation lives in the sibling `sts2-wiki` checkout and is not exported, so
@@ -36,10 +37,14 @@ from .static_tables import CLASS_ALIASES, SKIPPED_CLASSES
 # Monorepo root: python/ppo/combat_ctx/ -> sts2-pycli -> root.
 _ROOT = Path(__file__).resolve().parents[4]
 # The builds this module generates, and the module each one goes to.
-MODULES = {"v0.111.0": "static_tables_v0111", "v0.113.0": "static_tables_v0113"}
+MODULES = {
+    "v0.111.0": "static_tables_v0111",
+    "v0.113.0": "static_tables_v0113",
+    "v0.114.0": "static_tables_v0114",
+}
 # The decompilation each build is generated from: the v0.113.0 engine follows the
 # v0.113.1 hotfix (GH #1535).
-DECOMPS = {"v0.111.0": "v0.111.0", "v0.113.0": "v0.113.1"}
+DECOMPS = {"v0.111.0": "v0.111.0", "v0.113.0": "v0.113.1", "v0.114.0": "v0.114.0"}
 _NEVER = re.compile(r"override bool ShowCounter\s*=>\s*false\s*;")
 _TYPE = re.compile(r":\s*base\(\s*-?\d+\s*,\s*CardType\.(\w+)")
 

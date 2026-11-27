@@ -399,14 +399,20 @@ pub(crate) fn strip_powers_on_adaptable_death(state: &mut CombatState, dead: Cre
     if !has_revive_power {
         return;
     }
+    // v0.114.0 dropped PainfulStabs' `ShouldPowerBeRemovedAfterOwnerDeath`
+    // override, so the death strips it there. Not while enemies perform their
+    // moves, though: v0.114 `Kill` leaves the powers of a creature that
+    // `IsPerformingMove` / `IsAttacking` in place until its move ends
+    // (CreatureCmd.cs:752-769, MonsterModel.cs:599-612), so a TestSubject that
+    // dies to Thorns in its own attack still owes that attack's Wounds
+    // (`AttackCommand`'s `Hook.AfterAttack`, :704). Respawn #2 removes it.
+    let stabs_survive = state.game_version < crate::GameVersion::V0_114_0
+        || state.phase == crate::CombatPhase::EnemyTurnExec;
     let survives = |kind: PowerKind| {
         matches!(
             kind,
-            PowerKind::Adaptable
-                | PowerKind::PainfulStabs
-                | PowerKind::Nemesis
-                | PowerKind::Reattach
-        )
+            PowerKind::Adaptable | PowerKind::Nemesis | PowerKind::Reattach
+        ) || (stabs_survive && kind == PowerKind::PainfulStabs)
     };
     let creature_power_uids: smallvec::SmallVec<[std::num::NonZeroU32; 8]> =
         creature.powers.iter().map(|u| u.0).collect();
@@ -790,6 +796,17 @@ fn apply_damage_with_final_impl(
     // produce deferred-effect queue entries (Thorns: reflective
     // `Effect::DealHpLoss` to dealer) which the dispatcher drains internally
     // after the read-only walk via `apply_effects(state, &effects)`.
+    // v0.114.0 works the whole hit out (`GetDamageResults`, CreatureCmd.cs:312)
+    // BEFORE `BeforeDamageReceived` (:334): the block it absorbs is the block the
+    // target held before a Thorns reflect, and `ApplyDamageResults` then strips
+    // it with `DamageBlockInternal`'s clamp. Earlier builds fired the hook first.
+    let pre_hook_block = (state.game_version >= crate::GameVersion::V0_114_0).then(|| {
+        if state.player.pet_uid == Some(target) {
+            state.player.block
+        } else {
+            state.creatures[creature_index_for(state, target)].block
+        }
+    });
     hooks::dispatch_before_damage_received(state, &ctx);
 
     // Step 3-5: block absorption → modify_hp_lost pipeline → HP write. The
@@ -823,8 +840,10 @@ fn apply_damage_with_final_impl(
     let (unblocked, target_fully_blocked_arm) = {
         let unblockable = props.contains(hooks::ValueProps::UNBLOCKABLE);
         let owner_absorbed = if pet_of_player && !unblockable {
-            let a = final_damage.min(state.player.block).max(0);
-            state.player.block -= a;
+            let a = final_damage
+                .min(pre_hook_block.unwrap_or(state.player.block))
+                .max(0);
+            state.player.block -= a.min(state.player.block);
             // One block in C#: the player's mirror creature loses it too
             // (F9 block-mirror check, GH #1197).
             state.sync_creature_block_from_player();
@@ -836,10 +855,12 @@ fn apply_damage_with_final_impl(
         let absorbed = if unblockable || pet_of_player {
             owner_absorbed
         } else {
-            final_damage.min(creature.block).max(0)
+            final_damage
+                .min(pre_hook_block.unwrap_or(creature.block))
+                .max(0)
         };
         if !pet_of_player {
-            creature.block -= absorbed;
+            creature.block -= absorbed.min(creature.block);
         }
         // C# `WasFullyBlocked` block-arm (CreatureCmd.cs:154): `!Unblockable &&
         // (blockedDamage > 0 || target.Block > 0)` against the post-absorption
@@ -878,6 +899,7 @@ fn apply_damage_with_final_impl(
     if unblocked > 0 && !bypass_hp_loss_cap {
         flash_intangible_on_target(state, hp_lost_ctx.target);
         flash_hardened_shell_on_target(state, hp_lost_ctx.target);
+        flash_hard_to_kill_on_hp_lost(state, hp_lost_ctx.target, unblocked);
     }
 
     // Step 5: write HP loss.
@@ -1913,6 +1935,32 @@ pub(crate) fn flash_intangible_on_target(state: &mut CombatState, target: Creatu
 /// post-pipeline flash site serves both powers identically.
 pub(crate) fn flash_hardened_shell_on_target(state: &mut CombatState, target: CreatureRef) {
     flash_hp_lost_cap_power_on_target(state, target, crate::PowerKind::HardenedShell);
+}
+
+/// v0.114.0 HardToKill caps HP lost (`ModifyHpLostBeforeOstyLate`), and
+/// `Hook.ModifyHpLost` (Hook.cs:1936-1960) lists it as a modifier, so it
+/// flashes (`AfterModifyingHpLostBeforeOsty`), only when the cap lowered the
+/// amount: the hit got more than `Amount` past Block. Before v0.114.0 it
+/// capped damage and flashed from [`flash_damage_amount_modifiers`].
+fn flash_hard_to_kill_on_hp_lost(state: &mut CombatState, target: CreatureRef, unblocked: i32) {
+    if state.game_version < crate::GameVersion::V0_114_0
+        || !crate::event_log::armed(state)
+        || !state
+            .powers
+            .present_kinds()
+            .contains(crate::PowerKind::HardToKill)
+    {
+        return;
+    }
+    let binds = state.powers.iter().any(|p| {
+        p.kind == crate::PowerKind::HardToKill
+            && unblocked > p.amount
+            && hooks::owner_of_listener(state, hooks::ListenerRef::Power(crate::PowerUid(p.id)))
+                == Some(target)
+    });
+    if binds {
+        flash_hp_lost_cap_power_on_target_armed(state, target, crate::PowerKind::HardToKill);
+    }
 }
 
 #[inline]

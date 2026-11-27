@@ -8,7 +8,9 @@ use sts2_core::fool;
 use sts2_core::hooks::{CreatureRef, ValueProps};
 use sts2_core::{CardUid, CombatState, CreatureUid, PowerKind};
 
-use super::helpers::{apply_to_enemy, apply_to_player, current_block, current_damage, var};
+use super::helpers::{
+    apply_to_enemy, apply_to_player, current_block, current_damage, v0114, var, var_by,
+};
 
 fn target(t: Option<CreatureUid>, card: &str) -> CreatureUid {
     t.unwrap_or_else(|| panic!("{card}: AnyEnemy-targeted"))
@@ -32,6 +34,17 @@ pub(crate) fn play_rapid_shot(state: &mut CombatState, t: Option<CreatureUid>) -
         state,
         u32::try_from(var(state, 3, 4)).unwrap_or(0),
     );
+    let _ = fool::shoot_arrow_at_target(state, t, dmg, hits);
+    EffectResult::Resolved
+}
+
+/// v0.114.0 `TwinShot.cs`: one shot of `HitCountVar(2)` hits of 7 (+3).
+///
+/// [decompiled C# omitted — see the cited path]
+pub(crate) fn play_twin_shot(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
+    let t = target(t, "TwinShot");
+    let dmg = current_damage(state);
+    let hits = card_effects::resolving_card_attack_hits_u32(state, 2);
     let _ = fool::shoot_arrow_at_target(state, t, dmg, hits);
     EffectResult::Resolved
 }
@@ -78,8 +91,14 @@ pub(crate) fn play_melodic_shot(state: &mut CombatState, t: Option<CreatureUid>)
 
 /// `TheShot.cs`: one shot of `10 (+3) x CardsExhaustedByFlorescence`
 /// (`CalculationBase` 0), the count kept in the card's `Generic` var.
+/// v0.114.0: a flat `DamageVar(20)` (+5), the spec damage.
 pub(crate) fn play_the_shot(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "TheShot");
+    if v0114(state) {
+        let dmg = current_damage(state);
+        let _ = fool::shoot_arrow_at_target(state, t, dmg, 1);
+        return EffectResult::Resolved;
+    }
     let count = card_effects::resolving_card_inst(state)
         .map_or(0, |c| c.combat_var(sts2_core::cards::VarKey::Generic));
     let dmg = var(state, 10, 13).saturating_mul(count);
@@ -255,11 +274,29 @@ fn discard_to_draw_top(state: &mut CombatState, uid: CardUid) {
     }
 }
 
+/// `CardSelectCmd.FromCombatPile(Discard, prefs(1))` then `CardPileCmd.Add(
+/// card, Draw, Top)`: v0.113.0 Recall's tail, v0.114.0 WahKi's.
+pub(crate) fn discard_card_to_draw_top(state: &mut CombatState) {
+    let all = discard_where(state, |_| true);
+    select_from_discard(
+        state,
+        &all,
+        sts2_core::ChoiceKind::PutBack,
+        discard_to_draw_top,
+    );
+}
+
 /// `ArrowStab.cs`: attack; then, with an arrow ready and room in hand, a
-/// Shoot card from the discard pile to hand.
+/// Shoot card from the discard pile to hand. v0.114.0: attack (13, +2),
+/// then `Apply<AimPower>(self, 6 (+2))`.
 pub(crate) fn play_arrow_stab(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "ArrowStab");
     let _ = deal_damage_player_to_enemy(state, t, current_damage(state));
+    if v0114(state) {
+        let n = var(state, 6, 8);
+        apply_to_player(state, PowerKind::Aim, n);
+        return EffectResult::Resolved;
+    }
     if fool::player_has_any_arrows(state) && state.player.hand.len() < sts2_core::cards::HAND_LIMIT
     {
         let shoot = discard_where(state, |c| c.has_tag(CardTag::Shoot));
@@ -274,17 +311,12 @@ pub(crate) fn play_arrow_stab(state: &mut CombatState, t: Option<CreatureUid>) -
 }
 
 /// `Recall.cs`: against a target impaled by the player's arrow, dislodge
-/// every arrow, then any discard card to the top of the draw pile.
+/// every arrow, then any discard card to the top of the draw pile. v0.114.0
+/// only dislodges (the card is 0-cost Exhaust + Retain instead).
 pub(crate) fn play_recall(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "Recall");
-    if dislodge_until_free(state, t) {
-        let all = discard_where(state, |_| true);
-        select_from_discard(
-            state,
-            &all,
-            sts2_core::ChoiceKind::PutBack,
-            discard_to_draw_top,
-        );
+    if dislodge_until_free(state, t) && !v0114(state) {
+        discard_card_to_draw_top(state);
     }
     EffectResult::Resolved
 }
@@ -303,9 +335,10 @@ pub(crate) fn play_cho_firm(state: &mut CombatState, _t: Option<CreatureUid>) ->
     EffectResult::Resolved
 }
 
-/// `Quiver.cs`: `ArrowCmd.GainArrowSlot` 1 (+1) times.
+/// `Quiver.cs`: `ArrowCmd.GainArrowSlot` 1 (+1) times (v0.114.0: the
+/// upgrade adds Innate instead, so always once).
 pub(crate) fn play_quiver(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    for _ in 0..var(state, 1, 2) {
+    for _ in 0..var_by(state, (1, 2), (1, 1)) {
         fool::gain_arrow_slot(state);
     }
     EffectResult::Resolved
@@ -315,6 +348,10 @@ pub(crate) fn play_quiver(state: &mut CombatState, _t: Option<CreatureUid>) -> E
 /// (`AllCards` order: Hand, Draw, Discard, Play), then a TheShot (upgraded
 /// with Florescence) carrying that count to hand.
 pub(crate) fn play_florescence(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    if v0114(state) {
+        florescence_transform(state);
+        return EffectResult::Resolved;
+    }
     let p = &state.player;
     let shoot: SmallVec<[CardUid; 16]> = p
         .hand
@@ -339,6 +376,51 @@ pub(crate) fn play_florescence(state: &mut CombatState, _t: Option<CreatureUid>)
     EffectResult::Resolved
 }
 
+/// v0.114.0 `Florescence.cs`: pick one hand card (`FromHand(prefs(1))`) and
+/// `CardCmd.Transform` it into a TheShot, upgraded when Florescence is.
+///
+/// [decompiled C# omitted — see the cited path]
+///
+/// A hand of at most one card resolves without a prompt (`cards.Count <=
+/// MinSelect`), as Begone's; more open the same single-pick transform
+/// choice, whose resolver mints TheShot for a Florescence source
+/// (`sts2_core` `resolve_transform_in_hand_to_minion_strike`).
+fn florescence_transform(state: &mut CombatState) {
+    match state.player.hand.as_slice() {
+        [] => {}
+        &[uid] => {
+            let mut shot = super::helpers::fool_card(sts2_core::cards::CardId::TheShot);
+            if super::helpers::upgraded(state) {
+                let _ = shot.upgrade_for(state.game_version);
+            }
+            let _ = state.transform_card(uid, shot);
+        }
+        _ => {
+            let options: Vec<sts2_core::ChoiceOption> = state
+                .player
+                .hand
+                .iter()
+                .map(|&uid| {
+                    let c = &state.cards[uid.0.get() as usize - 1];
+                    sts2_core::ChoiceOption {
+                        card_id: c.card_id,
+                        upgraded: c.upgraded,
+                        card_uid: Some(uid),
+                        source_pile: Some(PileKind::Hand),
+                    }
+                })
+                .collect();
+            state.request_card_choice(
+                sts2_core::ChoiceKind::TransformInHandToMinionStrike,
+                options,
+                1,
+                1,
+                false,
+            );
+        }
+    }
+}
+
 /// `WhistlingArrows.cs` play body: `GainBlock` (3, +1). Its
 /// `AfterArrowShot` discard -> hand hook is the core lane's (`fool.rs`).
 pub(crate) fn play_whistling_arrows(
@@ -360,8 +442,15 @@ pub(crate) fn play_blot_out_the_sky(
     let Some(own) = state.player.character else {
         return EffectResult::Resolved;
     };
+    // v0.114.0 reads `ModelDb.CardPool<FoolCardPool>()`, not the owner's
+    // character pool (BlotOutTheSky.cs:23).
+    let pool_of = if v0114(state) {
+        sts2_core::potions::CharacterId::Fool
+    } else {
+        own
+    };
     let mut pool: SmallVec<[sts2_core::cards::CardId; 16]> =
-        crate::cards::colorless::helpers::fight_pool(state, own)
+        crate::cards::colorless::helpers::fight_pool(state, pool_of)
             .iter()
             .filter(|s| crate::cards::status::tags_for_card_id(s.id).contains(CardTag::Shoot))
             .map(|s| s.id)
@@ -384,8 +473,23 @@ pub(crate) fn play_blot_out_the_sky(
 /// player had an arrow; the flag for that read is kept in the card's
 /// `Generic` var while it resolves (core `discard_result_goes_to_hand`).
 /// A replay keeps the first play's reading.
+///
+/// v0.114.0 has no result-location override: a shot that happened draws
+/// 2 (+1).
+///
+/// [decompiled C# omitted — see the cited path]
 pub(crate) fn play_trick_shot(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "TrickShot");
+    if v0114(state) {
+        let dmg = current_damage(state);
+        if fool::shoot_arrow_at_target(state, t, dmg, 1) {
+            let n = var(state, 2, 3);
+            let was_suspended = state.pending_draw_resume.is_some();
+            let _ = sts2_core::cards::draw_via_state(state, n);
+            crate::cards::draw_then::after_draw(state, was_suspended, sts2_core::DrawThen::None);
+        }
+        return EffectResult::Resolved;
+    }
     if fool::player_has_any_arrows(state) {
         if let Some(uid) = card_effects::resolving_card_uid(state) {
             state.cards[uid.0.get() as usize - 1]

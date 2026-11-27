@@ -1557,3 +1557,55 @@ fn state_from_dict_telegraphs_aeonglass_buff_with_the_counter() {
     }
     assert_eq!(buff_amount(Some(2)), buff_amount(None) + 2);
 }
+
+/// v0.114.0 strips PainfulStabs when the TestSubject's 2nd form dies, so its
+/// corpse awaiting the last revive shows only Adaptable; its 200 max HP still
+/// marks the spent revive (GH #1924).
+#[test]
+fn state_from_dict_infers_a_v0114_test_subject_second_form_corpse() {
+    Python::with_gil(|py| {
+        let build = |version: &str, max_hp: i32| {
+            let d = make_mid_turn_fixture(py).unwrap();
+            d.set_item("game_version", version).unwrap();
+            let enc = PyList::empty(py);
+            let ts = PyDict::new(py);
+            ts.set_item("kind", "TestSubject").unwrap();
+            ts.set_item("uid", 1_i64).unwrap();
+            ts.set_item("hp", 0).unwrap();
+            ts.set_item("max_hp", max_hp).unwrap();
+            ts.set_item("block", 0).unwrap();
+            let powers = PyList::empty(py);
+            let p = PyDict::new(py);
+            p.set_item("name", "ADAPTABLE").unwrap();
+            p.set_item("amount", 1_i32).unwrap();
+            powers.append(p).unwrap();
+            ts.set_item("powers", powers).unwrap();
+            ts.set_item("intents", empty_list(py)).unwrap();
+            ts.set_item("intent_history", empty_list(py)).unwrap();
+            ts.set_item("is_dead", true).unwrap();
+            ts.set_item("is_escaped", false).unwrap();
+            enc.append(ts).unwrap();
+            d.set_item("encounter", enc).unwrap();
+            let state = state_from_dict(&d).expect("must build");
+            let boss = state
+                .creatures
+                .iter()
+                .find(|c| c.monster_id.0 == "TestSubject")
+                .expect("TestSubject reconstructed");
+            boss.powers.iter().find_map(|pu| {
+                state
+                    .powers
+                    .iter()
+                    .find(|p| p.id == pu.0 && p.kind == sts2_core::PowerKind::Adaptable)
+                    .map(|p| p.counter)
+            })
+        };
+        assert_eq!(build("v0.114.0", 200), Some(1), "the 2nd form's corpse");
+        assert_eq!(build("v0.114.0", 100), Some(0), "the 1st form's corpse");
+        assert_eq!(
+            build("v0.113.0", 200),
+            Some(0),
+            "v0.113 keeps PainfulStabs instead"
+        );
+    });
+}

@@ -272,8 +272,14 @@ class RustGame(GameBackend):
         target_convention: str = "native",
         game_version: str | None = None,
         agent_lane: bool = False,
+        human_play: bool = False,
     ) -> None:
         self.rm: Any = None
+        # A human plays this run (the workbench session): it shows the event
+        # options that would kill the player, as the game does
+        # (``RunManager.offer_lethal_event_options``). The policies acting on
+        # it still skip them. Off for every harness, which plays as the agent.
+        self._human_play = human_play
         # GH #1610: the agent-mode parity lane. The run is built in full agent
         # mode (``mode="agent"``, with ``ooc_potion_actions``) while still
         # speaking the C# dialect (``target_convention="csharp"``), and the
@@ -385,6 +391,7 @@ class RustGame(GameBackend):
             interactive_potion_swap=interactive_potion_swap,
             **mode_kwargs,
         )
+        self._offer_lethal_options()
         # Apply the remembered play-log recording preference now that the
         # RunManager exists (set_record_card_plays no-ops while rm is None).
         if self._record_card_plays and hasattr(self.rm, "set_record_card_plays"):
@@ -392,6 +399,12 @@ class RustGame(GameBackend):
         if self._record_combat_log and hasattr(self.rm, "set_record_combat_log"):
             self.rm.set_record_combat_log(True)
         return self._serialize()
+
+    def _offer_lethal_options(self) -> None:
+        """Show a human the event options that would kill them (see
+        ``human_play``); the agent lane keeps agent mode's withhold."""
+        if self._human_play and not self._agent_lane:
+            self.rm.offer_lethal_event_options = True
 
     def _decision_kwargs(self) -> dict[str, Any]:
         """The ``RunManager`` decision bundle :meth:`start` builds with.
@@ -479,6 +492,7 @@ class RustGame(GameBackend):
             act1=self.act1,
             mode="agent",  # GH #981: see `start` above
         )
+        self._offer_lethal_options()
         if self._record_card_plays and hasattr(self.rm, "set_record_card_plays"):
             self.rm.set_record_card_plays(True)
         if self._record_combat_log and hasattr(self.rm, "set_record_combat_log"):
@@ -541,6 +555,7 @@ class RustGame(GameBackend):
             # The game rolled this for the player; `roll` makes the same roll.
             act1="roll",
         )
+        self._offer_lethal_options()
         self.act1 = self.rm.act1
         self._import_notes: list[str] = []
 

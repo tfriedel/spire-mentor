@@ -42,10 +42,11 @@ DEFAULT_GAME_VERSION = "v0.111.0"
 #: New files always name their build, so nothing new depends on this.
 LEGACY_GAME_VERSION = "v0.107.1"
 #: Every build the oracle can be compiled for (mirrors the csproj check).
-SUPPORTED_GAME_VERSIONS: tuple[str, ...] = ("v0.107.1", "v0.111.0", "v0.113.0")
+SUPPORTED_GAME_VERSIONS: tuple[str, ...] = ("v0.107.1", "v0.111.0", "v0.113.0", "v0.114.0")
 #: Steam beta builds whose content the engine has only partly ported: the
 #: advisor answers on them, and labels the answer approximate (GH #1303).
-#: Empty since v0.113.0's port landed (#1319 run level, #1330 The Fool's cards).
+#: v0.113.0's port landed with #1319 (run level) and #1330 (The Fool's cards);
+#: v0.114.0's engine build (shared rules, Fool rework) landed with GH #1924.
 BETA_GAME_VERSIONS: frozenset[str] = frozenset()
 GAME_VERSION_ENV = "STS2_GAME_VERSION"
 
@@ -54,10 +55,10 @@ _BUILD_RE = re.compile(r"v(\d{1,9})\.(\d{1,9})\.(\d{1,9})")
 
 #: Game lines the engine has no build of yet, each with the build it plays
 #: on: ``(major, minor)`` -> engine build, for every patch of the line.
-#: v0.114.0 (public-beta 2026-11-25) reworks the Fool and changes a few shared
-#: rules; until it has a build of its own the advisor runs it as v0.113.0.
+#: Empty while every released line has a build (v0.114.x played as v0.113.0
+#: this way until GH #1924).
 #: Rust twin: ``game_version::PLAYS_AS``; mod twin: ``GameVersionFormat.PlaysAs``.
-PLAYS_AS: dict[tuple[int, int], str] = {(0, 114): "v0.113.0"}
+PLAYS_AS: dict[tuple[int, int], str] = {}
 
 
 def hotfix_base(version: str) -> str | None:
@@ -68,7 +69,7 @@ def hotfix_base(version: str) -> str | None:
     updates, so the engine of the newest supported build in the same line,
     patch not above the hotfix's, is the right one: ``v0.113.1`` →
     ``v0.113.0``. A new minor is a content update and maps to nothing unless
-    :data:`PLAYS_AS` names its line (``v0.114.0`` -> ``v0.113.0``); neither
+    :data:`PLAYS_AS` names its line; neither
     does a build older than every supported one of its line.
     Rust twin: ``GameVersion::from_str`` (``sts2-core/src/game_version.rs``).
     """

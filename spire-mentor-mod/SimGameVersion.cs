@@ -11,7 +11,7 @@
 // signature between them are reached through SimGameApi, and
 // tests/compile/build_mod.sh checks the DLL binds against each build's
 // sts2.dll. A hotfix of a listed build (v0.113.1 of v0.113.0), or a line
-// GameVersionFormat.PlaysAs maps (v0.114.0 to v0.113.0), counts as that
+// GameVersionFormat.PlaysAs maps, counts as that
 // build (GameVersionFormat.EngineBuild); any other build outside the list is
 // logged loudly at startup. Either way the wire carries the running build.
 
@@ -23,7 +23,7 @@ namespace SpireMentor;
 internal static class SimGameVersion
 {
     /// <summary>The game builds this DLL is checked against.</summary>
-    public static readonly string[] Supported = { "v0.107.1", "v0.111.0", "v0.113.0" };
+    public static readonly string[] Supported = { "v0.107.1", "v0.111.0", "v0.113.0", "v0.114.0" };
 
     /// <summary>What the protocol assumes when the build is unknown (PROTOCOL.md s1).</summary>
     private const string Fallback = "v0.107.1";
@@ -63,8 +63,7 @@ internal static class SimGameVersion
         string? engine = GameVersionFormat.EngineBuild(running, Supported);
         if (engine != null && engine != running)
         {
-            // A hotfix (v0.113.1 on v0.113.0) or a PlaysAs line (v0.114.0 on
-            // v0.113.0): reported as it is, and the advisor plays it on that
+            // A hotfix (v0.113.1 on v0.113.0) or a PlaysAs line: reported as it is, and the advisor plays it on that
             // build's engine.
             Logger.Log($"[SimGameVersion] game {running} plays as {engine}; treating it as {engine}.");
         }

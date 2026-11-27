@@ -1584,8 +1584,11 @@ class E2ENet(nn.Module):
         cfg = cfg or NetConfig()
         self.cfg = cfg
         self.layout = layout(filled)
-        #: Run the trunk and head hidden layers under bf16 autocast.
+        #: Run the trunk and head hidden layers under reduced-precision autocast.
         self.bf16 = False
+        #: The autocast dtype when `bf16` is on: bf16, or fp16 on pre-Ampere GPUs
+        #: (no native bf16; fp16 tensor cores). The weights stay fp32 either way.
+        self.amp_dtype = torch.bfloat16
         #: sha256 of the content prior in the `prior` buffer (None = all zero).
         self.prior_sha256: str | None = None
         # Parameters are created on the CPU, so seeding the CPU generator alone
@@ -1667,7 +1670,7 @@ class E2ENet(nn.Module):
 
     def _autocast(self, device: torch.device, bf16: bool | None) -> torch.autocast:
         on = self.bf16 if bf16 is None else bool(bf16)
-        return torch.autocast(device.type, dtype=torch.bfloat16, enabled=on)
+        return torch.autocast(device.type, dtype=self.amp_dtype, enabled=on)
 
     def embed(
         self,

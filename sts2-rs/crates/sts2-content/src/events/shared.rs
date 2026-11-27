@@ -1139,6 +1139,12 @@ fn colossal_flower_digs(state: &RunState) -> usize {
     (state.event_state.page as usize).min(2)
 }
 
+/// The damage the next Reach Deeper (or the Pollinous Core) deals:
+/// `_prizeDamage[NumberOfDigs]`, the value C# passes to `ThatDoesDamage`.
+pub(crate) fn colossal_flower_dig_damage(state: &RunState) -> i32 {
+    COLOSSAL_FLOWER_PRIZE_DAMAGE[colossal_flower_digs(state)]
+}
+
 fn colossal_flower_extract(state: &mut RunState) -> EventOutcome {
     // C# `ExtractCurrentPrize` / `ExtractInstead` (identical mechanics):
     // gain `_prizeCosts[NumberOfDigs]` and finish — 35 / 75 / 135 gold at

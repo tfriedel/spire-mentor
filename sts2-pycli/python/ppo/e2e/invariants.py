@@ -109,11 +109,25 @@ _NON_ALNUM = re.compile(r"[^A-Z0-9]")
 
 # Cards that an in-combat transform creates (v0.111.0 decomp):
 # PrimalForce -> GiantRock, Begone -> MinionStrike, Charge -> MinionDiveBomb,
-# Guards -> MinionSacrifice, Compact -> Fuel, Seance -> Soul. None is a Power,
-# so a transformed deck card always leaves one of these in a pile (or, if it
-# is transformed again, another one).
+# Guards -> MinionSacrifice, Compact -> Fuel, Seance -> Soul. v0.113.1 adds
+# PunchOfJoy and EcstasyPower (Sadness -> Joy); v0.114.0 adds Florescence
+# (a hand card -> TheShot, Florescence.cs:26) and Growth (Sadness -> a Growth
+# clone, Growth.cs:34). None is a Power, so a transformed deck card always
+# leaves one of these in a pile (or, if it is transformed again, another one).
+# Only cards minted in combat (uid past the deck) count, so a deck Growth does
+# not explain a missing card.
 _TRANSFORM_RESULTS = frozenset(
-    {"GIANTROCK", "MINIONSTRIKE", "MINIONDIVEBOMB", "MINIONSACRIFICE", "FUEL", "SOUL"}
+    {
+        "GIANTROCK",
+        "MINIONSTRIKE",
+        "MINIONDIVEBOMB",
+        "MINIONSACRIFICE",
+        "FUEL",
+        "SOUL",
+        "JOY",
+        "THESHOT",
+        "GROWTH",
+    }
 )
 # EntropyPower.AfterPlayerTurnStart transforms hand cards into random cards,
 # which can be Powers that then leave combat: no ledger while it is up.

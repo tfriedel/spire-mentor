@@ -143,6 +143,24 @@ def v0113_only_cards() -> frozenset[str]:
     return frozenset(names[v] for v in re.findall(r"Self::(\w+)", m.group(1)))
 
 
+_V0114_ONLY = re.compile(r"pub const V0114_ONLY: \[CardId; \d+\] = \[(.*?)\];", re.S)
+
+#: Cards v0.114.0 removed (GH #1924, `CardId::REMOVED_IN_V0114`): The Fool's
+#: Rapid Shot, whose pool slot Twin Shot takes.
+V0114_REMOVED_CARDS = frozenset({"RAPID_SHOT"})
+
+
+@lru_cache(maxsize=1)
+def v0114_only_cards() -> frozenset[str]:
+    """Id strings of `CardId::V0114_ONLY` — cards that exist from v0.114.0 on."""
+    text = _CARD_IDS_RS.read_text(encoding="utf-8")
+    m = _V0114_ONLY.search(text)
+    if m is None:
+        raise RuntimeError(f"no CardId::V0114_ONLY list found in {_CARD_IDS_RS}")
+    names = card_id_python_names()
+    return frozenset(names[v] for v in re.findall(r"Self::(\w+)", m.group(1)))
+
+
 def _version_tuple(game_version: str) -> tuple[int, ...]:
     return tuple(int(x) for x in game_version.lstrip("v").split("."))
 
@@ -159,7 +177,8 @@ def sweepable_cards(game_version: str) -> set[str]:
     `game_version` picks the build: v0.107.1 leaves out the
     v0.111.0-only cards; v0.111.0 and later leave out the cards v0.111.0
     removed (Rust gates the same split on ``>= V0_111_0``). Builds before
-    v0.113.0 also leave out the v0.113.0-only cards.
+    v0.113.0 also leave out the v0.113.0-only cards; builds before v0.114.0
+    the v0.114.0-only ones, and v0.114.0 on the cards it removed.
     """
     if has_v0111_cards(game_version):
         excluded = set(V0111_REMOVED_CARDS)
@@ -167,6 +186,10 @@ def sweepable_cards(game_version: str) -> set[str]:
         excluded = set(v0111_only_cards())
     if _version_tuple(game_version) < (0, 113, 0):
         excluded |= v0113_only_cards()
+    if _version_tuple(game_version) < (0, 114, 0):
+        excluded |= v0114_only_cards()
+    else:
+        excluded |= V0114_REMOVED_CARDS
     return {
         name
         for name, rarity in engine_cards().items()

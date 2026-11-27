@@ -16,6 +16,7 @@ use crate::vocab::{self, Reg};
 
 const HITS_TSV: &str = include_str!("../data/hits_v0111.tsv");
 const HITS_TSV_V0113: &str = include_str!("../data/hits_v0113.tsv");
+const HITS_TSV_V0114: &str = include_str!("../data/hits_v0114.tsv");
 
 fn hits_table() -> &'static HashMap<u16, f32> {
     static H: crate::build::PerBuild<HashMap<u16, f32>> = crate::build::PerBuild::new();
@@ -23,11 +24,7 @@ fn hits_table() -> &'static HashMap<u16, f32> {
     #[allow(clippy::disallowed_methods)]
     H.get(|| {
         let mut m = HashMap::new();
-        let tsv = if crate::build::later() {
-            HITS_TSV_V0113
-        } else {
-            HITS_TSV
-        };
+        let tsv = crate::build::pick(HITS_TSV, HITS_TSV_V0113, HITS_TSV_V0114);
         for line in tsv.lines() {
             if line.is_empty() || line.starts_with('#') {
                 continue;

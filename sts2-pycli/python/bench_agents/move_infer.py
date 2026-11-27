@@ -140,10 +140,30 @@ class MoveTracker:
         return pick
 
     def infer(self, obs: dict[str, Any]) -> list[dict[str, Any]]:
+        """Guesses for ``obs["enemies"]``, the living."""
+        return self.infer_board(obs)[0]
+
+    def infer_board(self, obs: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Guesses for ``obs["enemies"]`` and for ``obs["dead_enemies"]``.
+
+        A dead enemy the host still lists is a corpse that revives (Test
+        Subject, Illusion). It telegraphs its revive move, and the engine
+        revives it only through that move: a corpse rebuilt with no move
+        comes back AI-less, rolling the stand-in Attack 5 (GH #1933).
+        """
         wire = self._wire(obs)
-        rnd = obs.get("round")
+        alive = obs.get("enemies") or []
+        board = [*alive, *(obs.get("dead_enemies") or [])]
+        out = self._infer_all(wire, board, obs.get("round"))
+        return out[: len(alive)], out[len(alive) :]
+
+    def _infer_all(
+        self, wire: dict[str, Any], board: list[dict[str, Any]], rnd: Any
+    ) -> list[dict[str, Any]]:
+        # The adapter lays out ``$.encounter`` as the living, then the
+        # corpses, both in the order the observation lists them.
         out = []
-        for i, e in enumerate(obs.get("enemies") or []):
+        for i, e in enumerate(board):
             kind = wire["encounter"][i]["kind"]
             shown = _shown(e.get("intents"))
             # The creature's fight id survives another enemy's death; its
@@ -156,6 +176,8 @@ class MoveTracker:
             same_round = bool(st.log) and st.round == rnd
             if same_round and st.shown == shown:
                 pass  # nothing new
+            elif not shown and e.get("is_dead", e.get("hp") == 0):
+                pass  # a corpse that shows nothing keeps the move it died with
             else:
                 # A new round rolled a new move. Inside a round the move
                 # stays, but what it shows can change (Weak, Strength, a

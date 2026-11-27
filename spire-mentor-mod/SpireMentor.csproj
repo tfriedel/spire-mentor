@@ -55,7 +55,7 @@
 
   <!--
     One DLL for every supported game build (GH #800): v0.107.1, v0.111.0
-    (stable as v0.111.1) and v0.113.0 (beta). It compiles against whichever sts2.dll is installed; the
+    (stable as v0.111.1), v0.113.0 and v0.114.0 (beta). It compiles against whichever sts2.dll is installed; the
     members whose signature differs between the builds are reached through
     SimGameApi.cs, and tests/compile/build_mod.sh checks the DLL binds against
     every build present.

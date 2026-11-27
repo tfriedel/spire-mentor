@@ -1639,6 +1639,9 @@ pub(crate) fn finish_player_turn_setup(state: &mut CombatState, side_fired: bool
     if combat_is_ending(state) {
         return run_turn_start_relic_tail(state, smallvec::SmallVec::new(), u8::MAX, side_fired);
     }
+    // v0.114.0 `Hook.AfterPlayerTurnStart` first walks every listener's
+    // `AfterPlayerTurnStartEarly` (Hook.cs:1089-1101): Happy Flower's energy.
+    crate::relic_effects::happy_flower::grant_turn_start_energy_early(state);
     // Step 8 (`after_energy_reset`) now fires in `continue_player_turn_setup`,
     // right after the energy reset and before the hand draw.
 
@@ -6362,6 +6365,18 @@ fn perform_intent(
 
     // An attack the move body dealt itself owes its Wounds at its end too.
     flush_painful_stabs_wounds(state, enemy_uid);
+    // v0.114.0 `MonsterModel` runs the deferred `RemoveAllPowersAfterDeath`
+    // once the move ends (MonsterModel.cs:599-612): a TestSubject that died in
+    // its own move keeps PainfulStabs only until here (damage.rs strip).
+    if state.game_version >= crate::GameVersion::V0_114_0
+        && crate::creature_by_id(&state.creatures, enemy_uid.0).is_some_and(|c| c.current_hp <= 0)
+    {
+        crate::card_effects::remove_creature_power(
+            state,
+            enemy_uid,
+            crate::PowerKind::PainfulStabs,
+        );
+    }
 
     // A move body that opened a blocking player card screen raises it HERE —
     // inside the move, where C# `await`s it. Today that is only KnowledgeDemon
@@ -6387,6 +6402,12 @@ pub fn flush_painful_stabs_wounds(state: &mut CombatState, attacker: CreatureUid
     if owed == 0 {
         return;
     }
+    // An attacker that died in its own attack (Thorns) still pays on every
+    // build: through v0.113 PainfulStabs survived its owner's death, and from
+    // v0.114.0 `Kill` leaves a creature's powers in place while it
+    // `IsAttacking` / `IsPerformingMove` (CreatureCmd.cs:752-769), stripping
+    // them only after the attack (`AttackCommand.Execute`, :535-567), so the
+    // power still hears `Hook.AfterAttack` (:704).
     crate::event_log::flash_power(state, attacker, crate::PowerKind::PainfulStabs);
     for _ in 0..owed {
         crate::card_effects::spawn_wound_into_pile(state, crate::card_effects::PileKind::Discard);
@@ -7084,6 +7105,11 @@ pub fn apply_damage_to_player(
     // listeners can produce deferred-effect queue entries (Thorns:
     // reflective `Effect::DealHpLoss` to dealer) which the dispatcher
     // drains internally via `apply_effects`.
+    // v0.114.0 fixes the hit's block absorption before this hook
+    // (`GetDamageResults`, CreatureCmd.cs:312, then `BeforeDamageReceived`
+    // :334): see `damage::apply_damage_with_final_impl`.
+    let pre_hook_block =
+        (state.game_version >= crate::GameVersion::V0_114_0).then_some(state.player.block);
     hooks::dispatch_before_damage_received(state, &ctx);
 
     // Step 2.5 (v0.113.0): Wuppy's pre-block redirect. `CreatureCmd.Damage`
@@ -7127,9 +7153,11 @@ pub fn apply_damage_to_player(
     let absorbed = if unblockable {
         0
     } else {
-        damage_remaining.min(state.player.block).max(0)
+        damage_remaining
+            .min(pre_hook_block.unwrap_or(state.player.block))
+            .max(0)
     };
-    state.player.block -= absorbed;
+    state.player.block -= absorbed.min(state.player.block);
     let unblocked = (damage_remaining - absorbed).max(0);
 
     // Bead `sts2-rs-xsvp9`: track DamageReceivedEntry analogues for the
@@ -8926,7 +8954,7 @@ fn after_card_played_buses_from(
         if let Some(next) = after_card_played_relics_from(state, played_ctx, from, park_on_draw) {
             return Some(next);
         }
-        after_card_played_after_relics(state, hook_ctx);
+        after_card_played_after_relics(state, hook_ctx, last_in_series(state, void_form_tally));
         return None;
     }
     // The card's `OnPlay` has returned, so every `AttackCommand` it issued has
@@ -8973,7 +9001,7 @@ fn after_card_played_buses_from(
             let _ = crate::relic_effects::dispatch_after_card_played(state, played_ctx);
         }
     }
-    after_card_played_after_relics(state, hook_ctx);
+    after_card_played_after_relics(state, hook_ctx, last_in_series(state, void_form_tally));
     None
 }
 
@@ -8996,7 +9024,15 @@ fn after_card_played_relics_from(
 
 /// The cards' and the other creatures' part of the `AfterCardPlayed` walk,
 /// after the relics.
-fn after_card_played_after_relics(state: &mut CombatState, hook_ctx: &CardCtx) {
+/// C# `cardPlay.IsLastInSeries` for the `AfterCardPlayed` walk: a hand
+/// play's last iteration (`void_form_tally`), or an auto-play. An auto-play
+/// is taken as a one-play series; the auto-play walk does not carry its
+/// iteration.
+fn last_in_series(state: &CombatState, void_form_tally: bool) -> bool {
+    void_form_tally || state.combat_log.after_played_is_auto_play
+}
+
+fn after_card_played_after_relics(state: &mut CombatState, hook_ctx: &CardCtx, last: bool) {
     // The player's cards listen after the relics (CombatState.cs:101-160):
     // Banshee's Cry reads the played card's live keywords, after a Razor
     // Tooth upgrade (loadout Necrobinder 5451, v0.107.1).
@@ -9012,7 +9048,7 @@ fn after_card_played_after_relics(state: &mut CombatState, hook_ctx: &CardCtx) {
             .is_some_and(|c| card_is_ethereal_at_play(state, c));
         state.banshees_cry_after_card_played(played_is_ethereal);
     }
-    hooks::dispatch_after_card_played_other_creatures(state, hook_ctx);
+    hooks::dispatch_after_card_played_other_creatures_in_series(state, hook_ctx, last);
 }
 
 /// Drain and apply `RupturePower`'s deferred Strength after a card play has
@@ -9133,9 +9169,9 @@ pub(crate) fn history_course_replays(
             card_type,
             crate::cards::CardType::Attack | crate::cards::CardType::Skill
         ),
-        crate::GameVersion::V0_111_0 | crate::GameVersion::V0_113_0 => {
-            card_type == crate::cards::CardType::Attack
-        }
+        crate::GameVersion::V0_111_0
+        | crate::GameVersion::V0_113_0
+        | crate::GameVersion::V0_114_0 => card_type == crate::cards::CardType::Attack,
     }
 }
 
@@ -9199,6 +9235,11 @@ pub struct CardPlayFinish {
     /// its own play. Same shape, and the same reason, as
     /// `echo_form_amount_at_play_start` above.
     rebound_amount_at_play_start: i32,
+    /// ReboundPower claimed this play's result location at play-START and
+    /// spent its stack there (see [`rebound_claims_result_location`],
+    /// GH #1907): the routing sends the card to the draw top without
+    /// spending a second stack.
+    rebound_claimed: bool,
     /// NostalgiaPower stacks captured at play-start, for the same reason: C#
     /// fixes the result location before `OnPlay` (v0.111.0 CardModel.cs:1881),
     /// so a Havoc whose own `OnPlay` auto-plays the Nostalgia card goes to
@@ -9410,6 +9451,7 @@ fn play_card_resolved(state: &mut CombatState, hand_index: u8, target: Option<u8
         echo_form_amount_at_play_start: 0,
         first_in_series_before: 0,
         rebound_amount_at_play_start: 0,
+        rebound_claimed: false,
         nostalgia_amount_at_play_start: 0,
         attacks_skills_at_play_start: 0,
         imitation_clone: None,
@@ -9846,6 +9888,17 @@ fn play_card_resolved(state: &mut CombatState, hand_index: u8, target: Option<u8
         resolved_cost,
         state.game_version >= crate::GameVersion::V0_111_0 && card.combat_var(VarKey::IsDupe) != 0,
     );
+    // ReboundPower's redirect is decided here as well, and its stack spent
+    // before `OnPlay` (GH #1907). See [`rebound_claims_result_location`].
+    let rebound_claimed = rebound_claims_result_location(
+        state,
+        card,
+        corruption_active_pre_dispatch,
+        feral_returns_to_hand,
+        rebound_amount_at_play_start,
+        nostalgia_amount_at_play_start,
+        attacks_skills_at_play_start,
+    );
 
     // Bead `sts2-rs-ph5mx`: snapshot the powered-hit counter before the card's
     // effect runs so the Vigor/Gigantification consume (which fires in
@@ -9916,6 +9969,7 @@ fn play_card_resolved(state: &mut CombatState, hand_index: u8, target: Option<u8
     fin.echo_form_amount_at_play_start = echo_form_amount_at_play_start;
     fin.first_in_series_before = first_in_series_before;
     fin.rebound_amount_at_play_start = rebound_amount_at_play_start;
+    fin.rebound_claimed = rebound_claimed;
     fin.nostalgia_amount_at_play_start = nostalgia_amount_at_play_start;
     fin.attacks_skills_at_play_start = attacks_skills_at_play_start;
     fin.imitation_clone = imitation_clone;
@@ -10303,6 +10357,72 @@ fn feral_claims_result_location(
             .saturating_add(1);
     }
     redirect
+}
+
+/// ReboundPower's result-location redirect for a hand play, decided at play
+/// START and its stack spent on the spot (GH #1907). C#
+/// `CardModel.OnPlayWrapper` (CardModel.cs:1881-1886, v0.111.0) resolves
+/// `GetResultLocationForCardPlay`, runs `Hook.ModifyCardPlayResultLocation`
+/// and then `ReboundPower.AfterModifyingCardPlayResultLocation` (`Flash()` +
+/// `PowerCmd.Decrement`) before `OnPlay`. So a select the card opens (Burning
+/// Pact's exhaust pick, Spire Bench seed 180001292) already shows the stack
+/// spent, and a card the play auto-plays sees the stack the parent left.
+///
+/// The arguments are the play-start inputs the result-pile routing in
+/// [`finish_card_play`] reads (`card` is the play-start snapshot there too).
+/// Rebound acts only on a Discard result, so every branch that routes the
+/// card elsewhere first — Power / dupe `None`, Exhaust, Corruption's Skill
+/// exhaust, Feral's hand top, a card whose own result is Hand — keeps the
+/// stack; Nostalgia may win the draw-top slot (GH #650). Shining Strike's
+/// result is Discard (its `OnPlay` moves it to the draw top itself), so it
+/// does spend a stack, as in C#.
+fn rebound_claims_result_location(
+    state: &mut CombatState,
+    card: &cards::Card,
+    corruption_active: bool,
+    feral_returns_to_hand: bool,
+    rebound_stacks: i32,
+    nostalgia: i32,
+    attacks_skills_at_play_start: i64,
+) -> bool {
+    if rebound_stacks <= 0
+        || feral_returns_to_hand
+        || card.card_type == cards::CardType::Power
+        || card.combat_var(VarKey::IsDupe) != 0
+        || crate::card_effects::card_exhausts_inst(card)
+        || (card.card_type == cards::CardType::Skill && corruption_active)
+    {
+        return false;
+    }
+    // `discard_result_goes_to_hand`, read before `OnPlay`: TrickShot's flag is
+    // only stamped by its handler, so ask for the arrow it reads directly.
+    // v0.114.0 dropped TrickShot's `GetResultLocationForCardPlay` override:
+    // it goes to discard like any card, so Rebound claims it.
+    let result_is_hand = if card.card_id == cards::CardId::TrickShot
+        && state.game_version < crate::GameVersion::V0_114_0
+    {
+        crate::fool::player_has_any_arrows(state)
+    } else {
+        discard_result_goes_to_hand(card)
+    };
+    if result_is_hand {
+        return false;
+    }
+    let is_attack_or_skill = matches!(
+        card.card_type,
+        cards::CardType::Attack | cards::CardType::Skill
+    );
+    let claims = resolve_draw_top_redirect(
+        state,
+        is_attack_or_skill,
+        attacks_skills_at_play_start.saturating_add(1),
+        rebound_stacks,
+        nostalgia,
+    ) == Some(DrawTopRedirect::Rebound);
+    if claims {
+        consume_rebound_stack(state);
+    }
+    claims
 }
 
 /// A card whose own `GetResultLocationForCardPlay` turns a Discard result
@@ -11199,6 +11319,9 @@ fn finish_card_play_tail(state: &mut CombatState, fin: &mut CardPlayFinish) -> S
     if fin.feral_returns_to_hand && state.pending_choice.is_some() {
         state.combat_log.feral_claimed_in_play = Some(card_uid);
     }
+    if fin.rebound_claimed && state.pending_choice.is_some() {
+        state.combat_log.rebound_claimed_in_play = Some(card_uid);
+    }
     // Co-op (GH #1017): a result pile that belongs to another player (The
     // Ball's teammate, rolled at play start) takes the card. Feral's redirect
     // runs after `GetResultLocationForCardPlay` and sets the player back to
@@ -11354,18 +11477,27 @@ fn finish_card_play_tail(state: &mut CombatState, fin: &mut CardPlayFinish) -> S
             // (overflow -> Discard at HAND_LIMIT), the accepted position from
             // bead `sts2-rs-653b`.
             state.move_card_to_hand(card_uid);
-        } else if let Some(which) = resolve_draw_top_redirect(
-            state,
-            is_attack_or_skill,
-            fin.attacks_skills_at_play_start.saturating_add(1),
-            fin.rebound_amount_at_play_start,
-            fin.nostalgia_amount_at_play_start,
-        ) {
+        } else if let Some(which) = if fin.rebound_claimed {
+            Some(DrawTopRedirect::Rebound)
+        } else {
+            // Rebound took its decision at play start; unclaimed, it has no
+            // say here (`rebound_claims_result_location`).
+            resolve_draw_top_redirect(
+                state,
+                is_attack_or_skill,
+                fin.attacks_skills_at_play_start.saturating_add(1),
+                0,
+                fin.nostalgia_amount_at_play_start,
+            )
+        } {
             // Nostalgia or Rebound sends a Discard-bound result to draw-top,
             // whichever the owner picked up first (GH #650), and only that one
-            // gets its after-hook — `NostalgiaPower.cs:56`'s flash, or
-            // Rebound's flash-and-decrement.
-            fire_draw_top_redirect(state, which);
+            // gets its after-hook — `NostalgiaPower.cs:56`'s flash here, or
+            // Rebound's flash-and-decrement, which already ran at play start
+            // (GH #1907).
+            if which == DrawTopRedirect::Nostalgia {
+                fire_draw_top_redirect(state, which);
+            }
             if let Some(pos) = state.player.play.iter().position(|&u| u == card_uid) {
                 state.player.play.remove(pos);
                 state.player.draw.insert(0, card_uid);
@@ -11522,6 +11654,12 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
         // `TransformIntoAfterPlay` runs on Play before the result move
         // (`transform_into_after_play`): the decisions below stay the played
         // card's, the move carries the replacement.
+        // Rebound claimed the result location of this play at its start and
+        // spent its stack there (`rebound_claims_result_location`, GH #1907).
+        let rebound_claimed = state.combat_log.rebound_claimed_in_play == Some(uid);
+        if rebound_claimed {
+            state.combat_log.rebound_claimed_in_play = None;
+        }
         let uid = transform_into_after_play(state, uid);
         let moved = state.cards[uid.0.get() as usize - 1];
         // C# `GetResultPileType` precedence: Corruption's hook override
@@ -11593,22 +11731,25 @@ pub fn flush_played_cards_after_choice(state: &mut CombatState) {
         // play whose `OnPlay` opened a choice carries the same redirect when
         // the choice closes.
         //
-        // This path has no play-start snapshot (it flushes whatever is left on
-        // the Play pile), so Rebound reads the LIVE stack — the same
-        // approximation Nostalgia's turn tally makes here. Unreachable by
-        // construction at this pin: the only card granting Rebound is the
-        // Rebound card, whose `OnPlay` deals damage and applies a power without
-        // opening a choice, so a card can never both create a Rebound stack and
-        // land in this flush. A future Rebound source that opens a choice needs
-        // the snapshot threaded here too.
-        if let Some(which) = resolve_draw_top_redirect(
-            state,
-            is_attack_or_skill,
-            i64::from(attacks_skills_this_turn),
-            state.player_power_amount(crate::PowerKind::Rebound),
-            state.player_power_amount(crate::PowerKind::Nostalgia),
-        ) {
-            fire_draw_top_redirect(state, which);
+        // A hand play's Rebound decision was taken (and its stack spent) at
+        // play start, recorded in `rebound_claimed_in_play` (GH #1907). Any
+        // other card has no play-start snapshot here (it flushes whatever is
+        // left on the Play pile), so Rebound reads the LIVE stack — the same
+        // approximation Nostalgia's turn tally makes here.
+        if let Some(which) = if rebound_claimed {
+            Some(DrawTopRedirect::Rebound)
+        } else {
+            resolve_draw_top_redirect(
+                state,
+                is_attack_or_skill,
+                i64::from(attacks_skills_this_turn),
+                state.player_power_amount(crate::PowerKind::Rebound),
+                state.player_power_amount(crate::PowerKind::Nostalgia),
+            )
+        } {
+            if !rebound_claimed {
+                fire_draw_top_redirect(state, which);
+            }
             if let Some(pos) = state.player.play.iter().position(|&u| u == uid) {
                 state.player.play.remove(pos);
                 state.player.draw.insert(0, uid);
@@ -12420,10 +12561,12 @@ pub fn player_should_play_blocked(state: &CombatState, card: &crate::cards::Card
     // No Sloth anywhere in the arena (`present_kinds` superset): the walk
     // below finds none.
     if !hooks::power_kind_live(state, crate::powers::PowerKind::Sloth) {
-        debug_assert!(!state.player.powers.iter().any(|puid| state
-            .powers
-            .get_by_id(puid.0)
-            .is_some_and(|p| p.kind == crate::powers::PowerKind::Sloth)));
+        debug_assert!(!state.player.powers.iter().any(|puid| {
+            state
+                .powers
+                .get_by_id(puid.0)
+                .is_some_and(|p| p.kind == crate::powers::PowerKind::Sloth)
+        }));
     } else if let Some(sloth_amount) = state.player.powers.iter().find_map(|puid| {
         state
             .powers
@@ -20114,6 +20257,58 @@ mod tests {
             "one Wound per connecting hit"
         );
         assert_eq!(state.combat_log.painful_stabs_wounds_owed, 0, "all paid");
+    }
+
+    /// v0.114.0: a TestSubject that Thorns kills in its own attack keeps
+    /// PainfulStabs until the attack ends (its Wound is still added), and
+    /// loses it when the move ends (`MonsterModel.cs:599-612`); Adaptable stays.
+    #[test]
+    fn a_v0114_stabs_corpse_pays_then_loses_painful_stabs_at_move_end() {
+        let enemy_uid = CreatureUid(NonZeroU32::new(1).expect("nz"));
+        let mut state = state_for_enemy_turn_exec(
+            1,
+            MonsterKind::ShrinkerBeetle,
+            Intent::MultiAttack { damage: 5, hits: 3 },
+        );
+        state.game_version = crate::GameVersion::V0_114_0;
+        state.creatures[0].current_hp = 3;
+        for (id, kind, owner_is_player) in [
+            (7021, PowerKind::PainfulStabs, false),
+            (7022, PowerKind::Adaptable, false),
+            (7023, PowerKind::Thorns, true),
+        ] {
+            let pid = NonZeroU32::new(id).expect("nz");
+            state.powers.push(Power {
+                id: pid,
+                kind,
+                amount: if kind == PowerKind::Thorns { 5 } else { 1 },
+                counter: 0,
+                applier: None,
+                skip_next_tick: false,
+            });
+            if owner_is_player {
+                state.player.powers.push(PowerUid(pid));
+            } else {
+                state.creatures[0].powers.push(PowerUid(pid));
+            }
+        }
+        let _ = state.init_player_creature();
+        let discard_before = state.player.discard.len();
+
+        let intent = state.creatures[0].intent;
+        perform_intent(&mut state, enemy_uid, intent);
+        assert!(state.creatures[0].current_hp <= 0, "Thorns killed it");
+        assert_eq!(
+            state.player.discard.len() - discard_before,
+            1,
+            "the hit's Wound"
+        );
+        let kinds: Vec<PowerKind> = state.creatures[0]
+            .powers
+            .iter()
+            .filter_map(|u| state.powers.iter().find(|p| p.id == u.0).map(|p| p.kind))
+            .collect();
+        assert_eq!(kinds, vec![PowerKind::Adaptable]);
     }
 
     /// Only the enemy turn the board was read on reaches the teammate (their

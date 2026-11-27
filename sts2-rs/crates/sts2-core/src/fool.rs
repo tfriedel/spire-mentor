@@ -407,6 +407,16 @@ pub fn shoot_arrow_at_target_with(
         attack_skipped(state);
         return false;
     };
+    // v0.114.0 `ArrowCmd.ImpaleTarget` (ArrowCmd.cs:169-173, 212-216): a
+    // target that died during `AfterArrowShot` gets no attack, and the arrow
+    // comes straight back.
+    //
+    // [decompiled C# omitted — see the cited path]
+    if state.game_version >= crate::GameVersion::V0_114_0 && !is_alive(state, target) {
+        attack_skipped(state);
+        fool_mut(state).arrows[slot].status = ArrowStatus::Retrieved;
+        return true;
+    }
     action(state);
     impale(state, target, slot);
     true
@@ -543,7 +553,26 @@ pub fn on_damage_received(
     dealer: CreatureRef,
     props: ValueProps,
 ) {
-    if dealer != CreatureRef::Player || !props.is_powered() {
+    if !props.is_powered() {
+        return;
+    }
+    if state.game_version >= crate::GameVersion::V0_114_0 {
+        // v0.114.0 ImpaledPower.cs:97: any dealer, but the hit's card source
+        // must belong to the applier (the player). The hit tail carries no
+        // card, so the card being resolved stands in for C#'s `source`: the
+        // player's card for a card attack, an arrow shot (ArrowCmd passes
+        // the shooting card) or the player's Osty attacking with it. Every
+        // other powered (`Move`, not `Unpowered`) hit comes from a card, so
+        // none is dropped that C# keeps.
+        //
+        // [decompiled C# omitted — see the cited path]
+        let from_player_side = dealer == CreatureRef::Player
+            || Some(dealer) == crate::card_effects::osty_dealer_ref(state);
+        if !from_player_side || crate::card_effects::resolving_card_inst(state).is_none() {
+            return;
+        }
+    } else if dealer != CreatureRef::Player {
+        // v0.113.1 ImpaledPower.cs:97: `dealer == base.Applier`.
         return;
     }
     let Some(uid) = impaled_power_uid(state, target) else {
@@ -628,7 +657,13 @@ fn after_arrow_shot(state: &mut CombatState, slot: Option<usize>, from_card: boo
     let Some(slot) = slot else {
         return;
     };
-    if from_card && player_power_amount(state, PowerKind::Quietus) > 0 {
+    // v0.113.0 `QuietusPower.AfterArrowShot` marks a card's arrow
+    // `DestroyAfterImpaled`; v0.114.0 deleted that override (and the
+    // `Destroyed` arrow status with it).
+    if from_card
+        && state.game_version < crate::GameVersion::V0_114_0
+        && player_power_amount(state, PowerKind::Quietus) > 0
+    {
         fool_mut(state).arrows[slot].destroy_after_impaled = true;
     }
     let whistling: SmallVec<[CardUid; 2]> = state
@@ -815,13 +850,18 @@ fn note_play_finished_body(state: &mut CombatState, card: CardUid) {
     }
 }
 
-/// `MelodyCmd.PlayedThisTurn(player, tag)` (finished plays).
+/// `MelodyCmd.PlayedThisTurn(player, tag)`: finished plays through
+/// v0.113.0, STARTED plays from v0.114.0 on, so a melody card counts its
+/// own note while it resolves.
+///
+/// [decompiled C# omitted — see the cited path]
 #[must_use]
 pub fn played_this_turn(state: &CombatState, tag: CardTag) -> bool {
     let Some(i) = note_index(tag) else {
         return false;
     };
-    melody_now(state).is_some_and(|m| m.finished[i] > 0)
+    let started = state.game_version >= crate::GameVersion::V0_114_0;
+    melody_now(state).is_some_and(|m| if started { m.started[i] } else { m.finished[i] } > 0)
 }
 
 /// Finished plays this turn carrying `tag` (`History.CardPlaysFinished`
@@ -1060,6 +1100,13 @@ pub fn ennui_before_hand_draw(state: &mut CombatState, sadness: i32) {
 /// (`CombatCardSelection.NextItem`), the first `upgraded` (its `Upgraded`
 /// var, the power's `counter`) of them upgraded.
 pub fn mythic_form_before_hand_draw(state: &mut CombatState, amount: i32, upgraded: i32) {
+    // v0.114.0 `MythicFormPower` has no `Upgraded` var: every tarot comes
+    // un-upgraded (MythicFormPower.cs:30-36).
+    let upgraded = if state.game_version >= crate::GameVersion::V0_114_0 {
+        0
+    } else {
+        upgraded
+    };
     for i in 0..amount.max(0) {
         let idx = state
             .run_rng
@@ -1090,12 +1137,14 @@ fn first_note_count(state: &CombatState, tags: crate::cards::CardTags) -> i32 {
 }
 
 /// The Fool power kinds [`after_card_played_power`] has an arm for.
-pub const AFTER_CARD_PLAYED_KINDS: [PowerKind; 5] = [
+pub const AFTER_CARD_PLAYED_KINDS: [PowerKind; 6] = [
     PowerKind::SongPath,
     PowerKind::ViolentChord,
     PowerKind::Lullaby,
     PowerKind::Motif,
     PowerKind::LostLute,
+    // v0.114.0 only (the arm checks the build).
+    PowerKind::Tune,
 ];
 
 /// One Fool power's `AfterCardPlayed`, for the owner's play of a card with
@@ -1169,10 +1218,70 @@ pub fn after_card_played_power(
         PowerKind::LostLute => {
             let n = first_note_count(state, tags);
             if n > 0 {
+                // The auto-plays finish plays of their own; the listeners after
+                // this one still see the outer `cardPlay` (`IsFirstPlayThisTurn`
+                // compares the play itself, MelodyCmd.cs:49-57 on both builds).
+                let outer = fool(state).map_or(0, |f| f.last_finished_seq);
                 crate::combat_loop::auto_play_n_from_draw_top(state, n * amount, false);
+                if let Some(f) = state.player.fool.as_mut() {
+                    f.last_finished_seq = outer;
+                }
             }
         }
+        // v0.114.0 `TunePower.AfterCardPlayed` (TunePower.cs:21-41): the
+        // turn's first Ki play upgrades Amount random upgradable hand cards.
+        //
+        // [decompiled C# omitted — see the cited path]
+        PowerKind::Tune
+            if tags.contains(CardTag::Ki)
+                && state.game_version >= crate::GameVersion::V0_114_0
+                && finished_play_was_first(state, CardTag::Ki) =>
+        {
+            tune_upgrade_hand(state, amount);
+        }
         _ => {}
+    }
+}
+
+/// v0.114.0 `TunePower`'s upgrade: `TakeRandom(amount, CombatCardSelection)`
+/// over the upgradable hand cards (`UnstableShuffle` then `Take`), then
+/// `CardCmd.Upgrade` each, which does nothing while combat is ending.
+fn tune_upgrade_hand(state: &mut CombatState, amount: i32) {
+    let mut upgradable: SmallVec<[crate::CardUid; 10]> = state
+        .player
+        .hand
+        .iter()
+        .copied()
+        .filter(|uid| {
+            state
+                .cards
+                .get(uid.0.get() as usize - 1)
+                .is_some_and(crate::cards::Card::is_upgradable)
+        })
+        .collect();
+    state
+        .run_rng
+        .combat_card_selection
+        .shuffle_for(state.game_version, upgradable.as_mut_slice());
+    if crate::combat_loop::combat_is_ending(state) {
+        return;
+    }
+    let n = usize::try_from(amount).unwrap_or(0);
+    for uid in upgradable.into_iter().take(n) {
+        crate::card_effects::upgrade_card_uid(state, uid);
+    }
+}
+
+/// Whether `KiVersePower` replays a card with `tags`: any Wah, Cho or Ki
+/// card through v0.113.0, a Wah or Cho one from v0.114.0 on.
+///
+/// [decompiled C# omitted — see the cited path]
+#[must_use]
+pub fn ki_verse_replays(state: &CombatState, tags: crate::cards::CardTags) -> bool {
+    if state.game_version >= crate::GameVersion::V0_114_0 {
+        tags.contains(CardTag::Wah) || tags.contains(CardTag::Cho)
+    } else {
+        tags.has_melody()
     }
 }
 
@@ -1254,8 +1363,17 @@ pub fn stretch_block_bonus(
     if !props.contains(ValueProps::MOVE) || props.contains(ValueProps::UNPOWERED) {
         return 0;
     }
+    // v0.114.0 returns the amount latched when the card started
+    // (StretchPower.cs:87 `return internalData.amountWhenCardStarted;`),
+    // v0.113.0 the live `Amount`.
     match fool(state).and_then(|f| f.stretch_latch) {
-        Some((latched, _, _)) if latched == card => amount,
+        Some((latched, start, _)) if latched == card => {
+            if state.game_version >= crate::GameVersion::V0_114_0 {
+                start
+            } else {
+                amount
+            }
+        }
         _ => 0,
     }
 }

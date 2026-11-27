@@ -30,6 +30,19 @@ pub(crate) fn var(state: &CombatState, base: i32, up: i32) -> i32 {
     }
 }
 
+/// Whether the fight is on game build v0.114.0 or later (the Fool rework,
+/// GH #1924).
+pub(crate) fn v0114(state: &CombatState) -> bool {
+    state.game_version >= sts2_core::GameVersion::V0_114_0
+}
+
+/// [`var`] with the build's `(base, upgraded)` pair: `v0113` through
+/// v0.113.0, `v0114` from v0.114.0 on.
+pub(crate) fn var_by(state: &CombatState, v0113: (i32, i32), v0114: (i32, i32)) -> i32 {
+    let (base, up) = if self::v0114(state) { v0114 } else { v0113 };
+    var(state, base, up)
+}
+
 /// `PowerCmd.Apply<kind>(Owner.Creature, amount)`.
 pub(crate) fn apply_to_player(state: &mut CombatState, kind: PowerKind, amount: i32) {
     if amount <= 0 {

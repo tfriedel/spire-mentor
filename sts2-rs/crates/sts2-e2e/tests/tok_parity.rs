@@ -6,7 +6,7 @@
 //! decision line carries Python's policy row (`rowb`: `cat`, `cont` as
 //! float16 bits, `sec`, `tok_flags`, `cls_tok`, `cls_kind`, `pool_*`,
 //! `mem_*`) and its `row_scalars`. The directory is `$E2E_FIXTURES` or
-//! `~/runs/e2e-wb/fixtures-allchar-d4500-r5` (skipped with a message when absent;
+//! `~/runs/e2e-wb/fixtures-allchar-d4500-r6` (skipped with a message when absent;
 //! `E2E_SEED=<substring>` narrows it). Each seed is replayed through the
 //! Rust env with the recorded `chosen` class; every decision's row must
 //! equal Python's array for array, bit for bit. The first divergence of a
@@ -25,7 +25,7 @@ fn fixture_dir() -> Option<PathBuf> {
     let dir = std::env::var_os("E2E_FIXTURES").map_or_else(
         || {
             std::env::var_os("HOME")
-                .map(|h| PathBuf::from(h).join("runs/e2e-wb/fixtures-allchar-d4500-r5"))
+                .map(|h| PathBuf::from(h).join("runs/e2e-wb/fixtures-allchar-d4500-r6"))
                 .unwrap_or_default()
         },
         PathBuf::from,
@@ -206,7 +206,7 @@ fn replay(path: &Path) -> Result<SeedResult, String> {
 fn tokens_match_python_fixtures() {
     let Some(dir) = fixture_dir() else {
         eprintln!(
-            "SKIP: no e2e fixtures (set E2E_FIXTURES or create ~/runs/e2e-wb/fixtures-allchar-d4500-r5)"
+            "SKIP: no e2e fixtures (set E2E_FIXTURES or create ~/runs/e2e-wb/fixtures-allchar-d4500-r6)"
         );
         return;
     };

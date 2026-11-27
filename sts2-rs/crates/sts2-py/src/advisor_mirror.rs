@@ -280,6 +280,13 @@ impl PyAdvisorMirror {
             .on_combat_board(&json(wire, "wire")?, &json(state, "state")?))
     }
 
+    /// GH #1918: the last combat advice's `best.target_index` (board space),
+    /// which a killing play's null target is recovered from.
+    fn set_advice_target(&mut self, target: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.core.set_advice_target(json(target, "target")?);
+        Ok(())
+    }
+
     fn on_world_action(&mut self, msg: &Bound<'_, PyAny>) -> PyResult<()> {
         self.core.on_world_action(&json(msg, "msg")?);
         Ok(())

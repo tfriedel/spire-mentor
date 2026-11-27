@@ -197,7 +197,9 @@ def _seat_turn_histories(wire: dict[str, Any], board: dict[str, Any]) -> None:
     is the card's owner, ``CardModel.cs:1918``), whoever received them. The
     row names the receiver, not the card's owner, so it goes to the owner
     of the play it is logged inside: the latest ``card_play_started``. Only
-    a row with a card for its source counts (C# ``CardPlay != null``)."""
+    a row with a card for its source counts (C# ``CardPlay != null``).
+    v0.114.0 counts the earlier card PLAYS that gained block
+    (``DistinctBy(e => e.CardPlay)``), so there a play's gains count once."""
     rows = board.get("fight_rows")
     if rows is None or (board.get("player") or {}).get("cards_exhausted_this_turn") is not None:
         return
@@ -206,6 +208,9 @@ def _seat_turn_histories(wire: dict[str, Any], board: dict[str, Any]) -> None:
         seat_of[str(raw.get("net_id"))] = seat
     exhausted: Counter[str] = Counter()
     block: Counter[str] = Counter()
+    per_play = board.get("game_version") == "v0.114.0"
+    plays_with_block: set[int] = set()
+    play = 0  # the latest card play's index this turn
     actor: str | None = None  # whoever acted last this turn
     player: str | None = None  # whose card play is resolving
     for row in rows:
@@ -216,14 +221,16 @@ def _seat_turn_histories(wire: dict[str, Any], board: dict[str, Any]) -> None:
             actor = str(row.get("owner"))
             if kind == "card_play_started":
                 player = actor
+                play += 1
         elif kind == "card_exhausted":
             whose = row.get("owner")
             whose = actor if whose is None else str(whose)
             if whose is not None:
                 exhausted[whose] += 1
         elif kind == "block" and (row.get("source") or {}).get("kind") == "card":
-            if player is not None:
+            if player is not None and not (per_play and play in plays_with_block):
                 block[player] += 1
+                plays_with_block.add(play)
     for net, seat in seat_of.items():
         if exhausted[net]:
             seat["cards_exhausted_this_turn"] = exhausted[net]

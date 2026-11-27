@@ -75,6 +75,8 @@ fn capabilities_list_the_supported_builds() {
     want.push("v0.111.0");
     #[cfg(workbench_game_data_v0_113_0)]
     want.push("v0.113.0");
+    #[cfg(workbench_game_data_v0_114_0)]
+    want.push("v0.114.0");
     assert_eq!(caps["game_versions"], json!(want));
     // A new run starts on the new-run default when its bundle is embedded.
     let default = if cfg!(workbench_game_data_v0_111_0) {

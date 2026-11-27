@@ -315,6 +315,10 @@ def advise(
                 inconclusive += 1
                 _tick(key)
                 continue
+            # The human's pick is taken as shown; the rollout after it plays
+            # as the agent, without the event options that would kill.
+            if hasattr(sim, "offer_lethal_event_options"):
+                sim.offer_lethal_event_options = False
             # Paired across candidates: same run seed + policy seed per rollout
             # r, so the only difference is the option taken on this branch.
             sim.reseed_run(base_seed + r)

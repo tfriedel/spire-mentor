@@ -48,7 +48,8 @@ clipped to [-10, 10] (`CLIP`):
 Row 0 (NONE) stays all zero.
 
 `python -m ppo.e2e.content_prior --regen` rewrites the lane build's table
-(`content_prior_v0111.tsv`; `content_prior_v0113.tsv` for a v0.113.0 lane, GH #1535)
+(`content_prior_v0111.tsv`; `content_prior_v0113.tsv` / `content_prior_v0114.tsv` for a
+v0.113.0 / v0.114.0 lane, GH #1535)
 (one line per row with its non-zero columns) from the decomp; `table()` reads
 that file, so the public export, which has no decomp, still gets the prior.
 `coverage()` reports, per registry, the share of ids with an extracted class.
@@ -85,6 +86,10 @@ _TABLES = {
     "v0.113.0": (
         "content_prior_v0113.tsv",
         "a61db28c479c56b4c017746d937d0994ab9f2a060a0c0260eeb46e488baf1054",
+    ),
+    "v0.114.0": (
+        "content_prior_v0114.tsv",
+        "3e151e313dda85710e6ec343bbbec7eb257482b636b689eb2cbad6415d3859e6",
     ),
 }
 TSV = Path(__file__).with_name(_TABLES[_build.GAME_VERSION][0])

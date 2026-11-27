@@ -191,6 +191,16 @@ pub fn mask_rejectable(rm: &RunManager, phase: Phase, actions: &[RunAction]) -> 
         }
         return actions.to_vec();
     }
+    if phase == Phase::Event {
+        // A run that shows a human the lethal event options
+        // (`offer_lethal_event_options`, the workbench) still hides them from
+        // the policy, which never sees one in training. `actions` keeps a
+        // surviving option, so this is never empty.
+        return sts2_content::events::dispatch::drop_agent_withheld_event_choices(
+            &rm.run_state,
+            actions,
+        );
+    }
     if phase != Phase::Shop {
         return actions.to_vec();
     }
@@ -1719,5 +1729,36 @@ mod potion_popup_tests {
         assert_eq!(actions.last(), Some(&RunAction::ConfirmDeckSelection));
         let masked = mask_rejectable(&rm, Phase::RestSite, &actions);
         assert_eq!(masked, actions[..actions.len() - 1].to_vec());
+    }
+
+    /// A run that shows a human the lethal event options (the workbench's
+    /// `offer_lethal_event_options`) still hides them from the policy, which
+    /// never sees one in training: Room Full of Cheese's Search at 10 HP.
+    #[test]
+    fn the_run_policy_skips_an_offered_lethal_event_option() {
+        let mut rm =
+            sts2_content::run_callbacks::new_run_manager_for_character(7, CharacterId::Ironclad);
+        rm.run_state.set_agent_decisions();
+        rm.run_state.offer_lethal_event_options = true;
+        rm.run_state.current_hp = 10;
+        rm.debug_enter_event(
+            sts2_core::events::EventId::RoomFullOfCheese,
+            sts2_content::events::dispatch::begin_event_in_entered_room,
+        );
+        let actions = rm.get_available_actions();
+        assert_eq!(
+            actions,
+            [
+                RunAction::EventChoice { idx: 0 },
+                RunAction::EventChoice { idx: 1 }
+            ]
+        );
+        assert_eq!(
+            mask_rejectable(&rm, Phase::Event, &actions),
+            [RunAction::EventChoice { idx: 0 }]
+        );
+        // Above Search's 14 damage it is the policy's to take.
+        rm.run_state.current_hp = 15;
+        assert_eq!(mask_rejectable(&rm, Phase::Event, &actions), actions);
     }
 }

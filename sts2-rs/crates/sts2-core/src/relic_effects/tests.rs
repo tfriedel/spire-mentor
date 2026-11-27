@@ -10748,3 +10748,38 @@ fn bath_robes_full_heal_at_first_boss_only() {
     let _ = dispatch_before_combat_start(&mut state);
     assert_eq!(state.player.current_hp, 40, "used up");
 }
+
+/// v0.114.0 counts in `BeforeSideTurnStart` and grants the energy in
+/// `AfterPlayerTurnStartEarly` (GH #1924); `AfterSideTurnStart` no longer
+/// touches the flower.
+#[test]
+#[serial_test::serial(global_registry)]
+fn happy_flower_counts_before_the_turn_and_grants_early_on_v0114() {
+    ensure_installed();
+    let mut state = fresh_state_with_player(80, 80);
+    state.game_version = crate::GameVersion::V0_114_0;
+    give_player_relic(&mut state, RelicKind::HappyFlower);
+    let baseline = state.player.energy;
+    let counter = |s: &CombatState| {
+        s.relics
+            .iter()
+            .find(|r| r.kind == RelicKind::HappyFlower)
+            .map_or(-1, |r| r.counter)
+    };
+    for turn in 1..=3 {
+        let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+        let _ = dispatch_before_side_turn_start(&mut state, Side::Enemy);
+        let _ = dispatch_after_side_turn_start(&mut state, Side::Player);
+        assert_eq!(counter(&state), turn, "one tick per player turn");
+        assert_eq!(
+            state.player.energy, baseline,
+            "no energy before the early hook"
+        );
+        super::happy_flower::grant_turn_start_energy_early(&mut state);
+    }
+    assert_eq!(state.player.energy, baseline + 1, "turn 3 grants +1");
+    // Turn 4 grants nothing.
+    let _ = dispatch_before_side_turn_start(&mut state, Side::Player);
+    super::happy_flower::grant_turn_start_energy_early(&mut state);
+    assert_eq!(state.player.energy, baseline + 1);
+}

@@ -791,11 +791,8 @@ fn emit_seat_history(
     // with its card's uid is a resolving play's own (the tag is retired when
     // the play finishes), which C# Unmovable never counts against that play
     // and which a rebuilt board could not tell from an earlier play's.
-    let earlier = log
-        .unmovable_card_block_plays
-        .iter()
-        .filter(|&&tag| tag == sts2_core::UNMOVABLE_EARLIER_PLAY)
-        .count();
+    let earlier =
+        log.earlier_card_block_gains(state.game_version >= sts2_core::GameVersion::V0_114_0);
     if earlier > 0 {
         set(m, "card_block_gains_this_turn", earlier);
     }

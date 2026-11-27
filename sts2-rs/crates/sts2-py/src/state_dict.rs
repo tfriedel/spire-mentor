@@ -1945,6 +1945,40 @@ mod tests {
     }
 
     #[test]
+    fn card_v0113_is_the_v0113_lane_universe_without_later_cards() {
+        // The v0.113.0 e2e lane embeds this sorted list (+ UNK, PAD: 722 rows,
+        // `contracts._SCTX_TABLE_SIZES_V0113`); v0.114.0's cards would shift it.
+        let lane = list_registry_names_impl("card_v0113").unwrap();
+        let any = list_registry_names_impl("card_any").unwrap();
+        assert_eq!(lane.len() + 2, 722);
+        assert!(lane.iter().any(|s| s == "MY_SHINIES"));
+        for later in ["OPTIMISM", "TWIN_SHOT"] {
+            assert!(!lane.iter().any(|s| s == later), "{later}");
+            assert!(any.iter().any(|s| s == later), "{later}");
+        }
+    }
+
+    #[test]
+    fn card_v0114_is_card_v0113_plus_the_v0114_cards() {
+        // The v0.114.0 e2e lane's universe: every v0.113.0 lane row (Rapid
+        // Shot included, a dead row there) plus Optimism and Twin Shot; it
+        // equals `card_any` until a later build adds cards.
+        let v0113 = list_registry_names_impl("card_v0113").unwrap();
+        let v0114 = list_registry_names_impl("card_v0114").unwrap();
+        let any = list_registry_names_impl("card_any").unwrap();
+        assert!(v0113.iter().all(|s| v0114.contains(s)));
+        assert!(v0113.iter().any(|s| s == "RAPID_SHOT"));
+        let mut added: Vec<&str> = v0114
+            .iter()
+            .filter(|s| !v0113.contains(s))
+            .map(String::as_str)
+            .collect();
+        added.sort_unstable();
+        assert_eq!(added, ["OPTIMISM", "TWIN_SHOT"]);
+        assert_eq!(v0114, any);
+    }
+
+    #[test]
     fn list_registry_names_known_entries() {
         // Spot-check one canonical name per registry.
         let relics = list_registry_names_impl("relic").unwrap();

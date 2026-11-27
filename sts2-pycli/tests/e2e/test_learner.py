@@ -2034,6 +2034,51 @@ def test_a_resume_takes_the_new_lr_and_weight_decay(tmp_path: Path) -> None:
     assert [r["it"] for r in lr2.stats_rows] == [3, 4]
 
 
+@pytest.mark.parametrize("key", ["serve_amp", "update_amp"])
+def test_an_unknown_precision_is_refused(tmp_path: Path, key: str) -> None:
+    with pytest.raises(ValueError, match=key):
+        make_cfg(tmp_path, **{key: "fp8"})
+
+
+def test_an_unscaled_update_saves_no_loss_scale(tmp_path: Path) -> None:
+    """fp32 (and bf16) updates have no loss scale; their states say so with None."""
+    lr = make_learner(make_cfg(tmp_path, max_iters=2, update_amp="fp16"))
+    assert lr.train() == "max_iters"
+    # On CPU an fp16 update runs in fp32 (autocast is CUDA-only here): no scale.
+    assert lr.updater.rank.loss_scale is None
+    st = torch.load(tmp_path / "state.pt", map_location="cpu", weights_only=True)
+    assert st["loss_scale"] is None
+    assert all(r["update"]["loss_scale"] is None for r in lr.stats_rows)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_an_fp16_update_scales_its_loss_and_a_resume_keeps_the_scale(tmp_path: Path) -> None:
+    """`update_amp` fp16: the rank trains under fp16 autocast with a `LossScale`, the
+    state carries the scale, and a resume picks it up; serving stays fp32."""
+    kw = {"update_devices": "cuda", "update_amp": "fp16", "packed_update": False}
+    lr = make_learner(make_cfg(tmp_path, max_iters=2, **kw))
+    assert lr.train() == "max_iters"
+    rank = lr.updater.rank
+    assert rank.net.bf16 and rank.net.amp_dtype == torch.float16
+    assert not lr.net_inf.bf16
+    assert rank.loss_scale is not None
+    saved = rank.loss_scale.state()
+    rows = lr.stats_rows
+    assert all(r["update"]["loss_scale"] == pytest.approx(saved["scale"]) for r in rows[-1:])
+    assert all(math.isfinite(r["update"]["gradnorm_mean"]) for r in rows)
+    st = torch.load(tmp_path / "state.pt", map_location="cpu", weights_only=True)
+    assert st["loss_scale"] == saved
+    (tmp_path / OC.DONE).unlink()
+    lr2 = make_learner(make_cfg(tmp_path, max_iters=3, resume=str(tmp_path / "state.pt"), **kw))
+    assert lr2.train() == "max_iters"
+    after = lr2.updater.rank.loss_scale.state()
+    # The resumed scale continues the saved one (a fresh one would count from 0).
+    steps = lr2.stats_rows[-1]["update"]["steps"]
+    assert after["skipped"] >= saved["skipped"]
+    if after["skipped"] == saved["skipped"] and after["scale"] == saved["scale"]:
+        assert after["clean"] == saved["clean"] + steps
+
+
 def _state_weights(path: Path) -> dict[str, torch.Tensor]:
     st = torch.load(path, map_location="cpu", weights_only=True)
     return {k: v.clone() for k, v in st["net"]["state_dict"].items()}

@@ -500,3 +500,14 @@ fn ninja_scroll_shivs_carry_the_shiv_tag() {
         assert!(c.tags.contains(sts2_core::cards::CardTag::Shiv));
     }
 }
+
+/// Each Earring auto-play is one `CardPlayFinished` entry, so Gold Axe
+/// (`History.CardPlaysFinished.Count`) counts it once (Spire Bench seeds
+/// 180000541, 180001899, GH #1907).
+#[test]
+fn each_auto_play_counts_once_toward_card_plays_finished() {
+    let (state, _uids, _) =
+        run_turn_one(Setup::new(&[CardId::Bash, STRIKE, DEFEND, STRIKE, DEFEND]));
+    assert_eq!(ids(&state, &state.player.discard).len(), 3);
+    assert_eq!(state.combat_log.player_card_plays_this_combat, 3);
+}

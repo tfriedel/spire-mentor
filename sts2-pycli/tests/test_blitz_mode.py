@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import sts2_client
 
-HAS_BLITZ = sts2_client.GAME_VERSION == "v0.113.0"
+HAS_BLITZ = sts2_client.GAME_VERSION in ("v0.113.0", "v0.114.0")
 needs_blitz = pytest.mark.skipif(not HAS_BLITZ, reason="GameMode.Blitz exists from v0.113.0")
 
 LINE = ["Monster", "Monster", "Shop", "Elite", "Treasure", "RestSite"]

@@ -146,6 +146,9 @@ RELIC_COUNTER_DISPLAY_BY_VERSION: dict[str, dict[str, Callable[[int], int | None
     "v0.107.1": RELIC_COUNTER_DISPLAY,
     "v0.111.0": RELIC_COUNTER_DISPLAY_V0111,
     "v0.113.0": RELIC_COUNTER_DISPLAY_V0113,
+    # v0.114.0 changes no relic's DisplayAmount (HappyFlower still shows
+    # TurnsSeen % 3; Wuppy, the Clone option and HappyFlower's timing aside).
+    "v0.114.0": RELIC_COUNTER_DISPLAY_V0113,
 }
 
 

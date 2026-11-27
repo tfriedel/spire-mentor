@@ -121,3 +121,53 @@ def test_an_act3_boss_fight_is_tracked_on_its_own_build(game, encounter):
             full = game.end_turn()
     assert total >= 8
     assert not wrong, wrong
+
+
+def test_a_reviving_corpse_is_rebuilt_on_its_revive_move(game):
+    """GH #1933: the Test Subject's corpse sits in ``dead_enemies`` until its
+    RESPAWN. Rebuilt without a move, it came back AI-less, rolling a
+    stand-in Attack 5 where the boss telegraphs its next form's opening."""
+    import json as _json
+
+    from sts2_hint import adapter
+    from test_referee_rng import Host
+
+    state = game.start(character="Ironclad", seed="MVREVIVE", ascension=10)
+    game.skip_neow(state)
+    game.set_player(hp=9999, max_hp=9999, deck=["BLUDGEON"] * 10, relics=[], potions=[])
+    full = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+    tracker = MoveTracker("Ironclad", 10, "v0.111.0")
+    revived = 0
+    with Host(referee=True) as host:
+        for _ in range(30):
+            if full.get("decision") != "combat_play":
+                break
+            while full.get("decision") == "combat_play" and full.get("energy", 0) >= 3:
+                # PainfulStabs shuffles Wounds in; play a Bludgeon.
+                ids = [c.get("id") for c in full.get("hand") or []]
+                if "CARD.BLUDGEON" not in ids:
+                    break
+                full = game.play_card(ids.index("CARD.BLUDGEON"), 0)
+            if full.get("decision") != "combat_play":
+                break
+            view = _json.loads(host.send(cmd="referee_project", payload=full)["view"])
+            alive, dead = tracker.infer_board(view)
+            board = {**view, "game_version": "v0.111.0"}
+            for enemy, guess in [
+                *zip(board["enemies"], alive),
+                *zip(board.get("dead_enemies") or [], dead),
+            ]:
+                enemy["move_state"], enemy["ai"] = guess["move_state"], guess["ai"]
+            if not board.get("dead_enemies"):
+                full = game.end_turn()
+                continue
+            assert [g["move_state"] for g in dead] == ["RESPAWN"]
+            rebuilt = sts2_rs.state_from_dict(
+                adapter.translate(board, character="Ironclad", ascension=10)
+            )
+            rebuilt.apply({"action": "end_turn"})
+            boss = sts2_rs.state_to_dict(rebuilt)["encounter"][0]
+            full = game.end_turn()
+            assert boss["move_state"] is not None, "revived AI-less"
+            revived += 1
+    assert revived == 2

@@ -20,7 +20,11 @@ use sts2_core::{
     MonsterKind, Power, PowerKind, PowerUid,
 };
 
-const VERSIONS: [GameVersion; 2] = [GameVersion::V0_111_0, GameVersion::V0_113_0];
+const VERSIONS: [GameVersion; 3] = [
+    GameVersion::V0_111_0,
+    GameVersion::V0_113_0,
+    GameVersion::V0_114_0,
+];
 
 /// One 1-HP Nibbit, a player with Juggernaut 5 and 5 energy.
 fn fresh(version: GameVersion, character: CharacterId) -> CombatState {

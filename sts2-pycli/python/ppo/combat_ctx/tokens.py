@@ -302,13 +302,20 @@ def enchantment_norm(name: str) -> str:
 def _kinds() -> dict[str, str]:
     """The engine registry kind of each content table: the frozen universes, or, in a
     process whose e2e lane plays a later build (`ppo.e2e.build`, GH #1535), every
-    build's (`card_any`, ...), so that build's content has rows of its own. The Rust
+    build's (`relic_any`, ...), so that build's content has rows of its own. The Rust
     twin is `sts2_e2e::sctx` (`sts2_e2e::build::later`)."""
     from ppo.e2e import build
 
     if build.GAME_VERSION == build.DEFAULT_BUILD:
         return {"card": "card", "potion": "potion", "relic": "relic", "power": "power"}
-    return {"card": "card_any", "potion": "potion_any", "relic": "relic_any", "power": "power_any"}
+    # Cards: the universe as the lane's build left it (frozen per build); a newer
+    # build's cards would shift the sorted rows a trained net embeds (GH #1924).
+    return {
+        "card": build.CARD_KIND[build.GAME_VERSION],
+        "potion": "potion_any",
+        "relic": "relic_any",
+        "power": "power_any",
+    }
 
 
 @lru_cache(maxsize=1)

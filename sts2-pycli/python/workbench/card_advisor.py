@@ -298,6 +298,9 @@ def advise(
                 inconclusive += 1
                 _tick(idx)
                 continue
+            # The rollout plays as the agent: no event option that would kill.
+            if hasattr(sim, "offer_lethal_event_options"):
+                sim.offer_lethal_event_options = False
             # Paired across candidates: same run seed + policy seed per rollout
             # r, so the only difference is the card added on this branch.
             sim.reseed_run(base_seed + r)

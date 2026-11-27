@@ -22,7 +22,12 @@ STAR_CARD = "CARD.ASTRAL_PULSE"
 #: A Silent seed whose first Splash offers `STAR_CARD`, per game build: v0.111.0
 #: rehashed every seed (XxHash64), so STARPROBE14 offers other cards there;
 #: STARPROBE69 was found on the v0.113.0 C# headless (STARPROBE1..68 offer none).
-_STAR_SEED = {"v0.107.1": "STARPROBE14", "v0.111.0": "STARPROBE31", "v0.113.0": "STARPROBE69"}
+_STAR_SEED = {
+    "v0.107.1": "STARPROBE14",
+    "v0.111.0": "STARPROBE31",
+    "v0.113.0": "STARPROBE69",
+    "v0.114.0": "STARPROBE69",
+}
 
 
 def test_splashed_star_card_is_free_in_stars_and_playable(game):

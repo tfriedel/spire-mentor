@@ -78,7 +78,7 @@ const ZH_FILES: &[(&str, &str)] = &[
 /// The non-default game builds with a sibling bundle under `data/game/<ver>/`.
 /// Keep in step with `sts2_core::GameVersion::ALL` (a `data.rs` test
 /// checks) and `bundle_workbench_data.py`'s `_VERSIONS`.
-const VERSIONED: &[&str] = &["v0.111.0", "v0.113.0"];
+const VERSIONED: &[&str] = &["v0.111.0", "v0.113.0", "v0.114.0"];
 
 fn main() {
     sts2_srchash::emit_build_stamp("sts2-workbench", "STS2_WORKBENCH_SRC_HASH");

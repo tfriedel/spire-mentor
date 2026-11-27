@@ -2204,6 +2204,9 @@ pub fn build_run_manager(
     // Present on-obtain card removals / upgrades / transforms as player
     // card_selects, matching C#; grant the chosen Neow relic directly.
     rm.run_state.set_agent_decisions();
+    // A human plays: show the event options that would kill them, as the
+    // game does (the policies still skip them).
+    rm.run_state.offer_lethal_event_options = true;
     rm.run_state.interactive_potion_swap = false;
     // GH #544: which of the two Act-1 models this run walks — set BEFORE
     // `initialize_run_setup`, which pre-generates every act's rooms.
@@ -2271,6 +2274,9 @@ fn build_import_run_manager(
     // No `with_neow_start`: not a fresh run.
     let mut rm = new_string_seed_run(version, cid, seed, ascension);
     rm.run_state.set_agent_decisions();
+    // A human plays: show the event options that would kill them, as the
+    // game does (the policies still skip them).
+    rm.run_state.offer_lethal_event_options = true;
     rm.run_state.interactive_potion_swap = false;
     // The game rolled this Act-1 for the player; `with_rolled_act1` rolls the
     // same, and must run BEFORE `initialize_run_setup` pre-generates rooms.
@@ -2578,6 +2584,9 @@ pub fn build_faithful_run_manager(
         .with_run_seed(u64::from(seed as u32));
     let mut rm = rm.with_neow_start();
     rm.run_state.set_agent_decisions();
+    // A human plays: show the event options that would kill them, as the
+    // game does (the policies still skip them).
+    rm.run_state.offer_lethal_event_options = true;
     rm.run_state.interactive_potion_swap = false;
     let mut rm = match act1 {
         "overgrowth" => rm.with_act1(ActVariant::Overgrowth),

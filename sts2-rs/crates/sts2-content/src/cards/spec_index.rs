@@ -739,6 +739,9 @@ pub const V0111_ONLY_SPECS: &[fn() -> CardSpec] = &[
     fs::the_world,
     fs::wheel_of_fortune,
     fs::sadness,
+    // v0.114.0-only Fool cards (`CardId::V0114_ONLY`).
+    fs::optimism,
+    fs::twin_shot,
 ];
 
 /// Auto-listed status card factories (75 entries).
@@ -934,11 +937,16 @@ pub(crate) fn specs_in(
     version: sts2_core::GameVersion,
 ) -> impl Iterator<Item = CardSpec> {
     let v0113 = version >= sts2_core::GameVersion::V0_113_0;
+    let v0114 = super::v0111::is_v0114(version);
     slice.iter().flat_map(move |f| {
         let spec = super::v0111::pool_spec(*f, version);
         let shinies =
             (v0113 && spec.id == CardId::MindBlast).then(crate::cards::colorless::my_shinies::spec);
-        std::iter::once(spec).chain(shinies)
+        // v0.114.0 `FoolCardPool.cs`: Optimism follows Nock (a Fool-only
+        // card, so only the Fool slice inserts it).
+        let optimism = (v0114 && spec.id == CardId::Nock)
+            .then(|| super::v0111::spec_for(super::fool::specs::optimism(), version));
+        std::iter::once(spec).chain(shinies).chain(optimism)
     })
 }
 
@@ -2607,7 +2615,9 @@ pub fn character_for_card_id(card_id: CardId) -> Option<CharacterId> {
     }
     // v0.113.0 `FoolCardPool` (its 90 cards; the Fool tokens sit in
     // `TokenCardPool`). Fool ids exist in no earlier build's state.
-    if super::fool::FOOL_POOL_V0113.contains(&card_id) {
+    if super::fool::FOOL_POOL_V0113.contains(&card_id)
+        || super::fool::FOOL_POOL_V0114.contains(&card_id)
+    {
         return Some(CharacterId::Fool);
     }
     v0111_card_character(card_id)

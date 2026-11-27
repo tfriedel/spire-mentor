@@ -6,6 +6,8 @@ use super::prelude::*;
 pub const MY_SHINIES_GOLD_PER_HIT: i32 = 20;
 /// [`MY_SHINIES_GOLD_PER_HIT`] after the upgrade.
 pub const MY_SHINIES_GOLD_PER_HIT_UPGRADED: i32 = 10;
+/// v0.114.0 gold per hit (`GoldVar(25)`, not upgraded).
+pub const MY_SHINIES_GOLD_PER_HIT_V0114: i32 = 25;
 
 /// `CalculatedHits` (v0.113.0 `Cards/MyShinies.cs`): `CalculationBase(0) +
 /// CalculationExtra(1) * Owner.Gold / Gold.BaseValue`, cast to `int` (a
@@ -15,6 +17,11 @@ pub(crate) fn preview_my_shinies(
     card: &Card,
     _target: Option<CreatureUid>,
 ) -> i32 {
+    if state.game_version >= sts2_core::GameVersion::V0_114_0 {
+        // v0.114.0 `MyShinies.cs`: `CalculationBaseVar(1)`, `GoldVar(25)` with
+        // no upgrade (the upgrade is Damage +1): `(int)(1 + Gold / 25m)`.
+        return 1 + state.gold.max(0) / MY_SHINIES_GOLD_PER_HIT_V0114;
+    }
     let per_hit = if card.upgraded {
         MY_SHINIES_GOLD_PER_HIT_UPGRADED
     } else {

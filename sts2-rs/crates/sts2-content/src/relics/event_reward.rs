@@ -619,6 +619,10 @@ fn install_listeners() {
         RelicId::FakeHappyFlower,
         listener_fake_happy_flower as AfterSideTurnStartFn,
     );
+    register_before_side_turn_start(
+        RelicId::FakeHappyFlower,
+        listener_fake_happy_flower_count as BeforeSideTurnStartFn,
+    );
     register_before_combat_start(
         RelicId::TeaOfDiscourtesy,
         listener_tea_of_discourtesy as BeforeCombatStartFn,
@@ -1485,7 +1489,10 @@ fn listener_lost_wisp(state: &mut CombatState, ctx: &CardEventCtx) -> EffectResu
 /// `Relic.counter` and applies energy when the new value is a
 /// non-zero multiple of 5 — observably identical to Python.
 fn listener_fake_happy_flower(state: &mut CombatState, side: Side) -> EffectResult {
-    if side != Side::Player {
+    // v0.114.0 counts in `BeforeSideTurnStart` and grants in
+    // `AfterPlayerTurnStartEarly` (`listener_fake_happy_flower_count`,
+    // `sts2_core::relic_effects::happy_flower::grant_turn_start_energy_early`).
+    if side != Side::Player || state.game_version >= sts2_core::GameVersion::V0_114_0 {
         return EffectResult::NotImplemented;
     }
     // Find FakeHappyFlower in `state.relics` and post-increment its
@@ -1511,6 +1518,26 @@ fn listener_fake_happy_flower(state: &mut CombatState, side: Side) -> EffectResu
     }
     state.gain_energy(1);
     EffectResult::Resolved
+}
+
+/// v0.114.0 `FakeHappyFlower.BeforeSideTurnStart` (FakeHappyFlower.cs:101-106):
+/// the turn counter advances at the top of the owner's turn; the energy waits
+/// for `AfterPlayerTurnStartEarly`, after the hand draw.
+fn listener_fake_happy_flower_count(state: &mut CombatState, side: Side) -> EffectResult {
+    if side != Side::Player || state.game_version < sts2_core::GameVersion::V0_114_0 {
+        return EffectResult::NotImplemented;
+    }
+    match state
+        .relics
+        .iter_mut()
+        .find(|r| !r.is_melted && r.kind == RelicKind::FakeHappyFlower)
+    {
+        Some(relic) => {
+            relic.counter = relic.counter.saturating_add(1);
+            EffectResult::Resolved
+        }
+        None => EffectResult::NotImplemented,
+    }
 }
 
 /// `TeaOfDiscourtesy::before_combat_start` — add 2 Dazed to the draw

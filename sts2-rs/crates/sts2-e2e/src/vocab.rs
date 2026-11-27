@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 const TSV: &str = include_str!("../data/vocab_v0111.tsv");
 const TSV_V0113: &str = include_str!("../data/vocab_v0113.tsv");
+const TSV_V0114: &str = include_str!("../data/vocab_v0114.tsv");
 
 /// A registry block of the table (`REGISTRIES`, in block order).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -175,13 +176,7 @@ impl Vocab {
 #[must_use]
 pub fn load() -> &'static Vocab {
     static V: crate::build::PerBuild<Vocab> = crate::build::PerBuild::new();
-    V.get(|| {
-        Vocab::parse(if crate::build::later() {
-            TSV_V0113
-        } else {
-            TSV
-        })
-    })
+    V.get(|| Vocab::parse(crate::build::pick(TSV, TSV_V0113, TSV_V0114)))
 }
 
 #[cfg(test)]
@@ -201,5 +196,25 @@ mod tests {
         );
         assert!(v.id(Reg::Card, Some("StrikeIronclad")) >= 32);
         assert_eq!(enchantment_norm("Tezcatara's Ember"), "TEZCATARAS_EMBER");
+    }
+
+    /// Append-only across builds: each later table starts with the previous
+    /// build's rows verbatim (`ppo/e2e/vocab.py`), so a net carried forward
+    /// keeps every id's meaning.
+    #[test]
+    fn later_tables_extend_the_previous_builds() {
+        let rows = |t: &'static str| -> Vec<&'static str> {
+            t.lines().filter(|l| !l.starts_with('#')).collect()
+        };
+        for (old, new) in [(TSV, TSV_V0113), (TSV_V0113, TSV_V0114)] {
+            let (old, new) = (rows(old), rows(new));
+            assert!(new.len() > old.len());
+            assert_eq!(new[..old.len()], old[..]);
+        }
+        let _b = crate::build::Scope::enter(sts2_core::GameVersion::V0_114_0);
+        let v = load();
+        assert_eq!(v.id(Reg::Card, Some("OPTIMISM")), 2136);
+        assert_eq!(v.id(Reg::Card, Some("TwinShot")), 2137);
+        assert_eq!(v.id(Reg::Card, Some("RAPID_SHOT")), 2016);
     }
 }

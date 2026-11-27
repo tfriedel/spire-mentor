@@ -22,6 +22,7 @@ use crate::vocab::{self, Reg};
 
 const CARD_TYPES_TSV: &str = include_str!("../data/card_types_v0111.tsv");
 const CARD_TYPES_TSV_V0113: &str = include_str!("../data/card_types_v0113.tsv");
+const CARD_TYPES_TSV_V0114: &str = include_str!("../data/card_types_v0114.tsv");
 
 /// `static_tables.CARD_TYPES`.
 const CARD_TYPES: [&str; 6] = ["Attack", "Skill", "Power", "Status", "Curse", "Quest"];
@@ -231,13 +232,15 @@ pub struct SctxVocab {
 }
 
 /// `combat_ctx.tokens._kinds`: a later lane build reads every build's
-/// universe (`card_any`, ...) for the content tables.
+/// universe (`relic_any`, ...) for the content tables; for cards, the universe
+/// as that build left it (`card_v0113`, `card_v0114`), so a newer build's
+/// cards do not move a trained net's rows.
 fn reg_kind(kind: &str) -> &str {
     if !crate::build::later() {
         return kind;
     }
     match kind {
-        "card" => "card_any",
+        "card" => crate::build::pick("card", "card_v0113", "card_v0114"),
         "potion" => "potion_any",
         "relic" => "relic_any",
         "power" => "power_any",
@@ -308,11 +311,8 @@ impl SctxVocab {
         }
         let mut card_type = HashMap::new();
         let mut card_type_canon = HashMap::new();
-        let card_types_tsv = if crate::build::later() {
-            CARD_TYPES_TSV_V0113
-        } else {
-            CARD_TYPES_TSV
-        };
+        let card_types_tsv =
+            crate::build::pick(CARD_TYPES_TSV, CARD_TYPES_TSV_V0113, CARD_TYPES_TSV_V0114);
         for line in card_types_tsv.lines() {
             if line.is_empty() || line.starts_with('#') {
                 continue;
@@ -969,6 +969,43 @@ mod tests {
         let want = [601, 4, 299, 66, 272, 123, 25, 11, 16, 7, 14, 33, 8, 8, 1267];
         let got: Vec<usize> = vocab().tables.iter().map(Table::size).collect();
         assert_eq!(got, want);
+    }
+
+    /// Each later build's tables (`contracts.SCTX_TABLE_SIZES_BY_BUILD`):
+    /// v0.114.0's card table adds Optimism and Twin Shot to v0.113.0's
+    /// frozen universe, and its LUT maps them to `vocab_v0114.tsv`'s new
+    /// rows; on v0.113.0 they stay UNK, so a v0.113.0 lane is unchanged.
+    #[test]
+    fn later_builds_table_sizes_and_new_cards() {
+        let v0113 = [722, 4, 318, 69, 321, 124, 25, 11, 16, 7, 14, 33, 8, 8, 1512];
+        let v0114 = [724, 4, 318, 69, 321, 124, 25, 11, 16, 7, 14, 33, 8, 8, 1516];
+        let card = slot("card");
+        for (gv, want, new_ids) in [
+            (sts2_core::GameVersion::V0_113_0, v0113, None),
+            (sts2_core::GameVersion::V0_114_0, v0114, Some((2136, 2137))),
+        ] {
+            let _b = crate::build::Scope::enter(gv);
+            let got: Vec<usize> = vocab().tables.iter().map(Table::size).collect();
+            assert_eq!(got, want, "{gv}");
+            let tab = vocab().table(card);
+            let lut = &luts()[card];
+            let row = |n: &str| usize::try_from(tab.index(n)).unwrap();
+            let unk = usize::try_from(tab.unk).unwrap();
+            match new_ids {
+                None => {
+                    assert_eq!(row("OPTIMISM"), unk);
+                    assert_eq!(row("TWIN_SHOT"), unk);
+                }
+                Some((opt, twin)) => {
+                    assert_eq!(lut[row("OPTIMISM")], opt);
+                    assert_eq!(lut[row("TWIN_SHOT")], twin);
+                    assert_eq!(vocab().card_type_any("TWIN_SHOT"), "Attack");
+                    assert_eq!(vocab().card_type_any("OPTIMISM"), "Skill");
+                }
+            }
+            // Rapid Shot keeps its v0.113.0 id on both builds.
+            assert_eq!(lut[row("RAPID_SHOT")], 2016, "{gv}");
+        }
     }
 
     /// RL2 S04 is the live max energy: a Pyre gained this turn counts at

@@ -2475,7 +2475,9 @@ const SEAL_OF_GOLD_ENERGY: i32 = 1;
 const fn seal_of_gold_cost(version: sts2_core::GameVersion) -> i32 {
     match version {
         sts2_core::GameVersion::V0_107_1 => SEAL_OF_GOLD_COST,
-        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 3,
+        sts2_core::GameVersion::V0_111_0
+        | sts2_core::GameVersion::V0_113_0
+        | sts2_core::GameVersion::V0_114_0 => 3,
     }
 }
 
@@ -2587,7 +2589,9 @@ fn listener_signet_ring(rs: &mut RunState) -> EffectResult {
     // v0.111.0: `GoldVar(999)` -> `GoldVar(888)` (decomp SignetRing.cs:13).
     let gold = match rs.game_version {
         sts2_core::GameVersion::V0_107_1 => SIGNET_RING_GOLD,
-        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 888,
+        sts2_core::GameVersion::V0_111_0
+        | sts2_core::GameVersion::V0_113_0
+        | sts2_core::GameVersion::V0_114_0 => 888,
     };
     rs.gain_gold(gold);
     EffectResult::Resolved
@@ -4292,7 +4296,12 @@ fn listener_paels_growth_rest_site_options(
     rs: &RunState,
     options: &mut Vec<RestSiteOption>,
 ) -> EffectResult {
-    if !rs.owns_active_relic(RelicId::PaelsGrowth) {
+    // v0.114.0 moved this to the Clone enchantment
+    // (`RunState::rest_site_options`), so a Clone card removed from the deck
+    // takes the option with it.
+    if !rs.owns_active_relic(RelicId::PaelsGrowth)
+        || rs.game_version >= sts2_core::GameVersion::V0_114_0
+    {
         return EffectResult::NotImplemented;
     }
     options.push(RestSiteOption::Clone);
@@ -5598,7 +5607,9 @@ pub const TOY_BOX_RELICS: usize = 4;
 pub const fn toy_box_relics(version: sts2_core::GameVersion) -> usize {
     match version {
         sts2_core::GameVersion::V0_107_1 => TOY_BOX_RELICS,
-        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 5,
+        sts2_core::GameVersion::V0_111_0
+        | sts2_core::GameVersion::V0_113_0
+        | sts2_core::GameVersion::V0_114_0 => 5,
     }
 }
 
@@ -5796,7 +5807,9 @@ pub const FUR_COAT_COMBATS: usize = 7;
 pub const fn fur_coat_combats(version: sts2_core::GameVersion) -> usize {
     match version {
         sts2_core::GameVersion::V0_107_1 => FUR_COAT_COMBATS,
-        sts2_core::GameVersion::V0_111_0 | sts2_core::GameVersion::V0_113_0 => 8,
+        sts2_core::GameVersion::V0_111_0
+        | sts2_core::GameVersion::V0_113_0
+        | sts2_core::GameVersion::V0_114_0 => 8,
     }
 }
 
@@ -10838,6 +10851,38 @@ mod tests {
             .filter(|c| c.enchantment(EnchantmentId::Clone) == 4)
             .count();
         assert_eq!(cloned, 1, "exactly 1 card enchanted with Clone(4)");
+    }
+
+    /// The Clone rest-site option: Pael's Growth offers it through v0.113
+    /// (whether or not a Clone card is left), the Clone enchantment from
+    /// v0.114.0 (once, however many Clone cards; gone with the card).
+    #[test]
+    fn the_clone_rest_option_follows_the_enchantment_from_v0114() {
+        use sts2_core::cards::{CardId, EnchantmentId};
+        use sts2_core::runstate::RunState;
+        crate::relics::dispatch::ensure_installed();
+        let clones = |rs: &RunState| {
+            rs.rest_site_options()
+                .iter()
+                .filter(|o| matches!(o, RestSiteOption::Clone))
+                .count()
+        };
+        for (version, with_cards, without_cards) in [
+            (sts2_core::GameVersion::V0_113_0, 1, 1),
+            (sts2_core::GameVersion::V0_114_0, 1, 0),
+        ] {
+            let mut rs = RunState::new();
+            rs.game_version = version;
+            rs.relics.push(RelicId::PaelsGrowth);
+            push_deck_card(&mut rs, CardId::StrikeIronclad);
+            push_deck_card(&mut rs, CardId::DefendIronclad);
+            for c in &mut rs.master_deck {
+                c.set_enchantment(EnchantmentId::Clone, 4);
+            }
+            assert_eq!(clones(&rs), with_cards, "{version:?}: two Clone cards");
+            rs.master_deck.clear();
+            assert_eq!(clones(&rs), without_cards, "{version:?}: no Clone card");
+        }
     }
 
     /// Bead `sts2-rs-70anj.4`: PaelsGrowth listener is a no-op without

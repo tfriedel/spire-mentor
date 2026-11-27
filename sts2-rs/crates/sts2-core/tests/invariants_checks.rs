@@ -699,6 +699,20 @@ fn duplicate_power_kind_on_creature_fails() {
     );
 }
 
+/// The Fool's instanced powers (`ShowOff` Instanced, `Impaled` and `SicEm`
+/// InstancedPerApplier in the v0.113.1 and v0.114.0 decomps) may repeat: four
+/// Show Off plays leave four `ShowOff` instances, as in C#.
+#[test]
+fn fool_instanced_powers_may_repeat_on_one_owner() {
+    for kind in [PowerKind::ShowOff, PowerKind::Impaled, PowerKind::SicEm] {
+        let mut s = valid_state();
+        s.powers = vec![Power::new(nz(1), kind, 2), Power::new(nz(2), kind, 2)].into();
+        s.creatures[0].powers.push(puid(1));
+        s.creatures[0].powers.push(puid(2));
+        assert!(check_combat_invariants(&s, "t").is_ok(), "{kind:?}");
+    }
+}
+
 /// Two DIFFERENT kinds on one owner is the normal case.
 #[test]
 fn distinct_power_kinds_on_one_owner_pass() {

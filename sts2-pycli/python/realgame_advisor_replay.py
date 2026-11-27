@@ -149,6 +149,7 @@ def replay(
     # A fresh Instinct per replay: its run graft is carried state.
     ra.INSTINCT = ra.InstinctAdvisor()
     ra.LAST_COMBAT.clear()
+    ra.RUN_HP = ra.FightRunHp()
     args = argparse.Namespace(
         sims=sims,
         boss_sims=boss_sims,

@@ -60,8 +60,7 @@ internal static class GameVersionFormat
     /// ships hotfixes as bug-fix updates, and the advisor runs them on the
     /// base build's engine (<c>sts2_client.hotfix_base</c>). Null when no
     /// build fits: a new minor is a content update, not a hotfix, unless
-    /// <see cref="PlaysAs"/> names its line (<c>"v0.114.0"</c> plays as
-    /// <c>"v0.113.0"</c> when that is listed). Both sides are compared in wire
+    /// <see cref="PlaysAs"/> names its line. Both sides are compared in wire
     /// form (<see cref="Normalize"/>).
     /// </summary>
     public static string? EngineBuild(string? version, IEnumerable<string> builds)
@@ -95,14 +94,12 @@ internal static class GameVersionFormat
 
     /// <summary>
     /// Game lines the advisor has no build of yet, each with the build it
-    /// plays on, for every patch of the line. v0.114.0 (public-beta
-    /// 2026-11-25) runs on the v0.113.0 engine until it has its own. Twins:
-    /// <c>sts2_client.PLAYS_AS</c>, Rust <c>game_version::PLAYS_AS</c>.
+    /// plays on, for every patch of the line. Empty while every released
+    /// line has a build (v0.114.x played as v0.113.0 this way until GH
+    /// #1924). Twins: <c>sts2_client.PLAYS_AS</c>, Rust
+    /// <c>game_version::PLAYS_AS</c>.
     /// </summary>
-    public static readonly ((long Major, long Minor) Line, string Engine)[] PlaysAs =
-    {
-        ((0, 114), "v0.113.0"),
-    };
+    public static readonly ((long Major, long Minor) Line, string Engine)[] PlaysAs = { };
 
     /// <summary>The three numbers of a wire-form build (<c>"v0.113.1"</c>).</summary>
     private static bool TryParts(string wire, out long major, out long minor, out long patch)

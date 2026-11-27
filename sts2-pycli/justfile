@@ -189,7 +189,7 @@ regression-test: build-cs
 # left the per-PR gate on 2026-11-14 and gate-full on 2026-11-19 (GH #1572,
 # Steam no longer serves it): run `just test-107` on demand. A game version that ships is
 # an entry here; a build outside the gate rots silently.
-gate_builds := "v0.111.0 v0.113.0"
+gate_builds := "v0.111.0 v0.113.0 v0.114.0"
 
 # How many seeds the full-run parity sweeps walk in the per-PR gate
 # (`PARITY_SEEDS`; the full sweep, `just test-slow`, is 20).
@@ -389,6 +389,7 @@ build-cs-all:
     @just build-cs v0.107.1
     @just build-cs v0.111.0
     @just build-cs v0.113.0
+    @just build-cs v0.114.0
 
 # Build the native SimAdvisor (GH #1426): the Rust binary staged with its
 # nets and tables into dist/SimAdvisor/ (as SimAdvisor-<os>-<arch>, or

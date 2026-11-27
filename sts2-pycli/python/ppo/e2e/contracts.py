@@ -147,10 +147,20 @@ _SCTX_TABLE_SIZES_V0113: Final[Mapping[str, int]] = {
     "monster": 124,
     "rl2key": 1512,
 }
-SCTX_TABLE_SIZES: Final[Mapping[str, int]] = {
+# A v0.114.0 lane: v0.113.0's, with Optimism and Twin Shot in the frozen `card_v0114`
+# universe (two cards, four rl2 keys); the other registries are unchanged.
+_SCTX_TABLE_SIZES_V0114: Final[Mapping[str, int]] = {
+    **_SCTX_TABLE_SIZES_V0113,
+    "card": 724,
+    "rl2key": 1516,
+}
+#: Each lane build's S_ctx table sizes (`migrate` rebuilds an older build's schema).
+SCTX_TABLE_SIZES_BY_BUILD: Final[Mapping[str, Mapping[str, int]]] = {
     "v0.111.0": _SCTX_TABLE_SIZES_V0111,
     "v0.113.0": _SCTX_TABLE_SIZES_V0113,
-}[_build.GAME_VERSION]
+    "v0.114.0": _SCTX_TABLE_SIZES_V0114,
+}
+SCTX_TABLE_SIZES: Final[Mapping[str, int]] = SCTX_TABLE_SIZES_BY_BUILD[_build.GAME_VERSION]
 SCTX_PAD: Final[tuple[int, ...]] = tuple(SCTX_TABLE_SIZES[s] - 1 for s in SCTX_SLOTS)
 SCTX_INTENT_KINDS: Final = (
     "Attack",

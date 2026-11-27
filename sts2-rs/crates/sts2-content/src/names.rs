@@ -235,6 +235,7 @@ pub fn card_id_from_str(input: &str) -> Option<CardId> {
     let v0111: Vec<CardId> = CardId::V0111_ONLY
         .iter()
         .chain(CardId::V0113_ONLY.iter())
+        .chain(CardId::V0114_ONLY.iter())
         .copied()
         .collect();
     let v0111_names: Vec<&'static str> = v0111.iter().map(|v| v.to_python_name()).collect();

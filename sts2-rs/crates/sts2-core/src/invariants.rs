@@ -60,7 +60,8 @@ pub const BLOCK_RETENTION_RELICS: &[RelicKind] = &[
 /// one owner can legally hold more than one instance: every apply of an
 /// `Instanced` kind adds a new one, and an `InstancedPerApplier` kind adds
 /// one per applier. This is the full v0.111.0 decomp set (23 kinds; v0.107.1
-/// lacks only Cacophony and ImitationLearning). It is wider than
+/// lacks only Cacophony and ImitationLearning) plus the Fool's three (v0.113.0
+/// on: `ShowOff` Instanced, `Impaled` and `SicEm` InstancedPerApplier). It is wider than
 /// [`crate::card_effects::power_kind_is_instanced`], which lists only the
 /// kinds the engine's apply path already instances: a state rebuilt from a C#
 /// snapshot can carry duplicates of the rest, and they are legal (#1105).
@@ -75,6 +76,7 @@ pub const fn power_kind_may_repeat(kind: PowerKind) -> bool {
             | PowerKind::Guarded
             | PowerKind::Heist
             | PowerKind::ImitationLearning
+            | PowerKind::Impaled
             | PowerKind::Knockdown
             | PowerKind::MagicBomb
             | PowerKind::Monologue
@@ -84,6 +86,8 @@ pub const fn power_kind_may_repeat(kind: PowerKind) -> bool {
             | PowerKind::Panache
             | PowerKind::RollingBoulder
             | PowerKind::Sandpit
+            | PowerKind::ShowOff
+            | PowerKind::SicEm
             | PowerKind::Strangle
             | PowerKind::Swipe
             | PowerKind::TagTeam

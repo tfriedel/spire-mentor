@@ -1850,6 +1850,42 @@ pub const fn sadness() -> CardSpec {
     }
 }
 
+/// v0.114.0-only `Optimism` (`Models.Cards/Optimism.cs`): Rare Skill, cost 1,
+/// Self, Exhaust (the upgrade removes it).
+#[must_use]
+pub const fn optimism() -> CardSpec {
+    CardSpec {
+        id: CardId::Optimism,
+        name: "OPTIMISM",
+        cost: 1,
+        card_type: CardType::Skill,
+        target_type: TargetType::Self_,
+        rarity: CardRarity::Rare,
+        base_damage: 0,
+        base_block: 0,
+        keywords: CardKeywords::EXHAUST,
+        ..CardSpec::base()
+    }
+}
+
+/// v0.114.0-only `TwinShot` (`Models.Cards/TwinShot.cs`): Common Attack,
+/// cost 1, AnyEnemy, `DamageVar(7, Move | FromArrow)` x `HitCountVar(2)`.
+#[must_use]
+pub const fn twin_shot() -> CardSpec {
+    CardSpec {
+        id: CardId::TwinShot,
+        name: "TWIN_SHOT",
+        cost: 1,
+        card_type: CardType::Attack,
+        target_type: TargetType::Enemy,
+        rarity: CardRarity::Common,
+        base_damage: 7,
+        base_block: 0,
+        keywords: CardKeywords::NONE,
+        ..CardSpec::base()
+    }
+}
+
 /// Every Fool card factory, in the order of [`super::FOOL_CARDS`].
 pub const FOOL_SPECS: &[fn() -> CardSpec] = &[
     all_is_well,
@@ -1967,6 +2003,8 @@ pub const FOOL_SPECS: &[fn() -> CardSpec] = &[
     the_world,
     wheel_of_fortune,
     sadness,
+    optimism,
+    twin_shot,
 ];
 
 /// Spec-level upgraded values (absolute) for a Fool card, from its C#
@@ -1975,6 +2013,20 @@ pub const FOOL_SPECS: &[fn() -> CardSpec] = &[
 #[must_use]
 pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
     match card_id {
+        // v0.114.0 `Optimism.cs`: RemoveKeyword(CardKeyword.Exhaust);
+        CardId::Optimism => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: None,
+            base_block: None,
+            keywords: Some(CardKeywords::NONE),
+        }),
+        // v0.114.0 `TwinShot.cs`: DynamicVars.Damage.UpgradeValueBy(3m);
+        CardId::TwinShot => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(10),
+            base_block: None,
+            keywords: None,
+        }),
         // `ArrowStab.cs`: DynamicVars.Damage.UpgradeValueBy(3m);
         CardId::ArrowStab => Some(CardUpgradeDelta {
             cost: None,

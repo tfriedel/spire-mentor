@@ -341,6 +341,12 @@ class AdvisorMirror:
         self._flush()
         return self.live if live else None
 
+    def set_advice_target(self, target: Any) -> None:
+        """Remember the last combat advice's board target (``best.target_index``,
+        None for an untargeted one): a play that kills its target reports a
+        null target, which the mirror recovers from it (GH #1918)."""
+        self._core.set_advice_target(target)
+
     def on_world_action(self, msg: dict[str, Any]) -> None:
         """Advance the mirror through an action the world just committed.
 

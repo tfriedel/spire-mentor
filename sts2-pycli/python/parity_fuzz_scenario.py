@@ -1767,9 +1767,28 @@ def _for_build(cards: list[str], added: list[str], game_version: str | None) -> 
     return [c for c in cards if c not in _V0111_REMOVED_CARDS] + added
 
 
+def _fool_v0114(cards: list[str]) -> list[str]:
+    """v0.114.0 `FoolCardPool.GenerateAllCards()` (GH #1924; Rust
+    `FOOL_POOL_V0114`): `OPTIMISM` right after `NOCK`, `TWIN_SHOT` in
+    `RAPID_SHOT`'s slot."""
+    out: list[str] = []
+    for c in cards:
+        if c == "RAPID_SHOT":
+            out.append("TWIN_SHOT")
+            continue
+        out.append(c)
+        if c == "NOCK":
+            out.append("OPTIMISM")
+    return out
+
+
 def class_cards_for_build(character: str, game_version: str | None = None) -> list[str]:
     """A character's class cards at `game_version` (default: the sweep build)."""
-    return _for_build(_V2_CLASS_CARDS[character], _V0111_ADDED_CLASS_CARDS[character], game_version)
+    version = game_version or sweep_game_version()
+    cards = _for_build(_V2_CLASS_CARDS[character], _V0111_ADDED_CLASS_CARDS[character], version)
+    if character == "Fool" and _version_tuple(version) >= (0, 114, 0):
+        cards = _fool_v0114(cards)
+    return cards
 
 
 def colorless_cards_for_build(game_version: str | None = None) -> list[str]:

@@ -83,6 +83,90 @@ def test_a_practice_mix_replaces_the_schedule() -> None:
             P.check_practice_mix(bad)
 
 
+def test_an_empty_practice_mix_is_the_schedule() -> None:
+    """{} changes nothing: the default splits, no character filter, the same draws."""
+    assert P.check_practice_mix({}) == {}
+    q, base = P.PracticeQueues(worker=2, seed=5, mix={}), P.PracticeQueues(worker=2, seed=5)
+    assert (q.share, q.boss, q.boss_mix, q.elite_mix, q.characters) == (None,) * 5
+    assert [q.draw_cell(3e8) for _ in range(500)] == [base.draw_cell(3e8) for _ in range(500)]
+    assert P.cell_probs(3e8, None, None, None) == P.cell_probs(3e8)
+    assert q.sink(lambda: 0, "Fool") is not None and q.sink(lambda: 0) is not None
+
+
+def test_a_boss_mix_replaces_the_default_split() -> None:
+    """ "boss_mix" weighs the BOSS_MIX cells (normalized; a cell left out weighs 0)."""
+    m = P.check_practice_mix(
+        {"boss": 0.8, "boss_mix": {"BOSS_ACT3_DOUBLE": 0.45, "BOSS_ACT2": 0.3, "BOSS_ACT1": 0.25}}
+    )
+    assert m["boss_mix"] == pytest.approx(
+        {"BOSS_ACT3_DOUBLE": 0.45, "BOSS_ACT2": 0.3, "BOSS_ACT1": 0.25}
+    )
+    q = P.PracticeQueues(worker=0, seed=1, mix=m)
+    probs = P.cell_probs(0, q.boss, q.boss_mix, q.elite_mix)
+    assert probs["BOSS_ACT2"] == pytest.approx(0.8 * 0.3)
+    assert probs["ELITE_ACT2"] == pytest.approx(0.2 * 0.40)  # the default elite split
+    assert math.isclose(sum(probs.values()), 1.0)
+    half = P.check_practice_mix({"boss_mix": {"BOSS_ACT2": 2, "BOSS_ACT1": 2}})["boss_mix"]
+    assert half == {"BOSS_ACT3_DOUBLE": 0.0, "BOSS_ACT2": 0.5, "BOSS_ACT1": 0.5}
+    q = P.PracticeQueues(worker=0, seed=2, mix={"boss": 1.0, "boss_mix": {"BOSS_ACT2": 1}})
+    assert {q.draw_cell(0) for _ in range(200)} == {"BOSS_ACT2"}
+
+
+def test_an_elite_mix_replaces_the_default_split() -> None:
+    m = P.check_practice_mix({"boss": 0.0, "elite_mix": {"ELITE_ACT1": 1, "ELITE_ACT3": 3}})
+    assert m["elite_mix"] == {"ELITE_ACT1": 0.25, "ELITE_ACT2": 0.0, "ELITE_ACT3": 0.75}
+    q = P.PracticeQueues(worker=0, seed=4, mix=m)
+    got = collections.Counter(q.draw_cell(0) for _ in range(4000))
+    assert set(got) == {"ELITE_ACT1", "ELITE_ACT3"}
+    assert abs(got["ELITE_ACT3"] / 4000 - 0.75) < 0.05
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"boss_mix": {"BOSS_ACT4": 1.0}},  # not a cell
+        {"boss_mix": {"ELITE_ACT1": 1.0}},  # an elite cell in the boss split
+        {"elite_mix": {"BOSS_ACT1": 1.0}},
+        {"boss_mix": {"BOSS_ACT1": -1.0, "BOSS_ACT2": 2.0}},
+        {"boss_mix": {"BOSS_ACT1": 0.0}},  # sums to 0
+        {"elite_mix": {"ELITE_ACT1": float("nan")}},
+        {"boss_mix": [0.5, 0.5]},
+        {"characters": ["Watcher"]},
+        {"characters": []},
+        {"characters": "Fool"},
+        {"boss_share": 0.8},  # the old Fool lane's spelling: "boss" here
+    ],
+)
+def test_a_bad_practice_mix_is_refused(bad: dict) -> None:
+    with pytest.raises(ValueError):
+        P.check_practice_mix(bad)
+
+
+def test_practice_characters_keep_only_their_runs_captures() -> None:
+    """ "characters": a run of another character captures nothing (no sink, no clones),
+    so every practice start replays one of these characters' runs."""
+    m = P.check_practice_mix({"characters": ["Fool", "Ironclad", "Fool"]})
+    assert m == {"characters": ["Ironclad", "Fool"]}  # deduplicated, contracts order
+    q = P.PracticeQueues(worker=0, mix={"characters": ["Fool"]})
+    assert q.sink(lambda: 0, "Ironclad") is None
+    assert q.stats["capture/skipped_character/Ironclad"] == 1
+    sink = q.sink(lambda: 3, "Fool")
+    assert sink is not None
+    sink(fake("BOSS_ACT2"))
+    assert q.size("BOSS_ACT2") == 1 and q.q["BOSS_ACT2"][-1].born == 3
+
+
+def test_a_segment_source_files_only_the_kept_characters_runs() -> None:
+    """The source hands each full run a sink for that run's character."""
+    keep = P.PracticeQueues(worker=0, seed=1, mix={"characters": [factory.CHARACTER]})
+    env = P.SegmentSource(keep, iter([SMOKE]), n_slots=1).next(0, 0)
+    assert env.cfg.on_capture is not None
+    other = next(c for c in C.CHARACTERS if c != factory.CHARACTER)
+    drop = P.PracticeQueues(worker=0, seed=1, mix={"characters": [other]})
+    env = P.SegmentSource(drop, iter([SMOKE]), n_slots=1).next(0, 0)
+    assert env.segment.kind == "run" and env.cfg.on_capture is None
+
+
 def test_draws_match_the_cell_probabilities() -> None:
     q = P.PracticeQueues(worker=3, seed=11)
     n = 40_000

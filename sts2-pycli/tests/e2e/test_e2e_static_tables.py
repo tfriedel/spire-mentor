@@ -110,7 +110,8 @@ def test_the_legacy_build_reads_the_v0107_tables(select) -> None:
 
 # Builds the advisor accepts whose e2e tables are not generated yet. The e2e
 # brain does not serve them; GH #1303 tracks generating them.
-# v0.113.0 got its tables with the Fool lane (GH #1535).
+# v0.113.0 got its tables with the Fool lane (GH #1535), v0.114.0 with its
+# engine build (GH #1924).
 PENDING_TABLES: set[str] = set()
 
 

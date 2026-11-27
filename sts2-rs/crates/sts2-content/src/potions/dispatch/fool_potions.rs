@@ -31,7 +31,7 @@ pub(crate) fn drink_precision_potion(state: &mut CombatState, _target: Option<u8
 pub(crate) fn drink_bottled_song(state: &mut CombatState, _target: Option<u8>) -> EffectResult {
     let mut picks: smallvec::SmallVec<[CardId; 3]> = smallvec::SmallVec::new();
     for tag in CardTag::MELODY {
-        let mut pool = crate::cards::fool_pool::combat_melody_pool(Some(tag));
+        let mut pool = crate::cards::fool_pool::combat_melody_pool(state.game_version, Some(tag));
         if pool.is_empty() {
             continue;
         }

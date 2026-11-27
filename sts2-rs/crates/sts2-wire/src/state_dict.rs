@@ -606,11 +606,12 @@ fn parse_seat_history<V: WireValue>(d: &V, path: &str) -> WireResult<SeatHistory
 }
 
 /// A seat's turn so far, from its `SeatHistory`: the cards it exhausted and
-/// its card block gains, each as one earlier play (GH #989).
+/// its card block gains, each as one earlier play of its own (GH #989), so
+/// the count reads back the same whether gains or plays are counted.
 fn seed_turn_history(log: &mut sts2_core::TurnEvents, h: &SeatHistory) {
     log.cards_exhausted_this_turn = h.cards_exhausted_this_turn;
     log.unmovable_card_block_plays = (0..h.card_block_gains_this_turn)
-        .map(|_| EARLIER_PLAY_TAG)
+        .map(|i| EARLIER_PLAY_TAG - i)
         .collect();
 }
 
@@ -2768,6 +2769,7 @@ pub fn card_id_from_python_name(s: &str) -> Option<CardId> {
             .iter()
             .chain(CardId::V0111_ONLY.iter())
             .chain(CardId::V0113_ONLY.iter())
+            .chain(CardId::V0114_ONLY.iter())
             .copied()
     };
     if let Some(c) = ids().find(|k| k.to_python_name() == s) {
@@ -2861,6 +2863,33 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
                 set.insert(k.python_name());
             }
         }
+        "card_v0113" => {
+            // The v0.113.0 e2e lane's card universe (`sts2_e2e::sctx`,
+            // `combat_ctx.tokens`): `card_any` as v0.113.0 left it. Its sorted
+            // order is a trained net's embedding rows, so a later build's
+            // cards (v0.114.0's Optimism, Twin Shot) must not land in it.
+            for k in CardId::all()
+                .iter()
+                .chain(&CardId::V0111_ONLY)
+                .chain(&CardId::V0113_ONLY)
+            {
+                set.insert(k.to_python_name());
+            }
+        }
+        "card_v0114" => {
+            // The v0.114.0 e2e lane's card universe: `card_any` as v0.114.0
+            // left it (v0.113.0's plus Optimism and Twin Shot; Rapid Shot
+            // stays a row). Frozen like `card_v0113`, so a later build's
+            // cards do not shift a v0.114.0 net's sorted rows.
+            for k in CardId::all()
+                .iter()
+                .chain(&CardId::V0111_ONLY)
+                .chain(&CardId::V0113_ONLY)
+                .chain(&CardId::V0114_ONLY)
+            {
+                set.insert(k.to_python_name());
+            }
+        }
         "card_any" => {
             // Every build's cards, for checking a carried id -- the cards'
             // `power_any`. "card" is the PPO vocab, frozen at v0.111.0 (its
@@ -2871,6 +2900,7 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
                 .iter()
                 .chain(&CardId::V0111_ONLY)
                 .chain(&CardId::V0113_ONLY)
+                .chain(&CardId::V0114_ONLY)
             {
                 set.insert(k.to_python_name());
             }
@@ -2910,7 +2940,7 @@ pub fn registry_names_for(kind: &str) -> Result<Vec<String>, String> {
         }
         other => {
             return Err(format!(
-                "unknown registry kind `{other}` (expected one of: relic, relic_id, relic_any, card, card_any, monster, monster_any, power, power_all, power_any, potion, potion_any, orb, event, event_any, boss, enchantment)"
+                "unknown registry kind `{other}` (expected one of: relic, relic_id, relic_any, card, card_any, card_v0113, card_v0114, monster, monster_any, power, power_all, power_any, potion, potion_any, orb, event, event_any, boss, enchantment)"
             ));
         }
     }
@@ -4900,8 +4930,23 @@ pub fn state_from_dict_impl(parsed: &ParsedState) -> WireResult<CoreCombatState>
         // the 1st revive, removed on the 2nd — `adaptable_after_death`), and
         // the telegraphed MULTI_CLAW hit count is Base(3) + extra.
         let mut ai = ai;
+        // v0.114.0 strips PainfulStabs when the 2nd form dies (its
+        // `ShouldPowerBeRemovedAfterOwnerDeath` override is gone), so a 2nd-form
+        // corpse awaiting its last revive shows only Adaptable. Its max HP
+        // still names the form: `Revive(SecondFormHp)` set it (TestSubject.cs:
+        // 277, 342-346; single-player, where the HP is not scaled).
+        let second_form_corpse = || {
+            parsed.game_version >= sts2_core::GameVersion::V0_114_0
+                && m.is_dead
+                && m.powers.iter().any(|p| p.kind == PowerKind::Adaptable)
+                && matches!(
+                    m.max_hp,
+                    sts2_core::monsters::test_subject::SECOND_FORM_HP
+                        | sts2_core::monsters::test_subject::SECOND_FORM_HP_TOUGH
+                )
+        };
         if m.kind == MonsterKind::TestSubject
-            && m.powers.iter().any(|p| p.kind == PowerKind::PainfulStabs)
+            && (m.powers.iter().any(|p| p.kind == PowerKind::PainfulStabs) || second_form_corpse())
         {
             for pu in &mpowers {
                 if let Some(p) = state.powers.get_mut_by_id(pu.0) {
@@ -4926,6 +4971,18 @@ pub fn state_from_dict_impl(parsed: &ParsedState) -> WireResult<CoreCombatState>
             // to the 3rd-form moveset, matching `adaptable_after_death`.
             if let Some(ai) = ai.as_mut() {
                 ai.set_counter(1);
+            }
+        }
+        // The 3rd form carries Nemesis, applied on the 2nd revive
+        // (`adaptable_after_death`): both revives are spent. A 3rd form
+        // rebuilt on RESPAWN (a referee view's tracker follows the revive
+        // move) otherwise routes REVIVE_BRANCH to the 2nd form's MULTI_CLAW
+        // instead of PHASE3_LACERATE (GH #1933).
+        if m.kind == MonsterKind::TestSubject
+            && m.powers.iter().any(|p| p.kind == PowerKind::Nemesis)
+        {
+            if let Some(ai) = ai.as_mut() {
+                ai.set_counter(2);
             }
         }
 

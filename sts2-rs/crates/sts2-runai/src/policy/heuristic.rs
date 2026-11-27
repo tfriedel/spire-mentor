@@ -335,7 +335,20 @@ impl RunPolicy for HeuristicPolicy {
                 Self::position_of(actions, &RunAction::RestOption { idx: opt })
             }
             Phase::Event => {
-                let (best, scores) = events::best_event_option(&view, actions.len());
+                let (mut best, mut scores) = events::best_event_option(&view, actions.len());
+                // On a run that shows a human the lethal options
+                // (`offer_lethal_event_options`) the policy still skips them,
+                // as on every agent-mode run.
+                let withheld =
+                    sts2_content::events::dispatch::agent_withheld_event_options(&rm.run_state);
+                if !withheld.is_empty() {
+                    for (s, a) in scores.iter_mut().zip(actions) {
+                        if matches!(a, RunAction::EventChoice { idx } if withheld.contains(idx)) {
+                            *s = f64::NEG_INFINITY;
+                        }
+                    }
+                    best = crate::policy::surfaces::picks::argmax(&scores).unwrap_or(0);
+                }
                 self.set_scores(scores);
                 best
             }
@@ -747,5 +760,41 @@ mod tests {
             let _ = rm.take_action(actions[idx]);
         }
         panic!("no scored decision fired in 400 steps");
+    }
+
+    /// On a run that shows a human the lethal event options (the
+    /// workbench's `offer_lethal_event_options`), the heuristic still never
+    /// picks one while another survives: every event that flags one, at 1 HP
+    /// and 1 max HP.
+    #[test]
+    fn the_heuristic_skips_an_offered_lethal_event_option() {
+        use sts2_content::events::dispatch::{
+            agent_withheld_event_options, begin_event_in_entered_room,
+        };
+        use sts2_core::events::EventId;
+        let mut withheld_somewhere = false;
+        for event in EventId::all().iter().copied() {
+            let mut rm = new_run_manager_for_character(7, CharacterId::Ironclad);
+            rm.run_state.set_agent_decisions();
+            rm.run_state.offer_lethal_event_options = true;
+            rm.debug_enter_event(event, begin_event_in_entered_room);
+            rm.run_state.current_hp = 1;
+            rm.run_state.max_hp = 1;
+            let withheld = agent_withheld_event_options(&rm.run_state);
+            if withheld.is_empty() {
+                continue;
+            }
+            withheld_somewhere = true;
+            let actions = rm.get_available_actions();
+            let i = HeuristicPolicy::new()
+                .choose(&rm, &actions)
+                .expect("a choice");
+            assert!(
+                !matches!(actions[i], RunAction::EventChoice { idx } if withheld.contains(&idx)),
+                "{event:?}: picked {:?} of {actions:?}, withheld {withheld:?}",
+                actions[i]
+            );
+        }
+        assert!(withheld_somewhere);
     }
 }

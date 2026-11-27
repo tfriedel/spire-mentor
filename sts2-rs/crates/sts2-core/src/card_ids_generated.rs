@@ -1489,6 +1489,15 @@ pub enum CardId {
     /// `KnowledgeDemon.IChoosable` only `KnowledgeDemonDominion` offers; its
     /// `OnChosen` applies `AmnesiaPower` 1 (GH #1346).
     Amnesia,
+    // ── v0.114.0-only (GH #1924): The Fool rework's two new cards; see
+    // [`CardId::V0114_ONLY`] / [`CardId::all_for`].
+    /// v0.114.0 Fool Rare Skill (`Cards/Optimism.cs`), cost 1: exhaust every
+    /// Sadness in hand, draw that many.
+    Optimism,
+    /// v0.114.0 Fool Common Attack (`Cards/TwinShot.cs`), cost 1: a 2-hit
+    /// arrow shot. Takes RapidShot's `FoolCardPool` slot (the save migration
+    /// `SerializableRunV21ToV22` renames `CARD.RAPID_SHOT` to it).
+    TwinShot,
 }
 
 impl CardId {
@@ -2216,6 +2225,8 @@ impl CardId {
             Self::WheelOfFortune => "WHEEL_OF_FORTUNE",
             Self::Sadness => "SADNESS",
             Self::Amnesia => "AMNESIA",
+            Self::Optimism => "OPTIMISM",
+            Self::TwinShot => "TWIN_SHOT",
         }
     }
 
@@ -2954,6 +2965,14 @@ impl CardId {
         Self::Amnesia,
     ];
 
+    /// Cards that exist only from game build v0.114.0 on.
+    pub const V0114_ONLY: [CardId; 2] = [Self::Optimism, Self::TwinShot];
+
+    /// Cards v0.114.0 deleted: RapidShot went with the Fool rework
+    /// (`Models.Cards/RapidShot.cs` is gone; TwinShot takes its
+    /// `FoolCardPool` slot).
+    pub const REMOVED_IN_V0114: [CardId; 1] = [Self::RapidShot];
+
     /// The build a card first exists in.
     #[must_use]
     pub const fn introduced_in(self) -> crate::GameVersion {
@@ -3098,12 +3117,27 @@ impl CardId {
             | Self::WheelOfFortune
             | Self::Sadness
             | Self::Amnesia => crate::GameVersion::V0_113_0,
+            Self::Optimism | Self::TwinShot => crate::GameVersion::V0_114_0,
             _ => crate::GameVersion::V0_107_1,
         }
     }
 
+    /// Whether the card exists in game build `version`: introduced at or
+    /// before it, and not one of [`Self::REMOVED_IN_V0114`] from v0.114.0 on.
+    /// (v0.111.0's Scare stays an id there: Sidestep replaces it per pool
+    /// slot, [`Self::all_for`] keeps it.)
+    #[must_use]
+    pub const fn exists_in(self, version: crate::GameVersion) -> bool {
+        let introduced = self.introduced_in() as u8 <= version as u8;
+        let removed =
+            matches!(self, Self::RapidShot) && version as u8 >= crate::GameVersion::V0_114_0 as u8;
+        introduced && !removed
+    }
+
     /// Every card of game build `version`: [`Self::all`] (the v0.107.1
-    /// universe, unchanged) plus, from v0.111.0 on, [`Self::V0111_ONLY`].
+    /// universe, unchanged) plus, from v0.111.0 on, [`Self::V0111_ONLY`],
+    /// from v0.113.0 on [`Self::V0113_ONLY`], and from v0.114.0 on
+    /// [`Self::V0114_ONLY`] without [`Self::REMOVED_IN_V0114`].
     #[must_use]
     pub fn all_for(version: crate::GameVersion) -> Vec<CardId> {
         let mut v = Self::all().to_vec();
@@ -3112,6 +3146,10 @@ impl CardId {
         }
         if version >= crate::GameVersion::V0_113_0 {
             v.extend_from_slice(&Self::V0113_ONLY);
+        }
+        if version >= crate::GameVersion::V0_114_0 {
+            v.retain(|c| c.exists_in(version));
+            v.extend_from_slice(&Self::V0114_ONLY);
         }
         v
     }

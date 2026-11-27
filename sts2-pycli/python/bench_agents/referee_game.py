@@ -190,7 +190,11 @@ class RefereeGame:
             if self._tracker is None:
                 self._tracker = MoveTracker(self.character, self.ascension, self.game_version)
             combat.setdefault("game_version", self.game_version)
-            for enemy, guess in zip(combat["enemies"], self._tracker.infer(combat), strict=False):
+            alive, dead = self._tracker.infer_board(combat)
+            for enemy, guess in [
+                *zip(combat["enemies"], alive, strict=False),
+                *zip(combat.get("dead_enemies") or [], dead, strict=False),
+            ]:
                 enemy["move_state"] = guess["move_state"]
                 enemy["ai"] = guess["ai"]
         elif decision not in ("combat_play", "card_select", None):

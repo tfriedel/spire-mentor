@@ -122,6 +122,7 @@ pub fn tags_for_card_id(id: CardId) -> CardTags {
         | I::QuickShot
         | I::RainShot
         | I::RapidShot
+        | I::TwinShot
         | I::RepeatShot
         | I::SkyShot
         | I::TrickShot

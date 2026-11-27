@@ -13,7 +13,9 @@ pub(crate) fn on_after_side_turn_start_happy_flower(
     state: &mut CombatState,
     side: Side,
 ) -> EffectResult {
-    if side != Side::Player {
+    // v0.114.0 counts in `BeforeSideTurnStart` and grants in
+    // `AfterPlayerTurnStartEarly` instead (below).
+    if side != Side::Player || state.game_version >= crate::GameVersion::V0_114_0 {
         return EffectResult::NotImplemented;
     }
     if !player_owns_relic(state, crate::RelicKind::HappyFlower) {
@@ -40,9 +42,68 @@ pub(crate) fn on_after_side_turn_start_happy_flower(
     }
 }
 
+/// v0.114.0 `HappyFlower.BeforeSideTurnStart` (HappyFlower.cs:95-105): the
+/// turn counter advances at the top of the owner's turn, and the energy
+/// waits for `AfterPlayerTurnStartEarly` ([`grant_turn_start_energy_early`]),
+/// after the hand draw.
+///
+/// [decompiled C# omitted — see the cited path]
+pub(crate) fn on_before_side_turn_start_happy_flower(
+    state: &mut CombatState,
+    side: Side,
+) -> EffectResult {
+    if side != Side::Player || state.game_version < crate::GameVersion::V0_114_0 {
+        return EffectResult::NotImplemented;
+    }
+    match state
+        .relics
+        .iter_mut()
+        .find(|r| !r.is_melted && r.kind == crate::RelicKind::HappyFlower)
+    {
+        Some(relic) => {
+            relic.counter = relic.counter.saturating_add(1);
+            EffectResult::Resolved
+        }
+        None => EffectResult::NotImplemented,
+    }
+}
+
+/// v0.114.0 `AfterPlayerTurnStartEarly` of HappyFlower and FakeHappyFlower
+/// (HappyFlower.cs:107-115, FakeHappyFlower.cs): the energy their
+/// `BeforeSideTurnStart` counted towards, granted once the turn's hand is
+/// drawn and before any `AfterPlayerTurnStart` listener. They are the only
+/// `AfterPlayerTurnStartEarly` listeners in v0.114.0. Their counters only move
+/// in `BeforeSideTurnStart`, so a counter on a multiple of the period here is
+/// C#'s `GrantEnergyThisTurn`.
+///
+/// [decompiled C# omitted — see the cited path]
+pub fn grant_turn_start_energy_early(state: &mut CombatState) {
+    if state.game_version < crate::GameVersion::V0_114_0 {
+        return;
+    }
+    // In equip order, as C# iterates the hook listeners.
+    let grants: smallvec::SmallVec<[i32; 2]> = state
+        .relics
+        .iter()
+        .filter(|r| !r.is_melted)
+        .filter_map(|r| match r.kind {
+            crate::RelicKind::HappyFlower if r.counter > 0 && r.counter % 3 == 0 => Some(1),
+            crate::RelicKind::FakeHappyFlower if r.counter > 0 && r.counter % 5 == 0 => Some(1),
+            _ => None,
+        })
+        .collect();
+    for energy in grants {
+        state.gain_energy(energy);
+    }
+}
+
 pub(crate) fn install() {
     register_after_side_turn_start(
         RelicId::HappyFlower,
         on_after_side_turn_start_happy_flower as AfterSideTurnStartFn,
+    );
+    register_before_side_turn_start(
+        RelicId::HappyFlower,
+        on_before_side_turn_start_happy_flower as BeforeSideTurnStartFn,
     );
 }

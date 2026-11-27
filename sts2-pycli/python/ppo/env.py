@@ -319,6 +319,17 @@ def mask_rejectable(rm: Any, phase: str, actions: list[dict]) -> list[dict]:
         # so the student is never offered it (no kind names it).
         masked = [a for a in actions if a.get("action") != "confirm_deck_selection"]
         return masked or actions
+    if phase == "event" and getattr(rm, "offer_lethal_event_options", False):
+        # A run that shows a human the event options that would kill them
+        # (the workbench) still hides them from the policy, as every agent-mode
+        # run does. A surviving option always remains.
+        withheld = set(rm.agent_withheld_event_options())
+        masked = [
+            a
+            for a in actions
+            if not (a.get("action") == "event_choice" and a.get("idx") in withheld)
+        ]
+        return masked or actions
     if phase != "shop":
         return actions
     if len(rm.potions()) < int(rm.max_potion_slots()):

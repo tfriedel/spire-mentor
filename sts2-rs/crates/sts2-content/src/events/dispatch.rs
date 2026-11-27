@@ -147,7 +147,86 @@ pub fn spec_for(id: EventId) -> &'static EventSpec {
 #[must_use]
 pub fn present(state: &RunState) -> Option<Vec<EventOptionInfo>> {
     let id = state.current_event?;
-    let spec = spec_for(id);
+    Some(presented_options(state, spec_for(id)))
+}
+
+/// C# `EventOption.WillKillPlayer(owner)` for a presented option: the
+/// predicate an event attaches with `ThatDoesDamage(x)` (`CurrentHp <= x`),
+/// `ThatDecreasesMaxHp(x)` (`MaxHp <= x`) or `ThatWillKillPlayerIf(...)`
+/// (`EventOption.cs:202-222`). Keyed by the option's loc key, C#'s own
+/// text key, and read off the option's template vars, which carry the C#
+/// `DynamicVars` the predicates name. An option with no predicate, or whose
+/// value is not presented, reads as not lethal.
+///
+/// The predicates are the same in v0.107.1, v0.111.0 and v0.113.0; v0.113.0
+/// adds Thermae Nonupeipe's Drink the Waters and Wuppy in Trouble's Be
+/// Cautious. Vakuu's Sere Talon (`ThatDecreasesMaxHp(9)`) is offered by the
+/// boss-ancient path, not by an event option here.
+#[must_use]
+pub fn option_will_kill_player(state: &RunState, info: &EventOptionInfo) -> bool {
+    let var = |name: &str| {
+        info.vars.iter().find_map(|(n, v)| match v {
+            sts2_core::events::EventVar::Int(i) if *n == name => Some(*i),
+            _ => None,
+        })
+    };
+    let hp = i64::from(state.current_hp);
+    let max_hp = i64::from(state.max_hp);
+    let does_damage = |dmg: Option<i64>| dmg.is_some_and(|d| hp <= d);
+    let decreases_max_hp = |loss: Option<i64>| loss.is_some_and(|l| max_hp <= l);
+    let key = info.loc_key;
+    let (event, option) = key.split_once(".pages.").map_or(("", ""), |(e, rest)| {
+        (e, rest.split_once(".options.").map_or("", |(_, o)| o))
+    });
+    match (event, option) {
+        // `Damage.IntValue - MaxHp.BaseValue`: the bath grants max HP first.
+        ("ABYSSAL_BATHS", "IMMERSE" | "LINGER") => {
+            does_damage(var("Damage").zip(var("MaxHp")).map(|(d, m)| d - m))
+        }
+        ("BRAIN_LEECH", "RIP") => does_damage(var("RipHpLoss")),
+        ("COLOSSAL_FLOWER", o) if o.starts_with("REACH_DEEPER_") || o == "POLLINOUS_CORE" => {
+            does_damage(Some(i64::from(super::shared::colossal_flower_dig_damage(
+                state,
+            ))))
+        }
+        ("DENSE_VEGETATION", "TRUDGE_ON")
+        | ("SUNKEN_STATUE", "DIVE_INTO_WATER")
+        | ("THIS_OR_THAT", "PLAIN")
+        | ("TRASH_HEAP", "DIVE_IN")
+        | ("WHISPERING_HOLLOW", "HUG")
+        | ("WUPPY_IN_TROUBLE", "BE_CAUTIOUS") => does_damage(var("HpLoss")),
+        ("SLIPPERY_BRIDGE", o) if o.starts_with("HOLD_ON_") => does_damage(var("HpLoss")),
+        ("DOLL_ROOM", "TAKE_SOME_TIME") => does_damage(var("TakeTimeHpLoss")),
+        ("DOLL_ROOM", "EXAMINE") => does_damage(var("ExamineHpLoss")),
+        ("HUNGRY_FOR_MUSHROOMS", "FRAGRANT_MUSHROOM") => does_damage(Some(15)),
+        ("JUNGLE_MAZE_ADVENTURE", "SOLO_QUEST") => does_damage(var("SoloHp")),
+        ("ROOM_FULL_OF_CHEESE", "SEARCH")
+        | ("ROUND_TEA_PARTY", "PICK_FIGHT")
+        | ("THE_LEGENDS_WERE_TRUE", "SLOWLY_FIND_AN_EXIT") => does_damage(var("Damage")),
+        ("SPIRIT_GRAFTER", "REJECTION") => does_damage(var("RejectionHpLoss")),
+        ("STONE_OF_ALL_TIME", "PUSH") => does_damage(var("PushHpLoss")),
+        ("THERMAE_NONUPEIPE", "DRINK_WATERS") => does_damage(var("DrinkHpLoss")),
+        ("DROWNING_BEACON", "CLIMB") => decreases_max_hp(var("HpLoss")),
+        ("UNREST_SITE", "KILL") => decreases_max_hp(var("MaxHpLoss")),
+        ("TABLET_OF_TRUTH", o) if o.starts_with("DECIPHER") => {
+            decreases_max_hp(var("DecipherMaxHpLoss"))
+        }
+        // Opens the abandon-run confirm (`ThatWillKillPlayerIf(_ => true)`).
+        ("TRIAL", "DOUBLE_DOWN") => true,
+        _ => false,
+    }
+}
+
+/// The event's option list as the player is offered it: the spec's
+/// `generate_options`, its template values backfilled, and in agent mode
+/// ([`RunState::withhold_abandon_run_options`]) without the options the game
+/// flags `WillKillPlayer` while another enabled option survives. Every live
+/// chooser drops those (the game's own `AutoSlay.EventRoomHandler`,
+/// `realgame_ppo`, the advisor's screen rebuild), so offering one here was a
+/// train/serve skew: at 14 HP or less the game arm never saw Room Full of
+/// Cheese's Search (Spire Bench seed 180001036, GH #1907). [`present`] and
+/// [`resolve_by_index`] both index this list.
+fn presented_options(state: &RunState, spec: &EventSpec) -> Vec<EventOptionInfo> {
     let mut opts = (spec.generate_options)(state, spec);
     // Backfill the localized-template values from the spec. Roughly half the
     // events present themselves with a hand-written `generate_options` that
@@ -165,7 +244,70 @@ pub fn present(state: &RunState) -> Option<Vec<EventOptionInfo>> {
             info.title_vars = super::option_title_vars(state, opt);
         }
     }
-    Some(opts)
+    if state.withhold_abandon_run_options && !state.offer_lethal_event_options {
+        if let Some(lethal) = withheld_mask(state, &opts) {
+            let mut lethal = lethal.into_iter();
+            opts.retain(|_| !lethal.next().unwrap_or(false));
+        }
+    }
+    opts
+}
+
+/// Which of `opts` a live chooser withholds: the enabled options the game
+/// flags `WillKillPlayer`, or `None` when no enabled option survives them.
+/// `AutoSlay.EventRoomHandler` keeps the filtered list only when it is not
+/// empty (`if (list3.Count > 0)`): with every enabled option lethal the
+/// choice stays the player's.
+fn withheld_mask(state: &RunState, opts: &[EventOptionInfo]) -> Option<Vec<bool>> {
+    let lethal: Vec<bool> = opts
+        .iter()
+        .map(|o| o.enabled && option_will_kill_player(state, o))
+        .collect();
+    opts.iter()
+        .zip(&lethal)
+        .any(|(o, &l)| o.enabled && !l)
+        .then_some(lethal)
+}
+
+/// The indices into [`present`] that agent mode would withhold, on a run
+/// that offers them anyway ([`RunState::offer_lethal_event_options`], the
+/// workbench's human play): every policy acting on such a run drops these
+/// `EventChoice`s, so it chooses from the list it sees in training. Empty
+/// on any other run, where [`present`] has already withheld them (agent
+/// mode) or the game offers them (parity mode).
+#[must_use]
+pub fn agent_withheld_event_options(state: &RunState) -> Vec<usize> {
+    if !(state.withhold_abandon_run_options && state.offer_lethal_event_options) {
+        return Vec::new();
+    }
+    let Some(opts) = present(state) else {
+        return Vec::new();
+    };
+    withheld_mask(state, &opts)
+        .map(|m| {
+            m.iter()
+                .enumerate()
+                .filter(|(_, &l)| l)
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `actions` without the `EventChoice`s [`agent_withheld_event_options`]
+/// names, each kept action unchanged (its `idx` still indexes [`present`]).
+#[must_use]
+pub fn drop_agent_withheld_event_choices(
+    state: &RunState,
+    actions: &[sts2_core::run_manager::RunAction],
+) -> Vec<sts2_core::run_manager::RunAction> {
+    use sts2_core::run_manager::RunAction;
+    let withheld = agent_withheld_event_options(state);
+    actions
+        .iter()
+        .copied()
+        .filter(|a| !matches!(a, RunAction::EventChoice { idx } if withheld.contains(idx)))
+        .collect()
 }
 
 /// Resolve a choice for the event currently active in
@@ -203,7 +345,7 @@ pub fn resolve_by_index(state: &mut RunState, option_idx: usize) -> Option<Event
     // presents `spec.options` in order, so this is identical. The presented
     // `option_id` then keys the handler in the static list. Bead
     // `sts2-rs-2guyj`.
-    let presented = (spec.generate_options)(state, spec);
+    let presented = presented_options(state, spec);
     let info = presented.get(option_idx)?;
     let opt = spec
         .options

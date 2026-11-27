@@ -10,7 +10,11 @@ use sts2_core::GameVersion;
 /// (e.g. `ns = "Models.CardPools"`). `None` when the decomp is absent, as in
 /// the public snapshot.
 fn decomp(ns: &str, file: &str) -> Option<String> {
-    let tag = "v0.113.0";
+    decomp_in("v0.113.0", ns, file)
+}
+
+/// [`decomp`] in the decomp folder `tag` (e.g. `"v0.114.0"`).
+fn decomp_in(tag: &str, ns: &str, file: &str) -> Option<String> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../../../sts2-wiki/decompiled/{tag}"));
     let suffix = format!(".{ns}");
@@ -53,6 +57,67 @@ fn fool_pool_matches_the_decomp() {
     };
     let ours: Vec<String> = FOOL_POOL_V0113.iter().map(|&id| class_name(id)).collect();
     assert_eq!(ours, names_in(&src, "GenerateAllCards"));
+    let Some(src) = decomp_in("v0.114.0", "Models.CardPools", "FoolCardPool.cs") else {
+        return;
+    };
+    let ours: Vec<String> = FOOL_POOL_V0114.iter().map(|&id| class_name(id)).collect();
+    assert_eq!(ours, names_in(&src, "GenerateAllCards"));
+}
+
+/// The v0.114.0 Fool ids: Optimism and TwinShot are new, RapidShot is gone.
+#[test]
+fn v0114_fool_ids_enter_and_rapid_shot_leaves() {
+    for id in CardId::V0114_ONLY {
+        assert!(is_fool_card(id), "{id:?}");
+        assert_eq!(id.introduced_in(), GameVersion::V0_114_0, "{id:?}");
+        assert!(
+            !CardId::all_for(GameVersion::V0_113_0).contains(&id),
+            "{id:?}"
+        );
+        assert!(
+            CardId::all_for(GameVersion::V0_114_0).contains(&id),
+            "{id:?}"
+        );
+        assert!(FOOL_POOL_V0114.contains(&id), "{id:?}");
+        assert!(!FOOL_POOL_V0113.contains(&id), "{id:?}");
+        assert_eq!(spec_for_card_id(id).map(|s| s.id), Some(id), "{id:?}");
+        assert_eq!(
+            crate::names::card_id_from_str(id.to_python_name()),
+            Some(id)
+        );
+    }
+    assert!(CardId::all_for(GameVersion::V0_113_0).contains(&CardId::RapidShot));
+    assert!(!CardId::all_for(GameVersion::V0_114_0).contains(&CardId::RapidShot));
+    assert!(CardId::RapidShot.exists_in(GameVersion::V0_113_0));
+    assert!(!CardId::RapidShot.exists_in(GameVersion::V0_114_0));
+    assert!(!FOOL_POOL_V0114.contains(&CardId::RapidShot));
+    use sts2_core::powers::PowerKind;
+    assert!(PowerKind::all_for(GameVersion::V0_113_0).contains(&PowerKind::FreeCard));
+    assert!(!PowerKind::all_for(GameVersion::V0_114_0).contains(&PowerKind::FreeCard));
+}
+
+/// Every new card class in the v0.114.0 decomp (against the v0.113.1 one
+/// `V0_113_0` follows) that sits in a pool the Fool owns is a
+/// [`CardId::V0114_ONLY`] id.
+#[test]
+fn v0114_only_cards_are_the_new_fool_classes() {
+    let (Some(new), Some(_)) = (
+        decomp_in("v0.114.0", "Models.CardPools", "FoolCardPool.cs"),
+        decomp_in("v0.113.1", "Models.CardPools", "FoolCardPool.cs"),
+    ) else {
+        return;
+    };
+    let old = decomp_in("v0.113.1", "Models.CardPools", "FoolCardPool.cs").unwrap();
+    let old = names_in(&old, "GenerateAllCards");
+    let added: Vec<String> = names_in(&new, "GenerateAllCards")
+        .into_iter()
+        .filter(|c| !old.contains(c))
+        .collect();
+    let ours: Vec<String> = CardId::V0114_ONLY
+        .iter()
+        .map(|&id| class_name(id))
+        .collect();
+    assert_eq!(added, ours);
 }
 
 #[test]
@@ -60,6 +125,10 @@ fn every_fool_card_is_v0113_only_with_a_spec() {
     let mut seen = std::collections::BTreeSet::new();
     for (i, &id) in FOOL_CARDS.iter().enumerate() {
         assert!(seen.insert(id), "{id:?} listed twice");
+        assert_eq!(specs::FOOL_SPECS[i]().id, id, "FOOL_SPECS order");
+        if CardId::V0114_ONLY.contains(&id) {
+            continue; // `v0114_fool_ids_enter_and_rapid_shot_leaves`
+        }
         assert!(CardId::V0113_ONLY.contains(&id), "{id:?}");
         assert_eq!(id.introduced_in(), GameVersion::V0_113_0, "{id:?}");
         assert!(
@@ -132,7 +201,11 @@ fn fool_cards_are_every_new_fool_class() {
             .filter(|t| !old_tokens.contains(&t.as_str()) && !not_fool.contains(&t.as_str())),
     );
     want.push("Sadness".to_string());
-    let ours: Vec<String> = FOOL_CARDS.iter().map(|&id| class_name(id)).collect();
+    let ours: Vec<String> = FOOL_CARDS
+        .iter()
+        .filter(|id| !CardId::V0114_ONLY.contains(id))
+        .map(|&id| class_name(id))
+        .collect();
     assert_eq!(ours, want);
 }
 
@@ -206,8 +279,23 @@ fn fool_card_tags_match_the_decomp() {
     let Some(_) = decomp("Models.CardPools", "FoolCardPool.cs") else {
         return;
     };
-    for id in FOOL_CARDS {
-        let src = decomp("Models.Cards", &format!("{}.cs", class_name(id))).expect("card file");
+    // Each card against the build it exists in; a card of both builds
+    // against both (the tags are build-less).
+    let checks = FOOL_CARDS.iter().flat_map(|&id| {
+        let mut tags = Vec::new();
+        if !CardId::V0114_ONLY.contains(&id) {
+            tags.push("v0.113.0");
+        }
+        if id.exists_in(GameVersion::V0_114_0) {
+            tags.push("v0.114.0");
+        }
+        tags.into_iter().map(move |t| (id, t))
+    });
+    for (id, tag) in checks {
+        let Some(src) = decomp_in(tag, "Models.Cards", &format!("{}.cs", class_name(id))) else {
+            assert_eq!(tag, "v0.114.0", "{id:?}: card file");
+            continue;
+        };
         let decl = src
             .find("CanonicalTags =>")
             .or_else(|| src.find("IEnumerable<CardTag> Tags =>"));
@@ -230,6 +318,6 @@ fn fool_card_tags_match_the_decomp() {
         }
         want.sort();
         let got = tags_for_card_id(id).to_vec().to_vec();
-        assert_eq!(got, want, "{id:?}");
+        assert_eq!(got, want, "{id:?} ({tag})");
     }
 }

@@ -42,7 +42,7 @@ _ENCOUNTERS_DIR = _REPO_ROOT / "sts2-rs/crates/sts2-content/src/encounters"
 _DECOMP_ROOT = _REPO_ROOT / "sts2-wiki/decompiled"
 
 #: The builds the checks cover: the per-PR gate's builds plus the legacy one.
-BUILDS: tuple[str, ...] = ("v0.107.1", "v0.111.0", "v0.113.0")
+BUILDS: tuple[str, ...] = ("v0.107.1", "v0.111.0", "v0.113.0", "v0.114.0")
 
 #: Decomp tree of each build. v0.113.0 runs as the v0.113.1 hotfix, whose
 #: decompilation replaced v0.113.0's (repo CLAUDE.md).
@@ -50,6 +50,7 @@ DECOMP_DIR: dict[str, str] = {
     "v0.107.1": "v0.107.1",
     "v0.111.0": "v0.111.0",
     "v0.113.0": "v0.113.1",
+    "v0.114.0": "v0.114.0",
 }
 
 

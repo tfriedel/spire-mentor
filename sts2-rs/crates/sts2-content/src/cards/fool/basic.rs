@@ -8,7 +8,7 @@ use sts2_core::{CombatState, CreatureUid, DrawThen, PowerKind};
 
 use super::helpers::{
     apply_to_enemy, apply_to_player, current_block, current_damage, damage_all_enemies,
-    generate_into_hand, var,
+    generate_into_hand, v0114, var, var_by,
 };
 use crate::cards::draw_then::after_draw;
 
@@ -43,9 +43,9 @@ pub(crate) fn play_all_attack(state: &mut CombatState, _t: Option<CreatureUid>) 
     EffectResult::Resolved
 }
 
-/// `TheEmperor.cs`: `GainEnergy(Energy)`, 7 (+2).
+/// `TheEmperor.cs`: `GainEnergy(Energy)`, 7 (+2); v0.114.0 3 (+1).
 pub(crate) fn play_the_emperor(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    let e = var(state, 7, 9);
+    let e = var_by(state, (7, 9), (3, 4));
     state.gain_energy(e);
     EffectResult::Resolved
 }
@@ -66,10 +66,10 @@ pub(crate) fn play_strength(state: &mut CombatState, _t: Option<CreatureUid>) ->
     EffectResult::Resolved
 }
 
-/// `Death.cs`: `Apply<DoomPower>(target, 75 (+24))`.
+/// `Death.cs`: `Apply<DoomPower>(target, 75 (+24))`; v0.114.0 66 (+15).
 pub(crate) fn play_death(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "Death");
-    let n = var(state, 75, 99);
+    let n = var_by(state, (75, 99), (66, 81));
     apply_to_enemy(state, t, PowerKind::Doom, n);
     EffectResult::Resolved
 }
@@ -118,10 +118,18 @@ pub(crate) fn play_wah_cho(state: &mut CombatState, t: Option<CreatureUid>) -> E
 }
 
 /// `WahChoKi.cs`: `GainBlock` (9, +3), the attack (9, +3), `Draw(1 (+1))`.
+/// v0.114.0 attacks FIRST, then gains the block (8 / 8, +2 each):
+///
+/// [decompiled C# omitted — see the cited path]
 pub(crate) fn play_wah_cho_ki(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "WahChoKi");
-    card_effects::gain_block_player(state, current_block(state));
-    let _ = deal_damage_player_to_enemy(state, t, current_damage(state));
+    if v0114(state) {
+        let _ = deal_damage_player_to_enemy(state, t, current_damage(state));
+        card_effects::gain_block_player(state, current_block(state));
+    } else {
+        card_effects::gain_block_player(state, current_block(state));
+        let _ = deal_damage_player_to_enemy(state, t, current_damage(state));
+    }
     let n = var(state, 1, 2);
     draw_then(state, n, DrawThen::None);
     EffectResult::Resolved
@@ -144,6 +152,12 @@ pub(crate) fn play_wah_ki(state: &mut CombatState, t: Option<CreatureUid>) -> Ef
     for _ in 0..card_effects::resolving_card_attack_hits(state, 2) {
         let _ = deal_damage_player_to_enemy(state, t, dmg);
     }
+    if v0114(state) {
+        // v0.114.0 `WahKi.cs`: 2 hits of 3 (+1), then one discard card to the
+        // top of the draw pile (`FromCombatPile(Discard, prefs(1))`).
+        super::arrows::discard_card_to_draw_top(state);
+        return EffectResult::Resolved;
+    }
     apply_to_player(state, PowerKind::EnergyNextTurn, 1);
     apply_to_player(state, PowerKind::DrawCardsNextTurn, 1);
     EffectResult::Resolved
@@ -151,10 +165,24 @@ pub(crate) fn play_wah_ki(state: &mut CombatState, t: Option<CreatureUid>) -> Ef
 
 /// `Timber.cs`: attack (20, +5); if that hit killed the target, a second
 /// attack on all opponents with `OnKillDamage` (30, +5).
+///
+/// Through v0.113.1 those are two `DamageCmd.Attack` commands, so the first
+/// one's `AfterAttack` spends Vigor / Gigantification before the sweep.
+/// v0.114.0 opens one `AttackContext` around both `CreatureCmd.Damage`
+/// calls (Timber.cs:39-58), so the buffs boost both and are spent once,
+/// after the sweep, as for Echoing Slash.
+///
+/// [decompiled C# omitted — see the cited path]
 pub(crate) fn play_timber(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "Timber");
     let killed = card_effects::deal_damage_player_to_enemy_full(state, t, current_damage(state))
         .was_target_killed;
+    if !v0114(state) {
+        // v0.113.1 `Timber.cs:32-34`: the first `DamageCmd.Attack` ends here.
+        if let Some(card) = card_effects::resolving_card_uid(state) {
+            sts2_core::hooks::end_player_attack_command(state, card);
+        }
+    }
     if killed {
         let n = var(state, 30, 35);
         damage_all_enemies(state, n);
@@ -162,14 +190,15 @@ pub(crate) fn play_timber(state: &mut CombatState, t: Option<CreatureUid>) -> Ef
     EffectResult::Resolved
 }
 
-/// `SorrowfulStrike.cs`: attack (13, +4), then 2 Sadness to hand.
+/// `SorrowfulStrike.cs`: attack (13, +4), then 2 Sadness to hand (v0.114.0:
+/// `CardsVar(1)`, one).
 pub(crate) fn play_sorrowful_strike(
     state: &mut CombatState,
     t: Option<CreatureUid>,
 ) -> EffectResult {
     let t = target(t, "SorrowfulStrike");
     let _ = deal_damage_player_to_enemy(state, t, current_damage(state));
-    generate_into_hand(state, CardId::Sadness, 2);
+    generate_into_hand(state, CardId::Sadness, if v0114(state) { 1 } else { 2 });
     EffectResult::Resolved
 }
 
@@ -180,12 +209,35 @@ pub(crate) fn play_jest(state: &mut CombatState, _t: Option<CreatureUid>) -> Eff
     EffectResult::Resolved
 }
 
-/// `Vitriol.cs`: Weak 2 (+1) on the target, then 1 Sadness to hand.
+/// `Vitriol.cs`: Weak 2 (+1) on the target, then 1 Sadness to hand
+/// (v0.114.0: `CardsVar(2)`, two in one batch).
 pub(crate) fn play_vitriol(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = target(t, "Vitriol");
     let n = var(state, 2, 3);
     apply_to_enemy(state, t, PowerKind::Weak, n);
-    generate_into_hand(state, CardId::Sadness, 1);
+    generate_into_hand(state, CardId::Sadness, if v0114(state) { 2 } else { 1 });
+    EffectResult::Resolved
+}
+
+/// v0.114.0 `Optimism.cs`: `CardCmd.Exhaust` every Sadness in hand (hand
+/// order), then, when there was any, `Draw(count)`.
+///
+/// [decompiled C# omitted — see the cited path]
+pub(crate) fn play_optimism(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    let sadness: smallvec::SmallVec<[sts2_core::CardUid; 10]> = state
+        .player
+        .hand
+        .iter()
+        .copied()
+        .filter(|uid| state.cards[uid.0.get() as usize - 1].card_id == CardId::Sadness)
+        .collect();
+    for &uid in &sadness {
+        let _ = card_effects::exhaust_card_uid(state, uid);
+    }
+    if !sadness.is_empty() {
+        let n = i32::try_from(sadness.len()).unwrap_or(i32::MAX);
+        draw_then(state, n, DrawThen::None);
+    }
     EffectResult::Resolved
 }
 

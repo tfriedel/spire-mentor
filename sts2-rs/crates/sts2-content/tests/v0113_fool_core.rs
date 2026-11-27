@@ -566,7 +566,8 @@ fn fertilizer_turns_generated_sadness_into_strength() {
 #[test]
 fn ocarina_adds_one_melody_card() {
     use sts2_core::relic_effects::dispatch_before_hand_draw;
-    let pool = sts2_content::cards::fool_pool::combat_melody_pool(None);
+    let pool =
+        sts2_content::cards::fool_pool::combat_melody_pool(sts2_core::GameVersion::V0_113_0, None);
     assert!(!pool.is_empty());
     for id in &pool {
         assert!(

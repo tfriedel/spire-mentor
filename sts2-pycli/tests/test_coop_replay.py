@@ -901,6 +901,10 @@ def test_a_seats_turn_so_far_is_recounted_from_the_fight_rows() -> None:
     ally = wire["allies"][0]
     assert ally["cards_exhausted_this_turn"] == 2
     assert ally["card_block_gains_this_turn"] == 2
+    # v0.114.0 Unmovable counts plays: the teammate's one Survivor play gained
+    # block twice, and counts once.
+    a["game_version"] = "v0.114.0"
+    assert coop_replay.full_fight_wire(a)["allies"][0]["card_block_gains_this_turn"] == 1
 
 
 def test_a_seats_turn_so_far_from_the_mod_is_kept() -> None:

@@ -8,7 +8,7 @@ that sets a per-act dominion from the act's boss.
 import pytest
 import sts2_client
 
-HAS_DREAD = sts2_client.GAME_VERSION == "v0.113.0"
+HAS_DREAD = sts2_client.GAME_VERSION in ("v0.113.0", "v0.114.0")
 needs_dread = pytest.mark.skipif(not HAS_DREAD, reason="GameMode.Dread exists from v0.113.0")
 
 

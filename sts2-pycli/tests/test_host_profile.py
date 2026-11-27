@@ -24,7 +24,7 @@ SEED = "PROFILE1"
 #: seeds a child `Rng` with `rng.NextUnsignedLong()` (ListExtensions.cs:45-52).
 #: Earlier builds draw `NextInt` once per item, so there the relics a profile
 #: locks move the `up_front` counter, and on v0.113 they do not (GH #1781).
-ONE_DRAW_SHUFFLE = sts2_client.GAME_VERSION == "v0.113.0"
+ONE_DRAW_SHUFFLE = sts2_client.GAME_VERSION in ("v0.113.0", "v0.114.0")
 
 
 def _rooms(game: Any) -> list[dict[str, Any]]:

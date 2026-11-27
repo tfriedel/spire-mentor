@@ -4,7 +4,9 @@
 use sts2_core::card_effects::{self, deal_damage_player_to_enemy, EffectResult};
 use sts2_core::{CombatState, CreatureUid, DrawThen, PowerKind};
 
-use super::helpers::{apply_to_enemy, apply_to_player, current_block, current_damage, var};
+use super::helpers::{
+    apply_to_enemy, apply_to_player, current_block, current_damage, v0114, var, var_by,
+};
 use crate::cards::draw_then::after_draw;
 
 /// One self-applied power per card: `(power, base amount, upgraded amount)`.
@@ -42,27 +44,64 @@ pub(crate) fn self_power(id: sts2_core::cards::CardId) -> Option<(PowerKind, i32
     })
 }
 
+/// v0.114.0's `(base, upgraded)` power amount for a [`self_power`] card
+/// whose `PowerVar` or its upgrade moved (decomp
+/// `v0.114.0/.../Models.Cards/<Name>.cs`), `None` when v0.113.0's holds.
+fn self_power_v0114(id: sts2_core::cards::CardId) -> Option<(i32, i32)> {
+    use sts2_core::cards::CardId as C;
+    Some(match id {
+        // AllIsWell.cs: `UpgradeValueBy(2m)`.
+        C::AllIsWellCard => (4, 6),
+        // Archery.cs: `PowerVar<AimPower>(6m)`, +2.
+        C::ArcheryCard => (6, 8),
+        // ExplosiveArrows.cs: `PowerVar(8m)`, +3.
+        C::ExplosiveArrowsCard => (8, 11),
+        // Honing.cs: `PowerVar(100m)` (the upgrade is still cost -1).
+        C::HoningCard => (100, 100),
+        // Lullaby.cs: `PowerVar(12m)`, +4 (no Innate).
+        C::LullabyCard => (12, 16),
+        // SerratedArrows.cs: `PowerVar(50m)`, +25.
+        C::SerratedArrowsCard => (50, 75),
+        // Simpleton.cs: the upgrade is `SimpletonPower` +1, not cost -1.
+        C::SimpletonCard => (1, 2),
+        // SongPath.cs: `PowerVar(4m)`, +2.
+        C::SongPathCard => (4, 6),
+        // Tune.cs: `CardsVar(1)`, +1 (cards TunePower upgrades).
+        C::TuneCard => (1, 2),
+        // ViolentChord.cs: `PowerVar(7m)`, +2.
+        C::ViolentChordCard => (7, 9),
+        _ => return None,
+    })
+}
+
 /// `PowerCmd.Apply<XPower>(Owner.Creature, amount)` for [`self_power`] cards.
 pub(crate) fn play_self_power(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     let id = card_effects::originating_card_id(state).expect("resolving card");
     let (kind, base, up) = self_power(id).expect("self-power card");
+    let (base, up) = if v0114(state) {
+        self_power_v0114(id).unwrap_or((base, up))
+    } else {
+        (base, up)
+    };
     let n = var(state, base, up);
     apply_to_player(state, kind, n);
     EffectResult::Resolved
 }
 
-/// `ChoBarbs.cs`: `GainBlock` (7, +2), then ChoBarbsPower 3 (+1).
+/// `ChoBarbs.cs`: `GainBlock` (7, +2), then ChoBarbsPower 3 (+1); v0.114.0
+/// block 8 (+2), power 2 (+1).
 pub(crate) fn play_cho_barbs(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     card_effects::gain_block_player(state, current_block(state));
-    let n = var(state, 3, 4);
+    let n = var_by(state, (3, 4), (2, 3));
     apply_to_player(state, PowerKind::ChoBarbs, n);
     EffectResult::Resolved
 }
 
-/// `ChoReady.cs`: `GainBlock` (8, +3), then Aim 3 (+2).
+/// `ChoReady.cs`: `GainBlock` (8, +3), then Aim 3 (+2); v0.114.0 block 7
+/// (+2), Aim 3 (+1).
 pub(crate) fn play_cho_ready(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     card_effects::gain_block_player(state, current_block(state));
-    let n = var(state, 3, 5);
+    let n = var_by(state, (3, 5), (3, 4));
     apply_to_player(state, PowerKind::Aim, n);
     EffectResult::Resolved
 }
@@ -170,7 +209,9 @@ pub(crate) fn play_ennui(state: &mut CombatState, _t: Option<CreatureUid>) -> Ef
 /// come upgraded) is its `counter`.
 pub(crate) fn play_mythic_form(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
     apply_to_player(state, PowerKind::MythicForm, 1);
-    if super::helpers::upgraded(state) {
+    // v0.114.0 `MythicForm.cs`: the upgrade only drops Ethereal; the power
+    // has no `Upgraded` counter (`IncrementUpgraded` is gone).
+    if super::helpers::upgraded(state) && !v0114(state) {
         if let Some(p) = last_player_power_mut(state, PowerKind::MythicForm) {
             p.counter = p.counter.saturating_add(1);
         }

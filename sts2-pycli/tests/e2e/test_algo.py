@@ -2252,3 +2252,15 @@ def test_learner_vf_coef_run_flag_reaches_the_loss_cfg() -> None:
     )
     cfg = learner.cfg_from_args(args)
     assert update.loss_cfg(cfg).vf_coef_run == pytest.approx(2.0)
+
+
+def test_a_resume_clamps_m_into_a_narrower_kl_range():
+    """A lane that lowers kl_m_max resumes with m inside the new range (no lr alarm)."""
+    import dataclasses
+
+    st = algo.AlgoState(hold_iters=0)
+    st.kl.m = 2.0
+    cfg = dataclasses.replace(st.cfg, kl_m_max=1.0)
+    back = algo.AlgoState.from_dict(st.to_dict(), cfg)
+    assert back.kl.m == pytest.approx(1.0)
+    assert algo.AlgoState.from_dict(st.to_dict()).kl.m == pytest.approx(2.0)

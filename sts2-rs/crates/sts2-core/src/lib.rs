@@ -4154,6 +4154,10 @@ pub struct TurnEvents {
     /// `combat_loop::flush_played_cards_after_choice` sends it to the hand top
     /// once the choice closes. `None` at rest.
     pub feral_claimed_in_play: Option<CardUid>,
+    /// The same hold for a hand-played card whose result location Rebound
+    /// claimed (and whose stack it spent) at play start (GH #1907): the flush
+    /// sends it to the draw top without spending a second stack.
+    pub rebound_claimed_in_play: Option<CardUid>,
     /// v0.113.0 `JugglingPower` Data `cardToClone`: the turn's 3rd Attack,
     /// remembered by `BeforeCardPlayed` and cloned (then cleared) by
     /// `AfterCardPlayed` once that play finishes. Kept apart from the power's
@@ -4710,6 +4714,7 @@ impl Clone for TurnEvents {
             cards_drawn_by_effect_this_turn,
             extra_card_rewards_this_combat,
             feral_claimed_in_play,
+            rebound_claimed_in_play,
             juggling_card_to_clone,
             after_played_is_auto_play,
             status_cards_drawn_this_turn,
@@ -4775,6 +4780,7 @@ impl Clone for TurnEvents {
             cards_drawn_by_effect_this_turn: *cards_drawn_by_effect_this_turn,
             extra_card_rewards_this_combat: *extra_card_rewards_this_combat,
             feral_claimed_in_play: *feral_claimed_in_play,
+            rebound_claimed_in_play: *rebound_claimed_in_play,
             juggling_card_to_clone: *juggling_card_to_clone,
             after_played_is_auto_play: *after_played_is_auto_play,
             status_cards_drawn_this_turn: *status_cards_drawn_this_turn,
@@ -4839,18 +4845,89 @@ impl Clone for TurnEvents {
     }
 }
 
-/// The [`TurnEvents::unmovable_card_block_plays`] tag of a block gain whose
-/// card play has finished: never a live card uid.
+/// The first [`TurnEvents::unmovable_card_block_plays`] tag a finished card
+/// play's block gains take: never a live card uid. Each later finished play
+/// takes the next tag down (`u32::MAX - 1`, …), so the tags also tell the
+/// earlier plays apart (v0.114.0 Unmovable counts plays, not gains).
 pub const UNMOVABLE_EARLIER_PLAY: u32 = u32::MAX;
+
+/// Tags at or above this are finished plays' ([`UNMOVABLE_EARLIER_PLAY`] and
+/// below); card uids stay far under it.
+pub const UNMOVABLE_RETIRED_FLOOR: u32 = u32::MAX - (1 << 24);
 
 impl TurnEvents {
     /// C# `CardPlayFinished`: `card`'s gains this iteration now belong to an
-    /// earlier `CardPlay` for Unmovable's count.
+    /// earlier `CardPlay` for Unmovable's count, under a tag of their own.
+    #[inline]
     pub fn retire_unmovable_play(&mut self, card: CardUid) {
-        for tag in &mut self.unmovable_card_block_plays {
-            if *tag == card.0.get() {
-                *tag = UNMOVABLE_EARLIER_PLAY;
+        // Runs on every card play; most turns hold no tagged gain of `card`.
+        let live = card.0.get();
+        if self.unmovable_card_block_plays.contains(&live) {
+            self.retire_unmovable_play_body(live);
+        }
+    }
+
+    #[inline(never)]
+    fn retire_unmovable_play_body(&mut self, live: u32) {
+        let tag = self
+            .unmovable_card_block_plays
+            .iter()
+            .copied()
+            .filter(|&t| t >= UNMOVABLE_RETIRED_FLOOR)
+            .min()
+            .map_or(UNMOVABLE_EARLIER_PLAY, |t| t - 1);
+        for t in &mut self.unmovable_card_block_plays {
+            if *t == live {
+                *t = tag;
             }
+        }
+    }
+
+    /// C# `UnmovablePower.ModifyBlockMultiplicative`'s `num`: this turn's card
+    /// block gains from a `CardPlay` other than `current` (a card uid), as
+    /// gains through v0.113 and as distinct plays from v0.114.0
+    /// (`DistinctBy(e => e.CardPlay)`, UnmovablePower.cs:34-36).
+    #[must_use]
+    pub fn unmovable_other_plays(&self, current: u32, distinct_plays: bool) -> i32 {
+        let others = self
+            .unmovable_card_block_plays
+            .iter()
+            .copied()
+            .filter(|&t| t != current);
+        let n = if distinct_plays {
+            let mut seen: smallvec::SmallVec<[u32; 8]> = smallvec::SmallVec::new();
+            for t in others {
+                if !seen.contains(&t) {
+                    seen.push(t);
+                }
+            }
+            seen.len()
+        } else {
+            others.count()
+        };
+        i32::try_from(n).unwrap_or(i32::MAX)
+    }
+
+    /// The finished card plays' block gains this turn, as the oracle's
+    /// `card_block_gains_this_turn` counts them: gains through v0.113,
+    /// distinct plays from v0.114.0.
+    #[must_use]
+    pub fn earlier_card_block_gains(&self, distinct_plays: bool) -> usize {
+        let retired = self
+            .unmovable_card_block_plays
+            .iter()
+            .copied()
+            .filter(|&t| t >= UNMOVABLE_RETIRED_FLOOR);
+        if distinct_plays {
+            let mut seen: smallvec::SmallVec<[u32; 8]> = smallvec::SmallVec::new();
+            for t in retired {
+                if !seen.contains(&t) {
+                    seen.push(t);
+                }
+            }
+            seen.len()
+        } else {
+            retired.count()
         }
     }
 
@@ -6356,10 +6433,17 @@ impl CombatState {
         let Some(c) = self.creatures.iter().find(|c| c.id == uid.0) else {
             return true;
         };
+        // v0.114.0 dropped `PainfulStabsPower`'s death overrides
+        // (`ShouldPowerBeRemovedAfterOwnerDeath`,
+        // `ShouldCreatureBeRemovedFromCombatAfterDeath`): its corpse leaves.
+        let stabs_retain = self.game_version < GameVersion::V0_114_0;
         let retained = c.powers.iter().any(|puid| {
-            self.powers
-                .iter()
-                .any(|p| p.id == puid.0 && p.amount != 0 && RETAIN_CORPSE_POWERS.contains(&p.kind))
+            self.powers.iter().any(|p| {
+                p.id == puid.0
+                    && p.amount != 0
+                    && RETAIN_CORPSE_POWERS.contains(&p.kind)
+                    && (stabs_retain || p.kind != PowerKind::PainfulStabs)
+            })
         });
         !retained
     }
@@ -7771,7 +7855,7 @@ impl CombatState {
     /// `WuppysLoyaltyPower(1)` while it is alive, then
     /// `CreatureCmd.SetMaxHp(pet, max_hp)` and
     /// `CreatureCmd.SetCurrentHp(pet, current_hp)`. A relic at `CurrentHp`
-    /// 0 summons a corpse: `SetCurrentHp` kills it, it stays in the fight
+    /// 0 summons a corpse: through v0.113 `SetCurrentHp` kills it, it stays in the fight
     /// with its power (`ShouldCreatureBeRemovedFromCombatAfterDeath`,
     /// `ShouldPowerBeRemovedAfterOwnerDeath` both false for it), and the
     /// death reaches Melancholy (`Hook.AfterDeath`).
@@ -7789,10 +7873,14 @@ impl CombatState {
             return CreatureUid(c.id);
         }
         let uid = self.restore_wuppy(current_hp, max_hp, 0);
-        if self
-            .creatures
-            .iter()
-            .any(|c| c.id == uid.0 && c.current_hp == 0)
+        // v0.114.0 `Wuppy.SummonPet` writes the HP straight
+        // (`SetCurrentHpInternal`, Wuppy.cs:137-138), so no `Kill` and no
+        // `AfterDeath`: a 0-HP Wuppy enters as a corpse, Melancholy untouched.
+        if self.game_version < GameVersion::V0_114_0
+            && self
+                .creatures
+                .iter()
+                .any(|c| c.id == uid.0 && c.current_hp == 0)
         {
             self.reduce_melancholy_cost_on_death();
         }
@@ -13604,20 +13692,29 @@ fn resolve_transform_in_hand_to_minion_strike(
     // that opened this choice is held in the Play pile (its OnPlay is suspended
     // awaiting the select; the deferred Play→Discard flush runs only after the
     // choice resolves), so the Play-pile tail is that very card.
-    let upgraded = state
+    let source = state
         .player
         .play
         .last()
         .map(|u| u.0.get() as usize - 1)
-        .and_then(|i| state.cards.get(i))
-        .is_some_and(|c| c.upgraded);
+        .and_then(|i| state.cards.get(i));
+    let upgraded = source.is_some_and(|c| c.upgraded);
+    // v0.114.0 `Florescence.cs` opens the same single-pick hand transform
+    // (`FromHand(prefs(TransformSelectionPrompt, 1))`) into a TheShot,
+    // upgraded with Florescence; it reuses this kind so the frozen
+    // choice-kind vocabularies stay unchanged.
+    let into = if source.is_some_and(|c| c.card_id == crate::cards::CardId::Florescence) {
+        crate::cards::CardId::TheShot
+    } else {
+        crate::cards::CardId::MinionStrike
+    };
     let Some(factory) = lookup_card_factory() else {
         return;
     };
-    let Some(minion) = factory(crate::cards::CardId::MinionStrike, upgraded) else {
+    let Some(card) = factory(into, upgraded) else {
         return;
     };
-    let _ = state.transform_card(uid, minion);
+    let _ = state.transform_card(uid, card);
 }
 
 /// Resolve a [`ChoiceKind::TransformInHandToMinionSacrifice`] pending choice
@@ -16772,7 +16869,12 @@ const LF_SLOW_GATES: u8 = LF_STAR | LF_ANY_ALLY | LF_OWN_GATE;
 /// Same idea as SpireZero kernel's per-spec `unplayable`/`targeted` table.
 const CARD_LEGAL_FLAGS: [u8; 1024] = {
     use crate::cards::CardId;
-    let lists: [&[CardId]; 3] = [CardId::all(), &CardId::V0111_ONLY, &CardId::V0113_ONLY];
+    let lists: [&[CardId]; 4] = [
+        CardId::all(),
+        &CardId::V0111_ONLY,
+        &CardId::V0113_ONLY,
+        &CardId::V0114_ONLY,
+    ];
     let mut flags = [0u8; 1024];
     let mut l = 0;
     while l < lists.len() {
@@ -22845,15 +22947,16 @@ mod tests {
     #[test]
     fn all_card_ids_complete() {
         // `STAR_COST_CARD_BITS` is built from `all()` + `V0111_ONLY` +
-        // `V0113_ONLY`; together they must name every discriminant
-        // `0..=Amnesia` (the last variant) exactly once.
+        // `V0113_ONLY` + `V0114_ONLY`; together they must name every
+        // discriminant `0..=TwinShot` (the last variant) exactly once.
         let ids: Vec<cards::CardId> = cards::CardId::all()
             .iter()
             .chain(&cards::CardId::V0111_ONLY)
             .chain(&cards::CardId::V0113_ONLY)
+            .chain(&cards::CardId::V0114_ONLY)
             .copied()
             .collect();
-        let n = cards::CardId::Amnesia as usize + 1;
+        let n = cards::CardId::TwinShot as usize + 1;
         let mut seen = vec![false; n];
         for id in &ids {
             let d = *id as usize;
@@ -22869,6 +22972,7 @@ mod tests {
             .iter()
             .chain(&cards::CardId::V0111_ONLY)
             .chain(&cards::CardId::V0113_ONLY)
+            .chain(&cards::CardId::V0114_ONLY)
         {
             assert_eq!(card_has_star_cost_bit(id), card_has_star_cost(id), "{id:?}");
         }
@@ -22881,6 +22985,7 @@ mod tests {
             .iter()
             .chain(&cards::CardId::V0111_ONLY)
             .chain(&cards::CardId::V0113_ONLY)
+            .chain(&cards::CardId::V0114_ONLY)
         {
             let f = card_legal_flags(id);
             assert_eq!(f & LF_STAR != 0, card_has_star_cost(id), "{id:?}");
@@ -25134,7 +25239,11 @@ mod tests {
         use crate::GameVersion;
 
         const BOTH: &[GameVersion] = &GameVersion::ALL;
-        const V0111: &[GameVersion] = &[GameVersion::V0_111_0, GameVersion::V0_113_0];
+        const V0111: &[GameVersion] = &[
+            GameVersion::V0_111_0,
+            GameVersion::V0_113_0,
+            GameVersion::V0_114_0,
+        ];
         // C# v0.107.1 / v0.111.0 `Monsters/<Class>.cs` property, apply line.
         let rows: &[(MonsterKind, PowerKind, i32, u8, i32, &[GameVersion])] = &[
             // TerrorEel.cs:39,65 ShriekAmount (ToughEnemies, 75, 70)

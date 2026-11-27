@@ -92,7 +92,7 @@ class TestEnvelopeGameVersion:
             ("v0.113.1", "v0.113.0"),
             ("0.113.7", "v0.113.0"),
             ("v0.111.2", "v0.111.0"),
-            ("v0.114.0", "v0.113.0"),  # PLAYS_AS
+            ("v0.114.2", "v0.114.0"),
         ],
     )
     def test_a_hotfix_plays_on_its_base_build(self, raw: str, want: str) -> None:

@@ -39,6 +39,10 @@ _PINNED_BOSS: dict[str, dict[str, tuple[str, str, str]]] = {
         "underdocks": ("LAGAVULIN_MATRIARCH_BOSS", "Lagavulin Matriarch", "LagavulinMatriarch"),
         "overgrowth": ("VANTOM_BOSS", "Vantom", "Vantom"),
     },
+    "v0.114.0": {
+        "underdocks": ("LAGAVULIN_MATRIARCH_BOSS", "Lagavulin Matriarch", "LagavulinMatriarch"),
+        "overgrowth": ("VANTOM_BOSS", "Vantom", "Vantom"),
+    },
 }
 
 #: Each act 1's boss pool (``BossDiscoveryOrder``): a pin outside it is the bug.

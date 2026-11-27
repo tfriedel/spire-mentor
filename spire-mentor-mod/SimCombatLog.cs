@@ -289,9 +289,15 @@ internal static class SimCombatLog
             var history = CombatManager.Instance!.History;
             var finished = history.CardPlaysFinished
                 .Where(f => f.CardPlay != null).Select(f => f.CardPlay).ToHashSet();
-            return history.Entries.OfType<BlockGainedEntry>().Count(e =>
+            var gains = history.Entries.OfType<BlockGainedEntry>().Where(e =>
                 e.HappenedThisTurn(state) && e.CardPlay != null && finished.Contains(e.CardPlay)
                 && e.CardPlay.Card?.Owner?.Creature == creature && e.Props.IsCardOrMonsterMove());
+            // v0.114.0 UnmovablePower counts the earlier card PLAYS that gained
+            // block (`DistinctBy(e => e.CardPlay)`), not the gains, and the
+            // engine reads this count the same way on that build.
+            return SimGameVersion.Wire == "v0.114.0"
+                ? gains.DistinctBy(e => e.CardPlay).Count()
+                : gains.Count();
         }
         catch (Exception)
         {

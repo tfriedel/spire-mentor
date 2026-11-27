@@ -91,6 +91,43 @@ NO_BUCKETS = {
 LEARNER_FORMATS = ("ppo.e2e.learner/3",)
 
 
+class LossScale:
+    """Dynamic loss scaling for an fp16 update (`Cfg.update_amp`): fp16's range
+    (max 65504, normals from 6e-5) underflows small gradients, so the loss is
+    multiplied by `scale` before backward and the summed gradient divided by it.
+    A non-finite sum skips the step and halves the scale; `GROW_EVERY` clean
+    steps in a row double it. The ranks all-reduce before `unscale`, so every
+    rank sees the same sum and takes the same decision. bf16 and fp32 updates
+    need none (`Rank.loss_scale` is None)."""
+
+    INIT = 2.0**16
+    GROW_EVERY = 200
+    MIN, MAX = 1.0, 2.0**24
+
+    def __init__(self, state: dict[str, Any] | None = None) -> None:
+        self.scale, self.clean, self.skipped = self.INIT, 0, 0
+        if state is not None:  # a state saved by an fp16 update
+            self.scale = float(state["scale"])
+            self.clean, self.skipped = int(state["clean"]), int(state["skipped"])
+
+    def unscale(self, g: torch.Tensor) -> torch.Tensor | None:
+        """The true gradient of the summed scaled one `g`, or None (skip the step)."""
+        if not bool(torch.isfinite(g).all()):
+            self.scale = max(self.scale / 2.0, self.MIN)
+            self.clean = 0
+            self.skipped += 1
+            return None
+        self.clean += 1
+        out = g / self.scale
+        if self.clean >= self.GROW_EVERY:
+            self.scale = min(self.scale * 2.0, self.MAX)
+            self.clean = 0
+        return out
+
+    def state(self) -> dict[str, float | int]:
+        return {"scale": float(self.scale), "clean": int(self.clean), "skipped": int(self.skipped)}
+
+
 def ahead(make: Callable[[Any], Any], items: Iterable[Any], depth: int = 2) -> Iterator[Any]:
     """`make(item)` for each of `items`, in order, built by one thread up to `depth`
     results ahead of the consumer (#1550): the update's steps wait on the device,
@@ -442,7 +479,13 @@ class Rank:
         self.net = net_from_state(
             init["net"], schema_sha256=self.schema_sha256, vocab_sha256=self.vocab_sha256
         ).to(self.dev)
-        self.net.bf16 = bool(cfg.bf16) and self.dev.type == "cuda"
+        amp = getattr(cfg, "update_amp", "") or ("bf16" if cfg.bf16 else "fp32")
+        self.net.bf16 = amp != "fp32" and self.dev.type == "cuda"
+        self.net.amp_dtype = torch.float16 if amp == "fp16" else torch.bfloat16
+        # An fp16 update scales its loss; a state without a scale starts a fresh one.
+        self.loss_scale = (
+            LossScale(init.get("loss_scale")) if amp == "fp16" and self.net.bf16 else None
+        )
         self.net.train()
         self.algo = A.AlgoState.from_dict(init["algo"])
         self.opt = A.make_optimizer(
@@ -943,10 +986,17 @@ class Rank:
                         cfg=self.loss_cfg,
                         n_types=n_ct,
                     )
-                    lo.loss.backward()
+                    ls = self.loss_scale
+                    (lo.loss if ls is None else lo.loss * ls.scale).backward()
                     for k, v in lo.stats.items():
                         acc[k] = acc[k] + v
                 g = self._sum(self._flat_grads())
+                if self.loss_scale is not None:
+                    unscaled = self.loss_scale.unscale(g)
+                    if unscaled is None:  # an fp16 overflow: skip the step, not a NaN stop
+                        self.opt.zero_grad(set_to_none=True)
+                        continue
+                    g = unscaled
                 if not bool(torch.isfinite(g).all()):
                     nonfinite.append(f"gradient (it {it}, epoch {epoch})")
                     self.opt.zero_grad(set_to_none=True)
@@ -998,6 +1048,8 @@ class Rank:
                 "steps": steps,
                 "gradnorm_mean": float(torch.stack(gnorms).mean()) if gnorms else math.nan,
                 "gradnorm_max": float(torch.stack(gnorms).max()) if gnorms else math.nan,
+                "loss_scale": None if self.loss_scale is None else self.loss_scale.scale,
+                "skipped_steps": 0 if self.loss_scale is None else self.loss_scale.skipped,
                 "n_table": n,
                 "n_strata": n_strata,
                 "n_probe_strata": len(probe),
@@ -1128,6 +1180,9 @@ class Rank:
             ),
             "opt": self.opt.state_dict(),
             "ema": None if self.ema is None else self.ema.state_dict(),
+            # fp16 only (`update_amp`); a bf16 or fp32 resume ignores it and an fp16
+            # resume of a state without it starts a fresh scale.
+            "loss_scale": None if self.loss_scale is None else self.loss_scale.state(),
             "algo": self.algo.to_dict(),
             "learner": job["learner_state"],
             "held": held_blob(job.get("held")),

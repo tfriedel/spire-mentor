@@ -45,7 +45,7 @@ pub fn generate_all_cards(pool: Pool, version: GameVersion) -> &'static [CardId]
         (Pool::Character(CharacterId::Regent), false) => g::REGENT_V0107,
         (Pool::Character(CharacterId::Regent), true) => g::REGENT_V0111,
         // The Fool exists only from v0.113.0 (`FoolCardPool.cs`).
-        (Pool::Character(CharacterId::Fool), _) => super::fool_pool::generate_all_cards(),
+        (Pool::Character(CharacterId::Fool), _) => super::fool_pool::generate_all_cards(version),
         (Pool::Colorless, false) => g::COLORLESS_V0107,
         (Pool::Colorless, true) if version >= GameVersion::V0_113_0 => &COLORLESS_V0113,
         (Pool::Colorless, true) => g::COLORLESS_V0111,
@@ -124,7 +124,7 @@ pub fn has_character_visual_pool(id: CardId) -> bool {
 #[must_use]
 pub fn combat_pool(pool: Pool, version: GameVersion, multiplayer: bool) -> Vec<CardSpec> {
     use crate::cards::colorless::helpers::{
-        card_can_be_generated_in_combat, card_is_multiplayer_only,
+        card_can_be_generated_in_combat_in, card_is_multiplayer_only,
     };
     generate_all_cards(pool, version)
         .iter()
@@ -134,7 +134,7 @@ pub fn combat_pool(pool: Pool, version: GameVersion, multiplayer: bool) -> Vec<C
             !matches!(
                 s.rarity,
                 CardRarity::Basic | CardRarity::Ancient | CardRarity::Event
-            ) && card_can_be_generated_in_combat(s.id)
+            ) && card_can_be_generated_in_combat_in(s.id, version)
                 && super::v0111::can_be_generated_in_combat(s.id, version)
                 && (multiplayer || !card_is_multiplayer_only(s.id))
                 && !crate::unlocks::is_card_locked(s.id)
@@ -157,7 +157,7 @@ pub fn coop_combat_pool(pool: Pool, version: GameVersion) -> &'static [CardSpec]
     use std::collections::BTreeMap;
     use std::sync::RwLock;
 
-    type Cache = RwLock<Option<(u64, BTreeMap<(u8, bool), &'static [CardSpec]>)>>;
+    type Cache = RwLock<Option<(u64, BTreeMap<(u8, u8), &'static [CardSpec]>)>>;
     static CACHE: Cache = RwLock::new(None);
 
     let generation = crate::unlocks::locked_generation();
@@ -166,7 +166,8 @@ pub fn coop_combat_pool(pool: Pool, version: GameVersion) -> &'static [CardSpec]
             Pool::Character(c) => c as u8,
             Pool::Colorless => u8::MAX,
         },
-        super::v0111::is_v0111(version),
+        // Keyed on the build itself: v0.113.0 and v0.114.0 pools differ.
+        version as u8,
     );
     if let Some((gen, map)) = CACHE.read().expect("pool cache poisoned").as_ref() {
         if *gen == generation {

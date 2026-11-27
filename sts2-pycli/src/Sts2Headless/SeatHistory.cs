@@ -51,9 +51,15 @@ internal static class SeatHistory
 
         var finished = history.CardPlaysFinished
             .Where(f => f.CardPlay != null).Select(f => f.CardPlay).ToHashSet();
-        summary["card_block_gains_this_turn"] = history.Entries.OfType<BlockGainedEntry>().Count(e =>
+        var blockGains = history.Entries.OfType<BlockGainedEntry>().Where(e =>
             e.HappenedThisTurn(state) && e.CardPlay != null && finished.Contains(e.CardPlay)
             && e.CardPlay.Card?.Owner?.Creature == creature && e.Props.IsCardOrMonsterMove());
+#if GAME_V0114
+        // v0.114.0 UnmovablePower counts distinct card plays, not gains.
+        summary["card_block_gains_this_turn"] = blockGains.DistinctBy(e => e.CardPlay).Count();
+#else
+        summary["card_block_gains_this_turn"] = blockGains.Count();
+#endif
 
         var enemies = state.Enemies;
         var hits = damage.Where(e => e.Dealer == creature && e.Result.Props.IsPoweredAttack()

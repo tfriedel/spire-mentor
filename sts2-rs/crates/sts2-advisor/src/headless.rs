@@ -783,7 +783,7 @@ mod tests {
         assert_eq!(
             refused.to_string(),
             "Spire Mentor's advisor does not support game version 'v0.99.0' (supported: \
-             v0.107.1, v0.111.0, v0.113.0). Update the advisor, or switch the game to a \
+             v0.107.1, v0.111.0, v0.113.0, v0.114.0). Update the advisor, or switch the game to a \
              supported build in Steam (Properties > Betas)."
         );
     }

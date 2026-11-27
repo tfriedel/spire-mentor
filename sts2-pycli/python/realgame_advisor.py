@@ -1174,6 +1174,61 @@ class LastCombat:
 LAST_COMBAT = LastCombat()
 
 
+def _room_entry_heal(state: dict[str, Any]) -> int:
+    """HP that heals on entering the fight's room after the last out-of-fight
+    screen (the bench's ``_fight_start_hp`` entry): Pantograph's 25 on a boss
+    (``Pantograph.BeforeCombatStart``). Planisphere's +5 on a ``?`` room is left
+    out, as its own event page may already carry it. Twin of the native
+    ``serve.rs`` ``room_entry_heal`` (GH #1917, #1947)."""
+    if str(state.get("room_type") or "").lower() != "boss":
+        return 0
+    for r in (state.get("run_state") or {}).get("relics") or []:
+        rid = str((r or {}).get("id") or "")
+        if rid.upper().removeprefix("RELIC.") == "PANTOGRAPH" and not r.get("is_melted"):
+            return 25
+    return 0
+
+
+class FightRunHp:
+    """GH #1917: the engine keeps ``run_state.current_hp`` at its pre-fight
+    value for the whole fight, so the net trained on RUNCTX ``R_HP`` = the HP
+    the fight STARTED on, while the mod sends the live run HP. ``freeze``
+    rewrites a fight's ``state.run_state.{hp,max_hp}`` to the fight-entry value:
+    the last out-of-fight ``(hp, max_hp)`` plus the room-entry heal, or, after a
+    reconnect with no prior screen, the message's own. The ``combat`` block keeps
+    the live fight HP. Twin of the native ``serve.rs`` ``freeze_fight_run_hp``
+    (GH #1947: without it the two advisors answered differently)."""
+
+    def __init__(self) -> None:
+        self.room: tuple[int, int] | None = None
+        self.fight: tuple[int, int] | None = None
+
+    def freeze(self, state: dict[str, Any]) -> None:
+        rs = state.get("run_state")
+        rs = rs if isinstance(rs, dict) else {}
+        hp, max_hp = rs.get("hp"), rs.get("max_hp")
+        live = (hp, max_hp) if isinstance(hp, int) and isinstance(max_hp, int) else None
+        if not isinstance(state.get("combat"), dict):
+            self.fight = None
+            if live is not None:
+                self.room = live
+            return
+        if self.fight is None:
+            if self.room is not None:
+                room_hp, room_max = self.room
+                self.fight = (min(room_hp + _room_entry_heal(state), room_max), room_max)
+            else:
+                self.fight = live
+        if self.fight is not None and isinstance(state.get("run_state"), dict):
+            # A copy: ``state`` is a shallow copy of the message.
+            state["run_state"] = {**rs, "hp": self.fight[0], "max_hp": self.fight[1]}
+
+
+#: Singleton written by ``_handle_advice_request`` (process-wide, as the native
+#: advisor's ``Advisor::{room_hp, fight_hp}``).
+RUN_HP = FightRunHp()
+
+
 def companion_search_tree(cs: Any, cfg: RecommendConfig, sims: int) -> dict[str, Any]:
     """A single-tree search over ``cs`` in the workbench's ``search_tree``
     payload shape, pruned to keep log records bounded.
@@ -1799,6 +1854,7 @@ def _handle_advice_request(
         check_supported_characters(msg)
         state = dict(msg)
         state["type"] = advice_for
+        RUN_HP.freeze(state)
         is_boss = (state.get("room_type") or "") == "Boss"
         sims = args.boss_sims if is_boss else args.sims
         fight_cfg = fight_search_cfg(cfg, state)
@@ -1842,6 +1898,10 @@ def _handle_advice_request(
                 state, fight_cfg, sims, mirror, getattr(args, "plan_budget_s", None)
             )
             advice = apply_ally_wait(state, advice)
+            set_target = getattr(mirror, "set_advice_target", None)
+            if set_target is not None:
+                # GH #1918: a killing play's null target is recovered from it.
+                set_target((advice.get("best") or {}).get("target_index"))
             LAST_COMBAT.put(state_id, cs, call_cfg)
             if args.log_search_tree > 0 and logged_step:
                 try:

@@ -64,6 +64,7 @@ pub const fn engine_wiki_version(version: GameVersion) -> &'static str {
         GameVersion::V0_107_1 => ENGINE_WIKI_VERSION,
         GameVersion::V0_111_0 => "v0.111.0",
         GameVersion::V0_113_0 => "v0.113.0",
+        GameVersion::V0_114_0 => "v0.114.0",
     }
 }
 
@@ -264,6 +265,9 @@ macro_rules! bundled {
             GameVersion::V0_113_0 => {
                 include_str!(concat!(env!("OUT_DIR"), "/game/v0.113.0/", $name))
             }
+            GameVersion::V0_114_0 => {
+                include_str!(concat!(env!("OUT_DIR"), "/game/v0.114.0/", $name))
+            }
         };
         if own.is_empty() {
             base
@@ -378,6 +382,9 @@ impl Data {
                     }
                     GameVersion::V0_113_0 => {
                         include_str!(concat!(env!("OUT_DIR"), "/game/v0.113.0/card_tags.json"))
+                    }
+                    GameVersion::V0_114_0 => {
+                        include_str!(concat!(env!("OUT_DIR"), "/game/v0.114.0/card_tags.json"))
                     }
                 };
                 let overlay: BTreeMap<String, serde_json::Value> =
@@ -517,6 +524,13 @@ macro_rules! zh_versioned {
                 include_str!(concat!(
                     env!("OUT_DIR"),
                     "/game/v0.113.0/localization_zhs/",
+                    $name
+                ))
+            }
+            GameVersion::V0_114_0 => {
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/game/v0.114.0/localization_zhs/",
                     $name
                 ))
             }

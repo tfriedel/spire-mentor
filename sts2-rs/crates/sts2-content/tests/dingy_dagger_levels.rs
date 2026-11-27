@@ -64,3 +64,21 @@ fn smith_offers_an_upgraded_dingy_dagger_and_upgrades_it_again() {
     let up = rm.run_state.master_deck[at];
     assert_eq!((up.upgrade_level(), up.base_damage), (2, 16));
 }
+
+/// v0.114.0 `CardCmd.Downgrade` takes one level off (`DowngradeInternal(1)`
+/// replays `level - 1` upgrades); `RemoveAllUpgrades` (Dampen) still resets.
+#[test]
+fn a_v0114_downgrade_takes_one_level_off() {
+    install();
+    let v114 = GameVersion::V0_114_0;
+    let mut card = card_pod_for(CardId::DingyDagger, false, v114).expect("spec");
+    for _ in 0..3 {
+        assert!(card.upgrade_for(v114));
+    }
+    assert_eq!((card.upgrade_level(), card.base_damage), (3, 22));
+    assert!(card.downgrade_for(v114));
+    assert_eq!((card.upgrade_level(), card.base_damage), (2, 16));
+    assert!(card.remove_all_upgrades_for(v114));
+    assert_eq!((card.upgrade_level(), card.base_damage), (0, 7));
+    assert!(!card.downgrade_for(v114), "nothing left to take off");
+}

@@ -1057,7 +1057,11 @@ fn assert_power_hook_dead(state: &CombatState, hook: PowerHook) {
 /// (e.g. Vulnerable consulting the dealer's Cruelty stacks, Colossus checking
 /// whether the dealer has Vulnerable).
 #[must_use]
-fn creature_power_amount(state: &CombatState, cr: CreatureRef, kind: PowerKind) -> Option<i32> {
+pub(crate) fn creature_power_amount(
+    state: &CombatState,
+    cr: CreatureRef,
+    kind: PowerKind,
+) -> Option<i32> {
     // O(1) absence gate: `present_kinds` is a conservative superset of every
     // live power kind in the arena, so a miss proves no creature has `kind`.
     if !state.powers.present_kinds().contains(kind) {
@@ -3871,7 +3875,18 @@ fn power_modify_damage_additive(
                 if crate::card_effects::originating_card_id(state)
                     == Some(crate::cards::CardId::HeavyShot)
                 {
-                    power.amount.saturating_mul(2)
+                    // `HeavyShot.ModifyAimAmount`: `* AimMultiplier`, 2 through
+                    // v0.113.0; v0.114.0 3 (+1) (HeavyShot.cs:33,60).
+                    let multiplier = if state.game_version >= crate::GameVersion::V0_114_0 {
+                        if crate::card_effects::resolving_card_upgraded(state) {
+                            4
+                        } else {
+                            3
+                        }
+                    } else {
+                        2
+                    };
+                    power.amount.saturating_mul(multiplier)
                 } else {
                     power.amount
                 }
@@ -4770,10 +4785,9 @@ fn modify_damage_cap_with_owner(
     ctx: &DamageCtx,
 ) -> i32 {
     match listener {
-        ListenerRef::Power(uid) => state
-            .powers
-            .get_by_id(uid.0)
-            .map_or(i32::MAX, |power| power_modify_damage_cap(power, owner, ctx)),
+        ListenerRef::Power(uid) => state.powers.get_by_id(uid.0).map_or(i32::MAX, |power| {
+            power_modify_damage_cap(power, owner, ctx, state.game_version)
+        }),
         ListenerRef::Relic(_) => i32::MAX,
     }
 }
@@ -4784,6 +4798,7 @@ fn power_modify_damage_cap(
     power: &crate::Power,
     owner: Option<CreatureRef>,
     ctx: &DamageCtx,
+    version: crate::GameVersion,
 ) -> i32 {
     match power.kind {
         PowerKind::Intangible => {
@@ -4815,7 +4830,15 @@ fn power_modify_damage_cap(
         // Exoskeleton carries HardToKill(9) from AfterAddedToRoom.
         // (Guard-style arm: a non-matching HardToKill falls through
         // to `_ => i32::MAX`, identical to the prior `else`.)
-        PowerKind::HardToKill if owner == Some(ctx.target) => power.amount,
+        //
+        // v0.114.0 moved the cap off `ModifyDamageCap` onto
+        // `ModifyHpLostBeforeOstyLate` (it caps HP lost, after Block): see the
+        // HardToKill arm in [`modify_hp_lost_cap`].
+        PowerKind::HardToKill
+            if owner == Some(ctx.target) && version < crate::GameVersion::V0_114_0 =>
+        {
+            power.amount
+        }
         _ => i32::MAX,
     }
 }
@@ -5118,12 +5141,10 @@ fn power_modify_block_multiplicative(
             // DIFFERENT CardPlay: every tag but the gaining card's live one
             // (see `TurnEvents::unmovable_card_block_plays`).
             let current_play = ctx.card_source.map_or(0, |c| c.0.get());
-            let num = state
-                .combat_log
-                .unmovable_card_block_plays
-                .iter()
-                .filter(|&&t| t != current_play)
-                .count() as i32;
+            let num = state.combat_log.unmovable_other_plays(
+                current_play,
+                state.game_version >= crate::GameVersion::V0_114_0,
+            );
             if num >= power.amount {
                 return DamageMul::ONE;
             }
@@ -5580,7 +5601,7 @@ fn modify_hp_lost_cap_with_owner(
 ) -> i32 {
     match listener {
         ListenerRef::Power(uid) => state.powers.get_by_id(uid.0).map_or(i32::MAX, |power| {
-            power_modify_hp_lost_cap(power, owner, ctx)
+            power_modify_hp_lost_cap(power, owner, ctx, state.game_version)
         }),
         ListenerRef::Relic(_) => i32::MAX,
     }
@@ -5592,6 +5613,7 @@ fn power_modify_hp_lost_cap(
     power: &crate::Power,
     owner: Option<CreatureRef>,
     ctx: &HpLostCtx,
+    version: crate::GameVersion,
 ) -> i32 {
     match power.kind {
         // Slippery / Intangible: cap post-block HP loss at 1 for the owner
@@ -5625,6 +5647,16 @@ fn power_modify_hp_lost_cap(
         // (mirror_live2, SkulkingColony rd1/rd2).
         PowerKind::HardenedShell if owner == Some(ctx.target) => {
             power.amount.saturating_sub(power.counter)
+        }
+        // HardToKill from v0.114.0: caps the owner's HP lost per hit at
+        // `Amount`, after Block (before it, it capped the damage: see
+        // [`modify_damage_cap`]). v0.114.0 `HardToKillPower.cs:15-26`:
+        //
+        // [decompiled C# omitted — see the cited path]
+        PowerKind::HardToKill
+            if owner == Some(ctx.target) && version >= crate::GameVersion::V0_114_0 =>
+        {
+            power.amount
         }
         _ => i32::MAX,
     }
@@ -5980,8 +6012,9 @@ pub fn modify_card_play_count(
         }
         PowerKind::KiVerse => {
             // v0.113.0 `KiVersePower.ModifyCardPlayCount`: the owner's
-            // Wah/Cho/Ki cards play once more while it lasts.
-            if power.amount <= 0 || !ctx.card_tags.has_melody() {
+            // Wah/Cho/Ki cards play once more while it lasts (v0.114.0: Wah
+            // or Cho only, `fool::ki_verse_replays`).
+            if power.amount <= 0 || !crate::fool::ki_verse_replays(state, ctx.card_tags) {
                 return 0;
             }
             if owner_of_listener(state, listener) != Some(ctx.owner) {
@@ -6095,7 +6128,7 @@ pub fn after_modifying_card_play_count(
         PowerKind::KiVerse => {
             // v0.113.0 `KiVersePower.AfterModifyingCardPlayCount`:
             // `PowerCmd.Decrement(this)` after each melody play it boosted.
-            if power.amount <= 0 || !ctx.card_tags.has_melody() {
+            if power.amount <= 0 || !crate::fool::ki_verse_replays(state, ctx.card_tags) {
                 return None;
             }
             let mut effects = SmallVec::new();
@@ -7065,9 +7098,11 @@ pub fn after_turn_end(
             Some(effects)
         }
         // `TunePower.AfterSideTurnEnd`: a Ki played this (player) turn grants
-        // FreeCard(Amount).
+        // FreeCard(Amount). v0.114.0 replaced it with an `AfterCardPlayed`
+        // upgrade (`fool::after_card_played_power`) and deleted FreeCard.
         PowerKind::Tune => {
             if ctx.side == Side::Enemy
+                || state.game_version >= crate::GameVersion::V0_114_0
                 || !crate::fool::played_this_turn(state, crate::cards::CardTag::Ki)
             {
                 return None;
@@ -12120,7 +12155,15 @@ fn dispatch_after_damage_given_body(
                             // `AfterDamageGiven` fires (CreatureCmd.cs:285,412),
                             // so its PaperCuts no longer triggers (Ironclad
                             // v0.111.0 full seed 2674: one max-HP loss too many).
-                            PowerKind::PaperCuts if dealer.current_hp > 0 => {
+                            //
+                            // v0.114.0 keeps an attacker's powers listening
+                            // until its attack ends (`Kill` skips the strip
+                            // while it `IsAttacking`, CreatureCmd.cs:752-769),
+                            // so there the dead dealer's PaperCuts still costs.
+                            PowerKind::PaperCuts
+                                if dealer.current_hp > 0
+                                    || state.game_version >= crate::GameVersion::V0_114_0 =>
+                            {
                                 pending_papercuts.push(power.amount);
                             }
                             PowerKind::PainfulStabs => pending_painful_stabs.push(power.amount),
@@ -12677,7 +12720,12 @@ fn damage_power_stage(
             mul = mul.compose(power_modify_damage_multiplicative(state, power, owner, ctx));
         }
         if run_cap && MODIFY_DAMAGE_CAP_KINDS.contains(power.kind) {
-            cap = cap.min(power_modify_damage_cap(power, owner, ctx));
+            cap = cap.min(power_modify_damage_cap(
+                power,
+                owner,
+                ctx,
+                state.game_version,
+            ));
         }
     });
     #[cfg(debug_assertions)]
@@ -12746,7 +12794,12 @@ fn hp_lost_power_stage(
                 mul = mul.compose(power_modify_hp_lost_multiplicative(power, owner, ctx));
             }
             if MODIFY_HP_LOST_CAP_ARMS.contains(power.kind) {
-                cap = cap.min(power_modify_hp_lost_cap(power, owner, ctx));
+                cap = cap.min(power_modify_hp_lost_cap(
+                    power,
+                    owner,
+                    ctx,
+                    state.game_version,
+                ));
             }
         },
     );
@@ -14213,6 +14266,7 @@ fn modify_hp_lost_inner(
 /// [`MODIFY_DAMAGE_ADDITIVE_KINDS`] on drift safety.
 const MODIFY_HP_LOST_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kinds(&[
     PowerKind::Buffer,
+    PowerKind::HardToKill,
     PowerKind::HardenedShell,
     PowerKind::Intangible,
     PowerKind::Slippery,
@@ -14222,6 +14276,7 @@ const MODIFY_HP_LOST_KINDS: crate::PowerKindSet = crate::PowerKindSet::from_kind
 /// `match` has an arm for (Buffer). [`modify_hp_lost_inner`]'s walk calls the
 /// multiplicative arm only for these.
 const MODIFY_HP_LOST_MULTIPLICATIVE_ARMS: crate::PowerKindSet = MODIFY_HP_LOST_KINDS.without(&[
+    PowerKind::HardToKill,
     PowerKind::HardenedShell,
     PowerKind::Intangible,
     PowerKind::Slippery,
@@ -16816,6 +16871,8 @@ const AFTER_CARD_PLAYED_ORDERED_ENEMY_HIT_KINDS: crate::PowerKindSet =
         PowerKind::Lullaby,
         PowerKind::Motif,
         PowerKind::LostLute,
+        // v0.114.0 `TunePower.AfterCardPlayed` (upgrades hand cards).
+        PowerKind::Tune,
         // Tender's Strength drain is read by a later power's auto-played
         // attack (Lost Lute), so it walks in application order too.
         PowerKind::Tender,
@@ -17920,15 +17977,31 @@ const AFTER_CARD_PLAYED_OTHER_CREATURE_KINDS: crate::PowerKindSet =
 /// call and the large body's prologue. The body re-tests it.
 #[inline]
 pub fn dispatch_after_card_played_other_creatures(state: &mut CombatState, ctx: &CardCtx) {
+    dispatch_after_card_played_other_creatures_in_series(state, ctx, true);
+}
+
+/// [`dispatch_after_card_played_other_creatures`] for one iteration of a
+/// play series: `last_in_series` is C# `cardPlay.IsLastInSeries`, which
+/// v0.114.0's `EnsemblePower.AfterCardPlayed` checks.
+#[inline]
+pub fn dispatch_after_card_played_other_creatures_in_series(
+    state: &mut CombatState,
+    ctx: &CardCtx,
+    last_in_series: bool,
+) {
     if !kinds_live(state, KindGate::AfterCardPlayedOtherCreature) {
         grant_latched_skittish(state);
         return;
     }
-    dispatch_after_card_played_other_creatures_body(state, ctx);
+    dispatch_after_card_played_other_creatures_body(state, ctx, last_in_series);
 }
 
 #[inline(never)]
-fn dispatch_after_card_played_other_creatures_body(state: &mut CombatState, ctx: &CardCtx) {
+fn dispatch_after_card_played_other_creatures_body(
+    state: &mut CombatState,
+    ctx: &CardCtx,
+    last_in_series: bool,
+) {
     // Whole-dispatcher gate: `present_kinds` is a superset of every live
     // kind, and each lane below is gated on one of these kinds, so none can
     // act. The only other statement, `played_galvanized`, is a pure read.
@@ -17950,8 +18023,13 @@ fn dispatch_after_card_played_other_creatures_body(state: &mut CombatState, ctx:
     }
     // ── React: Ensemble (co-op) ────────────────────────────────────────
     // v0.113.0 `EnsemblePower.AfterCardPlayed`: a card ANOTHER player plays
-    // spends one stack of the owner's Ensemble.
-    if power_kind_live(state, PowerKind::Ensemble) {
+    // spends one stack of the owner's Ensemble. v0.114.0 spends it only on
+    // the series' last play (EnsemblePower.cs:28):
+    //
+    // [decompiled C# omitted — see the cited path]
+    if power_kind_live(state, PowerKind::Ensemble)
+        && (last_in_series || state.game_version < crate::GameVersion::V0_114_0)
+    {
         crate::coop::spend_teammates_ensemble(state);
     }
 
@@ -36677,7 +36755,12 @@ mod owner_scoped_power_folds {
             mul = mul.compose(super::power_modify_damage_multiplicative(
                 state, power, owner, ctx,
             ));
-            cap = cap.min(super::power_modify_damage_cap(power, owner, ctx));
+            cap = cap.min(super::power_modify_damage_cap(
+                power,
+                owner,
+                ctx,
+                state.game_version,
+            ));
         });
         (additive, mul, cap)
     }

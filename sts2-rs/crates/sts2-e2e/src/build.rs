@@ -11,10 +11,12 @@
 //! per net instead: [`Scope::enter`] sets this thread's build from the net's
 //! header (`E2eNet::build`) until the guard drops, and `tokens::encode_for`
 //! enters it on every row. Each build's tables are built once, in their own
-//! `OnceLock`, so one process holds both. A later build reads its own content-ID
-//! table (`data/vocab_v0113.tsv`: `vocab_v0111.tsv`'s rows, then the new names),
+//! `OnceLock`, so one process holds them all. A later build reads its own
+//! content-ID table (`data/vocab_v0113.tsv`: `vocab_v0111.tsv`'s rows, then the
+//! new names; `data/vocab_v0114.tsv`: `vocab_v0113.tsv`'s rows, then v0.114.0's),
 //! card types and hit counts, and every build's registries for the S_ctx content
-//! tables (`card_any`, ...), so its new content has rows of its own.
+//! tables (`relic_any`, ...; cards: the frozen `card_v0113` / `card_v0114`), so
+//! its new content has rows of its own.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -43,7 +45,7 @@ pub fn resolve(raw: Option<&str>) -> Result<GameVersion, String> {
         .parse()
         .map_err(|e| format!("{BUILD_ENV}={raw:?}: {e}"))?;
     match gv {
-        GameVersion::V0_111_0 | GameVersion::V0_113_0 => Ok(gv),
+        GameVersion::V0_111_0 | GameVersion::V0_113_0 | GameVersion::V0_114_0 => Ok(gv),
         other @ GameVersion::V0_107_1 => Err(format!(
             "{BUILD_ENV}={raw:?}: an e2e lane does not play {other}"
         )),
@@ -119,6 +121,7 @@ impl Drop for Scope {
 pub(crate) struct PerBuild<T> {
     v0111: OnceLock<T>,
     v0113: OnceLock<T>,
+    v0114: OnceLock<T>,
 }
 
 impl<T> PerBuild<T> {
@@ -126,12 +129,29 @@ impl<T> PerBuild<T> {
         Self {
             v0111: OnceLock::new(),
             v0113: OnceLock::new(),
+            v0114: OnceLock::new(),
         }
     }
 
     /// The current build's value, built by `f` (under that build) on first use.
     pub(crate) fn get(&self, f: impl FnOnce() -> T) -> &T {
-        if later() { &self.v0113 } else { &self.v0111 }.get_or_init(f)
+        match current() {
+            GameVersion::V0_113_0 => &self.v0113,
+            GameVersion::V0_114_0 => &self.v0114,
+            // `resolve` admits no v0.107.1.
+            GameVersion::V0_111_0 | GameVersion::V0_107_1 => &self.v0111,
+        }
+        .get_or_init(f)
+    }
+}
+
+/// One of three values by the current build: v0.111.0's, v0.113.0's or
+/// v0.114.0's (the per-build embedded tables).
+pub(crate) fn pick<T>(v0111: T, v0113: T, v0114: T) -> T {
+    match current() {
+        GameVersion::V0_113_0 => v0113,
+        GameVersion::V0_114_0 => v0114,
+        GameVersion::V0_111_0 | GameVersion::V0_107_1 => v0111,
     }
 }
 
@@ -146,7 +166,8 @@ mod tests {
         assert_eq!(resolve(Some("v0.113.0")), Ok(GameVersion::V0_113_0));
         assert_eq!(resolve(Some("0.113.1")), Ok(GameVersion::V0_113_0));
         assert!(resolve(Some("v0.107.1")).is_err());
-        assert_eq!(resolve(Some("v0.114.0")), Ok(GameVersion::V0_113_0));
+        assert_eq!(resolve(Some("v0.114.0")), Ok(GameVersion::V0_114_0));
+        assert_eq!(resolve(Some("0.114.2")), Ok(GameVersion::V0_114_0));
         assert!(resolve(Some("v0.115.0")).is_err());
     }
 
@@ -161,6 +182,12 @@ mod tests {
                 assert!(!later());
             }
             assert_eq!(current(), GameVersion::V0_113_0);
+            {
+                let _c = Scope::enter(GameVersion::V0_114_0);
+                assert!(later());
+                assert_eq!(pick(1, 3, 4), 4);
+            }
+            assert_eq!(pick(1, 3, 4), 3);
         }
         assert_eq!(current(), base);
     }

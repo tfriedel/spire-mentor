@@ -592,6 +592,23 @@ pub(crate) fn combat_generatable_pool_in(
         character: sts2_core::potions::CharacterId,
         version: sts2_core::GameVersion,
     ) -> Vec<CardSpec> {
+        if character == CharacterId::Fool && crate::cards::v0111::is_v0114(version) {
+            // v0.114.0 changed the Fool pool's membership (Optimism, TwinShot
+            // for RapidShot, a generatable MythicForm), so filter that
+            // build's pool rather than mapping the v0.113.0 one.
+            use crate::cards::types::CardRarity;
+            return crate::cards::fool_pool::pool_specs(version)
+                .filter(|s| {
+                    !matches!(
+                        s.rarity,
+                        CardRarity::Basic | CardRarity::Ancient | CardRarity::Event
+                    ) && card_can_be_generated_in_combat_in(s.id, version)
+                        && crate::cards::v0111::can_be_generated_in_combat(s.id, version)
+                        && !card_is_multiplayer_only(s.id)
+                        && !crate::unlocks::is_card_locked(s.id)
+                })
+                .collect();
+        }
         combat_generatable_pool(character)
             .iter()
             .map(|s| crate::cards::v0111::pool_spec_of(*s, version))
@@ -600,9 +617,10 @@ pub(crate) fn combat_generatable_pool_in(
     }
     if crate::unlocks::any_locked() {
         // Same generation-keyed leak as `locked_filtered_combat_pool`.
-        static CACHE: RwLock<Option<(u64, BTreeMap<u8, &'static [CardSpec]>)>> = RwLock::new(None);
+        type Cache = RwLock<Option<(u64, BTreeMap<(u8, u8), &'static [CardSpec]>)>>;
+        static CACHE: Cache = RwLock::new(None);
         let generation = crate::unlocks::locked_generation();
-        let key = character as u8;
+        let key = (character as u8, version as u8);
         if let Some((gen, map)) = CACHE.read().expect("pool cache poisoned").as_ref() {
             if *gen == generation {
                 if let Some(slice) = map.get(&key) {
@@ -624,21 +642,17 @@ pub(crate) fn combat_generatable_pool_in(
         }
         return leaked;
     }
-    static POOLS: [OnceLock<Vec<CardSpec>>; 6] = [
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-        OnceLock::new(),
-    ];
+    // One slot per (build, character): the builds' pools differ.
+    static POOLS: [[OnceLock<Vec<CardSpec>>; 6]; sts2_core::GameVersion::ALL.len()] =
+        [const { [const { OnceLock::new() }; 6] }; sts2_core::GameVersion::ALL.len()];
+    let pools = &POOLS[version as usize];
     let slot = match character {
-        CharacterId::Ironclad => &POOLS[0],
-        CharacterId::Silent => &POOLS[1],
-        CharacterId::Defect => &POOLS[2],
-        CharacterId::Necrobinder => &POOLS[3],
-        CharacterId::Regent => &POOLS[4],
-        CharacterId::Fool => &POOLS[5],
+        CharacterId::Ironclad => &pools[0],
+        CharacterId::Silent => &pools[1],
+        CharacterId::Defect => &pools[2],
+        CharacterId::Necrobinder => &pools[3],
+        CharacterId::Regent => &pools[4],
+        CharacterId::Fool => &pools[5],
     };
     slot.get_or_init(|| build(character, version))
 }
@@ -1230,6 +1244,16 @@ pub(crate) fn card_can_be_generated_in_combat(id: CardId) -> bool {
     )
 }
 
+/// [`card_can_be_generated_in_combat`] in game build `version`: v0.114.0's
+/// `MythicForm.cs` drops its `CanBeGeneratedInCombat => false` override.
+pub(crate) fn card_can_be_generated_in_combat_in(
+    id: CardId,
+    version: sts2_core::GameVersion,
+) -> bool {
+    (id == CardId::MythicFormCard && crate::cards::v0111::is_v0114(version))
+        || card_can_be_generated_in_combat(id)
+}
+
 /// Pick up to `count` **distinct** Attack [`CardId`]s drawn from every
 /// character pool **other than** the owner's, off the
 /// `combat_card_generation` stream. Mirrors C# `Splash.OnPlay`:
@@ -1261,14 +1285,15 @@ pub(crate) fn distinct_cross_character_attack_ids(
     if count == 0 {
         return SmallVec::new();
     }
-    fn eligible(s: &CardSpec) -> bool {
+    let version = state.game_version;
+    let eligible = |s: &CardSpec| -> bool {
         s.card_type == sts2_core::cards::CardType::Attack
             && !matches!(
                 s.rarity,
                 CardRarity::Basic | CardRarity::Ancient | CardRarity::Event
             )
-            && card_can_be_generated_in_combat(s.id)
-    }
+            && card_can_be_generated_in_combat_in(s.id, version)
+    };
 
     let own = state.player.character;
     let coop = crate::cards::pool_order::is_multiplayer(state);
@@ -1324,8 +1349,8 @@ pub(crate) fn distinct_cross_character_attack_ids(
         && own != Some(CharacterId::Fool)
         && state.game_version >= sts2_core::GameVersion::V0_113_0
     {
-        for f in crate::cards::fool_pool::FOOL_SPECS {
-            let s = f();
+        // v0.114.0 swaps RapidShot for TwinShot in the pool's attacks.
+        for s in crate::cards::fool_pool::pool_specs(state.game_version) {
             if eligible(&s) && !crate::cards::spec_index::is_multiplayer_only(s.id) {
                 pool.push(s.id);
             }

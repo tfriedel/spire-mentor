@@ -416,6 +416,23 @@ pub fn mask_rejectable(rm: &RunManager, phase: &str, actions: Vec<Value>) -> Vec
             .collect();
         return if masked.is_empty() { actions } else { masked };
     }
+    if phase == "event" {
+        // A run that shows a human the lethal event options (the workbench's
+        // `offer_lethal_event_options`) still hides them from the student,
+        // as every agent-mode run does. A surviving option always remains.
+        let withheld = sts2_content::events::dispatch::agent_withheld_event_options(&rm.run_state);
+        if withheld.is_empty() {
+            return actions;
+        }
+        return actions
+            .into_iter()
+            .filter(|a| {
+                let idx = get(a, "idx").and_then(Value::as_u64);
+                !(action_name(a) == "event_choice"
+                    && idx.is_some_and(|i| withheld.iter().any(|&w| w as u64 == i)))
+            })
+            .collect();
+    }
     if phase != "shop" {
         return actions;
     }

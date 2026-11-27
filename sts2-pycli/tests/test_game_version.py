@@ -58,9 +58,7 @@ def test_normalize_rejects_unsupported(raw) -> None:
         ("v0.111.1", "v0.111.0"),
         ("v0.111.4", "v0.111.0"),
         ("v0.107.2", "v0.107.1"),
-        # PLAYS_AS: a line with no build of its own (v0.114, 2026-11-25).
-        ("v0.114.0", "v0.113.0"),
-        ("0.114.2", "v0.113.0"),
+        ("0.114.2", "v0.114.0"),
     ],
 )
 def test_normalize_maps_a_hotfix_to_its_base_build(raw, want) -> None:

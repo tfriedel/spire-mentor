@@ -43,6 +43,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import hashlib
+import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -114,12 +115,20 @@ def boss_share(t: float) -> float:
     return _lerp(BOSS_SHARE, t)
 
 
-def cell_probs(t: float, boss: float | None = None) -> dict[str, float]:
+def cell_probs(
+    t: float,
+    boss: float | None = None,
+    boss_mix: dict[str, float] | None = None,
+    elite_mix: dict[str, float] | None = None,
+) -> dict[str, float]:
     """P(cell) for one practice start at `t`, before fallbacks (sums to 1). `boss`
-    replaces the scheduled boss share (a lane's `practice_mix`)."""
+    replaces the scheduled boss share, `boss_mix` / `elite_mix` (normalized, every cell
+    of their kind) the default splits (a lane's `practice_mix`)."""
     b = boss_share(t) if boss is None else float(boss)
-    out = {c: b * p for c, p in BOSS_MIX.items()}
-    out.update({c: (1.0 - b) * p for c, p in ELITE_MIX.items()})
+    out = {c: b * p for c, p in (BOSS_MIX if boss_mix is None else boss_mix).items()}
+    out.update(
+        {c: (1.0 - b) * p for c, p in (ELITE_MIX if elite_mix is None else elite_mix).items()}
+    )
     return out
 
 
@@ -134,16 +143,58 @@ def is_practice_slot(slot: int, n_slots: int, t: float, share: float | None = No
     return int(slot) < practice_slots(n_slots, t, share)
 
 
-def check_practice_mix(mix: dict[str, Any]) -> dict[str, float]:
-    """A lane's `practice_mix`: optional "share" (of env slots) and "boss" (of practice
-    starts), each in [0, 1], replacing the schedule's value; {} keeps the schedule."""
-    bad = sorted(set(mix) - {"share", "boss"})
+PRACTICE_MIX_KEYS = ("share", "boss", "boss_mix", "elite_mix", "characters")
+
+
+def _check_split(key: str, split: Any, cells: dict[str, float]) -> dict[str, float]:
+    """A `boss_mix` / `elite_mix`: weights over `cells`' names (a cell left out weighs
+    0), each >= 0 and not all 0, normalized to sum 1, in `cells`' order."""
+    if not isinstance(split, dict):
+        raise ValueError(f"{key} {split!r} is not an object of cell weights")
+    bad = sorted(set(split) - set(cells))
     if bad:
-        raise ValueError(f"unknown keys {bad} (known: share, boss)")
-    out = {k: float(v) for k, v in mix.items()}
-    for k, v in out.items():
-        if not 0.0 <= v <= 1.0:
-            raise ValueError(f"{k} {v} is not in [0, 1]")
+        raise ValueError(f"{key}: unknown cells {bad} (known: {', '.join(cells)})")
+    w = {c: float(split.get(c, 0.0)) for c in cells}
+    if any(not math.isfinite(v) or v < 0.0 for v in w.values()):
+        raise ValueError(f"{key} {split}: a weight is negative or not finite")
+    tot = sum(w.values())
+    if tot <= 0.0:
+        raise ValueError(f"{key} {split}: the weights sum to 0")
+    return {c: v / tot for c, v in w.items()}
+
+
+def check_practice_mix(mix: dict[str, Any]) -> dict[str, Any]:
+    """A lane's `practice_mix`, checked and normalized; {} keeps the schedule.
+
+    * "share" (of env slots) and "boss" (of practice starts): each in [0, 1], replacing
+      the schedule's value.
+    * "boss_mix" / "elite_mix": weights over the `BOSS_MIX` / `ELITE_MIX` cells, which
+      replace that default split (normalized; a cell left out is never wanted, though
+      it still serves as a fallback).
+    * "characters": a non-empty list of `contracts.CHARACTERS`; the queues keep only
+      captures of those characters' runs, so practice starts only from them.
+    """
+    bad = sorted(set(mix) - set(PRACTICE_MIX_KEYS))
+    if bad:
+        raise ValueError(f"unknown keys {bad} (known: {', '.join(PRACTICE_MIX_KEYS)})")
+    out: dict[str, Any] = {}
+    for k in ("share", "boss"):
+        if k in mix:
+            v = float(mix[k])
+            if not 0.0 <= v <= 1.0:
+                raise ValueError(f"{k} {v} is not in [0, 1]")
+            out[k] = v
+    for k, cells in (("boss_mix", BOSS_MIX), ("elite_mix", ELITE_MIX)):
+        if k in mix:
+            out[k] = _check_split(k, mix[k], cells)
+    if "characters" in mix:
+        chars = mix["characters"]
+        if isinstance(chars, str) or not isinstance(chars, (list, tuple)) or not chars:
+            raise ValueError(f"characters {chars!r} is not a non-empty list")
+        unknown = sorted({str(c) for c in chars} - set(C.CHARACTERS))
+        if unknown:
+            raise ValueError(f"characters: unknown {unknown} (known: {', '.join(C.CHARACTERS)})")
+        out["characters"] = sorted({str(c) for c in chars}, key=C.CHARACTERS.index)
     return out
 
 
@@ -174,7 +225,7 @@ class PracticeQueues:
         worker: int,
         seed: int = 0,
         enabled: bool = True,
-        mix: dict[str, float] | None = None,
+        mix: dict[str, Any] | None = None,
         queue_len: int = QUEUE_LEN,
         max_age: int = MAX_AGE,
         max_uses: int = MAX_USES,
@@ -186,6 +237,11 @@ class PracticeQueues:
         self.enabled = bool(enabled)
         m = check_practice_mix(dict(mix or {}))
         self.share, self.boss = m.get("share"), m.get("boss")  # None: the schedule
+        self.boss_mix, self.elite_mix = m.get("boss_mix"), m.get("elite_mix")  # None: default
+        # The characters whose runs feed the queues; None: every character.
+        self.characters: frozenset[str] | None = (
+            frozenset(m["characters"]) if "characters" in m else None
+        )
         self.queue_len = int(queue_len)
         self.max_age = int(max_age)
         self.max_uses = int(max_uses)
@@ -211,10 +267,16 @@ class PracticeQueues:
         q.append(Entry(cap=cap, born=int(now)))
         self.stats[f"captured/{cap.cell}"] += 1
 
-    def sink(self, clock: Callable[[], int]) -> Callable[[Capture], None] | None:
+    def sink(
+        self, clock: Callable[[], int], character: str | None = None
+    ) -> Callable[[Capture], None] | None:
         """An `EnvConfig.on_capture` that files captures at `clock()`; None (no capture,
-        no clones) when practice is off."""
+        no clones) when practice is off, or when the run's `character` is not one the
+        lane's `practice_mix` "characters" keeps."""
         if not self.enabled:
+            return None
+        if self.characters is not None and character not in self.characters:
+            self.stats[f"capture/skipped_character/{character}"] += 1
             return None
         return lambda cap: self.add(cap, clock())
 
@@ -237,7 +299,7 @@ class PracticeQueues:
     # ── starts ──────────────────────────────────────────────────────────────
 
     def draw_cell(self, t: float) -> str:
-        probs = cell_probs(t, self.boss)
+        probs = cell_probs(t, self.boss, self.boss_mix, self.elite_mix)
         cells = list(probs)
         p = np.asarray([probs[c] for c in cells], dtype=float)
         return cells[int(self.rng.choice(len(cells), p=p / p.sum()))]
@@ -355,7 +417,7 @@ class SegmentSource:
                 self.stats[f"practice/{st.cell}"] += 1
                 return st.env
             self.stats["practice/run_fallback"] += 1
-        cfg = dataclasses.replace(self.cfg, on_capture=self.queues.sink(self.clock))
+        cfg = self.cfg
         self.stats["run"] += 1
         seed = int(next(self.seeds))
         char = cfg.character or factory.CHARACTER
@@ -363,6 +425,7 @@ class SegmentSource:
             char = draw_character(seed, self.t, self.mix)
             cfg = dataclasses.replace(cfg, character=char)
             self.stats[f"run/{char}"] += 1
+        cfg = dataclasses.replace(cfg, on_capture=self.queues.sink(self.clock, char))
         start = draw_start(seed, char, self.human)
         if start is not None:
             cfg = dataclasses.replace(cfg, human_start=start, on_capture=None)

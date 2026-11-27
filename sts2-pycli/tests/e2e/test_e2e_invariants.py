@@ -350,6 +350,19 @@ def test_a_transform_result_explains_one_missing_card(first_combat) -> None:
     assert _codes(inv.deck_ledger(deck, twice)[0]) == [inv.COMBAT_DECK_MISSING]
 
 
+@pytest.mark.parametrize("result", ["THE_SHOT", "JOY", "GROWTH"])
+def test_v0113_and_v0114_transform_results_explain_a_missing_card(first_combat, result) -> None:
+    """Florescence -> TheShot, Growth -> a Growth clone (v0.114.0), Sadness -> Joy (v0.113.1).
+
+    The Fool v0.114.0 soak stopped on seed 1400000052: Florescence turned a
+    Particle Wall into The Shot, and the ledger did not know The Shot.
+    """
+    deck, state = first_combat
+    broken, _uid = _drop_deck_card(state, len(deck), "SKILL")
+    broken["deck"]["hand"].append({"id": result, "stable_idx": len(deck) + 40})
+    assert inv.deck_ledger(deck, broken) == ([], None)
+
+
 def test_a_card_in_two_piles_is_caught(first_combat) -> None:
     deck, state = first_combat
     broken = copy.deepcopy(state)

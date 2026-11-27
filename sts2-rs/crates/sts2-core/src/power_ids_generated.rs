@@ -1428,6 +1428,11 @@ impl PowerKind {
     /// `OutbreakPower.cs`; neither file exists in v0.111.0).
     pub const REMOVED_IN_V0111: [PowerKind; 2] = [Self::DiamondDiadem, Self::Outbreak];
 
+    /// Powers that v0.114.0 deleted (GH #1924): `FreeCardPower` went with the
+    /// Tune rework (`TunePower` now upgrades hand cards; decomp
+    /// `v0.113.1/.../Powers/FreeCardPower.cs` has no v0.114.0 counterpart).
+    pub const REMOVED_IN_V0114: [PowerKind; 1] = [Self::FreeCard];
+
     /// The build a power first exists in.
     #[must_use]
     pub const fn introduced_in(self) -> crate::GameVersion {
@@ -1486,12 +1491,15 @@ impl PowerKind {
     }
 
     /// Whether the power exists in game build `version`: introduced at or
-    /// before it, and not one of [`Self::REMOVED_IN_V0111`] from v0.111.0 on.
+    /// before it, and not one of [`Self::REMOVED_IN_V0111`] from v0.111.0 on
+    /// nor [`Self::REMOVED_IN_V0114`] from v0.114.0 on.
     #[must_use]
     pub const fn exists_in(self, version: crate::GameVersion) -> bool {
         let introduced = self.introduced_in() as u8 <= version as u8;
-        let removed = matches!(self, Self::DiamondDiadem | Self::Outbreak)
-            && version as u8 >= crate::GameVersion::V0_111_0 as u8;
+        let removed = (matches!(self, Self::DiamondDiadem | Self::Outbreak)
+            && version as u8 >= crate::GameVersion::V0_111_0 as u8)
+            || (matches!(self, Self::FreeCard)
+                && version as u8 >= crate::GameVersion::V0_114_0 as u8);
         introduced && !removed
     }
 
@@ -1509,7 +1517,7 @@ impl PowerKind {
             v.extend_from_slice(&Self::V0111_ONLY);
         }
         if version >= crate::GameVersion::V0_113_0 {
-            v.extend_from_slice(&Self::V0113_ONLY);
+            v.extend(Self::V0113_ONLY.iter().filter(|k| k.exists_in(version)));
         }
         v
     }

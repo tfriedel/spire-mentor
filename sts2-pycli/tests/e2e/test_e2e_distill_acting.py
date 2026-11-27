@@ -487,6 +487,8 @@ def test_acting_on_a_character_without_rows_is_bit_identical_to_off(tmp_path: Pa
 
 
 def test_learner_refusals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The lane build, so the run starts reach the refusals on every test build.
+    monkeypatch.setattr(sts2_client, "GAME_VERSION", factory.GAME_VERSION)
     src, teacher, sha = TD._base(tmp_path)
     d = {"distill_ckpt": str(teacher), "distill_sha256": sha, "distill_lambda": 0.5}
     # "acting" needs the Rust env.
@@ -519,6 +521,7 @@ def test_learner_refusals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(L.UsageError, match="distill_source"):
         _acting_learner(cfg)
     monkeypatch.undo()
+    monkeypatch.setattr(sts2_client, "GAME_VERSION", factory.GAME_VERSION)
     # "acting" beside a combat or run teacher: they would share the rows' teacher probs.
     monkeypatch.setattr(L.Learner, "_teacher_flags", lambda self: (True, False))
     w = tmp_path / "w"

@@ -1356,6 +1356,7 @@ mod tests {
             sts2_core::GameVersion::V0_107_1 => "v0.107.1",
             sts2_core::GameVersion::V0_111_0 => "v0.111.0",
             sts2_core::GameVersion::V0_113_0 => "v0.113.0",
+            sts2_core::GameVersion::V0_114_0 => "v0.114.0",
         };
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../../sts2-wiki/decompiled/{tag}/MegaCrit.Sts2.Core.Models.Monsters"

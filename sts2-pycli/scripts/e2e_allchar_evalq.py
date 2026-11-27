@@ -26,6 +26,13 @@ also gets, every 100M, a held-out human-start eval per character (DEV-500 with
 `"env": "human"`: seed i plays held-out start i), logged as
 `<character>/human/ema0999/win_rate`.
 
+`--variant` picks the weights (default ema0999). EMA 0.999 averages over ~131M decisions:
+on the Fool fine-tune, whose policy moved fast, it scored 9/500 at 200M where ema0996
+scored 60/500 and raw 57/500.
+
+`--only <character>` narrows the lane to one character: DEV-500 at every 50M pin and
+nothing else (the Fool fine-tune, which trains the others only to keep them).
+
 Run it from `sts2-pycli` with `PYTHONPATH=python`, on a timer. The characters and
 `ramp_end` come from the lane's `cfg.json` mix (`ppo.e2e.mix.MixCfg`); the lane must
 pin at every 50M (`--pin-every 50000000`), or the 50M milestones have no pin.
@@ -80,8 +87,10 @@ def lane_mix(cfg: dict) -> MixCfg:
     return MixCfg.from_dict(cfg.get("mix") or {})
 
 
-def queue(sd: ckpt.SaveDir) -> int:
-    """Write the requests of the milestone pins not queued yet; returns how many."""
+def queue(sd: ckpt.SaveDir, only: str | None = None, variant: str = VARIANT) -> int:
+    """Write the requests of the milestone pins not queued yet; returns how many.
+    `only`: that character's DEV-500 at every milestone pin, nothing else. `variant`:
+    the weights evaluated (`raw`, `ema0996`, `ema0999`)."""
     seen_path = sd.p(SEEN)
     seen = json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     cfg = C.read_json(sd.p("cfg.json")) or {}
@@ -95,19 +104,22 @@ def queue(sd: ckpt.SaveDir) -> int:
         if pin.reason != REASON:
             continue
         m = pin.decisions // STEP * STEP
-        jobs = [
-            (char, panel, "")
-            for char, panel in schedule(
-                pin.decisions, characters=mix.characters, ramp_end=mix.ramp_end
-            )
-        ]
-        jobs += [
-            (char, OTHER_PANEL, "human")
-            for char in human_schedule(pin.decisions, characters=mix.characters, on=human_on)
-        ]
+        if only:
+            jobs = [(only, OTHER_PANEL, "")] if m > 0 else []
+        else:
+            jobs = [
+                (char, panel, "")
+                for char, panel in schedule(
+                    pin.decisions, characters=mix.characters, ramp_end=mix.ramp_end
+                )
+            ]
+            jobs += [
+                (char, OTHER_PANEL, "human")
+                for char in human_schedule(pin.decisions, characters=mix.characters, on=human_on)
+            ]
         for char, panel, env in jobs:
             tag = f":{env}" if env else ""
-            key = f"{pin.sha256}:{char}:{panel}:{VARIANT}{tag}"
+            key = f"{pin.sha256}:{char}:{panel}:{variant}{tag}"
             if key in seen:
                 continue
             spec = C.EVAL_PANELS[panel]
@@ -116,7 +128,7 @@ def queue(sd: ckpt.SaveDir) -> int:
             # (and the student exported in it), the done file and the wandb point on it.
             rid = (
                 f"{sd.root.name}_d{pin.decisions:013d}_{pin.sha256[:8]}"
-                f"_{char}_{panel}_{VARIANT}_milestone" + (f"_{env}" if env else "")
+                f"_{char}_{panel}_{variant}_milestone" + (f"_{env}" if env else "")
             )
             req = {
                 "id": rid,
@@ -129,7 +141,7 @@ def queue(sd: ckpt.SaveDir) -> int:
                 "panel": panel,
                 "n": spec["n"],
                 "seed_start": spec["seed_start"],
-                "variant": VARIANT,
+                "variant": variant,
                 "nice": C.EVAL_NICE,
                 "max_procs": C.EVAL_MAX_PROCS,
                 "reason": "milestone",
@@ -173,12 +185,21 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Queue per-character DEV evals for an e2e lane.")
     ap.add_argument("--lane", type=Path, required=True, help="the lane's save dir")
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--only", default="", help="one character: its DEV-500 at every 50M pin")
+    ap.add_argument(
+        "--variant",
+        default=VARIANT,
+        choices=("raw", "ema0996", "ema0999"),
+        help="the weights evaluated; ema0999 lags ~130M decisions behind a fast-moving lane",
+    )
     a = ap.parse_args(argv)
     sd = ckpt.SaveDir(a.lane)
     if a.report:
         report(sd)
     else:
-        queue(sd)
+        if a.only and a.only not in lane_mix(C.read_json(sd.p("cfg.json")) or {}).characters:
+            ap.error(f"--only {a.only}: not one of the lane's characters")
+        queue(sd, only=a.only or None, variant=a.variant)
     return 0
 
 

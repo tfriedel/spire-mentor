@@ -249,9 +249,10 @@ class Cfg:
     run_seed_base: int = 0
     practice: bool = True
     # Overrides of practice's schedule (`practice.check_practice_mix`): {"share": slots
-    # share, "boss": boss share of practice starts}; {} = the schedule. Any restart may
-    # change it (it only picks segments).
-    practice_mix: dict[str, float] = field(default_factory=dict)
+    # share, "boss": boss share of practice starts, "boss_mix" / "elite_mix": cell
+    # weights, "characters": whose runs feed the queues}; {} = the schedule. Any restart
+    # may change it (it only picks segments).
+    practice_mix: dict[str, Any] = field(default_factory=dict)
     # F9 (FIDELITY.md): `invariants.KNOWN_ISSUES` keys the env checker tolerates
     # (["crossbow_hand_cap"] if G1 launches with engine fault E1); [] = strict.
     f9_tolerate: list[str] = field(default_factory=list)
@@ -298,6 +299,12 @@ class Cfg:
     infer_device: str = "cuda:0"
     update_devices: str = "cuda:1,cuda:2,cuda:3"
     bf16: bool = True
+    # Per-side precision: "fp32", "bf16" or "fp16" ("" = follow `bf16`, as before).
+    # fp16 is for pre-Ampere GPUs (fp16 tensor cores, no native bf16); an fp16
+    # update scales its loss (`update.Rank`, dynamic scale). Checkpoints are fp32
+    # either way, so a state moves between hosts of any precision.
+    serve_amp: str = ""
+    update_amp: str = ""
     rank_threads: int = 2
     sync_rounds: bool = False  # wait for every worker each round, in worker order
     sync_updates: bool = False  # wait for each update before collecting the next batch
@@ -476,6 +483,9 @@ class Cfg:
     lc_verdict: str = ""  # a learning_check.json to apply: pass -> ramp, fail -> hold λ_KS
 
     def __post_init__(self) -> None:
+        for k in ("serve_amp", "update_amp"):
+            if getattr(self, k) not in ("", "fp32", "bf16", "fp16"):
+                raise ValueError(f"{k} {getattr(self, k)!r}")
         if self.mode not in ("train", "learning_check"):
             raise ValueError(f"mode {self.mode!r}")
         if self.mode == "learning_check":
@@ -1209,7 +1219,7 @@ class Learner:
         self.lost_uids: list[int] = []
         # Held rows a resume dropped (`HoldBack.resume`), counted in the next stats row.
         self.held_lost = 0
-        opt_state = ema_state = None
+        opt_state = ema_state = loss_scale = None
         saved_mix = None
         saved_forced = None
         saved_human = None
@@ -1220,6 +1230,7 @@ class Learner:
             self._check_resume_stamps(st.get("stamps") or {})
             algo = A.AlgoState.from_dict(st["algo"], cfg=cfg.schedule() if cfg.sched else None)
             net_ck, opt_state, ema_state = st["net"], st["opt"], st["ema"]
+            loss_scale = st.get("loss_scale")  # None: not an fp16 update, or older
             ls = st["learner"]
             self.decisions, self.runs_done = int(ls["decisions"]), int(ls["runs_done"])
             self.version, self.next_ref = int(ls["version"]), int(ls["next_ref"])
@@ -1352,7 +1363,9 @@ class Learner:
             net_ck, schema_sha256=SCHEMA_SHA256, vocab_sha256=self.stamps["vocab_sha256"]
         ).to(self.dev_i)
         self.net_inf.eval()
-        self.net_inf.bf16 = cfg.bf16 and self.dev_i.type == "cuda"
+        amp = cfg.serve_amp or ("bf16" if cfg.bf16 else "fp32")
+        self.net_inf.bf16 = amp != "fp32" and self.dev_i.type == "cuda"
+        self.net_inf.amp_dtype = torch.float16 if amp == "fp16" else torch.bfloat16
         # GH #1197 distill_source "acting": the teacher scores the workers' chars-off
         # shadow rows here, at serving time (`distill.DistillScorer`).
         self.distill_scorer = None
@@ -1372,6 +1385,7 @@ class Learner:
             except (ValueError, OSError) as e:
                 raise UsageError(f"distill: {e}") from None
             teacher.bf16 = self.net_inf.bf16
+            teacher.amp_dtype = self.net_inf.amp_dtype
             self.distill_scorer = DistillScorer(
                 teacher, self.dev_i, int(algo.cfg.distill_flush_rows)
             )
@@ -1390,6 +1404,7 @@ class Learner:
                     "algo": algo.to_dict(),
                     "opt": opt_state,
                     "ema": ema_state,
+                    "loss_scale": loss_scale,
                     "schema_sha256": SCHEMA_SHA256,
                     "vocab_sha256": self.stamps["vocab_sha256"],
                     "dtypes": list(DTYPE_NAMES),

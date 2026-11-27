@@ -21,11 +21,24 @@ pub const FOOL_SPECS: &[fn() -> CardSpec] = super::fool::specs::FOOL_SPECS
     .split_at(super::fool::FOOL_POOL_V0113.len())
     .0;
 
-/// `FoolCardPool.GenerateAllCards()` as ids, in decomp order (the
-/// `pool_order::generate_all_cards` list for `Pool::Character(Fool)`).
+/// `FoolCardPool.GenerateAllCards()` as ids in game build `version`, in
+/// decomp order (the `pool_order::generate_all_cards` list for
+/// `Pool::Character(Fool)`): v0.114.0 adds Optimism and swaps RapidShot for
+/// TwinShot ([`super::fool::FOOL_POOL_V0114`]).
 #[must_use]
-pub fn generate_all_cards() -> &'static [CardId] {
-    &super::fool::FOOL_POOL_V0113
+pub fn generate_all_cards(version: sts2_core::GameVersion) -> &'static [CardId] {
+    if super::v0111::is_v0114(version) {
+        &super::fool::FOOL_POOL_V0114
+    } else {
+        &super::fool::FOOL_POOL_V0113
+    }
+}
+
+/// The Fool pool's specs in game build `version`, in
+/// [`generate_all_cards`] order, each with that build's metadata
+/// ([`super::spec_index::specs_in`] over [`FOOL_SPECS`]).
+pub fn pool_specs(version: sts2_core::GameVersion) -> impl Iterator<Item = CardSpec> {
+    super::spec_index::specs_in(FOOL_SPECS, version)
 }
 
 /// The Fool's Basic Strike / Defend pair (`StrikeFool`, `DefendFool`), for
@@ -55,12 +68,11 @@ pub fn starter_deck() -> Vec<CardSpec> {
 /// (`GetDistinctForCombat` over this list) read it.
 #[must_use]
 pub fn combat_melody_pool(
+    version: sts2_core::GameVersion,
     tag: Option<sts2_core::cards::CardTag>,
 ) -> smallvec::SmallVec<[CardId; 48]> {
     use super::types::CardRarity;
-    FOOL_SPECS
-        .iter()
-        .map(|f| f())
+    pool_specs(version)
         .filter(|s| {
             let tags = super::status::helpers::tags_for_card_id(s.id);
             tags.has_melody()
@@ -69,7 +81,7 @@ pub fn combat_melody_pool(
                     s.rarity,
                     CardRarity::Basic | CardRarity::Ancient | CardRarity::Event
                 )
-                && super::colorless::helpers::card_can_be_generated_in_combat(s.id)
+                && super::colorless::helpers::card_can_be_generated_in_combat_in(s.id, version)
                 && !super::spec_index::is_multiplayer_only(s.id)
         })
         .map(|s| s.id)
@@ -84,6 +96,10 @@ mod tests {
     fn pool_specs_match_pool_order() {
         let ids: Vec<CardId> = FOOL_SPECS.iter().map(|f| f().id).collect();
         assert_eq!(ids, super::super::fool::FOOL_POOL_V0113.to_vec());
+        for version in sts2_core::GameVersion::ALL {
+            let ids: Vec<CardId> = pool_specs(version).map(|s| s.id).collect();
+            assert_eq!(ids, generate_all_cards(version).to_vec(), "{version:?}");
+        }
     }
 
     #[test]

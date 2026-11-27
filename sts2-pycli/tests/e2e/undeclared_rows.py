@@ -24,13 +24,22 @@ separate, detached worktree with its own freshly built wheel, then remove the wo
     cd "$W"/sts2-pycli
     uv sync --frozen                                 # its own .venv and wheel
     uv run --frozen python -c 'import sts2_rs; print(sts2_rs.__file__)'  # must be under $W
-    PYTHONPATH=python uv run --frozen python \\
+    STS2_E2E_CORPSE_POWERS=keep PYTHONPATH=python uv run --frozen python \\
         "$REPO/sts2-pycli/tests/e2e/undeclared_rows.py" \\
         --out "$REPO/sts2-pycli/tests/e2e/data/undeclared_ironclad_rows.json"
     cd "$REPO" && git worktree remove "$W"
 
 The run is deterministic (two runs `cmp` equal); the file should change only when
 main itself changes undeclared Ironclad rows on purpose.
+
+`STS2_E2E_CORPSE_POWERS=keep` pins the engine's corpse powers, as the test does: the
+hashes predate GH #1791's default strip, and without it 31 of the 96 runs move.
+
+An engine-only change that moves random play (GH #1907 withholds lethal event
+options, so seed 1300000623 survives its event) regenerates the file on its own
+branch, but only when `git diff origin/main -- sts2-pycli` is empty, so the tokenizer
+is main's. Check that just one or two seeds move, each from the step the engine
+change explains.
 """
 
 from __future__ import annotations

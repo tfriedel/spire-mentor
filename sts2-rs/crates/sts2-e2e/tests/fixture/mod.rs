@@ -37,10 +37,10 @@ pub fn weights_path() -> PathBuf {
     )
 }
 
-/// `E2E_FIXTURES`, default `~/runs/e2e-wb/fixtures-allchar-d4500-r5`.
+/// `E2E_FIXTURES`, default `~/runs/e2e-wb/fixtures-allchar-d4500-r6`.
 pub fn fixtures_dir() -> PathBuf {
     std::env::var_os("E2E_FIXTURES").map_or_else(
-        || home().join("runs/e2e-wb/fixtures-allchar-d4500-r5"),
+        || home().join("runs/e2e-wb/fixtures-allchar-d4500-r6"),
         PathBuf::from,
     )
 }

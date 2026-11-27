@@ -118,11 +118,11 @@ pub const PY_DATA_INPUTS: [(&str, &str); 0] = [];
 pub const RUNAI_DATA_INPUTS: [(&str, &str); 1] =
     [("data/runai/heuristic_v.toml", "data/runai/heuristic_v.toml")];
 
-/// Extra out-of-`src` engine inputs for sts2-e2e: the v0.111.0 and v0.113.0 tables the
+/// Extra out-of-`src` engine inputs for sts2-e2e: the v0.111.0, v0.113.0 and v0.114.0 tables the
 /// student's tokenizer bakes in with `include_str!` (`src/vocab.rs`,
 /// `src/sctx.rs`, `src/tactical.rs`). Linked into `sts2_rs` for the mod's
 /// Instinct advisor.
-pub const E2E_DATA_INPUTS: [(&str, &str); 6] = [
+pub const E2E_DATA_INPUTS: [(&str, &str); 9] = [
     (
         "crates/sts2-e2e/data/vocab_v0111.tsv",
         "crates/sts2-e2e/data/vocab_v0111.tsv",
@@ -147,6 +147,19 @@ pub const E2E_DATA_INPUTS: [(&str, &str); 6] = [
     (
         "crates/sts2-e2e/data/hits_v0113.tsv",
         "crates/sts2-e2e/data/hits_v0113.tsv",
+    ),
+    // The v0.114.0 lane's tables.
+    (
+        "crates/sts2-e2e/data/vocab_v0114.tsv",
+        "crates/sts2-e2e/data/vocab_v0114.tsv",
+    ),
+    (
+        "crates/sts2-e2e/data/card_types_v0114.tsv",
+        "crates/sts2-e2e/data/card_types_v0114.tsv",
+    ),
+    (
+        "crates/sts2-e2e/data/hits_v0114.tsv",
+        "crates/sts2-e2e/data/hits_v0114.tsv",
     ),
 ];
 

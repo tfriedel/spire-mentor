@@ -119,3 +119,53 @@ fn the_stack_it_granted_redirects_the_following_card() {
         "that redirect spent the stack, removing the power"
     );
 }
+
+/// Push a fresh `card_id` into the hand and return its uid.
+fn add_to_hand(state: &mut CombatState, card_id: CardId) -> CardUid {
+    let mut card = sts2_core::lookup_card_factory()
+        .and_then(|f| f(card_id, false))
+        .expect("card factory has the card");
+    let uid = CardUid::new(u32::try_from(state.cards.len() + 1).expect("fits")).expect("nz");
+    card.uid = uid;
+    state.cards.push(card);
+    state.player.hand.push(uid);
+    uid
+}
+
+#[test]
+fn a_select_opening_card_spends_the_stack_before_its_select() {
+    // C# `OnPlayWrapper` fires `ReboundPower.AfterModifyingCardPlayResultLocation`
+    // (flash + decrement) before `OnPlay` (CardModel.cs:1881-1886, v0.111.0),
+    // so Burning Pact's exhaust pick already shows the stack spent (Spire Bench
+    // seed 180001292, GH #1907). The card still goes to the draw top.
+    let (mut state, _rebound) = state_with_card_in_hand(CardId::Rebound);
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, Some(0));
+    assert_eq!(state.player_power_amount(PowerKind::Rebound), 1);
+    state.player.energy = 3;
+
+    let pact = add_to_hand(&mut state, CardId::BurningPact);
+    // Two cards to pick from: a single option is taken without a select.
+    let _fodder = add_to_hand(&mut state, CardId::StrikeIronclad);
+    let _fodder2 = add_to_hand(&mut state, CardId::DefendIronclad);
+    let _ = sts2_core::combat_loop::play_card(&mut state, 0, None);
+
+    assert!(
+        state.pending_choice.is_some(),
+        "Burning Pact opens its exhaust pick"
+    );
+    assert_eq!(
+        state.player_power_amount(PowerKind::Rebound),
+        0,
+        "the stack is spent before the select opens"
+    );
+
+    let _ = sts2_core::resolve_choice_atomic_apply(&mut state, &[0]);
+    assert!(state.pending_choice.is_none());
+    assert!(
+        state.player.draw.contains(&pact) && !state.player.discard.contains(&pact),
+        "Burning Pact still lands on the draw pile (draw={:?} discard={:?})",
+        state.player.draw,
+        state.player.discard
+    );
+    assert_eq!(state.player_power_amount(PowerKind::Rebound), 0);
+}

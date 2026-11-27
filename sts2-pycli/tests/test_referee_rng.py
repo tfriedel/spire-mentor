@@ -140,7 +140,7 @@ def test_keyed_draws_are_uniform_through_the_games_own_rng_api():
     # One counter step per draw: int + bool + float + the shuffle's own draws.
     # From v0.113.0 the shuffle draws once (a child Rng's seed) and runs its
     # four swaps on that child stream.
-    per_sample = 4 if sts2_client.GAME_VERSION == "v0.113.0" else 7
+    per_sample = 4 if sts2_client.GAME_VERSION in ("v0.113.0", "v0.114.0") else 7
     assert got["counter"] >= samples * per_sample
     # Critical values at p = 0.001. The key is fixed, so this cannot flake.
     for name, critical in [
@@ -790,7 +790,12 @@ def test_the_referee_view_keeps_the_starting_count_and_lists_both_tools(monkeypa
 ANY_TIME_POTIONS = {"FRUIT_JUICE", "BLOOD_POTION", "ENTROPIC_BREW", "FOUL_POTION"}
 # A run whose path offers both a potion reward and a chest under KEY. Content
 # differs between game builds, so each build has its own.
-REWARD_LABELS = {"v0.107.1": "REWARD6", "v0.111.0": "REWARD0", "v0.113.0": "REWARD1"}
+REWARD_LABELS = {
+    "v0.107.1": "REWARD6",
+    "v0.111.0": "REWARD0",
+    "v0.113.0": "REWARD1",
+    "v0.114.0": "REWARD1",
+}
 REWARD_LABEL = REWARD_LABELS.get(sts2_client.GAME_VERSION, "REWARD6")
 
 

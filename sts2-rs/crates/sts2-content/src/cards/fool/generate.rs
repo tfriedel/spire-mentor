@@ -8,7 +8,9 @@ use sts2_core::energy_cost::CostExpiry;
 use sts2_core::potions::CharacterId;
 use sts2_core::{CardUid, CombatState, CreatureUid, PowerKind};
 
-use super::helpers::{apply_to_player, current_damage, fool_card, upgraded, var};
+use super::helpers::{
+    apply_to_player, current_block, current_damage, fool_card, upgraded, v0114, var, var_by,
+};
 
 /// C# `CardPile.MaxCardsInHand - hand.Count`, floored at 0. The played card
 /// is already on the Play pile, so it does not count.
@@ -44,9 +46,14 @@ pub(crate) fn play_the_hierophant(
 ) -> EffectResult {
     let count = usize::try_from(var(state, 3, 4)).unwrap_or(0);
     let ids = crate::cards::colorless::distinct_colorless_modifier_ids(state, count);
+    // v0.114.0 `TheHierophant.cs` adds the cards as they come (one
+    // `AddGeneratedCardsToCombat` batch), with no -1 cost.
+    let discount = !v0114(state);
     for id in ids {
         if let Some(mut card) = crate::cards::spec_index::card_pod_from_id(id, false) {
-            card.cost.add(-1, CostExpiry::TurnOrPlayed);
+            if discount {
+                card.cost.add(-1, CostExpiry::TurnOrPlayed);
+            }
             let _ = card_effects::spawn_card_into_hand(state, card);
         }
     }
@@ -135,9 +142,45 @@ fn sadness_in_hand(state: &CombatState) -> SmallVec<[CardUid; 10]> {
         .collect()
 }
 
+/// `StableShuffle(Rng.CombatCardSelection)` over hand Sadness cards.
+fn stable_shuffle_sadness(state: &mut CombatState, sadness: &mut [CardUid]) {
+    let version = state.game_version;
+    let cards = &state.cards;
+    let cmp = |a: CardUid, b: CardUid| {
+        sts2_core::cards::card_model_compare_for(
+            &cards[a.0.get() as usize - 1],
+            &cards[b.0.get() as usize - 1],
+            version,
+        )
+    };
+    state
+        .run_rng
+        .combat_card_selection
+        .stable_shuffle_by_for(version, sadness, &cmp);
+}
+
 /// `Growth.cs`: exhaust every Sadness in hand, then
 /// `Apply<StretchPower>(4 (+2) x count)` (a 0 amount applies nothing).
+///
+/// v0.114.0: `GainBlock` (8, +3), then, with Sadness in hand, `StableShuffle`
+/// them and transform the first into a clone of this Growth.
+///
+/// [decompiled C# omitted — see the cited path]
 pub(crate) fn play_growth(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
+    if v0114(state) {
+        card_effects::gain_block_player(state, current_block(state));
+        let mut sadness = sadness_in_hand(state);
+        if sadness.is_empty() {
+            return EffectResult::Resolved;
+        }
+        stable_shuffle_sadness(state, sadness.as_mut_slice());
+        if let Some(clone) =
+            card_effects::resolving_card_inst(state).map(sts2_core::Card::create_clone)
+        {
+            let _ = card_effects::transform_card_in_place(state, sadness[0], clone);
+        }
+        return EffectResult::Resolved;
+    }
     let sadness = sadness_in_hand(state);
     for &uid in &sadness {
         let _ = card_effects::exhaust_card_uid(state, uid);
@@ -158,21 +201,13 @@ pub(crate) fn play_punch_of_joy(state: &mut CombatState, t: Option<CreatureUid>)
     if sadness.is_empty() {
         return EffectResult::Resolved;
     }
-    let version = state.game_version;
-    let cards = &state.cards;
-    let cmp = |a: CardUid, b: CardUid| {
-        sts2_core::cards::card_model_compare_for(
-            &cards[a.0.get() as usize - 1],
-            &cards[b.0.get() as usize - 1],
-            version,
-        )
-    };
-    state.run_rng.combat_card_selection.stable_shuffle_by_for(
-        version,
-        sadness.as_mut_slice(),
-        &cmp,
-    );
-    let _ = card_effects::transform_card_in_place(state, sadness[0], fool_card(CardId::Joy));
+    stable_shuffle_sadness(state, sadness.as_mut_slice());
+    // v0.114.0 `PunchOfJoy.cs`: the first `CardsVar` 1 (+1) of them, in one
+    // `CardCmd.Transform(list)` batch.
+    let n = usize::try_from(var_by(state, (1, 1), (1, 2))).unwrap_or(1);
+    for &uid in sadness.iter().take(n) {
+        let _ = card_effects::transform_card_in_place(state, uid, fool_card(CardId::Joy));
+    }
     EffectResult::Resolved
 }
 
@@ -190,7 +225,8 @@ pub(crate) fn play_locked_in(state: &mut CombatState, _t: Option<CreatureUid>) -
 /// one card resolves without a prompt; a combat already ending opens nothing
 /// (`FromHand` returns empty) and goes straight to the draw.
 pub(crate) fn play_the_hermit(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    let draw = var(state, 2, 3);
+    // v0.114.0 `TheHermit.cs`: `CardsVar(3)`, +1.
+    let draw = var_by(state, (2, 3), (3, 4));
     let hand: SmallVec<[CardUid; 16]> = state.player.hand.iter().copied().collect();
     if sts2_core::combat_loop::combat_is_ending(state) {
         card_effects::discard_or_exhaust_curses_then_draw(state, &[], draw);

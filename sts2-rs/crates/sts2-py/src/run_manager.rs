@@ -350,6 +350,27 @@ impl PyRunManager {
         self.inner.run_state.ooc_potion_actions = on;
     }
 
+    /// Whether an agent-mode run still offers the event options that would
+    /// kill the player, as the game shows them to a human
+    /// (`RunState::offer_lethal_event_options`; Trial's Double Down stays
+    /// withheld). Off by default; the workbench's human play turns it on.
+    #[getter]
+    fn offer_lethal_event_options(&self) -> bool {
+        self.inner.run_state.offer_lethal_event_options
+    }
+
+    #[setter]
+    fn set_offer_lethal_event_options(&mut self, on: bool) {
+        self.inner.run_state.offer_lethal_event_options = on;
+    }
+
+    /// The `event_choice` indices agent mode would withhold on a run that
+    /// offers them anyway (`offer_lethal_event_options`): a policy acting on
+    /// such a run drops these. Empty on every other run.
+    fn agent_withheld_event_options(&self) -> Vec<usize> {
+        sts2_content::events::dispatch::agent_withheld_event_options(&self.inner.run_state)
+    }
+
     /// Whether the deck selects behave as the game's select screens (GH
     /// #1619, #1621): Smith's and Cook's selects can be cancelled
     /// (`confirm_deck_selection` with nothing picked), and a pick-N deck select

@@ -45,14 +45,20 @@ pub enum GameVersion {
     /// seeding as v0.111.0; content differences branch on `>= V0_113_0`.
     #[serde(rename = "v0.113.0")]
     V0_113_0,
+    /// v0.114.0 — the Steam `public-beta` build of 2026-11-25 (commit
+    /// `a7b9a9c0`). Same seeding as v0.111.0; content differences branch on
+    /// `>= V0_114_0` (GH #1924: the Fool rework and a few shared rules).
+    #[serde(rename = "v0.114.0")]
+    V0_114_0,
 }
 
 impl GameVersion {
     /// Every supported build, oldest first.
-    pub const ALL: [GameVersion; 3] = [
+    pub const ALL: [GameVersion; 4] = [
         GameVersion::V0_107_1,
         GameVersion::V0_111_0,
         GameVersion::V0_113_0,
+        GameVersion::V0_114_0,
     ];
 
     /// The canonical `vX.Y.Z` spelling (what [`fmt::Display`] prints).
@@ -62,6 +68,7 @@ impl GameVersion {
             GameVersion::V0_107_1 => "v0.107.1",
             GameVersion::V0_111_0 => "v0.111.0",
             GameVersion::V0_113_0 => "v0.113.0",
+            GameVersion::V0_114_0 => "v0.114.0",
         }
     }
 
@@ -115,7 +122,7 @@ impl GameVersion {
             GameVersion::V0_107_1 => {
                 u64::from(crate::dotnet_rng::deterministic_hash_code(text) as u32)
             }
-            GameVersion::V0_111_0 | GameVersion::V0_113_0 => {
+            GameVersion::V0_111_0 | GameVersion::V0_113_0 | GameVersion::V0_114_0 => {
                 xxhash_rust::xxh64::xxh64(text.as_bytes(), 0)
             }
         }
@@ -141,7 +148,9 @@ impl GameVersion {
     pub fn run_seed_hash(self, seed: &str) -> u64 {
         match self {
             GameVersion::V0_107_1 => self.seed_hash(seed),
-            GameVersion::V0_111_0 | GameVersion::V0_113_0 => match seed.strip_prefix("old") {
+            GameVersion::V0_111_0 | GameVersion::V0_113_0 | GameVersion::V0_114_0 => match seed
+                .strip_prefix("old")
+            {
                 Some(rest) => u64::from(crate::dotnet_rng::deterministic_hash_code(rest) as u32),
                 None => self.seed_hash(seed),
             },
@@ -173,7 +182,9 @@ impl GameVersion {
     pub fn seed_add(self, a: u64, b: u64) -> u64 {
         match self {
             GameVersion::V0_107_1 => u64::from((a as u32).wrapping_add(b as u32)),
-            GameVersion::V0_111_0 | GameVersion::V0_113_0 => a.wrapping_add(b),
+            GameVersion::V0_111_0 | GameVersion::V0_113_0 | GameVersion::V0_114_0 => {
+                a.wrapping_add(b)
+            }
         }
     }
 
@@ -208,7 +219,7 @@ impl GameVersion {
     pub fn normalize_seed(self, seed: u64) -> u64 {
         match self {
             GameVersion::V0_107_1 => u64::from(seed as u32),
-            GameVersion::V0_111_0 | GameVersion::V0_113_0 => seed,
+            GameVersion::V0_111_0 | GameVersion::V0_113_0 | GameVersion::V0_114_0 => seed,
         }
     }
 }
@@ -222,19 +233,14 @@ impl fmt::Display for GameVersion {
 /// Game lines the engine has no build of yet, each with the build it plays
 /// on: `(major, minor)` → the engine build. Every patch of the line maps.
 ///
-/// v0.114.0 (Steam public-beta 2026-11-25, commit `a7b9a9c0`) reworks the
-/// Fool's cards and changes a few shared rules (Hard to Kill caps HP loss
-/// instead of damage, Happy Flower's energy moves to the player's turn start,
-/// Pael's Growth loses the Clone rest-site option); everything else plays as
-/// v0.113.1. Running it on `V0_113_0` keeps the advisor and Instinct
-/// answering on it until it gets a build of its own (GH #1924 lists what
-/// differs).
+/// Empty while every released line has a build. A new beta goes here until
+/// it is ported (v0.114.x played as `V0_113_0` this way until GH #1924).
 /// Python twin: `sts2_client.PLAYS_AS`; mod twin: `GameVersionFormat.PlaysAs`.
-pub const PLAYS_AS: [((u32, u32), GameVersion); 1] = [((0, 114), GameVersion::V0_113_0)];
+pub const PLAYS_AS: [((u32, u32), GameVersion); 0] = [];
 
 /// Error from parsing an unknown game-version string.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown game version {0:?} (expected one of: v0.107.1, v0.111.0, v0.113.0)")]
+#[error("unknown game version {0:?} (expected one of: v0.107.1, v0.111.0, v0.113.0, v0.114.0)")]
 pub struct ParseGameVersionError(pub String);
 
 impl FromStr for GameVersion {
@@ -250,7 +256,7 @@ impl FromStr for GameVersion {
     /// every player the moment Steam patched the game. A new minor is a
     /// content update and fails, as does a build older than every supported
     /// one of its line, unless [`PLAYS_AS`] names the build its line plays
-    /// on (`v0.114.0` → `V0_113_0`). Python twin: `sts2_client.hotfix_base`.
+    /// on. Python twin: `sts2_client.hotfix_base`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let trimmed = s.trim();
         let bare = trimmed
@@ -366,14 +372,13 @@ mod tests {
         }
     }
 
-    /// A line with no build of its own plays on the one `PLAYS_AS` names:
-    /// v0.114.0 (and its hotfixes) on `V0_113_0`.
+    /// v0.114.0 has its own build now (GH #1924); its hotfixes map to it.
     #[test]
-    fn parse_maps_a_plays_as_line_to_its_engine_build() {
+    fn parse_maps_v0114_and_its_hotfixes_to_v0114() {
         for raw in ["v0.114.0", "0.114.0", "v0.114.3"] {
             assert_eq!(
                 raw.parse::<GameVersion>(),
-                Ok(GameVersion::V0_113_0),
+                Ok(GameVersion::V0_114_0),
                 "{raw:?}"
             );
         }

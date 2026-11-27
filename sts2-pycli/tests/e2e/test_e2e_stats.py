@@ -315,6 +315,35 @@ def _evalq():
     return mod
 
 
+def test_evalq_only_one_character(tmp_path):
+    from ppo.e2e import ckpt
+    from ppo.e2e import ops_contract as OC
+
+    Q = _evalq()
+    M = 1_000_000
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    sd = ckpt.SaveDir(lane)
+    mix = {"weights": {"Regent": 0.8, "Ironclad": 0.2}}
+    (lane / "cfg.json").write_text(json.dumps({"mix": mix}), encoding="utf-8")
+    for d, why in ((50 * M + 5, "milestone"), (150 * M + 5, "milestone"), (150 * M + 9, "k2")):
+        src = tmp_path / f"s{d}.pt"
+        src.write_bytes(str(d).encode())
+        ckpt.pin(sd, decisions=d, reason=why, src=src)
+    assert Q.queue(sd, only="Regent") == 2
+    reqs = [json.loads(p.read_text(encoding="utf-8")) for p in sd.p(OC.EVAL_QUEUE).glob("*.json")]
+    got = sorted((r["decisions"], r["character"], r["panel"]) for r in reqs)
+    assert got == [(50 * M + 5, "Regent", "DEV-500"), (150 * M + 5, "Regent", "DEV-500")]
+    assert Q.queue(sd, only="Regent") == 0  # once per pin
+    assert Q.queue(sd, only="Regent", variant="ema0996") == 2  # its own requests
+    late = [
+        json.loads(p.read_text(encoding="utf-8")) for p in sd.p(OC.EVAL_QUEUE).glob("*ema0996*")
+    ]
+    assert len(late) == 2 and {r["variant"] for r in late} == {"ema0996"}
+    with pytest.raises(SystemExit):
+        Q.main(["--lane", str(lane), "--only", "Silent"])
+
+
 def test_evalq_schedule(tmp_path):
     from ppo.e2e import ckpt
     from ppo.e2e import ops_contract as OC

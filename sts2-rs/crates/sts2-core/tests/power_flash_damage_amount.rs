@@ -349,3 +349,57 @@ fn a_disarmed_run_records_nothing_and_lands_the_same_damage() {
     let hp_of = |s: &CombatState| s.creatures.first().map(|c| c.current_hp);
     assert_eq!(hp_of(&armed), hp_of(&silent), "the flash must not move HP");
 }
+
+// ── v0.114.0: HardToKill caps HP lost, after Block (GH #1924) ──────────────
+
+fn hard_to_kill_with_block(version: sts2_core::GameVersion) -> (CombatState, CreatureUid) {
+    let mut state = recording_state();
+    state.game_version = version;
+    let enemy = add_enemy(&mut state, 90);
+    push_enemy_power(&mut state, 1, enemy, PowerKind::HardToKill, 9, 0);
+    if let Some(c) = state.creatures.iter_mut().find(|c| c.id == enemy.0) {
+        c.block = 10;
+    }
+    (state, enemy)
+}
+
+fn hp_and_block(state: &CombatState, enemy: CreatureUid) -> (i32, i32) {
+    let c = state
+        .creatures
+        .iter()
+        .find(|c| c.id == enemy.0)
+        .expect("enemy");
+    (c.current_hp, c.block)
+}
+
+#[test]
+fn hard_to_kill_caps_the_damage_before_block_through_v0113() {
+    // v0.113.1 `HardToKillPower.ModifyDamageCap`: 25 is capped to 9, which
+    // the 10 Block absorbs whole.
+    let (mut state, enemy) = hard_to_kill_with_block(sts2_core::GameVersion::V0_113_0);
+    hit(&mut state, enemy, 25);
+    assert_eq!(hp_and_block(&state, enemy), (90, 1));
+    assert_eq!(flash_rows(&state, PowerKind::HardToKill), 1);
+}
+
+#[test]
+fn hard_to_kill_caps_the_hp_lost_after_block_on_v0114() {
+    // v0.114.0 `HardToKillPower.ModifyHpLostBeforeOstyLate`: 25 takes all 10
+    // Block, and the 15 that gets through is capped to 9.
+    let (mut state, enemy) = hard_to_kill_with_block(sts2_core::GameVersion::V0_114_0);
+    hit(&mut state, enemy, 25);
+    assert_eq!(hp_and_block(&state, enemy), (81, 0));
+    assert_eq!(
+        flash_rows(&state, PowerKind::HardToKill),
+        1,
+        "the cap bound"
+    );
+    // 14 into no Block: 14 > 9, capped again.
+    hit(&mut state, enemy, 14);
+    assert_eq!(hp_and_block(&state, enemy), (72, 0));
+    assert_eq!(flash_rows(&state, PowerKind::HardToKill), 2);
+    // Under the cap: lands in full, no flash.
+    hit(&mut state, enemy, 5);
+    assert_eq!(hp_and_block(&state, enemy), (67, 0));
+    assert_eq!(flash_rows(&state, PowerKind::HardToKill), 2);
+}

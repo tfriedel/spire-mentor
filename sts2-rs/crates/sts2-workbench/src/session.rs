@@ -1768,7 +1768,7 @@ mod tests {
         let parse = |s: &str| parse_game_version(Some(&json!(s)));
         assert_eq!(parse("v0.113.0"), Ok(GameVersion::V0_113_0));
         assert_eq!(parse("v0.113.1"), Ok(GameVersion::V0_113_0));
-        assert_eq!(parse("v0.114.0"), Ok(GameVersion::V0_113_0), "PLAYS_AS");
+        assert_eq!(parse("v0.114.0"), Ok(GameVersion::V0_114_0));
         for bad in ["0.113.1", " v0.113.1", "V0.113.1", "v0.115.0", "v9.9.9"] {
             assert!(parse(bad).is_err(), "{bad:?}");
         }

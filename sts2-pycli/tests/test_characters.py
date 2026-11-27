@@ -46,7 +46,12 @@ class TestSeedCanonicalization:
 #: A Necrobinder seed whose Neow offers Scroll Boxes, per game build: v0.111.0
 #: rehashed every seed (XxHash64), so ECHO rolls a different Neow there;
 #: v0.113.0 changed the Neow offer, so ECHO1 rolls none there (C# headless).
-SCROLL_BOXES_SEED = {"v0.107.1": "ECHO", "v0.111.0": "ECHO1", "v0.113.0": "ECHO2"}
+SCROLL_BOXES_SEED = {
+    "v0.107.1": "ECHO",
+    "v0.111.0": "ECHO1",
+    "v0.113.0": "ECHO2",
+    "v0.114.0": "ECHO2",
+}
 
 
 class TestScrollBoxes:

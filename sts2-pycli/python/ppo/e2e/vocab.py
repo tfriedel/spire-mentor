@@ -13,9 +13,10 @@ policy trunk, the value module and the content prior.
 
 `vocab.tsv` beside this module is the source of truth for v0.111.0 lanes. A
 later build's lane (`ppo.e2e.build`, GH #1535) reads its own table,
-`vocab_<build>.tsv` (`vocab_v0113.tsv`): `vocab.tsv`'s rows unchanged, then that
-build's new names, so a v0.111.0 net's rows keep their ids there and a v0.111.0
-lane's `vocab_sha256` never moves. `engine_names(build)` reads each registry's
+`vocab_<build>.tsv` (`vocab_v0113.tsv`): the previous build's rows unchanged (`vocab.tsv`'s
+for v0.113.0, `vocab_v0113.tsv`'s for `vocab_v0114.tsv`), then that build's new names, so
+an older net's rows keep their ids there and an older lane's `vocab_sha256` never moves.
+A card a build removes keeps its row (v0.114.0's RAPID_SHOT), unused. `engine_names(build)` reads each registry's
 every-build universe (`card_any`, `relic_any`, ...) for a later build. It is append-only: a
 later wheel's new names go after the last used id (whatever their registry),
 and no row is ever removed or renumbered. `python -m ppo.e2e.vocab --check`
@@ -161,8 +162,9 @@ class Row:
 
 # Per registry: the engine kind a v0.111.0 table reads, and the every-build kind a
 # later build's reads (None: the same kind; `monster` is `monster_species()`).
+# Cards are frozen per build (`build.CARD_KIND`): `card_any` grows with each build.
 _KINDS: Final = {
-    "card": ("card", "card_any"),
+    "card": ("card", None),
     "relic": ("relic_id", "relic_any"),
     "potion": ("potion", "potion_any"),
     "power": ("power_all", "power_any"),
@@ -179,7 +181,10 @@ def engine_names(build: str = _build.GAME_VERSION) -> dict[str, list[str]]:
 
     def reg(registry: str) -> list[str]:
         kinds = _KINDS.get(registry, (registry, registry))
-        return list(sts2_rs.list_registry_names(kinds[1 if later else 0]))
+        kind = kinds[1 if later else 0]
+        if kind is None:
+            kind = _build.CARD_KIND[build]
+        return list(sts2_rs.list_registry_names(kind))
 
     if later:
         species = list(sts2_rs.list_registry_names("monster_any"))
@@ -346,8 +351,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         write_tsv(rows, path)
         print(f"wrote {len(rows)} rows, sha256 {sha256(rows)}")
         return 0
-    # A later build's first append starts from the v0.111.0 table's rows.
-    old = read_tsv(path if path.exists() else BASE_TSV_PATH)
+    # A later build's first append starts from the previous build's table's rows.
+    old = read_tsv(path if path.exists() else tsv_path(_build.previous(build)))
     try:
         new = build_rows(names, old)
     except ValueError as e:

@@ -96,9 +96,11 @@ fn spirit_grafter_rejection_damage_goes_through_lose_hp() {
     rs.enter_event_room(EventId::SpiritGrafter);
     let i = option_index(rs, "rejection");
     assert_eq!(preview_option_effect(rs, i).unwrap().hp_delta, -9);
-    // HP stops at 0.
+    // HP stops at 0. Parity mode: agent mode withholds a lethal Rejection
+    // (`ThatDoesDamage(RejectionHpLoss)`, GH #1907).
     let mut rm = run_state(7, 1);
     let rs = &mut rm.run_state;
+    rs.withhold_abandon_run_options = false;
     rs.current_hp = 4;
     rs.enter_event_room(EventId::SpiritGrafter);
     let i = option_index(rs, "rejection");

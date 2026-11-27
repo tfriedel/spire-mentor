@@ -30,7 +30,7 @@ pub const INSTINCT_CHARACTERS: [&str; 5] =
 /// The build the student was trained on, and a run's fallback build.
 pub const INSTINCT_GAME_VERSION: &str = "v0.111.0";
 /// The builds Instinct plays, each on its own rules.
-pub const INSTINCT_GAME_VERSIONS: [&str; 2] = ["v0.111.0", "v0.113.0"];
+pub const INSTINCT_GAME_VERSIONS: [&str; 3] = ["v0.111.0", "v0.113.0", "v0.114.0"];
 /// The weights, relative to the data root.
 pub const WEIGHTS_RELPATH: &str = "data/e2e/allchar_e2e_d4500_ema0999.e2ew";
 /// The Fool's own student (GH #1535), relative to the data root: a
@@ -38,6 +38,10 @@ pub const WEIGHTS_RELPATH: &str = "data/e2e/allchar_e2e_d4500_ema0999.e2ew";
 pub const FOOL_WEIGHTS_RELPATH: &str = "data/e2e/fool_e2e_d850_ema0996.e2ew";
 /// The Fool's net's build: the Fool exists only from v0.113.0 on.
 pub const FOOL_GAME_VERSION: &str = "v0.113.0";
+/// The builds the Fool's net plays, each on its own rules: its own, and
+/// v0.114.0 until a net is trained there (GH #1924; the v0.114.0 Fool cards
+/// it has not seen read as unknown).
+pub const FOOL_GAME_VERSIONS: [&str; 2] = ["v0.113.0", "v0.114.0"];
 
 /// Whether the board's character is the Fool (whose net is
 /// [`FOOL_WEIGHTS_RELPATH`]).
@@ -86,6 +90,19 @@ pub fn engine_game_version(state: &Value) -> &'static str {
                 .unwrap_or(INSTINCT_GAME_VERSION)
         }
         Err(_) => INSTINCT_GAME_VERSION,
+    }
+}
+
+/// `["a", "b", "c"]` as "a, b and c" (Chinese: "a、b、c").
+fn builds_list(builds: &[&str]) -> String {
+    match builds {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [init @ .., last] if !crate::i18n::is_zh() => format!("{} and {last}", init.join(", ")),
+        all => crate::i18n::join_list(
+            &all.iter().map(|b| (*b).to_string()).collect::<Vec<_>>(),
+            ", ",
+        ),
     }
 }
 
@@ -381,7 +398,11 @@ impl InstinctAdvisor {
             }));
         }
         if self.fool_available(log) {
-            out.push(json!({"character": "Fool", "game_version": FOOL_GAME_VERSION}));
+            out.extend(
+                FOOL_GAME_VERSIONS
+                    .iter()
+                    .map(|v| json!({"character": "Fool", "game_version": v})),
+            );
         }
         Value::Array(out)
     }
@@ -590,10 +611,13 @@ impl InstinctAdvisor {
         };
         if character == "fool" {
             // The Fool's own net (v0.113.0); the Fool does not exist earlier.
-            return (version != FOOL_GAME_VERSION).then(|| {
+            return (!FOOL_GAME_VERSIONS.contains(&version.as_str())).then(|| {
                 trf(
                     "Instinct plays the Fool on {build} only (this game is {version})",
-                    &[("build", &FOOL_GAME_VERSION), ("version", &version)],
+                    &[
+                        ("build", &builds_list(&FOOL_GAME_VERSIONS)),
+                        ("version", &version),
+                    ],
                 )
             });
         }
@@ -610,13 +634,7 @@ impl InstinctAdvisor {
             return Some(trf(
                 "Instinct plays {builds} only (this game is {version})",
                 &[
-                    (
-                        "builds",
-                        &crate::i18n::join_list(
-                            &INSTINCT_GAME_VERSIONS.map(str::to_string),
-                            " and ",
-                        ),
-                    ),
+                    ("builds", &builds_list(&INSTINCT_GAME_VERSIONS)),
                     ("version", &version),
                 ],
             ));
@@ -984,7 +1002,7 @@ mod tests {
         let fool = json!({"run_state": {"character": "FOOL"}, "game_version": "v0.111.0"});
         assert_eq!(
             InstinctAdvisor::eligibility(&fool).as_deref(),
-            Some("Instinct plays the Fool on v0.113.0 only (this game is v0.111.0)")
+            Some("Instinct plays the Fool on v0.113.0 and v0.114.0 only (this game is v0.111.0)")
         );
         let fool_new = json!({"run_state": {"character": "FOOL"}, "game_version": "v0.113.0"});
         assert_eq!(InstinctAdvisor::eligibility(&fool_new), None);
@@ -995,26 +1013,26 @@ mod tests {
         let legacy = json!({"run_state": {"character": "IRONCLAD"}});
         assert_eq!(
             InstinctAdvisor::eligibility(&legacy).as_deref(),
-            Some("Instinct plays v0.111.0 and v0.113.0 only (this game is v0.107.1)")
+            Some("Instinct plays v0.111.0, v0.113.0 and v0.114.0 only (this game is v0.107.1)")
         );
         assert_eq!(engine_game_version(&legacy), INSTINCT_GAME_VERSION);
         assert_eq!(engine_game_version(&ok), "v0.113.0");
     }
 
-    /// v0.114.0 has no engine build of its own (`game_version::PLAYS_AS`):
-    /// the advisor reads it as v0.113.0, and Instinct plays it there, the
-    /// Fool on the v0.113.0 Fool net.
+    /// v0.114.0 is its own build (GH #1924): Instinct rebuilds the run on
+    /// it, the Fool on the v0.113.0 Fool net.
     #[test]
-    fn a_plays_as_build_is_advised_on_its_engine_build() {
+    fn v0114_is_advised_on_its_own_build() {
         let silent = json!({"run_state": {"character": "SILENT"}, "game_version": "v0.114.0"});
         assert_eq!(
             crate::headless::game_version(&silent).unwrap(),
-            Some("v0.113.0")
+            Some("v0.114.0")
         );
         assert_eq!(InstinctAdvisor::eligibility(&silent), None);
-        assert_eq!(engine_game_version(&silent), "v0.113.0");
+        assert_eq!(engine_game_version(&silent), "v0.114.0");
         let fool = json!({"run_state": {"character": "FOOL"}, "game_version": "v0.114.0"});
         assert_eq!(InstinctAdvisor::eligibility(&fool), None);
+        assert_eq!(engine_game_version(&fool), "v0.114.0");
         let unknown = json!({"run_state": {"character": "SILENT"}, "game_version": "v0.115.0"});
         assert!(crate::headless::game_version(&unknown).is_err());
     }

@@ -108,12 +108,34 @@ pub(crate) fn play_thrash(state: &mut CombatState, target: Option<CreatureUid>) 
                 sts2_core::enchantment_hooks::enchant_damage_multiplicative_x100(card, true),
             )
         };
-        let enchanted_x100 =
-            i64::from(exhausted_base.saturating_add(ench_add)).saturating_mul(i64::from(ench_x100));
+        // An exhausted THRASH folds its own decimal `Damage.BaseValue`, whose
+        // fraction this port keeps in its `ThrashFoldRem{Num,Den}` vars:
+        // dropping it folded one less once two fractions met (Spire Bench
+        // seed 180001591, GH #1907). Every other card's base is whole.
+        let (ex_rem_num, ex_rem_den) = {
+            let card = &state.cards[exhausted_uid.0.get() as usize - 1];
+            let den = card.combat_var(VarKey::ThrashFoldRemDen);
+            if card.card_id == CardId::Thrash && den > 0 {
+                (
+                    i64::from(card.combat_var(VarKey::ThrashFoldRemNum)),
+                    i64::from(den),
+                )
+            } else {
+                (0, 1)
+            }
+        };
+        let enchanted_x100 = i64::from(exhausted_base.saturating_add(ench_add))
+            .saturating_mul(ex_rem_den)
+            .saturating_add(ex_rem_num)
+            .saturating_mul(i64::from(ench_x100));
         let (term_num, mut term_den) = card_effects::player_modified_card_damage_frac_of(
             state,
-            enchanted_x100.saturating_add(i64::from(relic_add - vigor).saturating_mul(100)),
-            100,
+            enchanted_x100.saturating_add(
+                i64::from(relic_add - vigor)
+                    .saturating_mul(100)
+                    .saturating_mul(ex_rem_den),
+            ),
+            100i64.saturating_mul(ex_rem_den),
         );
         // Gigantification is the other modifier the fold must see after the
         // attack, not during it. Thrash's attack latches it, and its
@@ -330,14 +352,11 @@ fn exhaust_fold_base_damage(state: &CombatState, uid: sts2_core::CardUid) -> i32
         // `BaseValue` (Thrash.cs:62-65), which `OnUpgrade` raised
         // (`OstyDamage.UpgradeValueBy`, same in v0.107.1). These cards keep
         // `base_damage` at the printed value and apply the upgrade in their
-        // handler (`upgrade()` is `None`), so add the bump here (Bone Shards+
-        // folded 9 instead of 12: Ironclad-8019 act3#b2). Poke / Snap declare
-        // an `upgrade()` delta, but `card_upgrades_generated::upgrade_delta`
-        // does not route to it, so their `base_damage` also stays printed
-        // (Poke+ folded 6 instead of 9: loadout Ironclad 5215 v0.107.1).
-        CardId::BoneShards | CardId::Fetch | CardId::Poke | CardId::Snap => {
-            card.base_damage + if upgraded { 3 } else { 0 }
-        }
+        // handler (`upgrade()` is `None`), so add the bump here. Bone Shards,
+        // Poke and Snap carry their delta in `card_upgrades_generated` (#1884,
+        // GH #1907), so their `base_damage` already holds it and they take the
+        // `_` arm: bumping them again folded Bone Shards+ as 15.
+        CardId::Fetch => card.base_damage + if upgraded { 3 } else { 0 },
         CardId::Flatten => card.base_damage + if upgraded { 4 } else { 0 },
         CardId::HighFive | CardId::Rattle | CardId::RightHandHand => {
             card.base_damage + if upgraded { 2 } else { 0 }

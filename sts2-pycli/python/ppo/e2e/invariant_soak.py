@@ -1,4 +1,4 @@
-"""F9 soak: play random-action v0.111.0 A10 Ironclad runs and check every step.
+"""F9 soak: play random-action A10 runs (Ironclad, or ``--character``) and check every step.
 
 The live F9 gate samples 1% of the e2e env's steps. This soak checks every
 decision of many random-action runs before the week starts, so a check that
@@ -39,6 +39,7 @@ def random_run(
     max_steps: int = 6000,
     play_bias: float = 0.85,
     game_version: str = EXPECTED_GAME_VERSION,
+    character: str = "Ironclad",
 ) -> Iterator[Any]:
     """Yield the run's ``RunManager`` at every decision of a random-action run.
 
@@ -51,7 +52,7 @@ def random_run(
 
     rm = sts2_rs.RunManager(
         seed,
-        character="Ironclad",
+        character=character,
         ascension_level=10,
         neow_start=True,
         act1="roll",
@@ -98,9 +99,9 @@ def _thin(xs: list[float], keep: int = 500) -> list[float]:
     return xs[:: max(1, len(xs) // keep)]
 
 
-def soak_one(job: tuple[int, bool, int]) -> dict[str, Any]:
+def soak_one(job: tuple[int, bool, int, str]) -> dict[str, Any]:
     """Check every decision of one run. Returns its counters and timings."""
-    seed, pin_hp, max_steps = job
+    seed, pin_hp, max_steps, character = job
     full = InvariantChecker(ledger_every=1)
     fast = InvariantChecker(ledger_every=0)
     t_fast_combat: list[float] = []
@@ -110,7 +111,7 @@ def soak_one(job: tuple[int, bool, int]) -> dict[str, Any]:
     steps = combat_steps = 0
     max_act = max_floor = 0
     rm = None
-    for rm in random_run(seed, pin_hp=pin_hp, max_steps=max_steps):
+    for rm in random_run(seed, pin_hp=pin_hp, max_steps=max_steps, character=character):
         steps += 1
         in_combat = rm.phase() == "combat" and not rm.is_over()
         combat_steps += in_combat
@@ -148,10 +149,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed-start", type=int, default=1_400_000_000)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--max-steps", type=int, default=6000)
+    ap.add_argument("--character", default="Ironclad", help="the runs' character")
     ap.add_argument("--out", type=Path, required=True, help="summary JSON path")
     args = ap.parse_args(argv)
 
-    jobs = [(args.seed_start + i, i % 2 == 0, args.max_steps) for i in range(args.runs)]
+    jobs = [
+        (args.seed_start + i, i % 2 == 0, args.max_steps, args.character) for i in range(args.runs)
+    ]
     args.out.parent.mkdir(parents=True, exist_ok=True)
     per_run = args.out.with_suffix(".runs.jsonl")
     totals: collections.Counter[str] = collections.Counter()
@@ -192,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
     summary = {
         "game_version": EXPECTED_GAME_VERSION,
+        "character": args.character,
         "seed_start": args.seed_start,
         "max_steps": args.max_steps,
         "totals": dict(totals),

@@ -1053,6 +1053,13 @@ pub const fn power_kind_is_instanced(kind: PowerKind) -> bool {
             // the freshly-applied instance) are ALREADY per-instance; this
             // aligns the apply path with them. Bead `sts2-rs-nightmare-inst`.
             | PowerKind::Nightmare
+            // v0.113.0 `ShowOffPower.InstanceType => Instanced`: each ShowOff
+            // play (a replayed one too) is its own instance, linked to its
+            // card by `counter` for the fatal-kill `IncreaseAim`. The kill
+            // (`fool::show_off_after_death`) and turn-end removal are already
+            // per instance. Merged, four replays read as one SHOW_OFF 8 where
+            // C# holds four SHOW_OFF 2 (Fool parity seed 215).
+            | PowerKind::ShowOff
     )
 }
 
@@ -4809,7 +4816,8 @@ pub fn upgrade_card_uid(state: &mut CombatState, uid: CardUid) -> bool {
     crate::card_by_uid_mut(&mut state.cards, uid).is_some_and(|c| c.upgrade_for(version))
 }
 
-/// `CardCmd.Downgrade` on an in-combat card: [`Card::downgrade_for`] plus the
+/// Dampen's in-combat reset (`CardCmd.Downgrade` through v0.113,
+/// `CardCmd.RemoveAllUpgrades` from v0.114.0): [`Card::remove_all_upgrades_for`] plus the
 /// keyword storage that lives off the card. C# `CardModel.DowngradeInternal`
 /// resets `_keywords` to the canonical Local set (CardModel.cs:2157 v0.111.0,
 /// :2144 v0.107.1), so a Sly that Master Planner applied with
@@ -4825,7 +4833,9 @@ pub fn downgrade_card_in_combat(state: &mut CombatState, uid: CardUid) -> bool {
     let Some(card) = crate::card_by_uid_mut(&mut state.cards, uid) else {
         return false;
     };
-    if !card.downgrade_for(version) {
+    // Dampen: `CardCmd.RemoveAllUpgrades` from v0.114.0 (DampenPower.cs:35),
+    // `Downgrade` before it, both a full reset there.
+    if !card.remove_all_upgrades_for(version) {
         return false;
     }
     // v0.113 keeps keywords added from outside across the downgrade
@@ -6902,6 +6912,21 @@ mod tests {
                 .all(|p| p.kind == PowerKind::Nightmare && p.amount == 3),
             "each Nightmare instance keeps its own clone-count 3"
         );
+    }
+
+    /// v0.113.0 `ShowOffPower` is Instanced: two applications leave two
+    /// instances (a replayed ShowOff), not one merged stack.
+    #[test]
+    fn apply_instanced_show_off_does_not_merge() {
+        assert!(power_kind_is_instanced(PowerKind::ShowOff));
+        let (mut state, uid) = fresh_state_with_one_enemy();
+        apply_power_to_enemy(&mut state, uid, PowerKind::ShowOff, 2);
+        apply_power_to_enemy(&mut state, uid, PowerKind::ShowOff, 2);
+        assert_eq!(state.powers.len(), 2, "two SHOW_OFF 2, not one SHOW_OFF 4");
+        assert!(state
+            .powers
+            .iter()
+            .all(|p| p.kind == PowerKind::ShowOff && p.amount == 2));
     }
 
     /// The general `apply_power_to_creature` path stays alive-gated: Rust

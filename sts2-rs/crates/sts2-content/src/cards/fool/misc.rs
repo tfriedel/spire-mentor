@@ -4,7 +4,7 @@ use sts2_core::card_effects::{deal_damage_player_to_enemy, EffectResult};
 use sts2_core::cards::{CardId, VarKey};
 use sts2_core::{CombatState, CreatureUid, PowerKind};
 
-use super::helpers::{apply_to_player, generate_into_hand, var};
+use super::helpers::{apply_to_player, generate_into_hand, var, var_by};
 
 /// The Sadness cards the player generated this combat: C#
 /// `History.Entries.OfType<CardGeneratedEntry>()` with `Card is Sadness`.
@@ -55,7 +55,8 @@ pub(crate) fn play_self_deprecate(
     _t: Option<CreatureUid>,
 ) -> EffectResult {
     // Read before the seats move: the played card stays with its owner.
-    let joy = var(state, 2, 3);
+    // v0.114.0 `SelfDeprecate.cs`: `DynamicVar("Joy", 1m)`, +1.
+    let joy = var_by(state, (2, 3), (1, 2));
     generate_into_hand(state, CardId::Sadness, 1);
     sts2_core::coop::each_other_player(state, |state| {
         generate_into_hand(state, CardId::Joy, joy);
@@ -67,7 +68,8 @@ pub(crate) fn play_self_deprecate(
 /// to hand is the Bolas sweep (`combat_loop::bolas_hatchet_returning`),
 /// keyed on the play's turn stamp.
 pub(crate) fn play_bounce(state: &mut CombatState, _t: Option<CreatureUid>) -> EffectResult {
-    apply_to_player(state, PowerKind::Stretch, var(state, 10, 13));
+    // v0.114.0 `Bounce.cs`: `PowerVar<StretchPower>(8m)`, +3.
+    apply_to_player(state, PowerKind::Stretch, var_by(state, (10, 13), (8, 11)));
     crate::cards::colorless::helpers::stamp_return_if_played(state);
     EffectResult::Resolved
 }
@@ -76,7 +78,8 @@ pub(crate) fn play_bounce(state: &mut CombatState, _t: Option<CreatureUid>) -> E
 /// (the combat's [`CombatState::total_floor`] snapshot).
 pub(crate) fn play_the_tower(state: &mut CombatState, t: Option<CreatureUid>) -> EffectResult {
     let t = t.expect("TheTower: AnyEnemy-targeted");
-    let dmg = var(state, 2, 3).saturating_mul(i32::from(state.total_floor));
+    // v0.114.0 `TheTower.cs`: `ExtraDamageVar(1m)`, +1.
+    let dmg = var_by(state, (2, 3), (1, 2)).saturating_mul(i32::from(state.total_floor));
     let _ = deal_damage_player_to_enemy(state, t, dmg);
     EffectResult::Resolved
 }

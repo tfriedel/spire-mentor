@@ -189,7 +189,7 @@ fn listener_ocarina(state: &mut CombatState) -> EffectResult {
     if state.turn_number() > 1 || !active(state, RelicKind::Ocarina) {
         return EffectResult::NotImplemented;
     }
-    let mut pool = crate::cards::fool_pool::combat_melody_pool(None);
+    let mut pool = crate::cards::fool_pool::combat_melody_pool(state.game_version, None);
     if pool.is_empty() {
         return EffectResult::NotImplemented;
     }

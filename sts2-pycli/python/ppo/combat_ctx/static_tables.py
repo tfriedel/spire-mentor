@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import sts2_client
 
-from . import static_tables_v0111, static_tables_v0113
+from . import static_tables_v0111, static_tables_v0113, static_tables_v0114
 
 CARD_TYPE: dict[str, str] = {
     "ABRASIVE": "Power",
@@ -669,11 +669,13 @@ CARD_TYPE_BY_VERSION: dict[str, dict[str, str]] = {
     "v0.107.1": CARD_TYPE,
     "v0.111.0": static_tables_v0111.CARD_TYPE,
     "v0.113.0": static_tables_v0113.CARD_TYPE,
+    "v0.114.0": static_tables_v0114.CARD_TYPE,
 }
 SHOW_COUNTER_RELICS_BY_VERSION: dict[str, frozenset[str]] = {
     "v0.107.1": SHOW_COUNTER_RELICS,
     "v0.111.0": static_tables_v0111.SHOW_COUNTER_RELICS,
     "v0.113.0": static_tables_v0113.SHOW_COUNTER_RELICS,
+    "v0.114.0": static_tables_v0114.SHOW_COUNTER_RELICS,
 }
 
 

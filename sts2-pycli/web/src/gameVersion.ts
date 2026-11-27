@@ -2,7 +2,7 @@
  * Which game build a run plays (GH #801).
  *
  * The engine runs the stable v0.107.1 content or a later beta (v0.111.0,
- * v0.113.0 — the build that adds the Fool). The
+ * v0.113.0 — the build that adds the Fool, v0.114.0 — its rework). The
  * server advertises what it can run in `GET /api/capabilities`
  * (`game_versions` / `default_game_version`); the launcher sends the pick as
  * `game_version` on start / start-faithful / import-state.
@@ -28,6 +28,7 @@ const LABELS: Record<string, string> = {
   "v0.107.1": t("v0.107.1 (previous stable)"),
   "v0.111.0": t("v0.111 (stable)"),
   "v0.113.0": t("v0.113.0 (beta, + the Fool)"),
+  "v0.114.0": t("v0.114.0 (beta, Fool rework)"),
 };
 
 /** Builds the version pickers no longer offer (GH #1572): Steam stopped

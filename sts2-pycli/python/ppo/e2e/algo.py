@@ -1647,6 +1647,9 @@ class AlgoState:
         )
         s.clocks = Clocks.from_dict(d["clocks"])
         s.kl = KLControl.from_dict(d["kl"])
+        # A resume under a narrower [kl_m_min, kl_m_max] (a deliberate lr change)
+        # starts m inside it; otherwise the closed-form lr check refuses the row.
+        s.kl.m = min(s.cfg.kl_m_max, max(s.cfg.kl_m_min, s.kl.m))
         s.collapse = EntropyCollapse.from_dict(d["collapse"])
         s.adv = AdvNorm.from_dict(d["adv"])
         s.hold = HoldBack.from_dict(d["hold"])

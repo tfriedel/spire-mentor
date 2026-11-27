@@ -352,15 +352,15 @@ class TestInstinct:
         msg = {"run_state": {"character": "WATCHER"}, "game_version": "v0.113.0"}
         with pytest.raises(ri.InstinctUnavailable, match="Ironclad, Silent"):
             advisor.advise(msg, "map_select")
-        # The Fool has its own net (GH #1535), on v0.113.0 only.
+        # The Fool has its own net (GH #1535), on v0.113.0 and v0.114.0 only.
         msg = {"run_state": {"character": "FOOL"}, "game_version": "v0.111.0"}
-        with pytest.raises(ri.InstinctUnavailable, match=r"the Fool on v0.113.0 only"):
+        with pytest.raises(ri.InstinctUnavailable, match=r"the Fool on v0.113.0 and v0.114.0 only"):
             advisor.advise(msg, "map_select")
         msg = {"run_state": {"character": "FOOL"}, "game_version": "v0.113.0"}
         with pytest.raises(ri.InstinctUnavailable, match=r"no Instinct net at .*no_fool.e2ew"):
             advisor.advise(msg, "map_select")
         msg = {"run_state": {"character": "IRONCLAD"}, "game_version": "v0.107.1"}
-        with pytest.raises(ri.InstinctUnavailable, match=r"v0.111.0 and v0.113.0 only"):
+        with pytest.raises(ri.InstinctUnavailable, match=r"v0.111.0, v0.113.0 and v0.114.0 only"):
             advisor.advise(msg, "map_select")
 
     def test_every_character_list_matches_the_engines(self) -> None:
@@ -400,8 +400,8 @@ class TestInstinct:
         assert ri.InstinctAdvisor(WEIGHTS).capabilities() == [
             {"character": c, "game_version": v}
             for c in ("Ironclad", "Silent", "Defect", "Regent", "Necrobinder")
-            for v in ("v0.111.0", "v0.113.0")
-        ] + [{"character": "Fool", "game_version": "v0.113.0"}]
+            for v in ("v0.111.0", "v0.113.0", "v0.114.0")
+        ] + [{"character": "Fool", "game_version": v} for v in ("v0.113.0", "v0.114.0")]
 
     @pytest.mark.parametrize("character", ri.INSTINCT_CHARACTERS)
     @pytest.mark.parametrize("build", ["v0.111.0", "v0.113.0"])

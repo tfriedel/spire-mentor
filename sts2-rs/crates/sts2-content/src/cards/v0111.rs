@@ -48,7 +48,177 @@ pub fn spec_for(spec: CardSpec, version: GameVersion) -> CardSpec {
     if !is_v0113(version) {
         return spec;
     }
-    v0113_spec(spec).unwrap_or(spec)
+    let spec = v0113_spec(spec).unwrap_or(spec);
+    if !is_v0114(version) {
+        return spec;
+    }
+    v0114_spec(spec).unwrap_or(spec)
+}
+
+/// `true` from game build v0.114.0 on.
+#[inline]
+#[must_use]
+pub fn is_v0114(version: GameVersion) -> bool {
+    version >= GameVersion::V0_114_0
+}
+
+/// The v0.114.0 spec of a card whose spec-level metadata changed against
+/// v0.113.0 (the v0.113.1 decomp), `None` for an unchanged card. Every arm
+/// is the Fool rework (GH #1924) except MyShinies (colorless). Decomp:
+/// the v0.114.0 decomp's `Models.Cards/<File>.cs`.
+#[allow(clippy::too_many_lines)]
+fn v0114_spec(mut s: CardSpec) -> Option<CardSpec> {
+    use CardRarity as R;
+    match s.id {
+        // Archery.cs:19: Uncommon -> Rare.
+        CardId::ArcheryCard => s.rarity = R::Rare,
+        // ArrowStab.cs:65,71: cost 1 -> 2, DamageVar 9 -> 13.
+        CardId::ArrowStab => {
+            s.cost = 2;
+            s.base_damage = 13;
+        }
+        // ChoBarbs.cs:24: BlockVar 7 -> 8.
+        CardId::ChoBarbsCard => s.base_block = 8,
+        // ChoChorus.cs:19: BlockVar 12 -> 14.
+        CardId::ChoChorus => s.base_block = 14,
+        // ChoFirm.cs:33: BlockVar 6 -> 5.
+        CardId::ChoFirm => s.base_block = 5,
+        // ChoReady.cs:24: BlockVar 8 -> 7.
+        CardId::ChoReady => s.base_block = 7,
+        // ExplosiveArrows.cs:20: Rare -> Uncommon.
+        CardId::ExplosiveArrowsCard => s.rarity = R::Uncommon,
+        // Florescence.cs:16-17: cost 0 -> 1, no longer Exhaust.
+        CardId::Florescence => {
+            s.cost = 1;
+            s.keywords = CardKeywords::NONE;
+        }
+        // Growth.cs:20: a plain `BlockVar(8)` (and `GainsBlock => true`)
+        // instead of the Stretch-per-Sadness calculation.
+        CardId::Growth => s.base_block = 8,
+        // HeavyShot.cs:32-37: DamageVar 20 -> 16, Common -> Uncommon.
+        CardId::HeavyShot => {
+            s.base_damage = 16;
+            s.rarity = R::Uncommon;
+        }
+        // Jest.cs:20: BlockVar 14 -> 15.
+        CardId::Jest => s.base_block = 15,
+        // Lullaby.cs:25: cost 0 -> 1.
+        CardId::LullabyCard => s.cost = 1,
+        // Motif.cs:24: Uncommon -> Rare.
+        CardId::MotifCard => s.rarity = R::Rare,
+        // MythicForm.cs:15: gains Ethereal (the upgrade removes it).
+        CardId::MythicFormCard => s.keywords = CardKeywords::ETHEREAL,
+        // MyShinies.cs:21 (colorless): DamageVar 1 -> 2.
+        CardId::MyShinies => s.base_damage = 2,
+        // PunchOfJoy.cs:19: DamageVar 13 -> 14.
+        CardId::PunchOfJoy => s.base_damage = 14,
+        // Quiver.cs:18: Rare -> Uncommon.
+        CardId::Quiver => s.rarity = R::Uncommon,
+        // Recall.cs:18-27: cost 1 -> 0, Exhaust + Retain.
+        CardId::Recall => {
+            s.cost = 0;
+            s.keywords = CardKeywords::EXHAUST.with(CardKeywords::RETAIN);
+        }
+        // RepeatShot.cs:24: DamageVar 15 -> 13.
+        CardId::RepeatShot => s.base_damage = 13,
+        // ShowOff.cs:64: cost 1 -> 0.
+        CardId::ShowOffCard => s.cost = 0,
+        // Temperance.cs:17: BlockVar 30 -> 20.
+        CardId::Temperance => s.base_block = 20,
+        // TheShot.cs:17-30: cost 1 -> 0, Exhaust, a flat `DamageVar(20)`
+        // (no Florescence count).
+        CardId::TheShot => {
+            s.cost = 0;
+            s.base_damage = 20;
+            s.keywords = CardKeywords::EXHAUST;
+        }
+        // Tune.cs:14: cost 2 -> 1.
+        CardId::TuneCard => s.cost = 1,
+        // Uproot.cs:38: cost 1 -> 0.
+        CardId::Uproot => s.cost = 0,
+        // WahChoKi.cs:26-44: Damage / Block 9 -> 8, cost 1 -> 2.
+        CardId::WahChoKi => {
+            s.cost = 2;
+            s.base_damage = 8;
+            s.base_block = 8;
+        }
+        // WahKi.cs:17: DamageVar 2 -> 3.
+        CardId::WahKi => s.base_damage = 3,
+        _ => return None,
+    }
+    Some(s)
+}
+
+/// `Some(delta)` for a card whose spec-level v0.114.0 upgrade differs from
+/// v0.113.0 (the inner `None` = no spec-level upgrade at all), `None` when
+/// the v0.113.0 answer still holds. Absolute upgraded values over the
+/// [`v0114_spec`] base; decomp `OnUpgrade` of each `Models.Cards/<File>.cs`.
+#[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
+fn v0114_upgrade_delta(card_id: CardId) -> Option<Option<CardUpgradeDelta>> {
+    const fn delta(
+        cost: Option<i8>,
+        base_damage: Option<i32>,
+        base_block: Option<i32>,
+        keywords: Option<CardKeywords>,
+    ) -> Option<CardUpgradeDelta> {
+        Some(CardUpgradeDelta {
+            cost,
+            base_damage,
+            base_block,
+            keywords,
+        })
+    }
+    Some(match card_id {
+        // ArrowStab.cs:93: Damage 13 + 2.
+        CardId::ArrowStab => delta(None, Some(15), None, None),
+        // ChoBarbs.cs: Block 8 + 2.
+        CardId::ChoBarbsCard => delta(None, None, Some(10), None),
+        // ChoChorus.cs:43: Block 14 + 4.
+        CardId::ChoChorus => delta(None, None, Some(18), None),
+        // ChoFirm.cs: Block 5 + 2.
+        CardId::ChoFirm => delta(None, None, Some(7), None),
+        // ChoReady.cs:44: Block 7 + 2.
+        CardId::ChoReady => delta(None, None, Some(9), None),
+        // Growth.cs:39: Block 8 + 3.
+        CardId::Growth => delta(None, None, Some(11), None),
+        // HeavyShot.cs:59: Damage 16 + 1 (AimMultiplier +1 in the handler).
+        CardId::HeavyShot => delta(None, Some(17), None, None),
+        // Jest.cs: Block 15 + 4.
+        CardId::Jest => delta(None, None, Some(19), None),
+        // Lullaby.cs:37: the power +4 instead of Innate.
+        CardId::LullabyCard => None,
+        // MelodicShot.cs:60: Damage 12 + 2, no cost change.
+        CardId::MelodicShot => delta(None, Some(14), None, None),
+        // MythicForm.cs:28: RemoveKeyword(Ethereal).
+        CardId::MythicFormCard => delta(None, None, None, Some(CardKeywords::NONE)),
+        // MyShinies.cs:45 (colorless): Damage 2 + 1 instead of Gold -10.
+        CardId::MyShinies => delta(None, Some(3), None, None),
+        // PunchOfJoy.cs:57: Damage 14 + 2 (Cards +1 in the handler).
+        CardId::PunchOfJoy => delta(None, Some(16), None, None),
+        // Quiver.cs:33: AddKeyword(Innate) instead of Repeat +1.
+        CardId::Quiver => delta(None, None, None, Some(CardKeywords::INNATE)),
+        // Recall.cs:44: RemoveKeyword(Exhaust) (Retain stays).
+        CardId::Recall => delta(None, None, None, Some(CardKeywords::RETAIN)),
+        // RepeatShot.cs:49: Damage 13 + 3.
+        CardId::RepeatShot => delta(None, Some(16), None, None),
+        // Simpleton.cs:28: SimpletonPower +1 instead of cost -1.
+        CardId::SimpletonCard => None,
+        // Temperance.cs: Block 20 + 5.
+        CardId::Temperance => delta(None, None, Some(25), None),
+        // TheShot.cs:45: Damage 20 + 5.
+        CardId::TheShot => delta(None, Some(25), None, None),
+        // TrickShot.cs:49: Damage 12 + 2 (Cards +1 in the handler).
+        CardId::TrickShot => delta(None, Some(14), None, None),
+        // Tune.cs:71: Cards +1 instead of cost -1.
+        CardId::TuneCard => None,
+        // WahChoKi.cs:63-65: Damage / Block 8 + 2.
+        CardId::WahChoKi => delta(None, Some(10), Some(10), None),
+        // WahHammer.cs:60: Damage 9 + 2.
+        CardId::WahHammer => delta(None, Some(11), None, None),
+        // WahKi.cs:62: Damage 3 + 1.
+        CardId::WahKi => delta(None, Some(4), None, None),
+        _ => return None,
+    })
 }
 
 /// `true` from game build v0.113.0 on.
@@ -249,6 +419,11 @@ fn v0111_spec(mut s: CardSpec) -> Option<CardSpec> {
 /// [`super::card_upgrades_generated::upgrade_delta`]).
 #[must_use]
 pub fn upgrade_delta_for(card_id: CardId, version: GameVersion) -> Option<CardUpgradeDelta> {
+    if is_v0114(version) {
+        if let Some(delta) = v0114_upgrade_delta(card_id) {
+            return delta;
+        }
+    }
     if is_v0113(version) {
         if let Some(delta) = v0113_upgrade_delta(card_id) {
             return delta;
@@ -379,6 +554,9 @@ fn v0111_upgrade_delta(card_id: CardId) -> Option<Option<CardUpgradeDelta>> {
 pub fn pool_substitute(card_id: CardId, version: GameVersion) -> Option<fn() -> CardSpec> {
     match card_id {
         CardId::Scare if is_v0111(version) => Some(super::silent::sidestep::spec),
+        // v0.114.0 `FoolCardPool.cs:87`: TwinShot sits exactly where
+        // v0.113.0 listed RapidShot (deleted; the save migration renames it).
+        CardId::RapidShot if is_v0114(version) => Some(super::fool::specs::twin_shot),
         _ => None,
     }
 }
@@ -423,7 +601,61 @@ pub fn can_be_generated_in_combat(card_id: CardId, version: GameVersion) -> bool
 pub fn pod_changes_in(card_id: CardId, version: GameVersion) -> bool {
     (is_v0111(version) && v0111_pods().contains_key(&(card_id, false)))
         || (is_v0113(version) && v0113_pods().contains_key(&(card_id, false)))
+        || (is_v0114(version) && v0114_pods().contains_key(&(card_id, false)))
 }
+
+/// The v0.114.0 PODs of every card whose spec or upgrade changed against
+/// v0.113.0 ([`V0114_POD_CARDS`]).
+fn v0114_pods() -> &'static std::collections::BTreeMap<(CardId, bool), sts2_core::cards::Card> {
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+    static PODS: OnceLock<BTreeMap<(CardId, bool), sts2_core::cards::Card>> = OnceLock::new();
+    PODS.get_or_init(|| {
+        let mut map = BTreeMap::new();
+        for id in V0114_POD_CARDS {
+            for upgraded in [false, true] {
+                if let Some(card) = build_pod_in(*id, upgraded, GameVersion::V0_114_0) {
+                    map.insert((*id, upgraded), card);
+                }
+            }
+        }
+        map
+    })
+}
+
+/// Every card [`v0114_spec`] or [`v0114_upgrade_delta`] touches.
+const V0114_POD_CARDS: &[CardId] = &[
+    CardId::ArcheryCard,
+    CardId::ArrowStab,
+    CardId::ChoBarbsCard,
+    CardId::ChoChorus,
+    CardId::ChoFirm,
+    CardId::ChoReady,
+    CardId::ExplosiveArrowsCard,
+    CardId::Florescence,
+    CardId::Growth,
+    CardId::HeavyShot,
+    CardId::Jest,
+    CardId::LullabyCard,
+    CardId::MelodicShot,
+    CardId::MotifCard,
+    CardId::MythicFormCard,
+    CardId::MyShinies,
+    CardId::PunchOfJoy,
+    CardId::Quiver,
+    CardId::Recall,
+    CardId::RepeatShot,
+    CardId::ShowOffCard,
+    CardId::SimpletonCard,
+    CardId::Temperance,
+    CardId::TheShot,
+    CardId::TrickShot,
+    CardId::TuneCard,
+    CardId::Uproot,
+    CardId::WahChoKi,
+    CardId::WahHammer,
+    CardId::WahKi,
+];
 
 /// The v0.113.0 PODs of every card whose spec or upgrade changed against
 /// v0.111.0. Cards that changed only in v0.111.0 stay in [`v0111_pods`].
@@ -560,6 +792,11 @@ pub fn card_pod_for(
     upgraded: bool,
     version: GameVersion,
 ) -> Option<sts2_core::cards::Card> {
+    if is_v0114(version) {
+        if let Some(card) = v0114_pods().get(&(card_id, upgraded)) {
+            return Some(*card);
+        }
+    }
     if is_v0113(version) {
         if let Some(card) = v0113_pods().get(&(card_id, upgraded)) {
             return Some(*card);

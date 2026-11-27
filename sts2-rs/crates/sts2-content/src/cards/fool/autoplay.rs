@@ -59,7 +59,8 @@ fn the_fool_run(state: &mut CombatState, me: CardUid, done: u32) {
             .filter(|u| !card_effects::card_unplayable(state.cards[u.0.get() as usize - 1].card_id))
             .collect();
         let mut pick = stable_first(state, playable);
-        if pick.is_none() {
+        // v0.114.0 `TheFool.cs` dropped the whole-hand fallback.
+        if pick.is_none() && !super::helpers::v0114(state) {
             let hand: SmallVec<[CardUid; 16]> = state.player.hand.iter().copied().collect();
             pick = stable_first(state, hand);
         }

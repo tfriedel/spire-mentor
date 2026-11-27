@@ -3,7 +3,7 @@
 //!
 //! Fixtures: `ppo.e2e.export_wb fixtures` writes `<seed>.jsonl.gz` (header,
 //! one line per stored decision, terminal). The directory is `$E2E_FIXTURES`
-//! or `~/runs/e2e-wb/fixtures-allchar-d4500-r5`; the test skips with a message when it is
+//! or `~/runs/e2e-wb/fixtures-allchar-d4500-r6`; the test skips with a message when it is
 //! absent. Each seed is replayed with the fixture's `chosen` class; at every
 //! decision the env's view must equal the record field for field, and the
 //! run must end with the recorded outcome and decision count.
@@ -18,7 +18,7 @@ fn fixture_dir() -> Option<PathBuf> {
     let dir = std::env::var_os("E2E_FIXTURES").map_or_else(
         || {
             std::env::var_os("HOME")
-                .map(|h| PathBuf::from(h).join("runs/e2e-wb/fixtures-allchar-d4500-r5"))
+                .map(|h| PathBuf::from(h).join("runs/e2e-wb/fixtures-allchar-d4500-r6"))
                 .unwrap_or_default()
         },
         PathBuf::from,
@@ -130,7 +130,7 @@ fn replay(path: &Path) -> Result<usize, String> {
 fn env_matches_python_fixtures() {
     let Some(dir) = fixture_dir() else {
         eprintln!(
-            "SKIP: no e2e fixtures (set E2E_FIXTURES or create ~/runs/e2e-wb/fixtures-allchar-d4500-r5)"
+            "SKIP: no e2e fixtures (set E2E_FIXTURES or create ~/runs/e2e-wb/fixtures-allchar-d4500-r6)"
         );
         return;
     };

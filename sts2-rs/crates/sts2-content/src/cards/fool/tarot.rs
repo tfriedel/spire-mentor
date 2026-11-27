@@ -73,9 +73,23 @@ pub(crate) fn play_the_sun(state: &mut CombatState, _t: Option<CreatureUid>) -> 
     EffectResult::Resolved
 }
 
-/// The tail of [`play_the_sun`].
+/// The tail of [`play_the_sun`]. v0.114.0 shuffles 2 Soot into the draw
+/// pile at random positions instead of 1 into the discard pile:
+///
+/// [decompiled C# omitted — see the cited path]
 pub(crate) fn the_sun_tail(state: &mut CombatState, upgraded: bool) {
     state.gain_energy(if upgraded { 3 } else { 2 });
-    let soot = crate::cards::status::card_from_spec(&crate::cards::status_specs_generated::soot());
-    let _ = card_effects::spawn_card_into_pile(state, soot, PileKind::Discard);
+    let soot =
+        || crate::cards::status::card_from_spec(&crate::cards::status_specs_generated::soot());
+    if super::helpers::v0114(state) {
+        // `AddToCombatAndPreview` returns before any add once the owner is dead.
+        if state.player.current_hp <= 0 {
+            return;
+        }
+        for _ in 0..2 {
+            let _ = card_effects::spawn_card_into_draw_pile_random(state, soot());
+        }
+        return;
+    }
+    let _ = card_effects::spawn_card_into_pile(state, soot(), PileKind::Discard);
 }

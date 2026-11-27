@@ -387,6 +387,17 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
         // Bead `sts2-rs-eiznx`: C# `Protector.cs` OnUpgrade
         // `EnergyCost.UpgradeBy(-1)`; base cost 1 → 0. (CalcBase 10→15
         // is effect-vars-only and gated by the handler, not base_damage.)
+        // C# `Poke.cs` / `Snap.cs` OnUpgrade: `OstyDamage.UpgradeValueBy(3m)`,
+        // 6 → 9 and 7 → 10 (all builds). Like Bone Shards, the handlers read
+        // the upgraded damage from `current_card_upgraded`; without the delta
+        // every other reader of the card's stats (Thrash's fold, the card
+        // token) saw the base value. GH #1907.
+        CardId::Poke => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(9),
+            base_block: None,
+            keywords: None,
+        }),
         CardId::Protector => Some(CardUpgradeDelta {
             cost: Some(0i8),
             base_damage: None,
@@ -513,6 +524,12 @@ pub fn upgrade_delta(card_id: CardId) -> Option<CardUpgradeDelta> {
             cost: None,
             base_damage: None,
             base_block: Some(3),
+            keywords: None,
+        }),
+        CardId::Snap => Some(CardUpgradeDelta {
+            cost: None,
+            base_damage: Some(10),
+            base_block: None,
             keywords: None,
         }),
         CardId::SovereignBlade => Some(CardUpgradeDelta {
@@ -1005,5 +1022,19 @@ mod tests {
     fn an_upgraded_bone_shards_has_twelve_damage_and_block() {
         let d = upgrade_delta(CardId::BoneShards).expect("Bone Shards upgrades");
         assert_eq!((d.base_damage, d.base_block), (Some(12), Some(12)));
+    }
+
+    /// Poke+ and Snap+ carry their Osty damage upgrade (+3) in the card's
+    /// stats, as the C# `OnUpgrade` does (GH #1907).
+    #[test]
+    fn poke_and_snap_upgrade_their_osty_damage() {
+        let poke = upgrade_delta(CardId::Poke).expect("Poke upgrades");
+        assert_eq!(poke.base_damage, Some(9));
+        let snap = upgrade_delta(CardId::Snap).expect("Snap upgrades");
+        assert_eq!(snap.base_damage, Some(10));
+        let mut card = super::super::spec_index::card_pod_from_id(CardId::Poke, true).expect("pod");
+        assert_eq!(card.base_damage, 9);
+        card = super::super::spec_index::card_pod_from_id(CardId::Snap, true).expect("pod");
+        assert_eq!(card.base_damage, 10);
     }
 }

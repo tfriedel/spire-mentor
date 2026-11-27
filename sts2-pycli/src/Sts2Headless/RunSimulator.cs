@@ -358,7 +358,11 @@ internal class LocLookup
 /// </summary>
 public class RunSimulator
 {
-#if GAME_V0113
+#if GAME_V0114
+    // v0.114.0 adds SerializableRunV21ToV22, so it writes v22. Checked first:
+    // v0.114.0 also defines GAME_V0113 and GAME_V0111.
+    private const int CurrentSaveSchemaVersion = 22;
+#elif GAME_V0113
     // v0.113.0 adds SerializableRunV20ToV21 (Saves.Migrations.SerializableRuns),
     // so it writes v21. Checked before GAME_V0111, which v0.113.0 also defines.
     private const int CurrentSaveSchemaVersion = 21;

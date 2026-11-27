@@ -1975,6 +1975,9 @@ fn evaluate_candidate(
             tick(done);
             continue;
         }
+        // The human's pick is taken as shown; the rollout after it plays as
+        // the agent, without the event options that would kill.
+        sim.run_state.offer_lethal_event_options = false;
         // Paired across candidates: the same run seed + policy seed per
         // rollout `r`, so the only difference is the option taken.
         let seed = cfg.seed.wrapping_add(i64::from(r));
